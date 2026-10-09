@@ -13,16 +13,10 @@ import {
   type PdfInspection,
 } from "./compressionModel.js";
 import {
-  COMPRESSION_ATTEMPT_DISK_BYTES,
-  COMPRESSION_CANDIDATE_BYTES,
-  COMPRESSION_JAVA_XMX_BYTES,
-  COMPRESSION_MAX_FORM_DEPTH,
-  COMPRESSION_MAX_PDF_OBJECTS,
-  COMPRESSION_MAX_PDF_PAGES,
-  COMPRESSION_RSS_BYTES,
-  COMPRESSION_GROUP_RSS_BYTES,
-  PDF_MAX_MS,
+  COMPRESSION_POLICY,
+  effectiveCompressionPolicy,
   compressionFileReady,
+  type CompressionPolicySnapshot,
   type CompressionMediaType,
 } from "./compressionPolicy.js";
 import { pdfboxJar, probeResourceLimits, type CompressionCapability } from "./compressionProbe.js";
@@ -55,6 +49,7 @@ type JobRequest = {
   signal: AbortSignal;
   capability: CompressionCapability;
   processObserver?: CompressionProcessObserver;
+  policy?: CompressionPolicySnapshot;
 };
 
 type ToolStop = { stop: CompressionJobResult };
@@ -62,33 +57,31 @@ type ToolOk = { status: number; stdout: string };
 
 let pythonPath: string | null | undefined;
 
-export function compressionContainPath(): string {
-  return CONTAIN;
+
+export function imageWorkerCommand(input: string, output: string, media: CompressionMediaType, policy: CompressionPolicySnapshot = COMPRESSION_POLICY): string[] {
+  return [process.execPath, WORKER, "--input", input, "--output", output, "--media", media, "--max-pixels", String(policy.max_image_pixels), "--max-decode-bytes", String(policy.max_image_decode_bytes)];
 }
 
-export function imageWorkerCommand(input: string, output: string, media: CompressionMediaType): string[] {
-  return [process.execPath, WORKER, "--input", input, "--output", output, "--media", media];
+export function javaHelperCommand(java: string, jar: string, mode: string, args: string[], policy: CompressionPolicySnapshot = COMPRESSION_POLICY): string[] {
+  const heap = Math.max(1, Math.floor(policy.java_xmx_bytes / (1024 * 1024)));
+  const limits = [policy.max_pdf_pages, policy.max_pdf_objects, policy.max_form_depth, policy.max_image_pixels, policy.max_image_decode_bytes, policy.max_decode_stream_bytes].join(",");
+  return [java, `-Xmx${heap}m`, "-cp", jar, "--source", "17", JAVA_SOURCE, mode, ...args, limits];
 }
 
-export function javaHelperCommand(java: string, jar: string, mode: string, args: string[]): string[] {
-  const heap = Math.round(COMPRESSION_JAVA_XMX_BYTES / (1024 * 1024));
-  return [java, `-Xmx${heap}m`, "-cp", jar, "--source", "17", JAVA_SOURCE, mode, ...args];
-}
-
-export function containArgs(command: string[], workDir?: string): string[] {
+export function containArgs(command: string[], workDir?: string, policy: CompressionPolicySnapshot = COMPRESSION_POLICY): string[] {
   return [
     CONTAIN,
     "--as",
-    String(COMPRESSION_RSS_BYTES),
+    String(policy.rss_bytes),
     "--group-memory",
-    String(COMPRESSION_GROUP_RSS_BYTES),
+    String(policy.group_rss_bytes),
     "--fsize",
-    String(COMPRESSION_CANDIDATE_BYTES),
+    String(policy.candidate_bytes),
     "--disk",
-    String(COMPRESSION_ATTEMPT_DISK_BYTES),
+    String(policy.attempt_disk_bytes),
     ...(workDir ? ["--work-dir", workDir] : []),
     "--cpu",
-    String(Math.ceil(PDF_MAX_MS / 1000)),
+    String(Math.ceil(policy.pdf_max_ms / 1000)),
     "--",
     ...command,
   ];
@@ -102,7 +95,7 @@ export function assertCompressionArgv(args: readonly string[]): void {
   }
 }
 
-export function resolveExecutable(name: string): string | null {
+function resolveExecutable(name: string): string | null {
   if (!name) return null;
   if (name.includes("/") || name.includes("\\")) return statOk(name) ? name : null;
   const finder = process.platform === "win32" ? "where" : "which";
@@ -129,13 +122,13 @@ function pythonBin(): string | null {
   return pythonPath;
 }
 
-function runContained(command: string[], request: Pick<JobRequest, "signal" | "processObserver">, workDir?: string): Promise<ToolStop | ToolOk> {
+function runContained(command: string[], request: Pick<JobRequest, "signal" | "processObserver" | "policy">, workDir?: string): Promise<ToolStop | ToolOk> {
   const { signal, processObserver } = request;
   if (signal.aborted) return Promise.resolve({ stop: none("failed", "timed_out") });
   assertCompressionArgv(command);
   const python = pythonBin();
   if (!python) return Promise.resolve({ stop: none("failed", "platform_budget_unavailable") });
-  const args = containArgs(command, workDir);
+  const args = containArgs(command, workDir, request.policy);
   const execution = processObserver?.begin();
   if (execution) args.splice(args.indexOf("--"), 0, "--compression-token", execution.token, "--closed-file", execution.closePath);
   assertCompressionArgv(args.filter((arg) => arg !== "--"));
@@ -226,7 +219,7 @@ function isStop(value: ToolStop | ToolOk): value is ToolStop {
 async function executeImage(request: JobRequest): Promise<CompressionJobResult> {
   mkdirSync(dirname(request.outputPath), { recursive: true });
   const run = await runContained(
-    imageWorkerCommand(request.sourcePath, request.outputPath, request.file.media_type),
+    imageWorkerCommand(request.sourcePath, request.outputPath, request.file.media_type, request.policy),
     request,
     dirname(request.outputPath),
   );
@@ -268,6 +261,7 @@ function javaStop(status: number): CompressionJobResult | null {
 }
 
 async function executePdf(request: JobRequest): Promise<CompressionJobResult> {
+  const policy = request.policy!;
   const qpdf = resolveExecutable("qpdf");
   const java = resolveExecutable("java");
   const jar = pdfboxJar();
@@ -293,27 +287,33 @@ async function executePdf(request: JobRequest): Promise<CompressionJobResult> {
   }
   const pages = await pageCount(qpdf, request.sourcePath, request);
   if (typeof pages !== "number") return pages;
-  if (pages > COMPRESSION_MAX_PDF_PAGES) return none("failed", "resource_limit");
+  if (pages > policy.max_pdf_pages) return none("failed", "resource_limit");
   const inputBytes = statSync(request.sourcePath).size;
   if (pdfUnderTarget(inputBytes)) return { status: "passthrough", reason: null, publish: "copy_source" };
   if (encryptedResult.encrypted) return none("unsupported", "password_required");
 
   const javaBin = java;
-  const inspect = await runContained(javaHelperCommand(javaBin, jar, "inspect", [request.sourcePath]), request);
+  const inspect = await runContained(javaHelperCommand(javaBin, jar, "inspect", [request.sourcePath], policy), request);
   if (isStop(inspect)) return inspect.stop;
   const inspectStop = javaStop(inspect.status);
   if (inspectStop) return inspectStop;
-  let info: Partial<PdfInspection> & { objects?: number; formDepth?: number; incremental?: boolean };
+  let info: Partial<PdfInspection> & { pages?: number; objects?: number; formDepth?: number; incremental?: boolean };
   try {
     info = JSON.parse(inspect.stdout) as typeof info;
   } catch {
     return none("failed", "content_invalid");
   }
-  if ((info.objects || 0) > COMPRESSION_MAX_PDF_OBJECTS || (info.formDepth || 0) > COMPRESSION_MAX_FORM_DEPTH) {
+  if (info.readable !== true || info.pages !== pages ||
+      ![info.objects, info.formDepth, info.filledSignatures, info.emptySignatureFields, info.stampAnnotations]
+        .every((count) => Number.isSafeInteger(count) && Number(count) >= 0) ||
+      ![info.docMdp, info.signatureUnknown, info.incremental].every((flag) => typeof flag === "boolean")) {
+    return none("failed", "content_invalid");
+  }
+  if ((info.objects || 0) > policy.max_pdf_objects || (info.formDepth || 0) > policy.max_form_depth) {
     return none("failed", "resource_limit");
   }
   const decision = decidePdf({
-    readable: info.readable !== false,
+    readable: info.readable,
     bytes: inputBytes,
     passwordRequired: false,
     filledSignatures: info.filledSignatures || 0,
@@ -326,7 +326,7 @@ async function executePdf(request: JobRequest): Promise<CompressionJobResult> {
   });
   if (!decision.rewrite) return none(decision.status, decision.reason || "content_invalid");
 
-  const sourceBoxes = await runContained(javaHelperCommand(javaBin, jar, "boxes", [request.sourcePath]), request);
+  const sourceBoxes = await runContained(javaHelperCommand(javaBin, jar, "boxes", [request.sourcePath], policy), request);
   if (isStop(sourceBoxes)) return sourceBoxes.stop;
   const sourceStop = javaStop(sourceBoxes.status);
   if (sourceStop) return sourceStop;
@@ -334,14 +334,14 @@ async function executePdf(request: JobRequest): Promise<CompressionJobResult> {
   let oversize = false;
   let roundIndex = 0;
   mkdirSync(dirname(request.outputPath), { recursive: true });
-  for (const round of pdfRoundPlan()) {
+  for (const round of pdfRoundPlan(policy)) {
     if (request.signal.aborted) return none("failed", "timed_out");
-    if (Date.now() - started >= PDF_MAX_MS) return none("failed", "attempt_budget");
+    if (Date.now() - started >= policy.pdf_max_ms) return none("failed", "attempt_budget");
     const candidate = `${request.outputPath}.r${roundIndex}`;
     roundIndex += 1;
     const command = round.kind === "lossless"
       ? [qpdf, ...qpdfLosslessArgs(request.sourcePath, candidate)]
-      : javaHelperCommand(javaBin, jar, "recompress", [request.sourcePath, candidate, String(round.quality)]);
+      : javaHelperCommand(javaBin, jar, "recompress", [request.sourcePath, candidate, String(round.quality)], policy);
     const ran = await runContained(command, request, dirname(request.outputPath));
     if (isStop(ran)) {
       rmSync(candidate, { force: true });
@@ -366,7 +366,7 @@ async function executePdf(request: JobRequest): Promise<CompressionJobResult> {
     } catch {
       continue;
     }
-    if (size <= 0 || size > COMPRESSION_CANDIDATE_BYTES) {
+    if (size <= 0 || size > policy.candidate_bytes) {
       rmSync(candidate, { force: true });
       continue;
     }
@@ -386,7 +386,7 @@ async function executePdf(request: JobRequest): Promise<CompressionJobResult> {
       if (candidatePages.reason === "platform_budget_unavailable" || candidatePages.reason === "timed_out") return candidatePages;
       continue;
     }
-    const boxes = await runContained(javaHelperCommand(javaBin, jar, "boxes", [candidate]), request);
+    const boxes = await runContained(javaHelperCommand(javaBin, jar, "boxes", [candidate], policy), request);
     if (isStop(boxes)) {
       rmSync(candidate, { force: true });
       return boxes.stop;
@@ -405,7 +405,10 @@ async function executePdf(request: JobRequest): Promise<CompressionJobResult> {
 }
 
 export async function runCompressionJob(request: JobRequest): Promise<CompressionJobResult> {
-  if (!compressionFileReady(request.file.media_type, request.capability)) {
+  const policy = effectiveCompressionPolicy(request.file);
+  if (!policy) return none("failed", "policy_unavailable");
+  request = { ...request, policy };
+  if (!compressionFileReady(request.file.media_type, request.capability, policy)) {
     return none("failed", "dependency_missing");
   }
   if (request.signal.aborted) return none("failed", "timed_out");

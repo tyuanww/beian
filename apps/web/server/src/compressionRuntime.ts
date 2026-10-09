@@ -22,6 +22,7 @@ import {
   PDF_TARGET_BYTES,
   compressionFileKey,
   compressionFileReady,
+  compressionPolicySnapshot,
 } from "./compressionPolicy.js";
 import {
   compressionBatchDir,
@@ -43,6 +44,7 @@ import {
   removeCompressionReceiptPointer,
   removeCompressionWorkdir,
   saveCompressionBatch,
+  syncCompressionFile,
   writeCompressionLease,
   writeCompressionTombstone,
   type CompressionBatchRecord,
@@ -52,11 +54,14 @@ import {
 import { isTid, nowIso, type Viewer } from "./tasks.js";
 
 const inflight = new Map<string, string>();
+const COMPRESSION_TOMBSTONE_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+const COMPRESSION_TOMBSTONE_SWEEP_MS = 5 * 60 * 1000;
 let chain: Promise<void> = Promise.resolve();
 let activeId: string | null = null;
 let nowFn = (): number => Date.now();
-let attemptTimeoutMs = PDF_MAX_MS;
+let attemptTimeoutMs: number | null = null;
 let recoveryTimer: ReturnType<typeof setTimeout> | null = null;
+let lastTombstoneSweep = 0;
 const downloads = new Map<string, { progress: number; stop: () => void }>();
 
 export function setCompressionClockForTest(next: (() => number) | null): void {
@@ -66,7 +71,7 @@ export function setCompressionClockForTest(next: (() => number) | null): void {
 
 export function setCompressionAttemptTimeoutForTest(ms: number | null): void {
   if (process.env.VITEST !== "1") throw new Error("压缩时限测试钩子只能在 VITEST 使用");
-  attemptTimeoutMs = ms ?? PDF_MAX_MS;
+  attemptTimeoutMs = ms;
 }
 
 export function compressionActiveLeases(): CompressionLease[] {
@@ -144,8 +149,11 @@ function queueAhead(batch: CompressionBatchRecord, all: CompressionBatchRecord[]
   return older + running;
 }
 
-export function toPublicCompression(batch: CompressionBatchRecord, viewer: Viewer): PublicCompressionBatch {
-  const all = compressionStoreSnapshot().batches;
+export function toPublicCompression(
+  batch: CompressionBatchRecord,
+  viewer: Viewer,
+  all: CompressionBatchRecord[] = compressionStoreSnapshot().batches,
+): PublicCompressionBatch {
   const capability = assessCapability();
   const manage = viewer.admin || viewer.id === batch.owner_id;
   const fence = writerLiveness(batch) === "unknown";
@@ -231,6 +239,7 @@ function publishResult(
         return { status: "passthrough", reason: null, outputBytes: copied };
       }
       if (result.status !== "succeeded") return reject(result.status === "passthrough" ? "failed" : result.status, result.reason || "content_invalid");
+      syncCompressionFile(output);
       return { status: "succeeded", reason: null, outputBytes: size };
     }
   } catch (err) {
@@ -272,11 +281,13 @@ async function runBatch(batchId: string): Promise<void> {
       const current = reloadOwned(batchId, token);
       const file = current?.files.find((item) => item.id === fileId);
       if (!current || !file || (file.status !== "queued" && file.status !== "running")) continue;
+      const capability = assessCapability();
+      file.tool_generation = capability.toolGeneration;
       file.status = "running";
       current.revision += 1;
       saveCompressionBatch(current);
       const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), attemptTimeoutMs);
+      const timer = setTimeout(() => controller.abort(), attemptTimeoutMs ?? file.policy_snapshot?.pdf_max_ms ?? PDF_MAX_MS);
       let result: CompressionExecuteResult;
       try {
         result = await executeCompressionFile({
@@ -286,7 +297,7 @@ async function runBatch(batchId: string): Promise<void> {
           outputPath: compressionOutputPath(batchId, file.id),
           token,
           signal: controller.signal,
-          capability: assessCapability(),
+          capability,
           processObserver: {
             begin() {
               const owned = reloadOwned(batchId, token);
@@ -347,7 +358,9 @@ async function pumpOnce(): Promise<void> {
   if (activeId) return;
   const snapshot = compressionStoreSnapshot();
   // A recovered or unknown writer still occupies the single process-tree budget.
-  if (snapshot.unreadable || snapshot.batches.some((batch) => batch.writer.state !== "idle")) return;
+  // An unreadable batch is accounted for in quotas and exposed to admins for
+  // quarantine, but it must not freeze healthy batches behind it.
+  if (snapshot.batches.some((batch) => batch.writer.state !== "idle")) return;
   const next = snapshot.batches
     .filter((batch) =>
       batch.writer.state === "idle" &&
@@ -470,6 +483,7 @@ export function recoverCompressionJobs(): void {
   for (const name of safeNames()) {
     if (compressionHasTombstone(name)) finishCompressionDelete(name);
   }
+  pruneOldCompressionTombstones();
   pumpCompressionQueue();
   scheduleCompressionRecovery();
 }
@@ -536,7 +550,11 @@ export function retryCompressionBatch(
     file.output_bytes = null;
     file.manual_retries += 1;
     file.last_retry_at = when;
+    file.policy_fingerprint = capability.policyFingerprint;
+    file.tool_generation = capability.toolGeneration;
+    file.policy_snapshot = compressionPolicySnapshot();
   }
+  batch.policy_fingerprint = capability.policyFingerprint;
   batch.attempt += 1;
   batch.retry_log.push({ expected_revision: expectedRevision, files_key: filesKey, attempt: batch.attempt });
   batch.writer = idleWriter();
@@ -559,6 +577,26 @@ function finishCompressionDelete(id: string): void {
   rmSync(join(compressionRoot(), "leases", id), { recursive: true, force: true });
 }
 
+/** Keep delete idempotency for a bounded retention window, then remove the
+ * empty batch directory so long-lived workspaces do not leak one inode per
+ * deleted compression forever. */
+function pruneOldCompressionTombstones(): void {
+  const now = Date.now();
+  if (now - lastTombstoneSweep < COMPRESSION_TOMBSTONE_SWEEP_MS) return;
+  lastTombstoneSweep = now;
+  for (const id of safeNames()) {
+    if (!compressionHasTombstone(id) || compressionManifestExists(id) || batchLeaseCount(id) > 0) continue;
+    try {
+      const marker = statSync(join(compressionBatchDir(id), "tombstone.json"));
+      if (now - marker.mtimeMs >= COMPRESSION_TOMBSTONE_RETENTION_MS) {
+        rmSync(compressionBatchDir(id), { recursive: true, force: true });
+      }
+    } catch {
+      /* A concurrent cleanup wins; the next sweep will reconsider it. */
+    }
+  }
+}
+
 export function deleteCompressionBatch(id: string): { status: 200 | 202; body: { ok: true; status?: "deleting"; already_deleted?: true } } {
   if (!isTid(id)) throw compressionProblem("compression_not_found");
   const batch = readCompressionBatch(id);
@@ -573,6 +611,7 @@ export function deleteCompressionBatch(id: string): { status: 200 | 202; body: {
   writeCompressionTombstone(id, batch.owner_id);
   if (batchLeaseCount(id) > 0) return { status: 202, body: { ok: true, status: "deleting" } };
   finishCompressionDelete(id);
+  pruneOldCompressionTombstones();
   return { status: 200, body: { ok: true } };
 }
 
@@ -592,8 +631,12 @@ export function sweepCompressionLeases(now = nowFn()): void {
   }
 }
 
-export function acquireCompressionLease(batchId: string, ownerId: string): CompressionLease {
+function acquireCompressionLease(batchId: string, ownerId: string): CompressionLease {
   sweepCompressionLeases();
+  const batch = readCompressionBatch(batchId);
+  if (!batch || batch.delete_state !== "none" || compressionHasTombstone(batchId)) {
+    throw compressionProblem("compression_file_missing");
+  }
   const leases = readCompressionLeases();
   if (leases.filter((lease) => lease.owner_id === ownerId).length >= COMPRESSION_DOWNLOADS_PER_OWNER) {
     throw compressionProblem("compression_download_busy");
@@ -612,7 +655,7 @@ export function acquireCompressionLease(batchId: string, ownerId: string): Compr
   return lease;
 }
 
-export function releaseCompressionLease(lease: CompressionLease): void {
+function releaseCompressionLease(lease: CompressionLease): void {
   removeCompressionLease(lease.batch_id, lease.token);
   finishCompressionDelete(lease.batch_id);
 }
@@ -671,14 +714,4 @@ export function compressionDownloadStream(batchId: string, ownerId: string, sour
     },
     async cancel() { stop(); if (!source.closed) await closed; },
   }, { highWaterMark: 0 });
-}
-
-export function noteCompressionResultForTest(
-  batchId: string,
-  token: string,
-  fileId: string,
-  result: CompressionExecuteResult,
-): void {
-  if (process.env.VITEST !== "1") throw new Error("压缩结果测试钩子只能在 VITEST 使用");
-  applyResult(batchId, token, fileId, result);
 }

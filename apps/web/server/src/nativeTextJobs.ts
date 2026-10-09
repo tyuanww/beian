@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { DATA_DIR } from "./config.js";
 import { illustratorBin } from "./settings.js";
 import { loadAllTasks, loadTask, saveTask, type Task } from "./tasks.js";
-import { runNativeText } from "./workers.js";
+import { inspectWorkerProcess, runNativeText } from "./workers.js";
 
 export type NativeRequest = {
   version: "native-text/1"; id: string; source_name: string; source_sha256: string;
@@ -91,17 +91,25 @@ function closed(task: Task, req: NativeRequest): boolean {
       && value.document_closed === true && value.bridge_exited === true && value.inflight === false && value.lock_returnable === true;
   } catch { return false; }
 }
-function pidGone(pid?: number): boolean {
-  if (!pid) return false;
-  try { process.kill(pid, 0); return false; }
-  catch (error) { return (error as NodeJS.ErrnoException).code === "ESRCH"; }
+function workerGone(task: Task, req: NativeRequest): boolean {
+  if (!req.pid) return false;
+  try {
+    return inspectWorkerProcess(req.pid, { kind: "native_text", id: task.id, executionId: req.id }) === "missing";
+  } catch {
+    return false;
+  }
 }
-export function recoverNativeRequests() {
+export function recoverNativeRequests(mode: "boot" | "late" = "boot") {
   for (const task of nativeQueue().running) {
     const req = nativeRequest(task)!;
     // A later close can release the fence only with proven executor exit. It
     // must not retrofit late evidence into the already selected OCR fallback.
-    if (pidGone(req.pid) && closed(task, req)) fallback(task, "native_failed");
+    const gone = workerGone(task, req);
+    // During normal polling, an active request without a close fence is still
+    // doing useful work. Only inspect it after timeout/boot recovery has
+    // already recorded a fence, or after its executor is proven gone.
+    if (mode === "late" && !req.reason && !gone) continue;
+    if (gone && closed(task, req)) fallback(task, "native_failed");
     else { req.reason = "close_unconfirmed"; saveTask(task); }
   }
 }

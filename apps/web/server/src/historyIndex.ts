@@ -31,9 +31,9 @@ const ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 const DAY = /^(\d{4})-(\d{2})-(\d{2})$/;
 const TZ = /^(Z|[+-](?:\d{2}):(?:\d{2}))$/;
 
-export const HISTORY_TYPES = ["review", "mockup", "upload", "compression"] as const;
+const HISTORY_TYPES = ["review", "mockup", "upload", "compression"] as const;
 export type HistoryType = (typeof HISTORY_TYPES)[number];
-export type HistoryVisibility = "owner" | "team" | "upload_owner";
+type HistoryVisibility = "owner" | "team" | "upload_owner";
 
 const PHASES = ["review", "mockup", "upload_receipt", "upload_session", "compression"] as const;
 type Phase = (typeof PHASES)[number];
@@ -45,7 +45,7 @@ const STATUS: Record<HistoryType, readonly string[]> = {
   compression: ["queued", "running", "done", "partial", "failed"],
 };
 
-export const HISTORY_ERROR_CATALOG = {
+const HISTORY_ERROR_CATALOG = {
   history_query_invalid: { status: 400, detail: "查询参数无效" },
   history_index_unavailable: { status: 503, detail: "历史索引还没准备好" },
   history_index_corrupt: { status: 503, detail: "历史索引已损坏" },
@@ -80,6 +80,7 @@ type Stored = {
   visibility: HistoryVisibility;
   access_owner: string;
   expires_at: string | null;
+  has_unmet_target?: boolean;
 };
 
 type OverlayOp =
@@ -94,7 +95,7 @@ type Doc = {
   scan: { phase: Phase; cursor: string } | null;
 };
 
-export type HistoryItem = {
+type HistoryItem = {
   id: string;
   type: HistoryType;
   title: string;
@@ -193,6 +194,7 @@ function storedFromParts(input: {
   visibility: HistoryVisibility;
   access_owner: string;
   expires_at: string | null;
+  has_unmet_target?: boolean;
 }): Stored | null {
   if (!TID.test(input.id) || !ISO.test(input.created_at)) return null;
   if (!STATUS[input.type].includes(input.status)) return null;
@@ -211,12 +213,15 @@ function storedFromParts(input: {
     visibility: input.visibility,
     access_owner: cleanText(input.access_owner, 120),
     expires_at: input.expires_at,
+    ...(input.type === "compression" ? { has_unmet_target: input.has_unmet_target === true } : {}),
   };
 }
 
 function parseStored(value: unknown): Stored | null {
   const raw = asObject(value);
   if (!raw || typeof raw.type !== "string" || !isHistoryType(raw.type)) return null;
+  // Old compression summaries cannot answer the virtual filter; rebuild in bounded passes.
+  if (raw.type === "compression" && typeof raw.has_unmet_target !== "boolean") return null;
   if (typeof raw.id !== "string" || typeof raw.status !== "string" || typeof raw.created_at !== "string") return null;
   if (!Array.isArray(raw.names) || raw.visibility !== "owner" && raw.visibility !== "team" && raw.visibility !== "upload_owner") {
     return null;
@@ -234,6 +239,7 @@ function parseStored(value: unknown): Stored | null {
     visibility: raw.visibility,
     access_owner: typeof raw.access_owner === "string" ? raw.access_owner : "",
     expires_at: raw.expires_at === null ? null : typeof raw.expires_at === "string" ? raw.expires_at : "bad",
+    has_unmet_target: raw.has_unmet_target === true,
   });
 }
 
@@ -482,6 +488,7 @@ function projectCompression(raw: Record<string, unknown>, id: string): Stored | 
     visibility: "team",
     access_owner: owner,
     expires_at: null,
+    has_unmet_target: Array.isArray(raw.files) && raw.files.some((file) => asObject(file)?.status === "unmet_target"),
   });
 }
 
@@ -617,7 +624,7 @@ export function noteHistoryCompression(batch: {
   owner_id?: string;
   created_by?: string;
   delete_state?: string;
-  files?: { name?: string }[];
+  files?: { name?: string; status?: string }[];
 }): void {
   if (batch.delete_state && batch.delete_state !== "none") {
     forgetHistory("compression", batch.id);
@@ -716,7 +723,8 @@ function parseFilter(queries: Record<string, string[]>): Filter {
   if (typeRaw && !isHistoryType(typeRaw)) throw historyProblem("history_query_invalid");
   if (status) {
     const vocab = typeRaw ? STATUS[typeRaw as HistoryType] : Object.values(STATUS).flat();
-    if (!vocab.includes(status)) throw historyProblem("history_query_invalid");
+    const virtual = status === "unmet_target" && (!typeRaw || typeRaw === "compression");
+    if (!virtual && !vocab.includes(status)) throw historyProblem("history_query_invalid");
   }
   if ((dateFrom || dateTo) && !TZ.test(tz)) throw historyProblem("history_query_invalid");
   if (tz && !TZ.test(tz)) throw historyProblem("history_query_invalid");
@@ -853,7 +861,9 @@ function afterCursor(record: Stored, cursor: CursorBody): boolean {
 function matches(record: Stored, filter: Filter, now: number): boolean {
   if (!live(record, now)) return false;
   if (filter.type && record.type !== filter.type) return false;
-  if (filter.status && record.status !== filter.status) return false;
+  if (filter.status === "unmet_target") {
+    if (record.type !== "compression" || !record.has_unmet_target) return false;
+  } else if (filter.status && record.status !== filter.status) return false;
   if (filter.creator && record.creator_id !== filter.creator && record.creator_name !== filter.creator) return false;
   const at = Date.parse(record.created_at);
   if (!Number.isFinite(at)) return false;
@@ -905,6 +915,9 @@ function answer(doc: Doc, viewer: HistoryViewer, filter: Filter, cursorRaw: stri
   for (const record of matched) {
     facets.type[record.type] += 1;
     facets.status[record.status] = (facets.status[record.status] || 0) + 1;
+    if (record.type === "compression" && record.has_unmet_target) {
+      facets.status.unmet_target = (facets.status.unmet_target || 0) + 1;
+    }
   }
   const rows = matched
     .filter((record) => (cursor ? afterCursor(record, cursor) : true))

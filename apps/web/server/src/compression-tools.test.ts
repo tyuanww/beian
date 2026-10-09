@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 import sharp from "sharp";
-import { compressionPolicyFingerprint, compressionFileReady, compressionToolsForMedia } from "./compressionPolicy.js";
+import { compressionPolicyFingerprint, compressionPolicySnapshot, compressionFileReady, compressionToolsForMedia } from "./compressionPolicy.js";
 import { toolGenerationOf, budgetFromProbe } from "./compressionProbe.js";
 import { setCompressionExecutorForTest, executeCompressionFile } from "./compressionExecute.js";
 import { qpdfLosslessArgs } from "./compressionModel.js";
@@ -84,7 +84,9 @@ describe("compression tools", () => {
     await sharp({ create: { width: 12, height: 6, channels: 3, background: "red" } })
       .jpeg()
       .withMetadata({ orientation: 6, icc: "p3" })
+      .withXmp('<x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"><rdf:Description xmlns:tiff="http://ns.adobe.com/tiff/1.0/" tiff:Orientation="6"/></rdf:RDF></x:xmpmeta>')
       .toFile(oriented);
+    const originalMeta = await sharp(oriented).metadata();
     const turned = await runWorker(oriented, orientedOut, "image/jpeg");
     assert.equal(turned.status, 0);
     const turnedMeta = await sharp(orientedOut).metadata();
@@ -92,6 +94,8 @@ describe("compression tools", () => {
     assert.equal(turnedMeta.height, 12);
     assert.ok(turnedMeta.orientation == null || turnedMeta.orientation === 1);
     assert.ok(turnedMeta.hasProfile || (turnedMeta.icc && turnedMeta.icc.length > 0));
+    assert.deepEqual(turnedMeta.icc, originalMeta.icc, "keep the actual source colour profile");
+    assert.equal(turnedMeta.xmp, undefined, "discard stale XMP orientation after rotating pixels");
 
     const mirrored = join(dir, "mirror.jpg");
     const mirroredOut = join(dir, "mirror-out.jpg");
@@ -139,7 +143,7 @@ describe("compression tools", () => {
         sha256: "0".repeat(64),
         manual_retries: 0,
         last_retry_at: null,
-        policy_fingerprint: "policy",
+        policy_fingerprint: compressionPolicyFingerprint(),
         tool_generation: "tools",
       },
       sourcePath: source,
@@ -164,6 +168,20 @@ describe("compression tools", () => {
     } else if (result.publish === "none") {
       assert.ok(result.reason === "platform_budget_unavailable" || result.reason === "dependency_missing");
     }
+  });
+
+  it("uses the saved execution budgets in each child command", () => {
+    const saved = { ...compressionPolicySnapshot(), rss_bytes: 64 * 1024 ** 2, pdf_max_ms: 30_000,
+      java_xmx_bytes: 32 * 1024 ** 2, max_image_pixels: 100, max_image_decode_bytes: 400 };
+    const image = imageWorkerCommand("in.png", "out.png", "image/png", saved);
+    assert.equal(image[image.indexOf("--max-pixels") + 1], "100");
+    assert.equal(image[image.indexOf("--max-decode-bytes") + 1], "400");
+    const args = containArgs(image, "attempt", saved);
+    assert.equal(args[args.indexOf("--as") + 1], String(saved.rss_bytes));
+    assert.equal(args[args.indexOf("--cpu") + 1], "30");
+    const java = javaHelperCommand("java", "pdfbox.jar", "inspect", ["in.pdf"], saved);
+    assert.ok(java.includes("-Xmx32m"));
+    assert.equal(java.at(-1), "200,100000,32,100,400,1073741824");
   });
 });
 

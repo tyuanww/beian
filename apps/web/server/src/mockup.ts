@@ -27,7 +27,6 @@ import {
   PRINT_FACE_NAMES,
   UNFOLDED_PRINT_NAME,
   UNFOLDED_SOURCE_NAME,
-  buildStoredZip,
   pdfHeaderRegularFile,
   projectPrintFacesZip,
   projectUnfoldedPrint,
@@ -1520,23 +1519,28 @@ function readyPrintFaceCount(jobId: string): number {
   return ready;
 }
 
-/** Six panel PNGs only. Built on download so it cannot be stored as the unfolded PDF. */
-export function printFacesZipBytes(jobId: string): Buffer | null {
+/**
+ * Validate the six fixed panel paths without reading their payloads. The
+ * total cap is the same 256 MiB envelope used by print assets, so a
+ * download cannot first allocate six independent 256 MiB buffers.
+ */
+export function printFacesZipEntries(jobId: string): Array<{ name: string; path: string }> | null {
   if (readyPrintFaceCount(jobId) !== PRINT_FACE_NAMES.length) return null;
-  const entries: { name: string; bytes: Buffer }[] = [];
+  const entries: Array<{ name: string; path: string }> = [];
+  let total = 0;
   for (const face of PRINT_FACE_NAMES) {
     const path = join(mockupRoot(false), jobId, "assets", `panel_${face}.png`);
     try {
       const stat = lstatSync(path);
-      if (!stat.isFile() || stat.isSymbolicLink() || stat.size <= 0 || stat.size > UNFOLDED_BINARY_MAX_BYTES) return null;
-      const bytes = readFileSync(path);
-      if (bytes.length !== stat.size || !bytes.subarray(0, 8).equals(PNG_MAGIC)) return null;
-      entries.push({ name: `panel_${face}.png`, bytes });
+      if (!stat.isFile() || stat.isSymbolicLink() || stat.size <= 0 || stat.size > UNFOLDED_BINARY_MAX_BYTES || !pngMagicAtPath(path)) return null;
+      total += stat.size;
+      if (total > UNFOLDED_BINARY_MAX_BYTES) return null;
+      entries.push({ name: `panel_${face}.png`, path });
     } catch {
       return null;
     }
   }
-  return buildStoredZip(entries);
+  return entries;
 }
 
 function canRepairPrintFaces(job: MockupJob): boolean {

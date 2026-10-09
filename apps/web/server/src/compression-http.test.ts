@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { beforeEach, describe, it } from "node:test";
 import { makeTestTempDir } from "./testTemp.js";
@@ -17,7 +17,7 @@ const { compressionPolicyFingerprint } = await import("./compressionPolicy.js");
 const { assessCapabilityNow, setCompressionCapabilityForTest } = await import("./compressionProbe.js");
 const { setCompressionExecutorForTest } = await import("./compressionExecute.js");
 const { compressionActiveLeases, compressionSettled, setCompressionAttemptTimeoutForTest, setCompressionClockForTest } = await import("./compressionRuntime.js");
-const { readCompressionBatch } = await import("./compressionStore.js");
+const { compressionOutputPath, readCompressionBatch } = await import("./compressionStore.js");
 const { loadReceipt, stageBuffers } = await import("./uploads.js");
 const { setCompressionStartFaultForTest } = await import("./compressionApi.js");
 
@@ -214,13 +214,23 @@ describe("compression http", () => {
     const stored = readCompressionBatch(started.body.id);
     assert.equal(stored?.retry_log.length, 1);
     assert.equal(stored?.attempt, 2);
+    assert.equal(stored?.files[0].tool_generation, "test-gen-2");
+    assert.equal(stored?.files[0].policy_snapshot?.pdf_target_bytes, 10_000_000);
     setCompressionClockForTest(() => Date.parse(stored?.files[0].last_retry_at || "") + 31_000);
     const admin = await app.request(`/api/compressions/${started.body.id}/retry`, {
       method: "POST",
       headers: { ...auth("ou_admin", "管理员", "admin"), "content-type": "application/json" },
       body: JSON.stringify({ expected_revision: stored?.revision, file_ids: ["asset1"] }),
     });
-    assert.equal(admin.status, 202);
+    assert.equal(admin.status, 409);
+    assert.equal((await admin.json() as { reason: string }).reason, "capability_unchanged");
+    setCompressionCapabilityForTest(ready("test-gen-3"));
+    const changed = await app.request(`/api/compressions/${started.body.id}/retry`, {
+      method: "POST",
+      headers: { ...auth("ou_admin", "管理员", "admin"), "content-type": "application/json" },
+      body: JSON.stringify({ expected_revision: stored?.revision, file_ids: ["asset1"] }),
+    });
+    assert.equal(changed.status, 202);
     await compressionSettled();
   });
 
@@ -273,6 +283,20 @@ describe("compression http", () => {
     const again = await app.request(`/api/compressions/${started.body.id}`, { method: "DELETE", headers: auth(owner) });
     assert.equal(again.status, 200);
     assert.equal((await again.json() as { already_deleted: boolean }).already_deleted, true);
+  });
+
+  it("refuses a missing or size-mismatched durable output before streaming", async () => {
+    const owner = "ou_missing_output";
+    const receipt = await stage(owner, [{ field: "asset1", name: "missing.jpg", buf: jpeg("missing") }]);
+    const started = await start(owner, receipt.id);
+    const file = (await fetchBatch(started.body.id, owner)).files[0];
+    rmSync(compressionOutputPath(started.body.id, "asset1"), { force: true });
+    const single = await app.request(`/api/compressions/${started.body.id}/files/${file.key}`, { headers: auth(owner) });
+    assert.equal(single.status, 404);
+    assert.equal((await single.json() as { code: string }).code, "compression_file_missing");
+    const zip = await app.request(`/api/compressions/${started.body.id}/zip`, { headers: auth(owner) });
+    assert.equal(zip.status, 404);
+    assert.equal((await zip.json() as { code: string }).code, "compression_file_missing");
   });
 
   it("does not publish an empty zip or delete a running batch", async () => {

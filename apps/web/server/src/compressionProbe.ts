@@ -50,7 +50,7 @@ export function setCompressionCapabilityForTest(next: CompressionCapability | nu
   cached = null;
 }
 
-export function diskFreeBytes(path = DATA_DIR): number {
+function diskFreeBytes(path = DATA_DIR): number {
   mkdirSync(path, { recursive: true });
   const stats = statfsSync(path);
   return Number(stats.bavail) * Number(stats.bsize);

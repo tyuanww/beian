@@ -10,6 +10,7 @@ import { makeTestTempDir } from "./testTemp.js";
 process.env.VITEST = "1";
 process.env.WB_DATA_DIR = makeTestTempDir("beian-compression-process-");
 const { executeCompressionFile } = await import("./compressionExecute.js");
+const { compressionPolicySnapshot } = await import("./compressionPolicy.js");
 
 for (const confirmed of [true, false]) it(`tool cancellation requires observed tree close; confirmed=${confirmed}`, async () => {
   const events: string[] = [];
@@ -39,7 +40,7 @@ for (const confirmed of [true, false]) it(`tool cancellation requires observed t
   syncBuiltinESMExports();
   try {
     const pending = executeCompressionFile({ batchId: "abcdefabcdef", token, sourcePath: "synthetic.jpg", outputPath: join(process.env.WB_DATA_DIR!, "out.jpg"), signal: abort.signal,
-      file: { id: "asset1", name: "synthetic.jpg", media_type: "image/jpeg", status: "running", input_bytes: 100, output_bytes: null, reason: null, sha256: "a".repeat(64), manual_retries: 0, last_retry_at: null, policy_fingerprint: "synthetic", tool_generation: "synthetic" },
+      file: { id: "asset1", name: "synthetic.jpg", media_type: "image/jpeg", status: "running", input_bytes: 100, output_bytes: null, reason: null, sha256: "a".repeat(64), manual_retries: 0, last_retry_at: null, policy_fingerprint: "synthetic", tool_generation: "synthetic", policy_snapshot: compressionPolicySnapshot() },
       capability: { budget: "enforced", mechanism: "synthetic", toolsReady: true, missing: [], diskFreeBytes: 8e9, toolGeneration: "synthetic", policyFingerprint: "synthetic", versions: { sharp: "test", qpdf: null, java: null, pdfbox: null } },
       processObserver: { begin() { events.push("begin"); return { token, closePath: path }; }, spawned(pid) { events.push("persist-pid"); assert.equal(pid, 12345); }, notSpawned() { assert.fail("process spawned"); }, closed() { events.push("verify-close"); return JSON.parse(readFileSync(path, "utf8")).closed === true; } },
     });

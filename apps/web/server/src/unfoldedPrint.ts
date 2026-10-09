@@ -1,10 +1,9 @@
 import { createHash } from "node:crypto";
 import { closeSync, lstatSync, openSync, readSync } from "node:fs";
 import { isAbsolute, relative, resolve } from "node:path";
-import { crc32 } from "node:zlib";
 
 /** Public reason codes. Chinese copy is the HTTP message, not a second field. */
-export const UNFOLDED_REASON = {
+const UNFOLDED_REASON = {
   source_missing: "source_missing",
   geometry_incomplete: "geometry_incomplete",
   separation_unreliable: "separation_unreliable",
@@ -29,11 +28,11 @@ export const UNFOLDED_MESSAGE: Record<UnfoldedReason, string> = {
 };
 
 export const UNFOLDED_PROTOCOL = "beian.illustrator.export/2";
-export const UNFOLDED_SOURCE_SCHEMA = "unfolded-print-source/1";
+const UNFOLDED_SOURCE_SCHEMA = "unfolded-print-source/1";
 export const UNFOLDED_SOURCE_NAME = "unfolded-source.json";
 export const UNFOLDED_PRINT_NAME = "unfolded-print.pdf";
-export const UNFOLDED_PRINT_KEY = "unfolded_print";
-export const PRINT_FACES_ZIP_KEY = "print_faces_zip";
+const UNFOLDED_PRINT_KEY = "unfolded_print";
+const PRINT_FACES_ZIP_KEY = "print_faces_zip";
 export const UNFOLDED_SOURCE_MAX_BYTES = 2 * 1024 * 1024;
 export const UNFOLDED_BINARY_MAX_BYTES = 256 * 1024 * 1024;
 export const PRINT_FACE_NAMES = ["front", "back", "left", "right", "top", "bottom"] as const;
@@ -101,7 +100,6 @@ export class UnfoldedPrintHttpError extends Error {
     this.unfolded_print = unfolded_print;
   }
 }
-
 export type UnfoldedSourcePlan =
   | { ok: true; mode: UnfoldedPrintMode; assembly: "semantic-net" | "attested-pdf" }
   | { ok: false; reason: "geometry_incomplete" | "separation_unreliable" };
@@ -205,7 +203,7 @@ export function projectPrintFacesZip(readyFaces: number): PublicPrintFacesZip {
   return { status: "unavailable" };
 }
 
-export function knownUnfoldedReason(value: unknown): UnfoldedReason {
+function knownUnfoldedReason(value: unknown): UnfoldedReason {
   const reason = typeof value === "string" ? value : "";
   if (reason === "busy" || !PUBLIC_STATUS_REASONS.has(reason)) return "export_failed";
   return reason as UnfoldedReason;
@@ -308,66 +306,4 @@ export function unfoldedAssetRecordValid(asset: UnfoldedPrintAsset): boolean {
     && Number.isFinite(asset.height_mm)
     && asset.height_mm > 0
     && asset.height_mm < 10000;
-}
-
-/** Stored ZIP of the six panel PNGs. Names stay panel_*.png; the unfolded PDF is not a member. */
-export function buildStoredZip(entries: { name: string; bytes: Buffer }[]): Buffer | null {
-  if (!entries.length) return null;
-  let payload = 0;
-  const locals: Buffer[] = [];
-  const centrals: Buffer[] = [];
-  let offset = 0;
-  for (const entry of entries) {
-    if (!entry.name || entry.name.includes("/") || entry.name.includes("\\") || entry.name.includes("..")) return null;
-    payload += entry.bytes.length;
-    if (payload > UNFOLDED_BINARY_MAX_BYTES) return null;
-    const name = Buffer.from(entry.name, "utf8");
-    const crc = crc32(entry.bytes) >>> 0;
-    const local = Buffer.alloc(30 + name.length);
-    local.writeUInt32LE(0x04034b50, 0);
-    local.writeUInt16LE(20, 4);
-    local.writeUInt16LE(0, 6);
-    local.writeUInt16LE(0, 8);
-    local.writeUInt16LE(0, 10);
-    local.writeUInt16LE(0, 12);
-    local.writeUInt32LE(crc, 14);
-    local.writeUInt32LE(entry.bytes.length, 18);
-    local.writeUInt32LE(entry.bytes.length, 22);
-    local.writeUInt16LE(name.length, 26);
-    local.writeUInt16LE(0, 28);
-    name.copy(local, 30);
-    locals.push(local, entry.bytes);
-    const central = Buffer.alloc(46 + name.length);
-    central.writeUInt32LE(0x02014b50, 0);
-    central.writeUInt16LE(20, 4);
-    central.writeUInt16LE(20, 6);
-    central.writeUInt16LE(0, 8);
-    central.writeUInt16LE(0, 10);
-    central.writeUInt16LE(0, 12);
-    central.writeUInt16LE(0, 14);
-    central.writeUInt32LE(crc, 16);
-    central.writeUInt32LE(entry.bytes.length, 20);
-    central.writeUInt32LE(entry.bytes.length, 24);
-    central.writeUInt16LE(name.length, 28);
-    central.writeUInt16LE(0, 30);
-    central.writeUInt16LE(0, 32);
-    central.writeUInt16LE(0, 34);
-    central.writeUInt16LE(0, 36);
-    central.writeUInt32LE(0, 38);
-    central.writeUInt32LE(offset, 42);
-    name.copy(central, 46);
-    centrals.push(central);
-    offset += local.length + entry.bytes.length;
-  }
-  const central = Buffer.concat(centrals);
-  const end = Buffer.alloc(22);
-  end.writeUInt32LE(0x06054b50, 0);
-  end.writeUInt16LE(0, 4);
-  end.writeUInt16LE(0, 6);
-  end.writeUInt16LE(entries.length, 8);
-  end.writeUInt16LE(entries.length, 10);
-  end.writeUInt32LE(central.length, 12);
-  end.writeUInt32LE(offset, 16);
-  end.writeUInt16LE(0, 20);
-  return Buffer.concat([...locals, central, end]);
 }

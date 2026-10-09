@@ -1028,9 +1028,14 @@ function recoverUnfoldedPrintsOnBoot(): void {
         }
       }
       if (gone && unfoldedCloseConfirmed(join(attempt, "close.json"), request.id, request.native_source_sha256)) {
+        const recoveryKey = `${job.id}:${request.id}`;
+        recoveringUnfolded.add(recoveryKey);
         live.illustrator = job.id;
         const requestId = request.id;
-        void publishAttestedUnfolded(job, requestId, join(attempt, "print.pdf")).finally(() => releaseNativeSlot(job.id, requestId));
+        void publishAttestedUnfolded(job, requestId, join(attempt, "print.pdf")).finally(() => {
+          recoveringUnfolded.delete(recoveryKey);
+          releaseNativeSlot(job.id, requestId);
+        });
         continue;
       }
       request.host_fence = "unconfirmed";
@@ -2651,11 +2656,55 @@ function illustratorSlotBusy(): boolean {
 
 let illustratorBusyPoll: ReturnType<typeof setInterval> | undefined;
 let illustratorBusyPollWasBusy = false;
+const recoveringUnfolded = new Set<string>();
+
+/** Native text uses the same preserved Illustrator host fence as unfolded
+ * export. Recheck it in-process so a late close can release the slot without
+ * waiting for a service restart. */
+function recoverNativeTextFences(): void {
+  recoverNativeRequests("late");
+  if (!live.illustrator?.startsWith("native:")) return;
+  const taskId = live.illustrator.slice("native:".length);
+  const task = loadTask(taskId);
+  if (nativeRequest(task)?.status === "running") return;
+  live.illustrator = null;
+  tryStart();
+}
+
+/** A preserved native timeout resolves before Illustrator exits. Keep the
+ * shared slot fenced, then promote the attempt once both the exact worker and
+ * the close evidence are independently gone/confirmed. */
+function recoverUnfoldedNativeFences(): void {
+  for (const job of loadAllMockups()) {
+    const request = job.unfolded_print_request;
+    if (request?.status !== "running" || request.mode !== "native_export" || request.host_fence !== "unconfirmed" || !request.worker_pid) continue;
+    const key = `${job.id}:${request.id}`;
+    if (recoveringUnfolded.has(key)) continue;
+    let gone = false;
+    try {
+      gone = (hooks.inspectWorker || inspectWorkerProcess)(request.worker_pid, {
+        kind: "unfolded_print", id: job.id, executionId: request.id, mode: "native_export",
+      }) === "missing";
+    } catch {
+      gone = false;
+    }
+    const attempt = join(mockupJobDir(job.id), `.unfolded-${request.id}`);
+    if (!gone || !unfoldedCloseConfirmed(join(attempt, "close.json"), request.id, request.native_source_sha256)) continue;
+    recoveringUnfolded.add(key);
+    live.illustrator = job.id;
+    void publishAttestedUnfolded(job, request.id, join(attempt, "print.pdf")).finally(() => {
+      recoveringUnfolded.delete(key);
+      releaseNativeSlot(job.id, request.id);
+    });
+  }
+}
 
 function ensureIllustratorBusyPoll(): void {
   if (illustratorBusyPoll || process.env.VITEST === "1") return;
   illustratorBusyPoll = setInterval(() => {
     try {
+      recoverNativeTextFences();
+      recoverUnfoldedNativeFences();
       const busy = illustratorSlotBusy();
       if (illustratorBusyPollWasBusy && !busy && !live.illustrator) {
         for (const job of loadAllMockups()) {

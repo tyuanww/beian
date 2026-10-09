@@ -15,6 +15,7 @@ const { setCompressionExecutorForTest } = await import("./compressionExecute.js"
 const { compressionQueueSnapshot, compressionSettled, recoverCompressionBeforeReceipts, recoverCompressionJobs } = await import("./compressionRuntime.js");
 const {
   compressionBatchDir,
+  compressionStoreSnapshot,
   createQueuedCompression,
   freezeCompressionSources,
   newCompressionId,
@@ -179,6 +180,43 @@ describe("compression recovery", () => {
     const detail = await app.request("/api/compressions/abcdefabcdef", { headers });
     assert.equal(detail.status, 503);
     assert.equal((await detail.json() as { code: string }).code, "compression_record_unreadable");
+    const admin = await app.request("/api/compressions", {
+      headers: { authorization: `Bearer ${issueSessionForTest("管理员", "admin", "ou_admin").token}` },
+    });
+    assert.equal(admin.status, 200);
+    assert.deepEqual((await admin.json() as { unreadable_ids?: string[] }).unreadable_ids, ["abcdefabcdef"]);
+    const healthy = await startedBatch("ou_healthy_after_corrupt");
+    assert.ok(readCompressionBatch(healthy));
+  });
+
+  it("isolates a batch written with an unknown policy version", async () => {
+    const id = await startedBatch("ou_unknown_policy");
+    const batch = readCompressionBatch(id);
+    assert.ok(batch);
+    writeFileSync(join(compressionBatchDir(id), "batch.json"), JSON.stringify({ ...batch, policy_version: "compression-policy-v0" }));
+    assert.equal(readCompressionBatch(id), null);
+    assert.deepEqual(compressionStoreSnapshot().unreadable_ids, [id]);
+  });
+
+  it("isolates a batch that exceeds the file cardinality envelope", async () => {
+    const id = await startedBatch("ou_too_many_files");
+    const batch = readCompressionBatch(id);
+    assert.ok(batch);
+    writeFileSync(join(compressionBatchDir(id), "batch.json"), JSON.stringify({ ...batch, files: Array.from({ length: 21 }, () => batch.files[0]) }));
+    assert.equal(readCompressionBatch(id), null);
+    assert.deepEqual(compressionStoreSnapshot().unreadable_ids, [id]);
+  });
+
+  it("isolates an idle batch with a stale executor identity", async () => {
+    const id = await startedBatch("ou_stale_writer");
+    const batch = readCompressionBatch(id);
+    assert.ok(batch);
+    writeFileSync(join(compressionBatchDir(id), "batch.json"), JSON.stringify({
+      ...batch,
+      writer: { token: "", pid: null, state: "idle", started_at: null, process_token: "deadbeefdeadbeefdeadbeefdeadbeef" },
+    }));
+    assert.equal(readCompressionBatch(id), null);
+    assert.deepEqual(compressionStoreSnapshot().unreadable_ids, [id]);
   });
 
   it("ignores a late result after the writer token changes", async () => {

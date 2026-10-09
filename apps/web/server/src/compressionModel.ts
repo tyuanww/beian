@@ -3,10 +3,11 @@ import {
   COMPRESSION_POLICY_VERSION,
   COMPRESSION_RETRY_INTERVAL_MS,
   PDF_MAX_ROUNDS,
-  PDF_QUALITY_LADDER,
   PDF_TARGET_BYTES,
   QPDF_WARNING_ALLOWLIST_V1,
   type CompressionMediaType,
+  COMPRESSION_POLICY,
+  type CompressionPolicySnapshot,
 } from "./compressionPolicy.js";
 
 export type CompressionFileStatus =
@@ -20,9 +21,9 @@ export type CompressionFileStatus =
 
 export type CompressionBatchStatus = "queued" | "running" | "done" | "partial" | "failed";
 
-export type RetryClass = "never" | "capability" | "dependency" | "interrupt";
+type RetryClass = "never" | "capability" | "dependency" | "interrupt";
 
-export const COMPRESSION_REASON_CLASS: Record<string, RetryClass> = {
+const COMPRESSION_REASON_CLASS: Record<string, RetryClass> = {
   magic_mismatch: "never",
   corrupt: "never",
   password_required: "never",
@@ -31,6 +32,7 @@ export const COMPRESSION_REASON_CLASS: Record<string, RetryClass> = {
   content_invalid: "never",
   multi_frame: "never",
   signature_unknown: "capability",
+  policy_unavailable: "capability",
   filter_unsupported: "capability",
   resource_limit: "capability",
   qpdf_warning_unapproved: "capability",
@@ -67,7 +69,7 @@ export const COMPRESSION_ERROR_CATALOG = [
 const DOWNLOADABLE = new Set<CompressionFileStatus>(["succeeded", "passthrough"]);
 const FAIL_TERMINAL = new Set<CompressionFileStatus>(["unmet_target", "unsupported", "failed"]);
 
-export function compressionReasonMessage(reason: string | null): string | null {
+function compressionReasonMessage(reason: string | null): string | null {
   if (!reason) return null;
   const found = COMPRESSION_ERROR_CATALOG.find((item) => item.code === reason);
   if (found) return found.detail;
@@ -80,6 +82,7 @@ export function compressionReasonMessage(reason: string | null): string | null {
     content_invalid: "文件内容不能安全重写",
     multi_frame: "多帧或动态图片不会压成单帧",
     signature_unknown: "签名状态无法判断，没有重写",
+    policy_unavailable: "原压缩策略无法恢复，请在策略更新后重试",
     filter_unsupported: "PDF 使用了当前工具不能安全处理的过滤器",
     resource_limit: "文件超出本批页数、对象或内存预算",
     qpdf_warning_unapproved: "qpdf 报告了尚未批准的警告，结果没有发布",
@@ -218,8 +221,8 @@ export function firstQualifiedPdfCandidate(sizes: readonly number[]): { index: n
   return null;
 }
 
-export function pdfRoundPlan(): Array<{ kind: "lossless" } | { kind: "quality"; quality: number }> {
-  return [{ kind: "lossless" }, ...PDF_QUALITY_LADDER.map((quality) => ({ kind: "quality" as const, quality }))];
+export function pdfRoundPlan(policy: Pick<CompressionPolicySnapshot, "pdf_quality_ladder" | "pdf_max_rounds"> = COMPRESSION_POLICY): Array<{ kind: "lossless" } | { kind: "quality"; quality: number }> {
+  return [{ kind: "lossless" as const }, ...policy.pdf_quality_ladder.map((quality) => ({ kind: "quality" as const, quality }))].slice(0, policy.pdf_max_rounds);
 }
 
 export type PdfInspection = {

@@ -7,8 +7,8 @@
 import { unlinkSync } from "node:fs";
 import sharp from "sharp";
 
-const MAX_PIXELS = 32_000_000;
-const MAX_DECODE_BYTES = 128 * 1024 * 1024;
+const HARD_PIXELS = 32_000_000;
+const HARD_DECODE_BYTES = 128 * 1024 * 1024;
 
 function arg(name) {
   const index = process.argv.indexOf(name);
@@ -29,6 +29,10 @@ const input = arg("--input");
 const output = arg("--output");
 const media = arg("--media");
 if (!input || !output || !media) fail(2);
+const maxPixels = Number(arg("--max-pixels") || HARD_PIXELS);
+const maxDecodeBytes = Number(arg("--max-decode-bytes") || HARD_DECODE_BYTES);
+if (!Number.isSafeInteger(maxPixels) || maxPixels < 1 || maxPixels > HARD_PIXELS ||
+    !Number.isSafeInteger(maxDecodeBytes) || maxDecodeBytes < 1 || maxDecodeBytes > HARD_DECODE_BYTES) fail(2);
 
 const formats = {
   "image/jpeg": "jpeg",
@@ -43,15 +47,15 @@ try {
   const width = header.width || 0;
   const height = header.height || 0;
   const pixels = width * height;
-  if (!width || !height || pixels > MAX_PIXELS || pixels * 4 > MAX_DECODE_BYTES) fail(3);
+  if (!width || !height || pixels > maxPixels || pixels * 4 > maxDecodeBytes) fail(3);
 
   let pipeline = sharp(input, {
     animated: false,
     pages: 1,
-    limitInputPixels: MAX_PIXELS,
+    limitInputPixels: maxPixels,
     sequentialRead: true,
     failOn: "error",
-  }).rotate().withMetadata({ orientation: undefined });
+  }).rotate().keepIccProfile();
   if (media === "image/jpeg") pipeline = pipeline.jpeg({ quality: 85, mozjpeg: false });
   else if (media === "image/png") pipeline = pipeline.png({ compressionLevel: 9 });
   else pipeline = pipeline.webp({ quality: 85, alphaQuality: 100 });

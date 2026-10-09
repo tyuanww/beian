@@ -6,9 +6,9 @@ export const PDF_TARGET_BYTES = 10_000_000;
 export const PDF_ESTIMATE_HEADROOM_BYTES = 9_800_000;
 export const PDF_MAX_ROUNDS = 8;
 export const PDF_MAX_MS = 5 * 60 * 1000;
-export const PDF_MIN_QUALITY = 60;
-export const PDF_MIN_DPI = 150;
-export const PDF_QUALITY_LADDER = [95, 90, 85, 80, 75, 70, 60] as const;
+const PDF_MIN_QUALITY = 60;
+const PDF_MIN_DPI = 150;
+const PDF_QUALITY_LADDER = [95, 90, 85, 80, 75, 70, 60] as const;
 export const QPDF_WARNING_ALLOWLIST_V1: readonly string[] = [];
 export const COMPRESSION_MAX_FILES = 20;
 export const COMPRESSION_MAX_BATCH_BYTES = 100 * 1024 * 1024;
@@ -17,19 +17,19 @@ export const COMPRESSION_OWNER_SOURCE_BYTES = 400 * 1024 * 1024;
 export const COMPRESSION_GLOBAL_SOURCE_BYTES = 1024 * 1024 * 1024;
 export const COMPRESSION_OWNER_ACTIVE = 8;
 export const COMPRESSION_GLOBAL_ACTIVE = 64;
-export const COMPRESSION_MAX_IMAGE_PIXELS = 32_000_000;
-export const COMPRESSION_MAX_IMAGE_DECODE_BYTES = 128 * 1024 * 1024;
-export const COMPRESSION_MAX_DECODE_STREAM_BYTES = 1024 * 1024 * 1024;
-export const COMPRESSION_MAX_PDF_PAGES = 200;
-export const COMPRESSION_MAX_PDF_OBJECTS = 100_000;
-export const COMPRESSION_MAX_FORM_DEPTH = 32;
-export const COMPRESSION_CONCURRENCY = 1;
-export const COMPRESSION_JAVA_XMX_BYTES = 256 * 1024 * 1024;
+const COMPRESSION_MAX_IMAGE_PIXELS = 32_000_000;
+const COMPRESSION_MAX_IMAGE_DECODE_BYTES = 128 * 1024 * 1024;
+const COMPRESSION_MAX_DECODE_STREAM_BYTES = 1024 * 1024 * 1024;
+const COMPRESSION_MAX_PDF_PAGES = 200;
+const COMPRESSION_MAX_PDF_OBJECTS = 100_000;
+const COMPRESSION_MAX_FORM_DEPTH = 32;
+const COMPRESSION_CONCURRENCY = 1;
+const COMPRESSION_JAVA_XMX_BYTES = 256 * 1024 * 1024;
 export const COMPRESSION_RSS_BYTES = 768 * 1024 * 1024;
 export const COMPRESSION_GROUP_RSS_BYTES = 1024 * 1024 * 1024;
-export const COMPRESSION_ATTEMPT_DISK_BYTES = 2 * 1024 * 1024 * 1024;
-export const COMPRESSION_CANDIDATE_BYTES = 128 * 1024 * 1024;
-export const COMPRESSION_DISK_SAFETY_BYTES = 2 * 1024 * 1024 * 1024;
+const COMPRESSION_ATTEMPT_DISK_BYTES = 2 * 1024 * 1024 * 1024;
+const COMPRESSION_CANDIDATE_BYTES = 128 * 1024 * 1024;
+const COMPRESSION_DISK_SAFETY_BYTES = 2 * 1024 * 1024 * 1024;
 export const COMPRESSION_REQUIRED_FREE_BYTES =
   COMPRESSION_ATTEMPT_DISK_BYTES + COMPRESSION_DISK_SAFETY_BYTES;
 export const COMPRESSION_DOWNLOADS_PER_OWNER = 2;
@@ -81,6 +81,46 @@ export const COMPRESSION_POLICY = {
   max_auto_requeues: COMPRESSION_MAX_AUTO_REQUEUES,
 } as const;
 
+/** 保存有效参数，队列恢复和同一轮执行不受后续默认策略修改影响。 */
+export type CompressionPolicySnapshot = {
+  [K in keyof typeof COMPRESSION_POLICY]:
+    (typeof COMPRESSION_POLICY)[K] extends readonly number[] ? readonly number[] :
+    (typeof COMPRESSION_POLICY)[K] extends readonly string[] ? readonly string[] :
+    (typeof COMPRESSION_POLICY)[K] extends number ? number : string;
+};
+
+export function compressionPolicySnapshot(): CompressionPolicySnapshot {
+  return JSON.parse(JSON.stringify(COMPRESSION_POLICY)) as CompressionPolicySnapshot;
+}
+
+export function validCompressionPolicySnapshot(value: unknown): value is CompressionPolicySnapshot {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const saved = value as Record<string, unknown>;
+  if (Object.keys(saved).length !== Object.keys(COMPRESSION_POLICY).length) return false;
+  for (const [key, hardLimit] of Object.entries(COMPRESSION_POLICY)) {
+    const actual = saved[key];
+    // A persisted snapshot is the contract for that attempt, but every
+    // version remains inside the immutable resource envelope. An arbitrary
+    // old version must not smuggle Number.MAX_SAFE_INTEGER into a worker.
+    if (typeof hardLimit === "number" &&
+        (!Number.isSafeInteger(actual) || Number(actual) < 1 ||
+          Number(actual) > hardLimit)) return false;
+  }
+  return saved.version === COMPRESSION_POLICY_VERSION &&
+    saved.pdf_target_bytes === PDF_TARGET_BYTES && saved.pdf_min_quality === PDF_MIN_QUALITY &&
+    saved.pdf_min_dpi === PDF_MIN_DPI && Array.isArray(saved.pdf_quality_ladder) &&
+    saved.pdf_quality_ladder.length > 0 && saved.pdf_quality_ladder.length <= PDF_QUALITY_LADDER.length &&
+    saved.pdf_quality_ladder.every((item, index, items) => Number.isInteger(item) && item >= PDF_MIN_QUALITY &&
+      item <= 95 && (index === 0 || item < items[index - 1])) &&
+    Array.isArray(saved.qpdf_warning_allowlist) && saved.qpdf_warning_allowlist.length === 0;
+}
+
+export function effectiveCompressionPolicy(file: { policy_snapshot?: CompressionPolicySnapshot; policy_fingerprint: string }): CompressionPolicySnapshot | null {
+  if (file.policy_snapshot) return validCompressionPolicySnapshot(file.policy_snapshot) ? file.policy_snapshot : null;
+  // 旧记录没有参数；只能恢复仍能确认身份的当前策略，不能猜测旧策略。
+  return file.policy_fingerprint === compressionPolicyFingerprint() ? compressionPolicySnapshot() : null;
+}
+
 export function compressionPolicyFingerprint(
   policy: { version?: string } & Record<string, unknown> = COMPRESSION_POLICY,
 ): string {
@@ -99,9 +139,10 @@ export function compressionToolsForMedia(media: CompressionMediaType): readonly 
 export function compressionFileReady(
   media: CompressionMediaType,
   capability: { budget: string; missing: readonly string[]; diskFreeBytes: number },
+  policy: Pick<CompressionPolicySnapshot, "required_free_bytes"> = COMPRESSION_POLICY,
 ): boolean {
   return capability.budget === "enforced" &&
-    capability.diskFreeBytes >= COMPRESSION_REQUIRED_FREE_BYTES &&
+    capability.diskFreeBytes >= policy.required_free_bytes &&
     compressionToolsForMedia(media).every((tool) => !capability.missing.includes(tool));
 }
 

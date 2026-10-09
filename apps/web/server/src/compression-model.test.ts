@@ -5,6 +5,9 @@ import {
   PDF_ESTIMATE_HEADROOM_BYTES,
   PDF_TARGET_BYTES,
   compressionPolicyFingerprint,
+  compressionPolicySnapshot,
+  validCompressionPolicySnapshot,
+  effectiveCompressionPolicy,
 } from "./compressionPolicy.js";
 import {
   COMPRESSION_ERROR_CATALOG,
@@ -27,6 +30,20 @@ const capability = {
 };
 
 describe("compression decisions", () => {
+  it("recovers saved policy parameters and refuses unknown legacy policy", () => {
+    const saved = { ...compressionPolicySnapshot(), pdf_quality_ladder: [85, 60], pdf_max_rounds: 3 };
+    assert.equal(validCompressionPolicySnapshot(saved), true);
+    assert.deepEqual(pdfRoundPlan(saved), [{ kind: "lossless" }, { kind: "quality", quality: 85 }, { kind: "quality", quality: 60 }]);
+    assert.deepEqual(effectiveCompressionPolicy({ policy_fingerprint: "old", policy_snapshot: saved }), saved);
+    assert.equal(effectiveCompressionPolicy({ policy_fingerprint: "unknown" }), null);
+    assert.ok(effectiveCompressionPolicy({ policy_fingerprint: compressionPolicyFingerprint() }));
+    assert.equal(validCompressionPolicySnapshot({ ...saved, pdf_min_quality: 50 }), false);
+    assert.equal(validCompressionPolicySnapshot({ ...saved, max_image_decode_bytes: Number.MAX_SAFE_INTEGER }), false);
+    assert.equal(validCompressionPolicySnapshot({ ...saved, version: "compression-policy-v0", max_image_decode_bytes: Number.MAX_SAFE_INTEGER }), false);
+    assert.equal(validCompressionPolicySnapshot({ ...saved, version: "compression-policy-v0" }), false);
+    assert.equal(validCompressionPolicySnapshot({ ...saved, pdf_quality_ladder: [85, 90] }), false);
+    assert.equal(validCompressionPolicySnapshot({ ...saved, injected: true }), false);
+  });
   it("stops below 10_000_000 bytes and ignores the 9.8 MB estimate", () => {
     assert.equal(PDF_TARGET_BYTES, 10_000_000);
     assert.equal(PDF_ESTIMATE_HEADROOM_BYTES, 9_800_000);

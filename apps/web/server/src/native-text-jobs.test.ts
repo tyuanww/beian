@@ -82,6 +82,14 @@ it("recovery does not accept a late result or clear an unknown executor", () => 
   assert.equal(queueSnapshot().illustrator.running, 1);
 });
 
+it("late polling leaves an active native extractor fenced but untouched", () => {
+  seed(); prepareNativeRequests(true); const task = loadTask(id); task.native_text_request!.status = "running";
+  task.native_text_request!.pid = process.pid; saveTask(task);
+  recoverNativeRequests("late");
+  assert.equal(loadTask(id).native_text_request?.reason, undefined);
+  assert.equal(loadTask(id).native_text_request?.status, "running");
+});
+
 it("unavailable host falls back once without dispatch", async () => {
   seed(); let calls = 0;
   setJobsTestHooks({ illustratorHostReady: false, runNativeText: async () => { calls++; return success; }, runCompare: async opts => { assert.equal(opts.nativeDir, undefined); return success; }, notify: async () => ({ ok: false }) as never, bookkeeping: () => ({ compare_ok: true, recorded: false }) });

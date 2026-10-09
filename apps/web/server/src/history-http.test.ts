@@ -97,6 +97,7 @@ describe("unified history", { concurrency: false }, () => {
       "limit=101",
       "type=nope",
       "type=review&status=failed",
+      "type=review&status=unmet_target",
       "date_from=2026-10-10&date_to=2026-10-09&tz=%2B08:00",
       "date_from=2026-02-31&tz=Z",
       "date_from=2026-10-09",
@@ -183,7 +184,7 @@ describe("unified history", { concurrency: false }, () => {
     assert.ok(batch);
     batch.files[0].status = "succeeded";
     batch.files[0].output_bytes = 4;
-    batch.files[1].status = "failed";
+    batch.files[1].status = "unmet_target";
     batch.files[1].reason = "unmet_target";
     batch.files[1].output_bytes = null;
     const output = compressionOutputPath(compressionId, "asset1");
@@ -233,6 +234,12 @@ describe("unified history", { concurrency: false }, () => {
     const partial = await history(viewer, q({ status: "partial" }));
     assert.deepEqual((partial.body.items as Array<{ id: string; type: string }>).map((item) => item.type), ["compression"]);
     assert.equal((partial.body.items as Array<{ id: string }>)[0].id, compressionId);
+    const unmet = await history(viewer, q({ type: "compression", status: "unmet_target" }));
+    assert.equal(unmet.status, 200);
+    assert.equal(unmet.body.total, 1);
+    assert.equal((unmet.body.items as Array<{ status: string }>)[0].status, "partial");
+    assert.equal((unmet.body.facets as { status: { unmet_target: number } }).status.unmet_target, 1);
+    assert.equal(unmet.text.includes("has_unmet_target"), false);
     const viewerReview = await history(viewer, q({ type: "review", q: "甲的品名" }));
     assert.equal(viewerReview.body.total, 0);
     const child = await history(viewer, q({ q: "子文件-打样叶子" }));

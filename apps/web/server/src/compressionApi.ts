@@ -1,4 +1,4 @@
-import { createReadStream, openSync, readSync, closeSync } from "node:fs";
+import { createReadStream, lstatSync, openSync, readSync, closeSync } from "node:fs";
 import type { Context } from "hono";
 import type { Session } from "./auth.js";
 import { compressionProblem, type PublicCompressionBatch } from "./compressionModel.js";
@@ -38,6 +38,7 @@ import {
   readCompressionReceiptPointer,
   removeCompressionReceiptPointer,
   removeCompressionWorkdir,
+  quarantineUnreadableCompression,
   writeCompressionReceiptPointer,
 } from "./compressionStore.js";
 import { enqueueCompression, removeCompression, retryCompression } from "./jobs.js";
@@ -130,7 +131,7 @@ function titleOf(raw: unknown, names: string[]): string {
   return title || defaultCompressionTitle(names);
 }
 
-export async function startCompression(
+async function startCompression(
   session: Session,
   body: { receipt?: unknown; title?: unknown },
   draining: boolean,
@@ -218,6 +219,17 @@ function zipEntryName(name: string, used: Set<string>): string {
   return unique;
 }
 
+function verifiedCompressionOutput(id: string, fileId: string, expectedBytes: number): string | null {
+  const path = compressionOutputPath(id, fileId);
+  try {
+    const stat = lstatSync(path);
+    if (!stat.isFile() || stat.isSymbolicLink() || stat.size !== expectedBytes) return null;
+    return path;
+  } catch {
+    return null;
+  }
+}
+
 export function registerCompressionRoutes(
   app: CompressionApp,
   deps: { need: (c: CompressionContext, perm: string) => Session; draining: () => boolean },
@@ -235,12 +247,14 @@ export function registerCompressionRoutes(
     const session = deps.need(c, "read");
     const viewer = viewerFromSession(session);
     const snapshot = compressionStoreSnapshot();
-    if (snapshot.unreadable > 0) throw compressionProblem("compression_record_unreadable");
+    if (snapshot.unreadable > 0 && !viewer.admin) throw compressionProblem("compression_record_unreadable");
     const items = snapshot.batches
       .filter((batch) => !compressionHasTombstone(batch.id))
       .sort((a, b) => b.created_at.localeCompare(a.created_at) || b.id.localeCompare(a.id))
-      .map((batch) => toPublicCompression(batch, viewer));
-    return c.json({ items });
+      .map((batch) => toPublicCompression(batch, viewer, snapshot.batches));
+    return c.json(viewer.admin && snapshot.unreadable > 0
+      ? { items, unreadable_ids: snapshot.unreadable_ids }
+      : { items });
   });
 
   app.get("/api/compressions/:id", (c) => {
@@ -283,7 +297,8 @@ export function registerCompressionRoutes(
     if (!file || file.output_bytes == null || (file.status !== "succeeded" && file.status !== "passthrough")) {
       throw compressionProblem("compression_file_missing");
     }
-    const path = compressionOutputPath(id, file.id);
+    const path = verifiedCompressionOutput(id, file.id, file.output_bytes);
+    if (!path) throw compressionProblem("compression_file_missing");
     const stream = compressionDownloadStream(id, viewerFromSession(session).id, createReadStream(path));
     c.header("content-type", file.media_type);
     c.header("content-length", String(file.output_bytes));
@@ -299,10 +314,13 @@ export function registerCompressionRoutes(
     if (!batch) throw compressionProblem("compression_not_found");
     if (batch.status === "queued" || batch.status === "running") throw compressionProblem("compression_not_terminal");
     const used = new Set<string>();
-    const entries = batch.files.filter((file) => file.status === "succeeded" || file.status === "passthrough").map((file) => ({
-      name: zipEntryName(file.name, used),
-      path: compressionOutputPath(id, file.id),
-    }));
+    const downloadable = batch.files.filter((file) => file.status === "succeeded" || file.status === "passthrough");
+    const entries = downloadable.map((file) => {
+      if (file.output_bytes == null) throw compressionProblem("compression_file_missing");
+      const path = verifiedCompressionOutput(id, file.id, file.output_bytes);
+      if (!path) throw compressionProblem("compression_file_missing");
+      return { name: zipEntryName(file.name, used), path };
+    });
     if (!entries.length) throw compressionProblem("compression_zip_empty");
     const stream = compressionDownloadStream(id, viewerFromSession(session).id, compressionZipStream(entries));
     c.header("content-type", "application/zip");
@@ -314,7 +332,11 @@ export function registerCompressionRoutes(
     const session = deps.need(c, "delete");
     const id = param(c, "id");
     const batch = readCompressionBatch(id);
-    if (!batch && compressionManifestExists(id)) throw compressionProblem("compression_record_unreadable");
+    if (!batch && compressionManifestExists(id)) {
+      if (!viewerFromSession(session).admin) throw compressionProblem("compression_record_unreadable");
+      quarantineUnreadableCompression(id);
+      return c.json({ ok: true });
+    }
     if (batch && !viewerFromSession(session).admin && viewerFromSession(session).id !== batch.owner_id) {
       throw compressionProblem("compression_forbidden");
     }

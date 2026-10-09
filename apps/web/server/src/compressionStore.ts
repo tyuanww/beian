@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import {
   closeSync,
+  constants,
   copyFileSync,
   existsSync,
   fsyncSync,
@@ -17,10 +18,13 @@ import {
 import { basename, dirname, join } from "node:path";
 import { DATA_DIR } from "./config.js";
 import {
+  COMPRESSION_MAX_FILES,
   COMPRESSION_MAX_FILE_BYTES,
   COMPRESSION_POLICY_VERSION,
+  compressionPolicySnapshot,
+  validCompressionPolicySnapshot,
+  type CompressionPolicySnapshot,
   compressionFileKey,
-  compressionPolicyFingerprint,
   isCompressionAssetField,
   type CompressionMediaType,
 } from "./compressionPolicy.js";
@@ -33,9 +37,9 @@ import { registerSourceUsageProvider, type SourceUsage } from "./sourceQuota.js"
 import { noteHistoryCompression } from "./historyIndex.js";
 import { isTid, newTid, nowIso } from "./tasks.js";
 
-export type CompressionWriterState = "idle" | "spawn_unconfirmed" | "running";
+type CompressionWriterState = "idle" | "spawn_unconfirmed" | "running";
 
-export type CompressionWriter = {
+type CompressionWriter = {
   token: string;
   pid: number | null;
   state: CompressionWriterState;
@@ -71,9 +75,10 @@ export type CompressionFileRecord = {
   last_retry_at: string | null;
   policy_fingerprint: string;
   tool_generation: string;
+  policy_snapshot?: CompressionPolicySnapshot;
 };
 
-export type CompressionRetryLog = {
+type CompressionRetryLog = {
   expected_revision: number;
   files_key: string;
   attempt: number;
@@ -112,6 +117,9 @@ const MEDIA = new Set<CompressionMediaType>(["application/pdf", "image/jpeg", "i
 const FILE_STATUS = new Set<CompressionFileStatus>([
   "queued", "running", "succeeded", "passthrough", "unmet_target", "unsupported", "failed",
 ]);
+const BATCH_STATUS = new Set<CompressionBatchStatus>(["queued", "running", "done", "partial", "failed"]);
+const COMPRESSION_MAX_RETRY_LOG = 200;
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 
 let renameHook: ((from: string, to: string) => void) | null = null;
 
@@ -143,7 +151,7 @@ function leaseRoot(): string {
   return dir;
 }
 
-export function compressionPointerKey(owner: string, receiptId: string): string {
+function compressionPointerKey(owner: string, receiptId: string): string {
   return createHash("sha256").update(`${owner}\0${receiptId}`).digest("hex");
 }
 
@@ -155,7 +163,7 @@ function batchJsonPath(id: string): string {
   return join(compressionBatchDir(id), "batch.json");
 }
 
-export function compressionTombstonePath(id: string): string {
+function compressionTombstonePath(id: string): string {
   return join(compressionBatchDir(id), "tombstone.json");
 }
 
@@ -181,6 +189,7 @@ function atomicWriteJson(dest: string, value: unknown): void {
   }
   try {
     (renameHook || renameSync)(tmp, dest);
+    syncDirectory(dirname(dest));
   } catch (err) {
     try {
       unlinkSync(tmp);
@@ -189,6 +198,19 @@ function atomicWriteJson(dest: string, value: unknown): void {
     }
     throw err;
   }
+}
+
+function syncDirectory(path: string): void {
+  // Windows does not expose directory fsync through Node; file flush still precedes publication.
+  if (process.platform === "win32") return;
+  const fd = openSync(path, "r");
+  try { fsyncSync(fd); } finally { closeSync(fd); }
+}
+
+export function syncCompressionFile(path: string): void {
+  const fd = openSync(path, "r+");
+  try { fsyncSync(fd); } finally { closeSync(fd); }
+  syncDirectory(dirname(path));
 }
 
 export function hashFile(path: string): string {
@@ -205,32 +227,51 @@ function fileShapeOk(file: CompressionFileRecord): boolean {
   return Boolean(
     file &&
       isCompressionAssetField(file.id) &&
-      typeof file.name === "string" &&
+      typeof file.name === "string" && file.name.length <= 180 &&
       MEDIA.has(file.media_type) &&
       FILE_STATUS.has(file.status) &&
       Number.isSafeInteger(file.input_bytes) &&
       file.input_bytes >= 0 &&
       (file.output_bytes === null || (Number.isSafeInteger(file.output_bytes) && file.output_bytes >= 0)) &&
-      (file.reason === null || typeof file.reason === "string") &&
+      (file.reason === null || (typeof file.reason === "string" && file.reason.length <= 160)) &&
       /^[a-f0-9]{64}$/.test(file.sha256 || "") &&
       Number.isInteger(file.manual_retries) &&
       file.manual_retries >= 0 &&
-      (file.last_retry_at === null || typeof file.last_retry_at === "string") &&
-      typeof file.policy_fingerprint === "string" &&
-      typeof file.tool_generation === "string",
+      (file.last_retry_at === null || (typeof file.last_retry_at === "string" && file.last_retry_at.length <= 64)) &&
+      typeof file.policy_fingerprint === "string" && file.policy_fingerprint.length > 0 && file.policy_fingerprint.length <= 128 &&
+      typeof file.tool_generation === "string" && file.tool_generation.length <= 120 &&
+      (file.policy_snapshot === undefined || validCompressionPolicySnapshot(file.policy_snapshot)),
   );
 }
 
-export function compressionBatchShapeOk(batch: CompressionBatchRecord): boolean {
+function writerShapeOk(writer: CompressionWriter): boolean {
+  if (!writer || typeof writer !== "object" || typeof writer.token !== "string" || writer.token.length > 64 ||
+      (writer.pid !== null && (!Number.isSafeInteger(writer.pid) || writer.pid <= 0)) ||
+      (writer.started_at !== null && (typeof writer.started_at !== "string" || writer.started_at.length > 64 || !ISO_DATE.test(writer.started_at)))) return false;
+  const processToken = writer.process_token;
+  if (processToken !== undefined && !/^[a-f0-9]{32}$/.test(processToken)) return false;
+  if (writer.state === "idle") return writer.token === "" && writer.pid === null && writer.started_at === null && processToken === undefined;
+  return writer.token.length > 0 && writer.started_at !== null;
+}
+
+function retryLogShapeOk(item: unknown): item is CompressionRetryLog {
+  if (!item || typeof item !== "object" || Array.isArray(item)) return false;
+  const value = item as Record<string, unknown>;
+  return Number.isSafeInteger(value.expected_revision) && Number(value.expected_revision) >= 1 &&
+    typeof value.files_key === "string" && value.files_key.length <= COMPRESSION_MAX_FILES * 16 &&
+    Number.isSafeInteger(value.attempt) && Number(value.attempt) >= 1;
+}
+
+function compressionBatchShapeOk(batch: CompressionBatchRecord): boolean {
   return Boolean(
     batch &&
       batch.schema_version === 1 &&
       isTid(batch.id) &&
-      typeof batch.title === "string" &&
-      typeof batch.created_at === "string" &&
-      typeof batch.owner_id === "string" &&
+      typeof batch.title === "string" && batch.title.length <= 80 &&
+      typeof batch.created_at === "string" && batch.created_at.length <= 64 && ISO_DATE.test(batch.created_at) &&
+      typeof batch.owner_id === "string" && batch.owner_id.length <= 120 &&
       batch.owner_id.trim() &&
-      typeof batch.created_by === "string" &&
+      typeof batch.created_by === "string" && batch.created_by.length <= 120 &&
       isTid(batch.source_receipt) &&
       Number.isInteger(batch.revision) &&
       batch.revision >= 1 &&
@@ -238,15 +279,17 @@ export function compressionBatchShapeOk(batch: CompressionBatchRecord): boolean 
       batch.attempt >= 1 &&
       Number.isInteger(batch.auto_requeues) &&
       batch.auto_requeues >= 0 &&
-      typeof batch.policy_fingerprint === "string" &&
+      typeof batch.policy_fingerprint === "string" && batch.policy_fingerprint.length > 0 && batch.policy_fingerprint.length <= 128 &&
       batch.policy_version === COMPRESSION_POLICY_VERSION &&
+      BATCH_STATUS.has(batch.status) &&
       Array.isArray(batch.files) &&
-      batch.files.length > 0 &&
+      batch.files.length > 0 && batch.files.length <= COMPRESSION_MAX_FILES &&
       batch.files.every((file) => fileShapeOk(file)) &&
-      batch.writer &&
-      (batch.writer.state === "idle" || batch.writer.state === "spawn_unconfirmed" || batch.writer.state === "running") &&
+      new Set(batch.files.map((file) => file.id)).size === batch.files.length &&
+      writerShapeOk(batch.writer) &&
       (batch.delete_state === "none" || batch.delete_state === "deleting") &&
-      Array.isArray(batch.retry_log),
+      Array.isArray(batch.retry_log) && batch.retry_log.length <= COMPRESSION_MAX_RETRY_LOG &&
+      batch.retry_log.every((item) => retryLogShapeOk(item)),
   );
 }
 
@@ -272,17 +315,19 @@ export function compressionHasTombstone(id: string): boolean {
 export type CompressionStoreSnapshot = {
   batches: CompressionBatchRecord[];
   unreadable: number;
+  unreadable_ids: string[];
 };
 
 export function compressionStoreSnapshot(): CompressionStoreSnapshot {
   const root = compressionRoot();
   const batches: CompressionBatchRecord[] = [];
   let unreadable = 0;
+  const unreadable_ids: string[] = [];
   let names: string[] = [];
   try {
     names = readdirSync(root);
   } catch {
-    return { batches, unreadable: 1 };
+    return { batches, unreadable: 1, unreadable_ids };
   }
   for (const name of names) {
     if (!isTid(name)) continue;
@@ -291,11 +336,12 @@ export function compressionStoreSnapshot(): CompressionStoreSnapshot {
     const batch = readCompressionBatch(name);
     if (!batch) {
       unreadable += 1;
+      unreadable_ids.push(name);
       continue;
     }
     batches.push(batch);
   }
-  return { batches, unreadable };
+  return { batches, unreadable, unreadable_ids: unreadable_ids.sort() };
 }
 
 export function saveCompressionBatch(batch: CompressionBatchRecord): void {
@@ -329,7 +375,8 @@ export function freezeCompressionSources(
   for (const file of files) {
     const dest = compressionSourcePath(id, file.id);
     mkdirSync(dirname(dest), { recursive: true });
-    copyFileSync(file.path, dest);
+    copyFileSync(file.path, dest, constants.COPYFILE_EXCL);
+    syncCompressionFile(dest);
     const bytes = statSync(dest).size;
     if (bytes <= 0 || bytes > COMPRESSION_MAX_FILE_BYTES) throw new Error("压缩原件大小不正确");
     frozen.push({
@@ -381,6 +428,7 @@ export function createQueuedCompression(input: {
       last_retry_at: null,
       policy_fingerprint: input.policyFingerprint,
       tool_generation: input.toolGeneration,
+      policy_snapshot: compressionPolicySnapshot(),
     })),
     writer: idleWriter(),
     retry_log: [],
@@ -472,15 +520,34 @@ export function writeCompressionTombstone(id: string, ownerId: string): void {
   atomicWriteJson(compressionTombstonePath(id), { id, owner_id: ownerId, deleted_at: nowIso() });
 }
 
+/** 管理员对无法解析的记录执行隔离删除；不把坏数据当成可恢复批次。 */
+export function quarantineUnreadableCompression(id: string): void {
+  if (!isTid(id) || !compressionManifestExists(id)) throw new Error("压缩记录不存在");
+  try {
+    // Keep the history index consistent with the authoritative quarantine.
+    // A corrupt batch has no owner we can trust, so this is deliberately a
+    // delete-only history operation and must not make quarantine fail closed.
+    noteHistoryCompression({ id, delete_state: "deleting" });
+  } catch {
+    /* History is a derived index; the quarantine remains authoritative. */
+  }
+  writeCompressionTombstone(id, "unknown");
+  for (const name of ["source", "out", "batch.json"]) {
+    rmSync(join(compressionBatchDir(id), name), { recursive: true, force: true });
+  }
+}
+
 export function publishCompressionBytes(id: string, fileId: string, source: "copy" | string): number {
   const dest = compressionOutputPath(id, fileId);
   mkdirSync(dirname(dest), { recursive: true });
   const from = source === "copy" ? compressionSourcePath(id, fileId) : source;
   const tmp = `${dest}.${process.pid}.${randomBytes(4).toString("hex")}.tmp`;
-  copyFileSync(from, tmp);
+  copyFileSync(from, tmp, constants.COPYFILE_EXCL);
   const bytes = statSync(tmp).size;
   try {
+    syncCompressionFile(tmp);
     (renameHook || renameSync)(tmp, dest);
+    syncDirectory(dirname(dest));
   } catch (err) {
     try {
       unlinkSync(tmp);
@@ -547,9 +614,6 @@ export function removeCompressionLease(batchId: string, token: string): void {
   }
 }
 
-export function defaultCompressionFingerprint(): string {
-  return compressionPolicyFingerprint();
-}
 
 function usageOf(owner: string): { global: SourceUsage; owner: SourceUsage } {
   const snapshot = compressionStoreSnapshot();

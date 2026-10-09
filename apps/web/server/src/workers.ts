@@ -25,6 +25,7 @@ export type WorkerProcessIdentity = {
   id: string;
 } | { kind: "print_faces"; id: string; executionId: string }
   | { kind: "unfolded_print"; id: string; executionId: string; mode: "publish_existing" | "native_export" }
+  | { kind: "native_text"; id: string; executionId: string }
   | { kind: "render_generation"; id: string; mutationId: string; executionId: string;
   container?: "windows-job-object/1" };
 
@@ -124,6 +125,11 @@ export function workerCommandMatches(commandLine: string, expected: WorkerProces
       return script >= 0 && execution > script && tokens[execution + 1] === expected.executionId
         && job > script && String(tokens[job + 1] || "").replace(/\\/g, "/").split("/").pop() === expected.id;
     }
+    const script = tokens.findIndex(token => /(^|[\\/])illustrator_worker\.py$/i.test(token));
+    const config = String(tokens[script + 1] || "").replace(/\\/g, "/");
+    return script >= 0 && config.includes(`/${expected.id}/`) && config.includes(expected.executionId);
+  }
+  if (expected.kind === "native_text") {
     const script = tokens.findIndex(token => /(^|[\\/])illustrator_worker\.py$/i.test(token));
     const config = String(tokens[script + 1] || "").replace(/\\/g, "/");
     return script >= 0 && config.includes(`/${expected.id}/`) && config.includes(expected.executionId);
@@ -481,6 +487,9 @@ export async function runUnfoldedNative(opts: UnfoldedNativeOpts): Promise<RunPy
     args: ["illustrator/illustrator_worker.py", opts.configPath, "--timeout", "1260"],
     cwd: PACKAGING,
     timeoutMs: 1_260_000,
+    // Illustrator is a shared host. A deadline only establishes the close
+    // fence; it must not kill the bridge or the host process tree.
+    preserveOnTimeout: true,
     onSpawn: opts.onSpawn,
   });
 }

@@ -82,6 +82,7 @@ import {
   type Role,
   type Session,
 } from "./auth.js";
+import { compressionZipStream } from "./compressionZip.js";
 import {
   assertBlenderReady,
   acceptStructureConfirmation,
@@ -90,7 +91,7 @@ import {
   deleteMockup,
   fileOf,
   findMockupBySourceReceipt,
-  printFacesZipBytes,
+  printFacesZipEntries,
   getJob,
   isMockupJobFile,
   isStructureProposalId,
@@ -1552,9 +1553,9 @@ app.get("/api/mockups/:id/files/:key", (c) => {
   if (!job) throw new HTTPException(404, { message: "没有这单打样" });
   const key = c.req.param("key");
   if (key === "print_faces_zip") {
-    const bytes = printFacesZipBytes(job.id);
-    if (!bytes) throw new HTTPException(404, { message: "六面印刷图还不齐" });
-    return new Response(new Uint8Array(bytes), {
+    const entries = printFacesZipEntries(job.id);
+    if (!entries) throw new HTTPException(404, { message: "六面印刷图还不齐" });
+    return new Response(Readable.toWeb(compressionZipStream(entries)) as ReadableStream, {
       headers: {
         "Content-Type": "application/zip",
         "X-Content-Type-Options": "nosniff",
