@@ -6,7 +6,7 @@ import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 import sharp from "sharp";
 import { compressionPolicyFingerprint, compressionFileReady, compressionToolsForMedia } from "./compressionPolicy.js";
-import { toolGenerationOf } from "./compressionProbe.js";
+import { toolGenerationOf, budgetFromProbe } from "./compressionProbe.js";
 import { setCompressionExecutorForTest, executeCompressionFile } from "./compressionExecute.js";
 import { qpdfLosslessArgs } from "./compressionModel.js";
 import {
@@ -174,3 +174,15 @@ function statOk(path: string): boolean {
     return false;
   }
 }
+
+it("requires the executed tree budget and group budget, never accepted rlimit flags", () => {
+  assert.equal(budgetFromProbe({ as: true, rss: true, data: true } as never).budget, "unavailable");
+  const proof = { enforced: true, mechanism: "windows-job-commit+tree-rss-monitor", tree_bytes: 768 * 1024 ** 2, group_bytes: 1024 ** 3 };
+  assert.equal(budgetFromProbe(proof).budget, "enforced");
+  assert.equal(budgetFromProbe({ ...proof, group_bytes: undefined }).budget, "unavailable");
+  assert.equal(budgetFromProbe({ ...proof, mechanism: "rlimit:rss" }).budget, "unavailable");
+  const argv = containArgs(["/safe/helper", "input.pdf"], "/owned/attempt");
+  assert.equal(argv[argv.indexOf("--group-memory") + 1], String(1024 ** 3));
+  assert.equal(argv[argv.indexOf("--fsize") + 1], String(128 * 1024 ** 2));
+  assert.equal(argv[argv.indexOf("--work-dir") + 1], "/owned/attempt");
+});

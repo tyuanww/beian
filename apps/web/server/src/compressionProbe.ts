@@ -1,12 +1,15 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, rmSync, statfsSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, statfsSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { pythonBin } from "./settings.js";
 import { DATA_DIR } from "./config.js";
 import {
   COMPRESSION_REQUIRED_FREE_BYTES,
+  COMPRESSION_RSS_BYTES,
+  COMPRESSION_GROUP_RSS_BYTES,
   compressionPolicyFingerprint,
 } from "./compressionPolicy.js";
 
@@ -32,11 +35,10 @@ export type CompressionCapability = {
 };
 
 export type RlimitProbe = {
-  as: boolean;
-  rss: boolean;
-  data: boolean;
-  fsize: boolean;
-  cpu: boolean;
+  enforced: boolean;
+  mechanism: string;
+  tree_bytes?: number;
+  group_bytes?: number;
 };
 
 let override: CompressionCapability | null = null;
@@ -57,6 +59,7 @@ export function diskFreeBytes(path = DATA_DIR): number {
 function pythonCandidates(): string[] {
   const home = process.env.HOME || "";
   return [
+    pythonBin(),
     process.env.BEIAN_PYTHON || "",
     "python3",
     "/usr/bin/python3",
@@ -81,11 +84,10 @@ export function probeResourceLimits(): { report: RlimitProbe | null; python: str
       return {
         python,
         report: {
-          as: parsed.as === true,
-          rss: parsed.rss === true,
-          data: parsed.data === true,
-          fsize: parsed.fsize === true,
-          cpu: parsed.cpu === true,
+          enforced: parsed.enforced === true,
+          mechanism: typeof parsed.mechanism === "string" ? parsed.mechanism : "platform-budget-unavailable",
+          tree_bytes: parsed.tree_bytes,
+          group_bytes: parsed.group_bytes,
         },
       };
     } catch {
@@ -95,32 +97,12 @@ export function probeResourceLimits(): { report: RlimitProbe | null; python: str
   return { report: null, python: null };
 }
 
-function cgroupMemoryMaxWritable(): boolean {
-  if (process.platform === "win32") return false;
-  const dir = `/sys/fs/cgroup/beian-compression-probe-${process.pid}`;
-  try {
-    mkdirSync(dir);
-    writeFileSync(join(dir, "memory.max"), String(256 * 1024 * 1024));
-    rmSync(dir, { recursive: true, force: true });
-    return true;
-  } catch {
-    try {
-      rmSync(dir, { recursive: true, force: true });
-    } catch {
-      /* 探针目录可能根本没创建 */
-    }
-    return false;
+export function budgetFromProbe(report: RlimitProbe | null): { budget: CompressionBudget; mechanism: string } {
+  if (report?.enforced === true && report.tree_bytes === COMPRESSION_RSS_BYTES && report.group_bytes === COMPRESSION_GROUP_RSS_BYTES
+      && ["windows-job-commit+tree-rss-monitor", "cgroup-v2-memory.max"].includes(report.mechanism)) {
+    return { budget: "enforced", mechanism: report.mechanism };
   }
-}
-
-function budgetFromProbe(report: RlimitProbe | null, cgroup: boolean): { budget: CompressionBudget; mechanism: string } {
-  if (cgroup) return { budget: "enforced", mechanism: "cgroup-memory.max" };
-  if (report && (report.as || report.rss || report.data)) {
-    const names = (["as", "rss", "data"] as const).filter((name) => report[name]);
-    return { budget: "enforced", mechanism: `rlimit:${names.join("+")}` };
-  }
-  if (!report) return { budget: "unavailable", mechanism: "rlimit-probe-failed" };
-  return { budget: "unavailable", mechanism: "rlimit-unavailable" };
+  return { budget: "unavailable", mechanism: "platform-budget-unavailable" };
 }
 
 function commandVersion(command: string, args: string[]): string | null {
@@ -169,8 +151,7 @@ export function toolGenerationOf(input: {
 export function assessCapabilityNow(): CompressionCapability {
   if (override) return override;
   const probed = probeResourceLimits();
-  const cgroup = cgroupMemoryMaxWritable();
-  const decision = budgetFromProbe(probed.report, cgroup);
+  const decision = budgetFromProbe(probed.report);
   const versions = {
     sharp: sharpVersion(),
     qpdf: commandVersion("qpdf", ["--version"]),

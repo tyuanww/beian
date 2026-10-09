@@ -331,7 +331,7 @@ describe("compression http", () => {
       setCompressionCapabilityForTest(null);
       const probed = assessCapabilityNow();
       assert.equal(probed.budget, "unavailable");
-      assert.match(probed.mechanism, /rlimit/);
+      assert.equal(probed.mechanism, "platform-budget-unavailable");
     }
   });
 

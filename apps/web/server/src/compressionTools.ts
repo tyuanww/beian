@@ -20,6 +20,7 @@ import {
   COMPRESSION_MAX_PDF_OBJECTS,
   COMPRESSION_MAX_PDF_PAGES,
   COMPRESSION_RSS_BYTES,
+  COMPRESSION_GROUP_RSS_BYTES,
   PDF_MAX_MS,
   compressionFileReady,
   type CompressionMediaType,
@@ -66,13 +67,18 @@ export function javaHelperCommand(java: string, jar: string, mode: string, args:
   return [java, `-Xmx${heap}m`, "-cp", jar, "--source", "17", JAVA_SOURCE, mode, ...args];
 }
 
-export function containArgs(command: string[]): string[] {
+export function containArgs(command: string[], workDir?: string): string[] {
   return [
     CONTAIN,
     "--as",
     String(COMPRESSION_RSS_BYTES),
+    "--group-memory",
+    String(COMPRESSION_GROUP_RSS_BYTES),
     "--fsize",
+    String(COMPRESSION_CANDIDATE_BYTES),
+    "--disk",
     String(COMPRESSION_ATTEMPT_DISK_BYTES),
+    ...(workDir ? ["--work-dir", workDir] : []),
     "--cpu",
     String(Math.ceil(PDF_MAX_MS / 1000)),
     "--",
@@ -115,11 +121,11 @@ function pythonBin(): string | null {
   return pythonPath;
 }
 
-function runContained(command: string[], signal: AbortSignal): Promise<ToolStop | ToolOk> {
+function runContained(command: string[], signal: AbortSignal, workDir?: string): Promise<ToolStop | ToolOk> {
   assertCompressionArgv(command);
   const python = pythonBin();
   if (!python) return Promise.resolve({ stop: none("failed", "platform_budget_unavailable") });
-  const args = containArgs(command);
+  const args = containArgs(command, workDir);
   assertCompressionArgv(args.filter((arg) => arg !== "--"));
   return new Promise((resolve) => {
     let stdout = "";
@@ -151,10 +157,16 @@ function runContained(command: string[], signal: AbortSignal): Promise<ToolStop 
     child.stdout?.on("data", (chunk: Buffer) => take(chunk, "out"));
     child.stderr?.on("data", (chunk: Buffer) => take(chunk, "err"));
     child.once("error", () => {
+      // Abort waits for close: the supervisor must release its owned tree first.
+      if (child.pid) return;
       finish({ stop: none("failed", signal.aborted ? "timed_out" : "dependency_missing") });
     });
     child.once("close", (status) => {
-      rmSync(`/sys/fs/cgroup/beian-compression-${child.pid}`, { recursive: true, force: true });
+
+      if (stderr.includes("containment=resource_limit")) {
+        finish({ stop: none("failed", "resource_limit") });
+        return;
+      }
       if (/unable to locate a java runtime/i.test(stderr)) {
         finish({ stop: none("failed", "dependency_missing") });
         return;
@@ -185,6 +197,7 @@ async function executeImage(request: JobRequest): Promise<CompressionJobResult> 
   const run = await runContained(
     imageWorkerCommand(request.sourcePath, request.outputPath, request.file.media_type),
     request.signal,
+    dirname(request.outputPath),
   );
   if (isStop(run)) return run.stop;
   if (run.status === 4) return none("unsupported", "multi_frame");
@@ -298,7 +311,7 @@ async function executePdf(request: JobRequest): Promise<CompressionJobResult> {
     const command = round.kind === "lossless"
       ? [qpdf, ...qpdfLosslessArgs(request.sourcePath, candidate)]
       : javaHelperCommand(javaBin, jar, "recompress", [request.sourcePath, candidate, String(round.quality)]);
-    const ran = await runContained(command, request.signal);
+    const ran = await runContained(command, request.signal, dirname(request.outputPath));
     if (isStop(ran)) {
       rmSync(candidate, { force: true });
       return ran.stop;
