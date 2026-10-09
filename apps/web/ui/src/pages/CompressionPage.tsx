@@ -20,7 +20,7 @@ export function validateCompressionFiles(files: readonly File[]): string | null 
 const ready = (file: CompressionFile) => (file.status === "succeeded" || file.status === "passthrough") && Boolean(file.key);
 const fileUrl = (id: string, key: string) => `/api/compressions/${id}/files/${encodeURIComponent(key)}`;
 
-type Props = { id: string | null; receiptId?: string | null; owner: string; canCreate: boolean; canExport: boolean;
+type Props = { id: string | null; receiptId?: string | null; owner: string; canCreate: boolean; canExport: boolean; canAdmin: boolean;
   onOpen: (id: string) => void; onBack: () => void; onHistory: () => void };
 
 export function CompressionPage(props: Props) {
@@ -28,7 +28,34 @@ export function CompressionPage(props: Props) {
     : <CompressionNew key={`${props.owner}:${props.receiptId || "new"}`} {...props} />;
 }
 
-function CompressionNew({ canCreate, receiptId, onOpen, onHistory }: Props) {
+function UnreadableRecovery({ canAdmin }: { canAdmin: boolean }) {
+  const [ids, setIds] = useState<string[]>([]);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    if (!canAdmin) return;
+    let alive = true;
+    void api.compressions().then(result => {
+      if (alive) setIds(result.unreadable_ids || []);
+    }).catch(() => { /* the normal page remains usable if the recovery probe fails */ });
+    return () => { alive = false; };
+  }, [canAdmin]);
+  if (!canAdmin || ids.length === 0) return null;
+  async function quarantine(id: string) {
+    if (busy) return;
+    setBusy(id); setError(null);
+    try {
+      await api.deleteCompression(id);
+      setIds(current => current.filter(item => item !== id));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "隔离损坏记录失败");
+    } finally { setBusy(null); }
+  }
+  return <Alert type="warning" showIcon title="有无法读取的压缩记录需要隔离"
+    description={<Space wrap>{ids.map(id => <span key={id} className="compression-recovery-item"><code>{id}</code><Button size="small" loading={busy === id} onClick={() => void quarantine(id)}>隔离记录</Button></span>)}{error ? <span>{error}</span> : null}</Space>} />;
+}
+
+function CompressionNew({ canCreate, canAdmin, receiptId, onOpen, onHistory }: Props) {
   const [files, setFiles] = useState<File[]>([]);
   const [title, setTitle] = useState("");
   const [pending, setPending] = useState<PendingUploadReceipt[]>([]);
@@ -89,6 +116,7 @@ function CompressionNew({ canCreate, receiptId, onOpen, onHistory }: Props) {
   }
   return <section className="batch-page">
     <header className="page-head"><div><h1 className="page-title">文件压缩</h1><p className="page-lead">图片与 PDF 一起上传，处理结果会保存到历史记录。</p></div><Button onClick={onHistory}>查看历史记录</Button></header>
+    <UnreadableRecovery canAdmin={canAdmin} />
     {error ? <Alert type="error" showIcon title={error} /> : null}
     <div className="batch-card">
       <h2>新建压缩批次</h2>
@@ -111,7 +139,7 @@ function CompressionNew({ canCreate, receiptId, onOpen, onHistory }: Props) {
   </section>;
 }
 
-function CompressionDetail({ id, canCreate, canExport, onBack, onHistory }: Props & { id: string }) {
+function CompressionDetail({ id, canCreate, canExport, canAdmin, onBack, onHistory }: Props & { id: string }) {
   const { message } = App.useApp();
   const [batch, setBatch] = useState<CompressionBatch | null>(null);
   const [preview, setPreview] = useState<CompressionFile | null>(null);
@@ -134,7 +162,9 @@ function CompressionDetail({ id, canCreate, canExport, onBack, onHistory }: Prop
     return () => { stopped = true; abort.abort(); clearTimeout(timer); };
   }, [id, reload]);
   const active = batch?.status === "queued" || batch?.status === "running";
-  const completed = batch?.files.filter(file => file.status !== "queued" && file.status !== "running").length || 0;
+  const available = batch?.files.filter(ready).length || 0;
+  const processing = batch?.files.filter(file => file.status === "queued" || file.status === "running").length || 0;
+  const unsuccessful = batch?.files.filter(file => !ready(file) && file.status !== "queued" && file.status !== "running").length || 0;
   async function retry(ids: string[]) {
     if (!batch || busy || active) return;
     setBusy(true);
@@ -144,11 +174,12 @@ function CompressionDetail({ id, canCreate, canExport, onBack, onHistory }: Prop
   }
   return <section className="batch-page">
     <header className="page-head"><div><h1 className="page-title">{batch?.title || "压缩记录"}</h1><p className="page-lead">{batch ? `${batch.files.length} 个文件 · ${new Date(batch.created_at).toLocaleString("zh-CN", { hour12: false })} · ${batch.owner}` : "正在读取记录…"}</p></div><Space wrap><Button onClick={onBack}>新建一批</Button><Button onClick={onHistory}>历史记录</Button></Space></header>
+    <UnreadableRecovery canAdmin={canAdmin} />
     {error ? <Alert type="error" showIcon title={error} action={<Button onClick={() => setReload(value => value + 1)}>刷新</Button>} /> : null}
     {batch ? <div className="batch-card">
-      <div className="batch-section-head"><div><Tag color={active ? "processing" : batch.status === "done" ? "success" : "warning"}>{compressionStatus[batch.status]}</Tag><span>已处理 {completed} / {batch.files.length}</span><p className="page-lead">{active ? `前方 ${batch.queue_ahead} 批，可以离开此页，任务会继续处理。` : "下载后请确认小字、公章及页面完整。未达标文件不会混入 ZIP。"}</p></div><Space wrap>
+      <div className="batch-section-head"><div><Tag color={active ? "processing" : batch.status === "done" ? "success" : batch.status === "failed" ? "error" : "warning"}>{compressionStatus[batch.status]}</Tag><span>可用 {available} · 处理中 {processing} · 未成功 {unsuccessful}</span><p className="page-lead">{active ? `前方 ${batch.queue_ahead} 批，可以离开此页，任务会继续处理。` : "下载后请确认小字、公章及页面完整。未达标文件不会混入 ZIP。"}</p></div><Space wrap>
         <Button disabled={!canCreate || active || !batch.files.some(file => file.can_retry)} loading={busy} onClick={() => void retry(batch.files.filter(file => file.can_retry).map(file => file.id))}>重试可重试项</Button>
-        <Button type="primary" href={!active && batch.files.some(ready) && canExport ? `/api/compressions/${id}/zip` : undefined} disabled={active || !canExport || !batch.files.some(ready)}>下载可用文件 ZIP</Button>
+        <Button type="primary" aria-label="下载可用文件 ZIP" href={!active && available > 0 && canExport ? `/api/compressions/${id}/zip` : undefined} disabled={active || !canExport || available === 0}>下载可用结果 {available} 项 ZIP</Button>
       </Space></div>
       <Table<CompressionFile> rowKey="id" dataSource={batch.files} pagination={false} scroll={{ x: 780 }} columns={[
         { title: "文件", key: "name", render: (_, file) => <div className="batch-file-name"><strong>{file.name}</strong><small>{file.media_type === "application/pdf" ? "目标：严格小于 10 MB" : "图片压缩"}</small></div> },
@@ -156,7 +187,7 @@ function CompressionDetail({ id, canCreate, canExport, onBack, onHistory }: Prop
         { title: "结果大小", key: "output_bytes", width: 125, render: (_, file) => file.output_bytes === null
           ? file.status === "queued" || file.status === "running" ? "待完成" : "未生成"
           : <div>{displayBytes(file.output_bytes)}<small className="compression-saving">节省 {Math.max(0, (1 - file.output_bytes / file.input_bytes) * 100).toFixed(1)}%</small></div> },
-        { title: "处理结果", key: "status", render: (_, file) => <div><Tag color={ready(file) ? "success" : file.status === "running" || file.status === "queued" ? "processing" : "warning"}>{compressionStatus[file.status]}</Tag><p className="page-lead">{file.message}</p></div> },
+        { title: "处理结果", key: "status", render: (_, file) => <div><Tag color={ready(file) ? "success" : file.status === "running" || file.status === "queued" ? "processing" : file.status === "failed" ? "error" : "warning"}>{compressionStatus[file.status]}</Tag><p className="page-lead">{file.message}</p></div> },
         { title: "操作", key: "actions", width: 160, render: (_, file) => <Space wrap>{ready(file) && canExport ? <><Button size="small" onClick={() => setPreview(file)}>预览</Button><Button size="small" href={fileUrl(id, file.key!)}>下载</Button></> : null}{file.can_retry && canCreate ? <Button size="small" disabled={active || busy} onClick={() => void retry([file.id])}>重试</Button> : null}</Space> },
       ]} />
     </div> : !error ? <Empty description="正在读取压缩记录…" /> : null}

@@ -24,12 +24,15 @@ test("压缩上传复用分片 receipt，刷新详情并只重试服务端允许
   });
   await page.goto("/compress");
   await page.getByLabel("选择压缩文件").setInputFiles([{ name: "seal.pdf", mimeType: "application/pdf", buffer: Buffer.from("synthetic pdf only") }]);
+  const detailResponse = page.waitForResponse(response => response.url().endsWith(`/api/compressions/${id}`));
   await page.getByRole("button", { name: "上传并压缩" }).click();
   await expect(page).toHaveURL(`/compress/${id}`);
+  await expect((await detailResponse).status()).toBe(200);
   expect(startBody).toHaveProperty("receipt");
   const session = syntheticApi.calls.find(call => call.path === "/api/uploads/sessions");
   expect(session?.body).toHaveProperty("purpose", "compression");
   expect(syntheticApi.calls.some(call => call.path.endsWith("/files/asset1"))).toBe(true);
+  await expect(page.getByRole("heading", { name: "海葡萄备案资料" })).toBeVisible();
   await expect(page.getByText("8.20 MB")).toBeVisible();
   await page.screenshot({ path: info.outputPath("compression-desktop.png"), fullPage: true });
   await expect(page.getByText("未生成", { exact: true })).toBeVisible();

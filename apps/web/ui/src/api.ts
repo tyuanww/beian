@@ -138,6 +138,10 @@ async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
     return body;
   }
 
+  // A caller-owned AbortSignal must never share a cached promise: aborting one
+  // page's request would otherwise reject a later page that reused the path.
+  if (opts.signal) return fetchJson<T>(path, opts);
+
   const epoch = getEpoch;
   const failed = failedGets.get(path);
   if (failed && failed.retryAt > Date.now()) throw failed.error;
@@ -662,7 +666,7 @@ export const api = {
     request<TaskSummary[]>(q ? `/api/tasks?q=${encodeURIComponent(q)}` : "/api/tasks"),
   task: (id: string) => request<TaskDetail>(`/api/tasks/${id}`),
   history: (query: string, signal?: AbortSignal) => fetchJson<HistoryResult>(`/api/history?${query}`, { signal }),
-  compressions: () => request<{ items: CompressionBatch[] }>("/api/compressions"),
+  compressions: () => request<{ items: CompressionBatch[]; unreadable_ids?: string[] }>("/api/compressions"),
   compression: (id: string, signal?: AbortSignal) => request<CompressionBatch>(`/api/compressions/${id}`, { signal }),
   startCompression: (receipt: string, title?: string) => request<CompressionBatch>("/api/compressions/start", { method: "POST", body: JSON.stringify({ receipt, title }) }),
   retryCompression: (id: string, expected_revision: number, file_ids: string[]) => request<CompressionBatch>(`/api/compressions/${id}/retry`, { method: "POST", body: JSON.stringify({ expected_revision, file_ids }) }),
