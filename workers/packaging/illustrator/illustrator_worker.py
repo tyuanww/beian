@@ -14,6 +14,7 @@ ROOT = Path(__file__).resolve().parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from export_close import confirm_export_close, validate_request_kind
 from illustrator_agent import IllustratorAgentError, request_agent
 from unattended_wait import parse_job_sidecar, progress_stage
 
@@ -33,8 +34,13 @@ def load_json(path: Path) -> dict:
 
 
 def select_jsx(config: dict) -> Path:
-    """V2 is opt-in until pipeline cutover; legacy configs are unchanged."""
-    return STRUCTURE_JSX if config.get("structure_json") else LEGACY_JSX
+    """V2 is opt-in until pipeline cutover; legacy configs are unchanged.
+
+    Unfolded reprint uses the same structure exporter. It does not add a host.
+    """
+    if config.get("request_kind") == "unfolded_print" or config.get("structure_json"):
+        return STRUCTURE_JSX
+    return LEGACY_JSX
 
 
 def bind_runtime_jsx(config_path: Path, config: dict) -> Path:
@@ -195,8 +201,13 @@ def main() -> int:
 
     config_path = args.config.expanduser().resolve()
     config = load_json(config_path)
-    output_keys = ["full_pdf", "print_pdf", "result_json"]
-    if config.get("structure_json"):
+    request_error = validate_request_kind(config)
+    if request_error:
+        print(f"Illustrator export config rejected: {request_error}", file=sys.stderr)
+        return 2
+    unfolded = config.get("request_kind") == "unfolded_print"
+    output_keys = ["print_pdf", "result_json", "close_json"] if unfolded else ["full_pdf", "print_pdf", "result_json"]
+    if not unfolded and config.get("structure_json"):
         output_keys.append("structure_json")
     for key in output_keys:
         Path(config[key]).parent.mkdir(parents=True, exist_ok=True)
@@ -233,7 +244,7 @@ def main() -> int:
             agent_result = request_agent(
                 "run",
                 config_path=str(config_path),
-                exporter="structure" if config.get("structure_json") else "legacy",
+                exporter="structure" if select_jsx(config) == STRUCTURE_JSX else "legacy",
                 # The Session 1 agent is outside this worker's process tree. Keep
                 # its deadline inside Hono's budget so cleanup finishes first.
                 timeout_seconds=max(30, args.timeout - 30),
@@ -324,6 +335,35 @@ def main() -> int:
         json.dumps(result, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
     )
+    if unfolded:
+        # Result JSON is written before close. Exit 8 keeps the slot fenced
+        # until a separate close record exists. stdout has no paths.
+        close_record = confirm_export_close(result, 0 if result_path.is_file() else 1)
+        public = {
+            "ok": bool(result.get("success")) and close_record is not None,
+            "reason": None if result.get("success") else str(result.get("reason") or "export_failed"),
+            "attempt_id": str(result.get("attempt_id") or ""),
+            "close_confirmed": close_record is not None,
+            "request_kind": "unfolded_print",
+        }
+        if close_record is None:
+            print(json.dumps(public, ensure_ascii=False))
+            return 8
+        Path(config["close_json"]).write_text(
+            json.dumps(close_record, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        if not result.get("success") or not Path(config["print_pdf"]).is_file():
+            public["ok"] = False
+            public["reason"] = str(result.get("reason") or "export_failed")
+            print(json.dumps(public, ensure_ascii=False))
+            return 4
+        page = result.get("page_size_mm")
+        if isinstance(page, list) and len(page) == 2:
+            public["width_mm"] = page[0]
+            public["height_mm"] = page[1]
+        print(json.dumps(public, ensure_ascii=False))
+        return 0
     if not result.get("success"):
         print(json.dumps(result, ensure_ascii=False), file=sys.stderr)
         return 4

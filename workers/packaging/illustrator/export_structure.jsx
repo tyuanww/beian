@@ -1003,6 +1003,165 @@ function isolateConfiguredPrintLayers(documentRef, configuredNames) {
     return state;
 }
 
+var UNFOLDED_PROTOCOL = "beian.illustrator.export/2";
+
+function unfoldedRoleListed(roles, role) {
+    var index;
+    for (index = 0; index < roles.length; index += 1) {
+        if (roles[index] === role) {
+            return true;
+        }
+    }
+    return false;
+}
+
+function unfoldedHelperRole(item) {
+    var note = "";
+    var name = "";
+    var layerName = "";
+    var assignment;
+    try {
+        note = String(item.note || "");
+    } catch (noteError) {
+        note = "";
+    }
+    try {
+        name = String(item.name || "");
+    } catch (nameError) {
+        name = "";
+    }
+    assignment = exactAssignment(note);
+    if (assignment === null) {
+        assignment = exactAssignment(name);
+    }
+    if (assignment === "cut" || assignment === "crease" || assignment === "perforation" || assignment === "glue") {
+        return assignment === "crease" ? "crease" : "cut";
+    }
+    if (note.toLowerCase().indexOf("packaging:dimension") === 0 || name.toLowerCase().indexOf("packaging:dimension") === 0) {
+        return "dimension";
+    }
+    if (note.toLowerCase().indexOf("packaging:production") === 0 || name.toLowerCase().indexOf("packaging:production") === 0) {
+        return "production";
+    }
+    try {
+        layerName = item.layer ? String(item.layer.name || "") : "";
+    } catch (layerError) {
+        layerName = "";
+    }
+    if (isFactoryKnifeLayerName(layerName)) {
+        return "cut";
+    }
+    if (layerName === "Dimensions" || layerName.indexOf("尺寸") >= 0) {
+        return "dimension";
+    }
+    if (layerName === "表" || layerName.indexOf("标注") >= 0) {
+        return "production";
+    }
+    return null;
+}
+
+function unfoldedLayerIsPrint(layerName) {
+    return layerName === "印刷" || layerName.indexOf("印刷") === 0;
+}
+
+// Identity-only hide for a clean reprint. Color and stroke width are not consulted.
+function exportCleanUnfoldedPrint(documentRef, config, result) {
+    var items;
+    var limit;
+    var index;
+    var item;
+    var role;
+    var hidden = [];
+    var hiddenRoles = [];
+    var unreliable = false;
+    var layerName;
+    var stroked;
+    var filled;
+    var state;
+    var artboard;
+    var widthPt;
+    var heightPt;
+    if (String(config.protocol || "") !== UNFOLDED_PROTOCOL) {
+        throw new Error("unfolded protocol mismatch");
+    }
+    if (!config.attempt_id || String(config.attempt_id).length !== 32) {
+        throw new Error("attempt_id required");
+    }
+    result.protocol = UNFOLDED_PROTOCOL;
+    result.request_kind = "unfolded_print";
+    result.attempt_id = String(config.attempt_id);
+    result.close_confirmed = false;
+    result.separation_method = "semantic-identity";
+    writeJobProgress(config, "saving_artwork_pdf");
+    items = documentRef.pathItems;
+    limit = items.length;
+    if (limit > 5000) {
+        unreliable = true;
+        limit = 5000;
+    }
+    for (index = 0; index < limit; index += 1) {
+        item = items[index];
+        role = unfoldedHelperRole(item);
+        if (role !== null) {
+            hidden.push(item);
+            if (!unfoldedRoleListed(hiddenRoles, role)) {
+                hiddenRoles.push(role);
+            }
+            continue;
+        }
+        try {
+            layerName = item.layer ? String(item.layer.name || "") : "";
+        } catch (layerReadError) {
+            layerName = "";
+            unreliable = true;
+        }
+        if (unfoldedLayerIsPrint(layerName)) {
+            continue;
+        }
+        stroked = false;
+        filled = false;
+        try {
+            stroked = Boolean(item.stroked);
+        } catch (strokeReadError) {
+            unreliable = true;
+        }
+        try {
+            filled = Boolean(item.filled);
+        } catch (fillReadError) {
+            unreliable = true;
+        }
+        if (stroked && !filled) {
+            unreliable = true;
+        }
+    }
+    result.hidden_roles = hiddenRoles;
+    if (unreliable) {
+        result.success = false;
+        result.reason = "separation_unreliable";
+        result.covers_blank_structure = false;
+        return;
+    }
+    state = hideSemanticItems(hidden);
+    try {
+        savePdf(documentRef, config.print_pdf);
+        artboard = documentRef.artboards[0].artboardRect;
+        widthPt = Math.abs(artboard[2] - artboard[0]);
+        heightPt = Math.abs(artboard[1] - artboard[3]);
+        result.page_size_mm = [widthPt * 25.4 / 72, heightPt * 25.4 / 72];
+        result.covers_blank_structure = true;
+        result.success = true;
+        result.reason = null;
+    } catch (saveError) {
+        try {
+            restoreSemanticItems(state);
+        } catch (restoreError) {
+            throw new Error(saveError.message + " | " + restoreError.message);
+        }
+        throw saveError;
+    }
+    restoreSemanticItems(state);
+}
+
 function withConfiguredPrintLayers(documentRef, configuredNames, callback) {
     var state = isolateConfiguredPrintLayers(documentRef, configuredNames);
     var callbackError = null;
@@ -1079,6 +1238,11 @@ try {
         "host outline_ok=" + (hostState.outline ? "1" : "0") +
             " view=" + String(hostState.viewMode || "")
     );
+    if (config.request_kind === "unfolded_print") {
+        exportCleanUnfoldedPrint(documentRef, config, result);
+        commitResult();
+        throw { unfoldedDone: true };
+    }
     writeJobProgress(config, "inventory");
     if (documentRef.artboards.length < 1) {
         throw new Error("Document has no artboard");
@@ -1296,13 +1460,15 @@ try {
     result.success = true;
     commitResult();
 } catch (error) {
-    appendUtf8(debugPath, "V2 ERROR " + error.message);
-    result.error = error.message;
-    result.error_line = error.line || null;
-    try {
-        commitResult();
-    } catch (resultError) {
-        appendUtf8(debugPath, "V2 ERROR result " + resultError.message);
+    if (!(error && error.unfoldedDone === true)) {
+        appendUtf8(debugPath, "V2 ERROR " + error.message);
+        result.error = error.message;
+        result.error_line = error.line || null;
+        try {
+            commitResult();
+        } catch (resultError) {
+            appendUtf8(debugPath, "V2 ERROR result " + resultError.message);
+        }
     }
 } finally {
     writeJobProgress(config, "closing");
