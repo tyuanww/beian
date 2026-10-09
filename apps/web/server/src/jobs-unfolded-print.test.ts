@@ -19,6 +19,7 @@ const otherId = "ab00ab00ab02";
 const net = {
   schema: "unfolded-print-source/1",
   assembly: "semantic-net",
+  attestation: { schema: "unfolded-separation-attestation/1", method: "semantic-identity", hidden_roles: ["cut", "crease"], covers_blank_structure: true },
   panels: [
     { id: "glue", role: "glue", bounds_mm: [0, 30, 20, 70] },
     { id: "back", role: "back", bounds_mm: [20, 30, 70, 90] },
@@ -45,17 +46,19 @@ const net = {
 function seed(tid = id, payload: unknown = net) {
   const dir = join(DATA_DIR, "mockups", tid);
   mkdirSync(join(dir, "assets"), { recursive: true });
+  execFileSync(PYTHON, ["-c", "import pymupdf,sys; d=pymupdf.open(); p=d.new_page(width=180*72/25.4,height=140*72/25.4); p.insert_text((300,150),'Original artwork'); p.draw_rect((310,160,360,200),fill=(0.4,0.6,0.2)); p.draw_line((300,220),(380,220)); d.save(sys.argv[1]); d.close()", join(dir, "artwork.pdf")]);
   writeFileSync(join(dir, "source.ai"), "%AI synthetic");
   writeFileSync(join(dir, "unfolded-source.json"), JSON.stringify(payload));
   saveMockup({
     id: tid, status: "done", job_kind: "mockup", job_status: "succeeded", created_at: "2026-10-09T00:00:00Z",
+    structure_artwork_path: join(dir, "artwork.pdf"),
     owner: viewer.id, files: [], source_path: join(dir, "source.ai"),
   });
   return dir;
 }
 
 async function settled(tid = id) {
-  for (let n = 0; n < 100; n += 1) {
+  for (let n = 0; n < 1000; n += 1) {
     await new Promise((resolve) => setTimeout(resolve, 10));
     const job = readMockupFromDisk(tid);
     const status = job?.unfolded_print_request?.status || "";
@@ -217,12 +220,16 @@ it("publishes a native export only after a separate close record and ignores wor
     runUnfoldedPublish,
     runUnfoldedNative: async (opts) => {
       const root = dirname(opts.configPath);
+      const config = JSON.parse(readFileSync(opts.configPath, "utf8"));
+      assert.notEqual(config.application, config.source_ai);
+      assert.match(config.source_ai, /source\.ai$/);
       const printPdf = join(root, "print.pdf");
       execFileSync(PYTHON, ["-c", "import pymupdf,sys; d=pymupdf.open(); d.new_page(width=180*72/25.4, height=140*72/25.4); d.save(sys.argv[1]); d.close()", printPdf]);
       writeFileSync(join(root, "close.json"), JSON.stringify({
         protocol: "beian.illustrator.export/2",
         request_kind: "unfolded_print",
         attempt_id: opts.executionId,
+        source_sha256: config.source_sha256,
         document_closed: true,
         bridge_exited: true,
         inflight: false,
@@ -240,7 +247,7 @@ it("publishes a native export only after a separate close record and ignores wor
   assert.equal(queueSnapshot().illustrator.running, 0);
 });
 
-it("holds the illustrator slot when close is unconfirmed and does not start another native export", async () => {
+for (const failure of [8, 2, "throw"] as const) it(`holds the illustrator slot after ${failure} without close evidence and blocks another native`, async () => {
   seed();
   seed(otherId, { ...net, assembly: "attested-pdf", export: "native", separation: undefined, attestation: {
     schema: "unfolded-separation-attestation/1", method: "semantic-identity",
@@ -255,7 +262,7 @@ it("holds the illustrator slot when close is unconfirmed and does not start anot
   let calls = 0;
   setJobsTestHooks({
     illustratorHostReady: true,
-    runUnfoldedNative: async () => { calls += 1; return { code: 8, stdout: "", stderr: "", timedOut: false }; },
+    runUnfoldedNative: async () => { calls += 1; if (failure === "throw") throw new Error("bridge connection lost"); return { code: failure, stdout: "", stderr: "", timedOut: false }; },
   });
   await requestUnfoldedPrint(id, viewer);
   for (let n = 0; n < 50 && publicMockup(readMockupFromDisk(id)!).unfolded_print.reason !== "close_unconfirmed"; n += 1) {
@@ -302,4 +309,25 @@ it("matches publish and native worker commands without treating a result path as
   assert.equal(workerCommandMatches("python export_unfolded_print.py --execution-id abc --job-dir /tmp/other", {
     kind: "unfolded_print", id, executionId: "a".repeat(32), mode: "publish_existing",
   }), false);
+});
+
+it("adopts a normal preflight net and rejects a source mismatch before native dispatch", async () => {
+  const dir = seed();
+  rmSync(join(dir, "unfolded-source.json"));
+  const project = join(dir, "output", "synthetic");
+  mkdirSync(project, { recursive: true });
+  writeFileSync(join(project, "resolved_job.json"), JSON.stringify({ structure_engine: "v2" }));
+  const sourceHash = createHash("sha256").update(readFileSync(join(dir, "source.ai"))).digest("hex");
+  writeFileSync(join(project, "unfolded-source.json"), JSON.stringify({ ...net, assembly: "attested-pdf", export: "native", source_ai_sha256: sourceHash }));
+  setJobsTestHooks({ illustratorHostReady: true, runUnfoldedNative: async () => ({ code: 8, stdout: "", stderr: "", timedOut: false }) });
+  await requestUnfoldedPrint(id, viewer);
+  assert.equal(readMockupFromDisk(id)?.unfolded_print_request?.mode, "native_export");
+  assert.equal(JSON.parse(readFileSync(join(dir, "unfolded-source.json"), "utf8")).source_ai_sha256, sourceHash);
+  // Do not race a native call with mutation; use an independent job.
+  const other = seed(otherId);
+  const project2 = join(other, "output");
+  mkdirSync(project2);
+  writeFileSync(join(project2, "resolved_job.json"), "{}");
+  writeFileSync(join(project2, "unfolded-source.json"), JSON.stringify({ ...net, source_ai_sha256: "wrong" }));
+  await assert.rejects(requestUnfoldedPrint(otherId, viewer), (error: unknown) => (error as { reason?: string }).reason === "source_changed");
 });

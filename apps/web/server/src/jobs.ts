@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 import { closeSync, copyFileSync, existsSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { isAbsolute, join, relative, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { DATA_DIR, PACKAGING, PYTHON } from "./config.js";
 import { compareBookkeeping } from "./billing.js";
 import { notifyJobFinished } from "./notify.js";
@@ -76,6 +76,7 @@ import {
   type WorkerProcessState,
 } from "./workers.js";
 import { inspectRenderGenerationGroup, recoverWindowsRenderGeneration, signalRenderGenerationGroup } from "./renderGenerationProcess.js";
+import { illustratorBin } from "./settings.js";
 import { rasterAiFile } from "./aiRaster.js";
 import { readIllustratorAgentStatus } from "./illustratorAgent.js";
 import {
@@ -774,7 +775,7 @@ async function executeUnfoldedPublish(job: MockupJob, requestId: string): Promis
     }
     let artwork: string | undefined;
     let artworkSha: string | undefined;
-    if (plan.assembly === "attested-pdf") {
+    if (plan.mode === "publish_existing") {
       const original = current.structure_artwork_path || "";
       artworkSha = sha256RegularFile(original, jobRoot, UNFOLDED_BINARY_MAX_BYTES) || undefined;
       if (!artworkSha) {
@@ -824,12 +825,13 @@ async function executeUnfoldedPublish(job: MockupJob, requestId: string): Promis
   }
 }
 
-function unfoldedCloseConfirmed(path: string, attemptId: string): boolean {
+function unfoldedCloseConfirmed(path: string, attemptId: string, sourceHash?: string): boolean {
   try {
     const value = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
     return value.protocol === UNFOLDED_PROTOCOL
       && value.request_kind === "unfolded_print"
       && value.attempt_id === attemptId
+      && Boolean(sourceHash) && value.source_sha256 === sourceHash
       && value.document_closed === true
       && value.bridge_exited === true
       && value.inflight === false
@@ -877,9 +879,19 @@ async function publishAttestedUnfolded(job: MockupJob, requestId: string, printP
   finishUnfolded(job.id, requestId);
 }
 
+function holdUnconfirmedUnfolded(job: MockupJob, requestId: string): void {
+  const request = job.unfolded_print_request;
+  if (!request || request.id !== requestId || request.status !== "running") return;
+  request.host_fence = "unconfirmed";
+  request.reason = "close_unconfirmed";
+  request.error = UNFOLDED_MESSAGE.close_unconfirmed;
+  saveMockup(job);
+}
+
 async function executeUnfoldedNative(job: MockupJob, requestId: string): Promise<void> {
   const jobRoot = mockupJobDir(job.id);
   const root = join(jobRoot, `.unfolded-${requestId}`);
+  let dispatched = false;
   try {
     const current = readMockupFromDisk(job.id);
     const request = current?.unfolded_print_request;
@@ -901,8 +913,9 @@ async function executeUnfoldedNative(job: MockupJob, requestId: string): Promise
     const closeJson = join(root, "close.json");
     const configPath = join(root, "config.json");
     writeFileSync(configPath, JSON.stringify({
-      application: aiCopy,
+      application: illustratorBin() || (process.platform === "darwin" ? "/Applications/Adobe Illustrator 2026/Adobe Illustrator.app" : ""),
       source_ai: aiCopy,
+      print_layers: JSON.parse(readFileSync(join(root, UNFOLDED_SOURCE_NAME), "utf8")).print_layers || [],
       print_pdf: printPdf,
       result_json: join(root, "result.json"),
       close_json: closeJson,
@@ -913,6 +926,7 @@ async function executeUnfoldedNative(job: MockupJob, requestId: string): Promise
       debug_log: join(root, "debug.log"),
     }));
     const run = hooks.runUnfoldedNative || runUnfoldedNative;
+    dispatched = true;
     const result = await run({
       executionId: requestId,
       configPath,
@@ -920,21 +934,23 @@ async function executeUnfoldedNative(job: MockupJob, requestId: string): Promise
     });
     const fresh = readMockupFromDisk(job.id);
     if (!fresh?.unfolded_print_request || fresh.unfolded_print_request.id !== requestId || fresh.unfolded_print_request.status !== "running") return;
-    const closed = result.code === 0 && !result.timedOut && unfoldedCloseConfirmed(closeJson, requestId);
+    const closed = !result.timedOut && unfoldedCloseConfirmed(closeJson, requestId, request.native_source_sha256);
     if (!closed) {
-      if (result.code === 8 || result.timedOut || result.code === 0) {
-        fresh.unfolded_print_request.host_fence = "unconfirmed";
-        fresh.unfolded_print_request.reason = "close_unconfirmed";
-        fresh.unfolded_print_request.error = UNFOLDED_MESSAGE.close_unconfirmed;
-        saveMockup(fresh);
-        return;
-      }
+      holdUnconfirmedUnfolded(fresh, requestId);
+      return;
+    }
+    if (result.code !== 0) {
       finishUnfolded(job.id, requestId, "export_failed");
       return;
     }
     await publishAttestedUnfolded(fresh, requestId, printPdf);
   } catch (error) {
-    finishUnfolded(job.id, requestId, unfoldedReasonFromMessage(error instanceof Error ? error.message : ""));
+    const fresh = readMockupFromDisk(job.id);
+    if (dispatched && fresh && !unfoldedCloseConfirmed(join(root, "close.json"), requestId, fresh.unfolded_print_request?.native_source_sha256)) {
+      holdUnconfirmedUnfolded(fresh, requestId);
+    } else {
+      finishUnfolded(job.id, requestId, unfoldedReasonFromMessage(error instanceof Error ? error.message : ""));
+    }
   } finally {
     const fresh = readMockupFromDisk(job.id);
     if (!(fresh?.unfolded_print_request?.id === requestId && fresh.unfolded_print_request.status === "running")) {
@@ -1004,7 +1020,7 @@ function recoverUnfoldedPrintsOnBoot(): void {
           gone = false;
         }
       }
-      if (gone && unfoldedCloseConfirmed(join(attempt, "close.json"), request.id)) {
+      if (gone && unfoldedCloseConfirmed(join(attempt, "close.json"), request.id, request.native_source_sha256)) {
         live.illustrator = job.id;
         const requestId = request.id;
         void publishAttestedUnfolded(job, requestId, join(attempt, "print.pdf")).finally(() => releaseNativeSlot(job.id, requestId));
@@ -1036,6 +1052,24 @@ export async function requestUnfoldedPrint(id: string, viewer: Viewer): Promise<
   if (unfoldedPublic(job).status === "ready" || unfoldedPrintActive(job)) return job;
   if (unfoldedBusy(job)) throw new UnfoldedPrintHttpError(409, "busy", unfoldedPublic(job));
   const root = mockupJobDir(job.id);
+  const generated = mockupRenderPlanBytes(job);
+  if (generated) {
+    const candidate = join(dirname(generated.path), UNFOLDED_SOURCE_NAME);
+    if (candidate !== join(root, UNFOLDED_SOURCE_NAME) && sha256RegularFile(candidate, root, UNFOLDED_SOURCE_MAX_BYTES)) {
+      let bytes: Buffer;
+      let source: Record<string, unknown>;
+      try {
+        bytes = readFileSync(candidate);
+        source = JSON.parse(bytes.toString("utf8")) as Record<string, unknown>;
+        if (!source || typeof source !== "object") return failUnfolded(job, viewer, "geometry_incomplete");
+      } catch {
+        return failUnfolded(job, viewer, "geometry_incomplete");
+      }
+      const aiHash = job.source_path ? sha256RegularFile(job.source_path, root, UNFOLDED_BINARY_MAX_BYTES) : null;
+      if (!aiHash || source.source_ai_sha256 !== aiHash) return failUnfolded(job, viewer, "source_changed");
+      writeFileSync(join(root, UNFOLDED_SOURCE_NAME), bytes);
+    }
+  }
   const sourceSha = sha256RegularFile(join(root, UNFOLDED_SOURCE_NAME), root, UNFOLDED_SOURCE_MAX_BYTES);
   if (!sourceSha) {
     const ai = job.source_path && /\.ai$/i.test(job.source_path)
@@ -1058,7 +1092,7 @@ export async function requestUnfoldedPrint(id: string, viewer: Viewer): Promise<
       : undefined;
     if (!nativeSha) return failUnfolded(job, viewer, "source_missing", "native_export", sourceSha);
     if (!unfoldedHostReady()) return failUnfolded(job, viewer, "host_unavailable", "native_export", sourceSha, nativeSha);
-  } else if (plan.assembly === "attested-pdf") {
+  } else if (plan.mode === "publish_existing") {
     const artwork = job.structure_artwork_path || "";
     if (!sha256RegularFile(artwork, root, UNFOLDED_BINARY_MAX_BYTES)) {
       return failUnfolded(job, viewer, "source_missing", "publish_existing", sourceSha);

@@ -33,7 +33,7 @@ def validate_request_kind(config: dict[str, Any]) -> str | None:
     return None
 
 
-def confirm_export_close(result: dict[str, Any] | None, returncode: int) -> dict[str, Any] | None:
+def confirm_export_close(result: dict[str, Any] | None, returncode: int, observation: dict[str, Any] | None = None) -> dict[str, Any] | None:
     """Return a close record only after the bridge has exited without a close error.
 
     The JSX must not set close_confirmed itself. A true value here means the
@@ -51,12 +51,24 @@ def confirm_export_close(result: dict[str, Any] | None, returncode: int) -> dict
     if any(result.get(key) for key in ("close_error", "close_prep_error", "host_restore_error")):
         return None
     attempt = str(result.get("attempt_id") or "")
+    # This observation comes from a post-bridge host probe, never from JSX's
+    # result file. In particular, mere file existence cannot release the slot.
+    if not isinstance(observation, dict):
+        return None
+    if (observation.get("attempt_id") != attempt
+            or observation.get("bridge_exited") is not True
+            or observation.get("document_count") != 0
+            or observation.get("documents") != []
+            or observation.get("source_sha256") != result.get("source_sha256")
+            or len(str(result.get("source_sha256") or "")) != 64):
+        return None
     if len(attempt) != 32:
         return None
     return {
         "protocol": EXPORT_PROTOCOL,
         "request_kind": UNFOLDED_REQUEST_KIND,
         "attempt_id": attempt,
+        "source_sha256": result["source_sha256"],
         "document_closed": True,
         "bridge_exited": True,
         "inflight": False,

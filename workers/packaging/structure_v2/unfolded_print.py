@@ -144,6 +144,30 @@ def _panels(payload: Mapping[str, Any]) -> list[dict[str, Any]]:
         raise UnfoldedPrintReject("geometry_incomplete")
     if any(sum(panel["role"] == role for panel in panels) != 1 for role in BODY_ROLES + CLOSURE_ROLES):
         raise UnfoldedPrintReject("geometry_incomplete")
+    if all("polygon_mm" in item for item in raw):
+        from shapely.geometry import Polygon
+        shapes = []
+        for item, panel in zip(raw, panels):
+            points = item["polygon_mm"]
+            if not isinstance(points, list) or not 3 <= len(points) <= 20000:
+                raise UnfoldedPrintReject("geometry_incomplete")
+            polygon = Polygon([[_finite_number(v) for v in point] for point in points])
+            if not polygon.is_valid or polygon.area <= TOLERANCE_MM ** 2 or any(abs(a - b) > TOLERANCE_MM for a, b in zip(polygon.bounds, panel["bounds_mm"])):
+                raise UnfoldedPrintReject("geometry_incomplete")
+            shapes.append(polygon)
+        connected = {0}
+        for i, shape in enumerate(shapes):
+            for other in shapes[i + 1:]:
+                if shape.intersection(other).area > TOLERANCE_MM ** 2:
+                    raise UnfoldedPrintReject("geometry_incomplete")
+        while True:
+            expanded = connected | {i for i, shape in enumerate(shapes) if any(shape.boundary.intersection(shapes[j].boundary).length >= MIN_SHARED_EDGE_MM for j in connected if i != j)}
+            if expanded == connected:
+                break
+            connected = expanded
+        if len(connected) != len(shapes):
+            raise UnfoldedPrintReject("geometry_incomplete")
+        return panels
     for index, panel in enumerate(panels):
         for other in panels[index + 1 :]:
             if _overlap_area(panel["bounds_mm"], other["bounds_mm"]) > 0:
@@ -260,29 +284,6 @@ def _write_pdf(document: Any, output: Path) -> None:
         raise
 
 
-def _redraw(kept: list[dict[str, Any]], union: tuple[float, float, float, float], output: Path) -> tuple[float, float]:
-    import pymupdf
-
-    width = union[2] - union[0]
-    height = union[3] - union[1]
-    document = pymupdf.open()
-    page = document.new_page(width=width * MM_TO_PT, height=height * MM_TO_PT)
-    for item in kept:
-        x0, y0, x1, y1 = item["bounds_mm"]
-        rect = pymupdf.Rect(
-            (x0 - union[0]) * MM_TO_PT,
-            (y0 - union[1]) * MM_TO_PT,
-            (x1 - union[0]) * MM_TO_PT,
-            (y1 - union[1]) * MM_TO_PT,
-        )
-        if item["role"] == "print":
-            page.draw_rect(rect, color=None, fill=(0.85, 0.1, 0.1), width=0)
-        else:
-            page.draw_rect(rect, color=(0.1, 0.2, 0.85), fill=None, width=0.6)
-    _write_pdf(document, output)
-    return width, height
-
-
 def _copy_attested(artwork: Path, union: tuple[float, float, float, float], output: Path) -> tuple[float, float]:
     import pymupdf
 
@@ -335,16 +336,18 @@ def publish_unfolded_print(
     panels = _panels(payload)
     union = _union(panels)
     if assembly == "semantic-net":
-        kept = _separation(payload, panels)
-        width, height = _redraw(kept, union, output)
-    else:
-        _attestation(payload)
-        if artwork is None:
-            raise UnfoldedPrintReject("source_missing")
-        artwork = artwork.expanduser()
-        if artwork_sha256 and (not artwork.is_file() or _sha256(artwork) != artwork_sha256.lower()):
-            raise UnfoldedPrintReject("source_changed" if artwork.is_file() else "source_missing")
-        width, height = _copy_attested(artwork, union, output)
+        # Roles and bounding boxes do not contain artwork. Never synthesize ink.
+        _separation(payload, panels)
+    _attestation(payload)
+    if artwork is None:
+        raise UnfoldedPrintReject("source_missing")
+    artwork = artwork.expanduser()
+    if artwork_sha256 and (not artwork.is_file() or _sha256(artwork) != artwork_sha256.lower()):
+        raise UnfoldedPrintReject("source_changed" if artwork.is_file() else "source_missing")
+    page_bounds = _bounds(payload["page_bounds_mm"]) if "page_bounds_mm" in payload else union
+    if not _inside(union, page_bounds):
+        raise UnfoldedPrintReject("geometry_incomplete")
+    width, height = _copy_attested(artwork, page_bounds, output)
     if before and _sha256(source_path) != before:
         output.unlink(missing_ok=True)
         raise UnfoldedPrintReject("source_changed")
@@ -354,3 +357,44 @@ def publish_unfolded_print(
         "width_mm": round(width, 3),
         "height_mm": round(height, 3),
     }
+
+
+def produce_unfolded_source(resolution: Mapping[str, Any], source_ai: Path, output: Path, print_layers: list[str] | None = None) -> bool:
+    """Carry accepted V2 geometry to the shared native exporter; no new inference.
+
+    Absence of explicit flap/glue roles is an unsupported net, not permission
+    to replace artwork with six face textures or drop blank structural areas.
+    """
+    structure = resolution.get("structure") or {}
+    if resolution.get("status") != "ready" or structure.get("validation", {}).get("status") != "accepted":
+        return False
+    digest = _sha256(source_ai)
+    source = structure.get("source", {})
+    if source.get("sha256") != digest or structure.get("units") != "mm":
+        return False
+    vertices = {v["id"]: [v["x"], v["y"]] for v in structure.get("vertices", [])}
+    panels = []
+    try:
+        for face in structure.get("faces", []):
+            role = {"glue_tab": "glue", "flap": "tuck"}.get(face["role"], face["role"])
+            if role not in PANEL_ROLES:
+                return False
+            polygon = [vertices[v] for v in face["boundary"]]
+            xs, ys = zip(*polygon)
+            panels.append({"id": face["id"], "role": role, "polygon_mm": polygon,
+                           "bounds_mm": [min(xs), min(ys), max(xs), max(ys)]})
+        page = source["page_size"]
+        payload = {"schema": SOURCE_SCHEMA, "assembly": "attested-pdf", "export": "native",
+                   "source_ai_sha256": digest, "panels": panels, "print_layers": print_layers or [],
+                   "page_bounds_mm": [0, 0, page[0], page[1]],
+                   "attestation": {"schema": ATTESTATION_SCHEMA, "method": "semantic-identity",
+                                   "hidden_roles": list(sorted(HELPER_ROLES)), "covers_blank_structure": True}}
+        checked = _panels(payload)
+        if not _inside(_union(checked), _bounds(payload["page_bounds_mm"])):
+            return False
+    except (KeyError, TypeError, ValueError, UnfoldedPrintReject):
+        return False
+    if _sha256(source_ai) != digest:
+        return False
+    output.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    return True

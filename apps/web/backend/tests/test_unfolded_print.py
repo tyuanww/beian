@@ -43,6 +43,7 @@ def net(**overrides) -> dict:
     payload = {
         "schema": "unfolded-print-source/1",
         "assembly": "semantic-net",
+        "attestation": {"schema": "unfolded-separation-attestation/1", "method": "semantic-identity", "hidden_roles": ["cut", "crease"], "covers_blank_structure": True},
         "panels": panels,
         "separation": {
             "method": "semantic-identity",
@@ -67,6 +68,15 @@ def write_source(tmp_path: Path, payload: dict) -> Path:
 
 
 def publish(tmp_path: Path, payload: dict, **kwargs):
+    if "artwork" not in kwargs:
+        artwork = tmp_path / "artwork.pdf"
+        with pymupdf.open() as doc:
+            page = doc.new_page(width=180 * 72 / 25.4, height=140 * 72 / 25.4)
+            page.insert_text((300, 150), "Original product artwork")
+            page.draw_rect((310, 160, 360, 200), fill=(0.4, 0.6, 0.2))
+            page.draw_line((300, 220), (380, 220))
+            doc.save(artwork)
+        kwargs["artwork"] = artwork
     source = write_source(tmp_path, payload)
     output = tmp_path / "out.pdf"
     before = hashlib.sha256(source.read_bytes()).hexdigest()
@@ -86,6 +96,7 @@ def test_semantic_net_keeps_flaps_and_drops_helpers(tmp_path: Path):
         assert page.rotation == 0
         assert abs(page.mediabox.width * 25.4 / 72 - 180) < 0.05
         assert abs(page.mediabox.height * 25.4 / 72 - 140) < 0.05
+        assert "Original product artwork" in page.get_text()
         drawings = page.get_drawings()
     finally:
         document.close()
@@ -186,8 +197,13 @@ def test_close_confirmation_is_separate_from_result_json():
         "attempt_id": attempt,
         "success": True,
         "close_confirmed": False,
+        "source_sha256": "b" * 64,
     }
-    confirmed = close_mod.confirm_export_close(result, 0)
+    observation = {"attempt_id": attempt, "source_sha256": "b" * 64, "bridge_exited": True, "document_count": 0, "documents": []}
+    assert close_mod.confirm_export_close(result, 0) is None
+    for change in ({"attempt_id": "c" * 32}, {"source_sha256": "c" * 64}, {"bridge_exited": False}, {"document_count": 1}, {"documents": ["open.ai"]}):
+        assert close_mod.confirm_export_close(result, 0, {**observation, **change}) is None
+    confirmed = close_mod.confirm_export_close(result, 0, observation)
     assert confirmed["document_closed"] is True
     assert confirmed["lock_returnable"] is True
     assert confirmed["attempt_id"] == attempt
@@ -212,3 +228,47 @@ def test_exporter_reuses_structure_jsx_and_does_not_classify_by_ink():
     worker = load(WORKER, "unfolded_illustrator_worker")
     assert worker.select_jsx({"request_kind": "unfolded_print"}).name == "export_structure.jsx"
     assert worker.select_jsx({}).name == "export_ai.jsx"
+
+
+def test_production_geometry_manifest_preserves_original_artwork_and_blank_flaps(tmp_path):
+    ai = tmp_path / "source.ai"
+    ai.write_bytes(b"synthetic Illustrator input")
+    digest = hashlib.sha256(ai.read_bytes()).hexdigest()
+    vertices, faces = [], []
+    for panel in net()["panels"]:
+        x0, y0, x1, y1 = panel["bounds_mm"]
+        points = [(x0, y0), (x1, y0), (x1, y1), (x0, y1)]
+        ids = []
+        for i, (x, y) in enumerate(points):
+            identity = panel["id"] + str(i)
+            vertices.append({"id": identity, "x": x, "y": y})
+            ids.append(identity)
+        faces.append({"id": panel["id"], "role": {"glue": "glue_tab", "tuck": "flap"}.get(panel["role"], panel["role"]), "boundary": ids})
+    resolution = {"status": "ready", "structure": {"units": "mm", "source": {"sha256": digest, "page_size": [190, 150]},
+        "validation": {"status": "accepted"}, "vertices": vertices, "faces": faces}}
+    manifest = tmp_path / "unfolded-source.json"
+    assert publisher.produce_unfolded_source(resolution, ai, manifest)
+    payload = json.loads(manifest.read_text())
+    assert payload["export"] == "native"
+    assert payload["source_ai_sha256"] == digest
+    assert len(payload["panels"]) == 8
+    artwork = tmp_path / "native.pdf"
+    with pymupdf.open() as doc:
+        page = doc.new_page(width=190 * 72 / 25.4, height=150 * 72 / 25.4)
+        page.insert_text((300, 150), "Source label 123")
+        doc.save(artwork)
+    result = publisher.publish_unfolded_print(manifest, tmp_path / "complete.pdf", artwork=artwork)
+    assert result["width_mm"] == 190
+    with pymupdf.open(tmp_path / "complete.pdf") as doc:
+        assert "Source label 123" in doc[0].get_text()
+    faces[0]["role"] = "unknown"
+    assert not publisher.produce_unfolded_source(resolution, ai, tmp_path / "bad.json")
+    faces[0]["role"] = "glue_tab"
+    ai.write_bytes(b"changed")
+    assert not publisher.produce_unfolded_source(resolution, ai, tmp_path / "changed.json")
+
+
+def test_roles_without_artwork_never_create_placeholder_pdf(tmp_path):
+    with pytest.raises(publisher.UnfoldedPrintReject, match="source_missing"):
+        publisher.publish_unfolded_print(write_source(tmp_path, net()), tmp_path / "out.pdf")
+    assert not (tmp_path / "out.pdf").exists()

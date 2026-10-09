@@ -338,7 +338,23 @@ def main() -> int:
     if unfolded:
         # Result JSON is written before close. Exit 8 keeps the slot fenced
         # until a separate close record exists. stdout has no paths.
-        close_record = confirm_export_close(result, 0 if result_path.is_file() else 1)
+        observation = None
+        bridge_code = process.returncode if sys.platform != "win32" else agent_result.get("bridge_exit_code", -1)
+        if sys.platform == "win32":
+            observation = agent_result.get("close_observation")
+        elif bridge_code == 0:
+            try:
+                count = document_count()
+                observation = {
+                    "attempt_id": expected_attempt,
+                    "source_sha256": config["source_sha256"],
+                    "bridge_exited": True,
+                    "document_count": count,
+                    "documents": [] if count == 0 else None,
+                }
+            except (OSError, ValueError, RuntimeError, subprocess.TimeoutExpired):
+                pass
+        close_record = confirm_export_close(result, bridge_code, observation)
         public = {
             "ok": bool(result.get("success")) and close_record is not None,
             "reason": None if result.get("success") else str(result.get("reason") or "export_failed"),

@@ -1075,8 +1075,6 @@ function exportCleanUnfoldedPrint(documentRef, config, result) {
     var hiddenRoles = [];
     var unreliable = false;
     var layerName;
-    var stroked;
-    var filled;
     var state;
     var artboard;
     var widthPt;
@@ -1088,12 +1086,13 @@ function exportCleanUnfoldedPrint(documentRef, config, result) {
         throw new Error("attempt_id required");
     }
     result.protocol = UNFOLDED_PROTOCOL;
+    result.source_sha256 = String(config.source_sha256 || "");
     result.request_kind = "unfolded_print";
     result.attempt_id = String(config.attempt_id);
     result.close_confirmed = false;
     result.separation_method = "semantic-identity";
     writeJobProgress(config, "saving_artwork_pdf");
-    items = documentRef.pathItems;
+    items = documentRef.pageItems;
     limit = items.length;
     if (limit > 5000) {
         unreliable = true;
@@ -1115,22 +1114,14 @@ function exportCleanUnfoldedPrint(documentRef, config, result) {
             layerName = "";
             unreliable = true;
         }
-        if (unfoldedLayerIsPrint(layerName)) {
+        if (unfoldedLayerIsPrint(layerName) || unfoldedRoleListed(config.print_layers || [], layerName)) {
             continue;
         }
-        stroked = false;
-        filled = false;
+        // A filled path or a text frame can also be a production annotation.
+        // Unclassified visible objects are not proof of clean artwork.
         try {
-            stroked = Boolean(item.stroked);
-        } catch (strokeReadError) {
-            unreliable = true;
-        }
-        try {
-            filled = Boolean(item.filled);
-        } catch (fillReadError) {
-            unreliable = true;
-        }
-        if (stroked && !filled) {
+            if (!item.hidden) { unreliable = true; }
+        } catch (visibilityError) {
             unreliable = true;
         }
     }

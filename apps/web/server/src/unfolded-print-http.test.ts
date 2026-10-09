@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
 import { makeTestTempDir } from "./testTemp.js";
@@ -23,6 +23,7 @@ const png = Buffer.from("89504e470d0a1a0a", "hex");
 const net = {
   schema: "unfolded-print-source/1",
   assembly: "semantic-net",
+  attestation: { schema: "unfolded-separation-attestation/1", method: "semantic-identity", hidden_roles: ["cut", "crease"], covers_blank_structure: true },
   panels: [
     { id: "glue", role: "glue", bounds_mm: [0, 30, 20, 70] },
     { id: "back", role: "back", bounds_mm: [20, 30, 70, 90] },
@@ -46,10 +47,11 @@ const net = {
 function seed() {
   const dir = join(DATA_DIR, "mockups", id);
   mkdirSync(join(dir, "assets"), { recursive: true });
+  execFileSync(PYTHON, ["-c", "import pymupdf,sys; d=pymupdf.open(); p=d.new_page(width=180*72/25.4,height=140*72/25.4); p.insert_text((300,150),'Original artwork'); p.draw_rect((310,160,360,200),fill=(0.4,0.6,0.2)); p.draw_line((300,220),(380,220)); d.save(sys.argv[1]); d.close()", join(dir, "artwork.pdf")]);
   writeFileSync(join(dir, "unfolded-source.json"), JSON.stringify(net));
   saveMockup({
     id, status: "done", job_kind: "mockup", job_status: "succeeded", created_at: "2026-10-09T00:00:00Z",
-    owner, files: [],
+    owner, files: [], structure_artwork_path: join(dir, "artwork.pdf"),
   });
   return dir;
 }
@@ -74,7 +76,7 @@ describe("unfolded print http", () => {
     assert.equal(queued.unfolded_print.status, "queued");
     assert.equal(queued.unfolded_print.file_key, undefined);
     let ready: { unfolded_print: { status: string; file_key?: string; width_mm?: number; height_mm?: number; reason?: string } } | undefined;
-    for (let n = 0; n < 100; n += 1) {
+    for (let n = 0; n < 1000; n += 1) {
       await new Promise((resolve) => setTimeout(resolve, 15));
       const view = await app.request(`/api/mockups/${id}`, { headers: { authorization: `Bearer ${token}` } });
       ready = await view.json() as typeof ready;

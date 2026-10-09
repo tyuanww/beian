@@ -1554,7 +1554,7 @@ app.get("/api/mockups/:id/files/:key", (c) => {
   if (key === "print_faces_zip") {
     const bytes = printFacesZipBytes(job.id);
     if (!bytes) throw new HTTPException(404, { message: "六面印刷图还不齐" });
-    return new Response(bytes, {
+    return new Response(new Uint8Array(bytes), {
       headers: {
         "Content-Type": "application/zip",
         "X-Content-Type-Options": "nosniff",
