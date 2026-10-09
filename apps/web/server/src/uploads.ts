@@ -21,6 +21,14 @@ import { once } from "node:events";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import busboy from "busboy";
 import { DATA_DIR } from "./config.js";
+import {
+  COMPRESSION_MAX_BATCH_BYTES,
+  COMPRESSION_MAX_FILE_BYTES,
+  COMPRESSION_MAX_FILES,
+  compressionMagic,
+  isCompressionAssetField,
+} from "./compressionPolicy.js";
+import { additionalSourceUsage } from "./sourceQuota.js";
 import { isTid, newTid, nowIso, viewerFromSession } from "./tasks.js";
 import { maxUploadBytes } from "./settings.js";
 
@@ -90,12 +98,12 @@ export type ListedUploadReceipt = {
   client_upload_id?: string;
   product_name?: string;
   pack_surface?: string;
-  kind: "compare" | "mockup";
+  kind: "compare" | "mockup" | "compression";
   phase: "ready" | "paused";
 };
 
 export type UploadSessionFile = {
-  field: "excel" | "pdf" | "ai";
+  field: string;
   name: string;
   bytes: number;
   received: number;
@@ -111,7 +119,7 @@ export type UploadSession = {
   client_upload_id: string;
   product_name?: string;
   pack_surface?: string;
-  kind: "compare" | "mockup";
+  kind: "compare" | "mockup" | "compression";
   files: UploadSessionFile[];
 };
 
@@ -119,6 +127,7 @@ export type UploadSessionStartInput = {
   client_upload_id?: unknown;
   product_name?: unknown;
   pack_surface?: unknown;
+  purpose?: unknown;
   files?: { field?: unknown; name?: unknown; bytes?: unknown; last_modified?: unknown }[];
 };
 
@@ -350,6 +359,10 @@ export function magicOk(field: string, buf: Buffer, name: string): string | null
   if (field === "ai") {
     if (!/\.ai$/i.test(name)) return "只收 .ai 稿件。";
     return null;
+  }
+  if (isCompressionAssetField(field)) {
+    const media = compressionMagic(name, buf);
+    return media === "只接收 JPG、PNG、WebP 或 PDF" ? media : null;
   }
   return "不认识的文件栏";
 }
@@ -680,13 +693,15 @@ function uploadSessionShapeOk(id: string, session: UploadSession): boolean {
     typeof session.created_at === "string" &&
     typeof session.updated_at === "string" &&
     /^[a-zA-Z0-9_-]{8,80}$/.test(session.client_upload_id || "") &&
-    (session.kind === "compare" || session.kind === "mockup") &&
+    (session.kind === "compare" || session.kind === "mockup" || session.kind === "compression") &&
     Array.isArray(session.files) &&
     session.files.length > 0 &&
     session.files.every(
       (file) =>
         Boolean(file) &&
-        (["excel", "pdf", "ai"] as string[]).includes(file.field) &&
+        (session.kind === "compression"
+          ? isCompressionAssetField(file.field)
+          : file.field === "excel" || file.field === "pdf" || file.field === "ai") &&
         typeof file.name === "string" &&
         Number.isInteger(file.bytes) &&
         file.bytes >= 0 &&
@@ -870,7 +885,52 @@ function sessionFieldsKind(files: UploadSessionFile[]): "compare" | "mockup" {
   throw uploadFailure("审稿需要 Excel + PDF；打样需要一份 AI");
 }
 
-function normalizeSessionFiles(
+function normalizeCompressionFiles(
+  files: { field?: unknown; name?: unknown; bytes?: unknown; last_modified?: unknown }[],
+): UploadSessionFile[] {
+  if (!Array.isArray(files) || files.length < 1 || files.length > COMPRESSION_MAX_FILES) {
+    throw uploadFailure("一次最多压缩 20 个 JPG、PNG、WebP 或 PDF");
+  }
+  const seen = new Set<string>();
+  const normalized = files.map((raw) => {
+    const field = String(raw.field || "");
+    if (!isCompressionAssetField(field) || seen.has(field)) throw uploadFailure("上传文件栏不正确");
+    seen.add(field);
+    const name = String(raw.name || "").trim();
+    const bytes = Number(raw.bytes);
+    if (!name || !Number.isInteger(bytes) || bytes <= 0) throw uploadFailure("上传文件信息不完整");
+    if (bytes > COMPRESSION_MAX_FILE_BYTES) throw uploadFailure(oversizeMessage(), 413);
+    const lastModified = Number(raw.last_modified);
+    return {
+      field,
+      name,
+      bytes,
+      received: 0,
+      ...(Number.isFinite(lastModified) && lastModified >= 0 ? { last_modified: lastModified } : {}),
+      storage_name: `${field}-${safeStagedName(name, field)}.part`,
+    } as UploadSessionFile;
+  });
+  if (normalized.reduce((sum, file) => sum + file.bytes, 0) > COMPRESSION_MAX_BATCH_BYTES) {
+    throw uploadFailure(UPLOAD_BODY_TOO_LARGE, 413);
+  }
+  return normalized;
+}
+
+function normalizeSessionFiles(input: UploadSessionStartInput): {
+  kind: "compare" | "mockup" | "compression";
+  files: UploadSessionFile[];
+} {
+  if (input.purpose != null && input.purpose !== "" && input.purpose !== "compression") {
+    throw uploadFailure("上传用途不正确");
+  }
+  if (input.purpose === "compression") {
+    return { kind: "compression", files: normalizeCompressionFiles(input.files || []) };
+  }
+  const files = normalizeLegacyFiles(input.files || []);
+  return { kind: sessionFieldsKind(files), files };
+}
+
+function normalizeLegacyFiles(
   files: { field?: unknown; name?: unknown; bytes?: unknown; last_modified?: unknown }[],
 ): UploadSessionFile[] {
   if (!Array.isArray(files) || files.length < 1 || files.length > 2) {
@@ -924,7 +984,8 @@ export function startUploadSession(
 ): ListedUploadReceipt {
   const clientUploadId = String(input.client_upload_id || "").trim();
   if (!/^[a-zA-Z0-9_-]{8,80}$/.test(clientUploadId)) throw uploadFailure("上传标识不正确");
-  const files = normalizeSessionFiles(input.files || []);
+  const normalized = normalizeSessionFiles(input);
+  const files = normalized.files;
   const productName = String(input.product_name || "").trim().slice(0, 80) || undefined;
   const packSurface = String(input.pack_surface || "").trim().slice(0, 24) || undefined;
 
@@ -967,7 +1028,7 @@ export function startUploadSession(
       client_upload_id: clientUploadId,
       product_name: productName,
       pack_surface: packSurface,
-      kind: sessionFieldsKind(files),
+      kind: normalized.kind,
       files,
     };
     writeFileSync(sessionPath(id), JSON.stringify(session), { encoding: "utf8", flag: "wx" });
@@ -1046,7 +1107,11 @@ export function completeUploadSession(id: string, owner: string): ListedUploadRe
     throw uploadFailure("文件还没有传完", 409);
   }
   for (const file of session.files) {
-    const error = magicOk(file.field, readPrefix(sessionFilePath(session, file)), file.name);
+    const error = magicOk(
+      file.field,
+      readPrefix(sessionFilePath(session, file), isCompressionAssetField(file.field) ? 16 : 8),
+      file.name,
+    );
     if (error) throw uploadFailure(error);
   }
 
@@ -1089,7 +1154,12 @@ export function discardUploadSession(id: string, owner: string): boolean {
   return true;
 }
 
-function assertReceiptCapacity(owner: string, incomingBytes: number): void {
+export function sourceReservation(owner: string, exceptReceiptId = ""): {
+  ownerCount: number;
+  ownerBytes: number;
+  globalCount: number;
+  globalBytes: number;
+} {
   sweepUploadSessions();
   let names: string[];
   try {
@@ -1103,7 +1173,7 @@ function assertReceiptCapacity(owner: string, incomingBytes: number): void {
   let ownerBytes = 0;
   for (const name of names) {
     const match = /^([0-9a-f]{12})\.json$/.exec(name);
-    if (!match) continue;
+    if (!match || match[1] === exceptReceiptId) continue;
     const rec = readReceipt(match[1]);
     if (!rec || !receiptFresh(rec)) continue;
     const bytes = receiptBytes(rec);
@@ -1132,6 +1202,16 @@ function assertReceiptCapacity(owner: string, incomingBytes: number): void {
       ownerBytes += bytes;
     }
   }
+  return { ownerCount, ownerBytes, globalCount, globalBytes };
+}
+
+function assertReceiptCapacity(owner: string, incomingBytes: number): void {
+  const reserved = sourceReservation(owner);
+  const extra = additionalSourceUsage(owner);
+  const ownerCount = reserved.ownerCount + extra.ownerCount;
+  const ownerBytes = reserved.ownerBytes + extra.ownerBytes;
+  const globalCount = reserved.globalCount + extra.globalCount;
+  const globalBytes = reserved.globalBytes + extra.globalBytes;
   if (ownerCount >= MAX_PENDING_RECEIPTS_PER_OWNER) {
     throw uploadFailure(`待开工上传最多保留 ${MAX_PENDING_RECEIPTS_PER_OWNER} 单，请先开始已有上传`, 429);
   }
@@ -1200,7 +1280,11 @@ function listedReceipt(rec: UploadReceipt): ListedUploadReceipt {
     ...(rec.client_upload_id ? { client_upload_id: rec.client_upload_id } : {}),
     ...(rec.product_name ? { product_name: rec.product_name } : {}),
     ...(rec.pack_surface ? { pack_surface: rec.pack_surface } : {}),
-    kind: files.some((file) => file.field === "ai") ? "mockup" : "compare",
+    kind: files.some((file) => isCompressionAssetField(file.field))
+      ? "compression"
+      : files.some((file) => file.field === "ai")
+        ? "mockup"
+        : "compare",
     phase: "ready",
   };
 }

@@ -78,6 +78,14 @@ import { readIllustratorAgentStatus } from "./illustratorAgent.js";
 import type { RenderBridgeObserver } from "./renderGenerationBridge.js";
 import { releaseRenderReservation } from "./renderGenerationBudget.js";
 import { getRenderGenerationRuntime } from "./renderGenerationRuntime.js";
+import {
+  compressionDownloadActivity,
+  compressionQueueSnapshot,
+  deleteCompressionBatch,
+  pumpCompressionQueue,
+  recoverCompressionJobs,
+  retryCompressionBatch,
+} from "./compressionRuntime.js";
 
 const STAGE_LABEL: Record<string, string> = {
   structure: "正在出图",
@@ -290,10 +298,12 @@ export function queueSnapshot(): {
   ocr: { running: number; queued: number };
   blender: { running: number; queued: number };
   illustrator: { running: number; queued: number };
+  compression: { running: number; queued: number };
   unknown: number;
 } {
   const taskStore = taskStoreSnapshot();
   const mockupStore = mockupStoreSnapshot();
+  const compression = compressionQueueSnapshot();
   const tasks = taskStore.tasks;
   const mocks = mockupStore.jobs;
   const ocrQueued = tasks.filter((t) => isOcr(t.job_kind) && t.job_status === "queued").length;
@@ -315,9 +325,25 @@ export function queueSnapshot(): {
       running: Math.max(ai.filter((j) => j.job_status === "running").length, live.illustrator ? 1 : 0),
       queued: ai.filter((j) => j.job_status === "queued").length,
     },
-    unknown: taskStore.unreadable + mockupStore.unreadable,
+    compression: { running: compression.running, queued: compression.queued },
+    unknown: taskStore.unreadable + mockupStore.unreadable + compression.unknown,
   };
 }
+
+export function enqueueCompression(id: string): void {
+  void id;
+  pumpCompressionQueue();
+}
+
+export function retryCompression(id: string, expectedRevision: number, fileIds?: string[]) {
+  return retryCompressionBatch(id, expectedRevision, fileIds);
+}
+
+export function removeCompression(id: string) {
+  return deleteCompressionBatch(id);
+}
+
+export { compressionDownloadActivity };
 
 export function decorateQueueAhead<T extends { id?: string; created_at?: string; job_kind?: string; job_status?: string }>(
   rows: T[],
@@ -2079,6 +2105,11 @@ export function reclaimOnBoot(): void {
       launchNotification(`mockup ${job.id}`, () => fireMockupNotify(job, job.job_status === "succeeded"));
     }
   }
+  try {
+    recoverCompressionJobs();
+  } catch (err) {
+    console.warn(`compression recover failed: ${err instanceof Error ? err.message : err}`);
+  }
   tryStart();
   ensureIllustratorBusyPoll();
 }
@@ -2141,6 +2172,11 @@ export function tryStart(): void {
       else claimMockup(next.job);
       break;
     }
+  }
+  try {
+    pumpCompressionQueue();
+  } catch (err) {
+    console.warn(`compression pump failed: ${err instanceof Error ? err.message : err}`);
   }
 }
 

@@ -41,6 +41,7 @@ import {
   launchNotification,
   notificationSnapshot,
   publicTask,
+  compressionDownloadActivity,
   queueSnapshot,
   reclaimOnBoot,
   relightMockupStudio,
@@ -115,6 +116,10 @@ import {
 } from "./illustratorAgent.js";
 import { confirmPackagingStructure } from "./workers.js";
 import { skipPackSheetField } from "./sheetSkip.js";
+import { CompressionProblem } from "./compressionModel.js";
+import { registerCompressionRoutes } from "./compressionApi.js";
+import { recoverCompressionBeforeReceipts } from "./compressionRuntime.js";
+import { compressionReceiptPersisted } from "./compressionStore.js";
 import {
   appendUploadChunk,
   claimReceipt,
@@ -375,6 +380,12 @@ app.onError((err, c) => {
   if (err instanceof ApiProblem) {
     return c.json({ detail: err.message, code: err.code }, err.status);
   }
+  if (err instanceof CompressionProblem) {
+    return c.json(
+      { detail: err.message, code: err.code, ...(err.reason ? { reason: err.reason } : {}) },
+      err.status,
+    );
+  }
   if (err instanceof HTTPException) {
     return c.json({ detail: err.message }, err.status);
   }
@@ -428,7 +439,7 @@ function releaseControlPayload(admission: ReturnType<typeof releaseCoordinator.s
   const reworkUploads = reworkUploadAdmission.snapshot();
   const readiness = releaseReadiness({
     admission,
-    jobs: [jobs.ocr, jobs.blender, jobs.illustrator],
+    jobs: [jobs.ocr, jobs.blender, jobs.illustrator, jobs.compression, compressionDownloadActivity()],
     jobsUnknown: jobs.unknown,
     uploads: {
       active: primaryUploads.active + reworkUploads.active,
@@ -1668,6 +1679,12 @@ app.get("/review/:id", spaHtml);
 app.get("/mockup", spaHtml);
 app.get("/mockup/new", spaHtml);
 app.get("/mockup/:id", spaHtml);
+app.get("/compress", spaHtml);
+app.get("/compress/:id", spaHtml);
+registerCompressionRoutes(app, {
+  need: (c, perm) => need(c, perm),
+  draining: () => releaseCoordinator.snapshot().state === "draining",
+});
 
 export { app };
 
@@ -1686,10 +1703,12 @@ if (process.env.VITEST !== "1") {
   }
   mkdirSync(join(DATA_DIR, "tasks"), { recursive: true });
   releaseCoordinator.controlFile(releaseControlPath, VERSION);
+  recoverCompressionBeforeReceipts();
   const recoveredReceipts = recoverReceiptClaims((receipt) =>
     Boolean(
       findTaskBySourceReceipt(receipt.id, receipt.owner) ||
-        findMockupBySourceReceipt(receipt.id, receipt.owner),
+        findMockupBySourceReceipt(receipt.id, receipt.owner) ||
+        compressionReceiptPersisted(receipt.id, receipt.owner),
     ),
   );
   if (Object.values(recoveredReceipts).some((count) => count > 0)) {

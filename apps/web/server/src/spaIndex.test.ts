@@ -15,6 +15,9 @@ describe("isSpaPath", () => {
     assert.equal(isSpaPath("/mockup"), true);
     assert.equal(isSpaPath("/mockup/new"), true);
     assert.equal(isSpaPath("/mockup/AABBCCDDEEFF"), true);
+    assert.equal(isSpaPath("/compress"), true);
+    assert.equal(isSpaPath("/compress/aabbccddeeff"), true);
+    assert.equal(isSpaPath("/compress/not-an-id"), false);
     assert.equal(isSpaPath("/api/health"), false);
     assert.equal(isSpaPath("/brand/logo-mark.png"), false);
     assert.equal(isSpaPath("/review/not-an-id"), false);
