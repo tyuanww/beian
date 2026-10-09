@@ -12,14 +12,14 @@ from typing import Any
 
 EXPORT_PROTOCOL = "beian.illustrator.export/2"
 UNFOLDED_REQUEST_KIND = "unfolded_print"
-SUPPORTED_REQUEST_KINDS = frozenset({"structure", UNFOLDED_REQUEST_KIND})
+SUPPORTED_REQUEST_KINDS = frozenset({"structure", UNFOLDED_REQUEST_KIND, "native_text"})
 
 
 def validate_request_kind(config: dict[str, Any]) -> str | None:
     kind = str(config.get("request_kind") or "structure")
     if kind not in SUPPORTED_REQUEST_KINDS:
         return "request_kind_unsupported"
-    if kind != UNFOLDED_REQUEST_KIND:
+    if kind not in {UNFOLDED_REQUEST_KIND, "native_text"}:
         return None
     if str(config.get("protocol") or "") != EXPORT_PROTOCOL:
         return "protocol_mismatch"
@@ -44,7 +44,7 @@ def confirm_export_close(result: dict[str, Any] | None, returncode: int, observa
         return None
     if str(result.get("protocol") or "") != EXPORT_PROTOCOL:
         return None
-    if str(result.get("request_kind") or "") != UNFOLDED_REQUEST_KIND:
+    if result.get("request_kind") not in {UNFOLDED_REQUEST_KIND, "native_text"}:
         return None
     if result.get("close_confirmed") is True:
         return None
@@ -66,7 +66,7 @@ def confirm_export_close(result: dict[str, Any] | None, returncode: int, observa
         return None
     return {
         "protocol": EXPORT_PROTOCOL,
-        "request_kind": UNFOLDED_REQUEST_KIND,
+        "request_kind": result["request_kind"],
         "attempt_id": attempt,
         "source_sha256": result["source_sha256"],
         "document_closed": True,

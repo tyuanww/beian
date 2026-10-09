@@ -211,7 +211,7 @@ def test_close_confirmation_is_separate_from_result_json():
     assert close_mod.confirm_export_close({**result, "close_error": "still open"}, 0) is None
     assert close_mod.confirm_export_close(result, 8) is None
     assert close_mod.confirm_export_close({**result, "request_kind": "native_text"}, 0) is None
-    assert close_mod.validate_request_kind({"request_kind": "native_text"}) == "request_kind_unsupported"
+    assert close_mod.validate_request_kind({"request_kind": "native_text"}) == "protocol_mismatch"
     assert close_mod.validate_request_kind({"request_kind": "structure"}) is None
 
 

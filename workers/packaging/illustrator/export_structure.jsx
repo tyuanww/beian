@@ -1153,6 +1153,75 @@ function exportCleanUnfoldedPrint(documentRef, config, result) {
     restoreSemanticItems(state);
 }
 
+// Native candidates share this exporter and the same post-bridge close protocol.
+// All coordinates are explicit top-left PDF points, derived from the artboard.
+function exportNativeText(documentRef, config, result) {
+    restoreUnattendedArtwork(documentRef, hostState);
+    result.protocol = "beian.illustrator.export/2";
+    result.request_kind = "native_text";
+    result.source_sha256 = String(config.source_sha256);
+    result.extractor_version = "native-text/1";
+    result.close_confirmed = false;
+    result.pages = [];
+    result.candidates = [];
+    var boards = documentRef.artboards;
+    var items = documentRef.pageItems;
+    var frames = documentRef.textFrames;
+    if (boards.length > 20 || frames.length > 50000 || items.length > 100000) { throw new Error("native_limit"); }
+    var chars = 0, comparisons = 0;
+    function intersects(a, b) { return Math.max(a[0], b[0]) < Math.min(a[2], b[2]) && Math.max(a[3], b[3]) < Math.min(a[1], b[1]); }
+    function visible(item) {
+        var parent = item, depth = 0;
+        while (parent && parent.typename !== "Document") {
+            if (++depth > 64) { return false; }
+            if (parent.hidden === true || parent.visible === false || parent.clipped === true || parent.opacity < 100) { return false; }
+            parent = parent.parent;
+        }
+        return true;
+    }
+    for (var p = 0; p < boards.length; p += 1) {
+        var rect = boards[p].artboardRect;
+        result.pages.push({page: p + 1, width: rect[2] - rect[0], height: rect[1] - rect[3], transform: [1, 0, 0, -1, -rect[0], rect[1]]});
+    }
+    for (var i = 0; i < frames.length; i += 1) {
+        var frame = frames[i], text = String(frame.contents || ""), bounds = frame.visibleBounds;
+        chars += text.length;
+        if (chars > 1000000 || text.length > 8192) { throw new Error("native_limit"); }
+        var safe = visible(frame), font = "", missingFont = false;
+        try {
+            for (var c = 0; c < frame.characters.length; c += 1) {
+                var f = frame.characters[c].characterAttributes.textFont;
+                if (!f || !f.name || app.textFonts.getByName(f.name).name !== f.name) { missingFont = true; }
+                if (!font) { font = String(f.name); }
+            }
+        } catch (fontError) { missingFont = true; }
+        // Unknown occlusion is not visible-text proof. Reject any overlapping
+        // non-ancestor paint object, including clipping groups and placed art.
+        for (var j = 0; safe && j < items.length; j += 1) {
+            if (++comparisons > 2000000) { throw new Error("native_limit"); }
+            var other = items[j], ancestor = frame.parent, isAncestor = false;
+            while (ancestor && ancestor.typename !== "Document") { if (ancestor === other) { isAncestor = true; break; } ancestor = ancestor.parent; }
+            if (other === frame || isAncestor || !visible(other)) { continue; }
+            try { if (intersects(bounds, other.visibleBounds)) { safe = false; } } catch (boundsError) { safe = false; }
+        }
+        for (p = 0; p < boards.length; p += 1) {
+            rect = boards[p].artboardRect;
+            if (bounds[0] < rect[0] || bounds[2] > rect[2] || bounds[1] > rect[1] || bounds[3] < rect[3]) { continue; }
+            result.candidates.push({object_id: "text-" + i, page: p + 1, text: text, bbox: [bounds[0] - rect[0], rect[1] - bounds[1], bounds[2] - rect[0], rect[1] - bounds[3]], visible: safe, font: font, font_available: !missingFont});
+        }
+    }
+    if (result.candidates.length > 50000 || jsonStringify(result).length > 2000000) { throw new Error("native_limit"); }
+    writeJobProgress(config, "saving_artwork_pdf");
+    var options = new PDFSaveOptions();
+    options.preserveEditability = false;
+    options.acrobatLayers = false;
+    options.generateThumbnails = false;
+    options.viewAfterSaving = false;
+    options.artboardRange = "1-" + boards.length;
+    documentRef.saveAs(new File(config.print_pdf), options);
+    result.success = true;
+}
+
 function withConfiguredPrintLayers(documentRef, configuredNames, callback) {
     var state = isolateConfiguredPrintLayers(documentRef, configuredNames);
     var callbackError = null;
@@ -1229,6 +1298,11 @@ try {
         "host outline_ok=" + (hostState.outline ? "1" : "0") +
             " view=" + String(hostState.viewMode || "")
     );
+    if (config.request_kind === "native_text") {
+        exportNativeText(documentRef, config, result);
+        commitResult();
+        throw { unfoldedDone: true };
+    }
     if (config.request_kind === "unfolded_print") {
         exportCleanUnfoldedPrint(documentRef, config, result);
         commitResult();

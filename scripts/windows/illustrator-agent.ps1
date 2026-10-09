@@ -857,7 +857,7 @@ function Invoke-RunRequest([object]$Request, [DateTime]$Deadline) {
   $configPath = Resolve-DataPath ([string](Get-JsonProperty $Request "config_path" $true))
   $config = Read-JsonFile $configPath
   $exporter = [string](Get-JsonProperty $Request "exporter" $true)
-  $unfolded = (Get-JsonProperty $config "request_kind") -eq "unfolded_print"
+  $unfolded = (Get-JsonProperty $config "request_kind") -in @("unfolded_print", "native_text")
   $expectedExporter = if ($unfolded -or (Get-JsonProperty $config "structure_json")) { "structure" } else { "legacy" }
   if ($exporter -ne $expectedExporter) {
     Throw-AgentFailure "illustrator_agent_invalid_request" "exporter does not match the job config"

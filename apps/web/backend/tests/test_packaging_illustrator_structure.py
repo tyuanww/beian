@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import hashlib
 import importlib.util
 import json
@@ -3059,7 +3060,20 @@ def test_agent_and_curve_adapter_changes_invalidate_pipeline_cache(
 def test_windows_worker_has_no_session_zero_launch_or_direct_com_path():
     source = WORKER.read_text(encoding="utf-8")
     assert "request_agent(" in source
-    assert "subprocess.Popen" not in source
+    # Windows must stay on the Session 1 agent. The Mac native-text bridge
+    # now uses Popen so a deadline can fence it without killing an open document.
+    def check(node, mac_only=False):
+        if isinstance(node, ast.If) and ast.unparse(node.test) == "sys.platform != 'win32'":
+            for child in node.body:
+                check(child, True)
+            for child in node.orelse:
+                check(child, mac_only)
+            return
+        if isinstance(node, ast.Call) and ast.unparse(node.func) == "subprocess.Popen":
+            assert mac_only
+        for child in ast.iter_child_nodes(node):
+            check(child, mac_only)
+    check(ast.parse(source))
     assert "run_export.vbs" not in source
     assert "CreateObject" not in source
 

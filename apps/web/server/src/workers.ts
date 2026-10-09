@@ -15,6 +15,7 @@ export type RunPythonOpts = {
   args: string[];
   cwd?: string;
   timeoutMs?: number;
+  preserveOnTimeout?: boolean;
   onStderrLine?: (line: string) => void;
   onSpawn?: (pid: number) => void;
 };
@@ -242,6 +243,7 @@ export function runPython(opts: RunPythonOpts): Promise<RunPythonResult> {
     };
     const timer = setTimeout(() => {
       timedOut = true;
+      if (opts.preserveOnTimeout) { finish(8); return; }
       if (pid) killTree(pid, false);
       setTimeout(() => {
         if (settled) return;
@@ -271,12 +273,14 @@ export function runPython(opts: RunPythonOpts): Promise<RunPythonResult> {
     try { if (pid) opts.onSpawn?.(pid); }
     catch (error) {
       spawnError = error;
-      if (pid) killTree(pid, true);
+      if (opts.preserveOnTimeout) finish(8);
+      else if (pid) killTree(pid, true);
     }
   });
 }
 
 export async function compareTask(opts: {
+  nativeDir?: string;
   tid: string;
   excel: string;
   pdf: string;
@@ -308,6 +312,7 @@ export async function compareTask(opts: {
       opts.actor,
       "--data-dir",
       DATA_DIR,
+      ...(opts.nativeDir ? ["--native-dir", opts.nativeDir] : []),
     ],
     timeoutMs: 180_000,
     onStderrLine: opts.onStderrLine,
@@ -316,6 +321,7 @@ export async function compareTask(opts: {
 }
 
 export async function reworkTask(opts: {
+  nativeDir?: string;
   tid: string;
   pdf: string;
   actor: string;
@@ -335,6 +341,7 @@ export async function reworkTask(opts: {
       opts.actor,
       "--data-dir",
       DATA_DIR,
+      ...(opts.nativeDir ? ["--native-dir", opts.nativeDir] : []),
     ],
     timeoutMs: 180_000,
     onStderrLine: opts.onStderrLine,
@@ -496,4 +503,10 @@ export async function runPrintFaceRepair(opts: PrintFaceRepairOpts): Promise<Run
     timeoutMs: 60_000,
     onSpawn: opts.onSpawn,
   });
+}
+
+/** Native review uses the existing host; deadline expiry fences rather than kills it. */
+export async function runNativeText(opts: UnfoldedNativeOpts): Promise<RunPythonResult> {
+  return runPython({ args: ["illustrator/illustrator_worker.py", opts.configPath, "--timeout", "1260"],
+    cwd: PACKAGING, timeoutMs: 1_260_000, preserveOnTimeout: true, onSpawn: opts.onSpawn });
 }

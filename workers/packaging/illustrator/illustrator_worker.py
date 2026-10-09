@@ -38,7 +38,7 @@ def select_jsx(config: dict) -> Path:
 
     Unfolded reprint uses the same structure exporter. It does not add a host.
     """
-    if config.get("request_kind") == "unfolded_print" or config.get("structure_json"):
+    if config.get("request_kind") in {"unfolded_print", "native_text"} or config.get("structure_json"):
         return STRUCTURE_JSX
     return LEGACY_JSX
 
@@ -205,7 +205,7 @@ def main() -> int:
     if request_error:
         print(f"Illustrator export config rejected: {request_error}", file=sys.stderr)
         return 2
-    unfolded = config.get("request_kind") == "unfolded_print"
+    unfolded = config.get("request_kind") in {"unfolded_print", "native_text"}
     output_keys = ["print_pdf", "result_json", "close_json"] if unfolded else ["full_pdf", "print_pdf", "result_json"]
     if not unfolded and config.get("structure_json"):
         output_keys.append("structure_json")
@@ -297,12 +297,14 @@ def main() -> int:
                 str(runtime_jsx),
                 str(config_path),
             ]
-            process = subprocess.run(
-                command,
-                capture_output=True,
-                text=True,
-                timeout=remaining_timeout,
-            )
+            if config.get("request_kind") == "native_text":
+                # communicate timeout deliberately leaves this owned bridge alive;
+                # Hono keeps the durable fence and source copy, never a kill/reset.
+                child = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                out, err = child.communicate(timeout=remaining_timeout)
+                process = subprocess.CompletedProcess(command, child.returncode, out, err)
+            else:
+                process = subprocess.run(command, capture_output=True, text=True, timeout=remaining_timeout)
         except subprocess.TimeoutExpired as error:
             print(
                 f"Illustrator export timed out after {remaining_timeout}s: {error}",
@@ -360,7 +362,7 @@ def main() -> int:
             "reason": None if result.get("success") else str(result.get("reason") or "export_failed"),
             "attempt_id": str(result.get("attempt_id") or ""),
             "close_confirmed": close_record is not None,
-            "request_kind": "unfolded_print",
+            "request_kind": config["request_kind"],
         }
         if close_record is None:
             print(json.dumps(public, ensure_ascii=False))

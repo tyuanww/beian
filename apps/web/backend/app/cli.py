@@ -65,6 +65,7 @@ def cmd_probe(args: argparse.Namespace) -> int:
 def cmd_compare(args: argparse.Namespace) -> int:
     data = Path(args.data_dir).expanduser().resolve() if args.data_dir else None
     compare_core.init_paths(data)
+    compare_core.NATIVE_DIR = Path(args.native_dir).resolve() if getattr(args, "native_dir", None) else None
     tid = (args.tid or "").strip()
     if not compare_core.TID_RE.fullmatch(tid):
         return _err("无效任务 id")
@@ -110,6 +111,7 @@ def cmd_compare(args: argparse.Namespace) -> int:
 def cmd_rework(args: argparse.Namespace) -> int:
     data = Path(args.data_dir).expanduser().resolve() if args.data_dir else None
     compare_core.init_paths(data)
+    compare_core.NATIVE_DIR = Path(args.native_dir).resolve() if getattr(args, "native_dir", None) else None
     tid = (args.tid or "").strip()
     task = compare_core.load_task(tid)
     pdf = Path(args.pdf).resolve()
@@ -190,12 +192,16 @@ def main() -> int:
     c.add_argument("--actor", default="")
     c.add_argument("--data-dir", default="")
 
+    c.add_argument("--native-dir", default="")
+
     r = sub.add_parser("rework", help="对红第二轮 PDF；stdout 最后一行结果 JSON")
     r.add_argument("--tid", required=True)
     r.add_argument("--pdf", required=True)
     r.add_argument("--max-pages", default="2")
     r.add_argument("--actor", default="")
     r.add_argument("--data-dir", default="")
+
+    r.add_argument("--native-dir", default="")
 
     pr = sub.add_parser("probe")
     pr.add_argument("--target", required=True, choices=("python", "baidu"))

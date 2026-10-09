@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from app import config, layout_zones, pack_profile, text_verify
+from app import config, layout_zones, pack_profile, text_verify, native_text
 from app.baidu_ocr import qrcode_image_bytes
 from app.claims_rules import build_claims_report
 from app.field_verify import clip_hit_bboxes, verify_fields
@@ -24,6 +24,7 @@ TID_RE = re.compile(r"^[0-9a-f]{12}$")
 DATA: Path
 TASKS: Path
 UPLOADS: Path
+NATIVE_DIR: Path | None = None
 
 
 def init_paths(data_dir: Path | None = None) -> Path:
@@ -237,6 +238,8 @@ def _surface_job(
     layer_words = text_verify.words_from_text_blocks(layer_px)
     emit_stage("ocr")
     ocr_text, ocr_words, ocr_engine, ocr_meta = _ocr_pages(page_metas, ingested)
+    candidates, native_reason = native_text.load_candidates(NATIVE_DIR, pdf, page_metas)
+    ocr_text, ocr_words, native_audit = native_text.fuse_words(ocr_text, ocr_words, candidates)
     prefer_layer = has_layer or ingested.get("mode") == "live_text"
     pack_text, words, text_source = text_verify.merge_text_sources(
         layer_text,
@@ -309,6 +312,11 @@ def _surface_job(
         regions=regions,
         excel_joined=excel_joined_pre,
     )
+    native_text.attach_evidence(hits, native_audit)
+    if native_reason:
+        for hit in hits:
+            hit.setdefault("native_text_evidence", {"version": 1, "status": "not_used", "native_text": None, "ocr_text": None,
+                "message": "原稿文字与当前可见稿面未能可靠对应，本字段继续使用原有识别结果。"})
     # 面标签
     for h in hits:
         h["surface"] = surface_label
