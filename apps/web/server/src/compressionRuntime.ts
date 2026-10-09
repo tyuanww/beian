@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { existsSync, readdirSync, readFileSync, rmSync, statSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
-import { assessCapability, type CompressionCapability } from "./compressionProbe.js";
+import { assessCapability } from "./compressionProbe.js";
 import { executeCompressionFile, type CompressionExecuteResult } from "./compressionExecute.js";
 import {
   compressionProblem,
@@ -17,10 +17,10 @@ import {
   COMPRESSION_DOWNLOADS_GLOBAL,
   COMPRESSION_DOWNLOADS_PER_OWNER,
   COMPRESSION_MAX_AUTO_REQUEUES,
-  COMPRESSION_REQUIRED_FREE_BYTES,
   PDF_MAX_MS,
   PDF_TARGET_BYTES,
   compressionFileKey,
+  compressionFileReady,
 } from "./compressionPolicy.js";
 import {
   compressionBatchDir,
@@ -123,13 +123,6 @@ export function compressionDownloadActivity(): { running: number; queued: number
   return { running: compressionActiveLeases().length, queued: 0 };
 }
 
-function capabilityReady(capability: CompressionCapability): boolean {
-  return capability.budget === "enforced" &&
-    capability.toolsReady &&
-    capability.missing.length === 0 &&
-    capability.diskFreeBytes >= COMPRESSION_REQUIRED_FREE_BYTES;
-}
-
 function queueAhead(batch: CompressionBatchRecord, all: CompressionBatchRecord[]): number {
   if (batch.status !== "queued") return 0;
   const older = all.filter((item) =>
@@ -160,7 +153,7 @@ export function toPublicCompression(batch: CompressionBatchRecord, viewer: Viewe
       const decision = evaluateCompressionRetry(file, nowFn(), {
         policyFingerprint: capability.policyFingerprint,
         toolGeneration: capability.toolGeneration,
-        ready: capabilityReady(capability),
+        ready: compressionFileReady(file.media_type, capability),
         executorFence: fence,
       });
       return publicCompressionFile({
@@ -471,7 +464,7 @@ export function retryCompressionBatch(
     const decision = evaluateCompressionRetry(file, nowFn(), {
       policyFingerprint: capability.policyFingerprint,
       toolGeneration: capability.toolGeneration,
-      ready: capabilityReady(capability),
+      ready: compressionFileReady(file.media_type, capability),
       executorFence: writerLiveness(batch) === "unknown",
     });
     if (!decision.ok) throw compressionProblem("compression_retry_rejected", decision.reason);

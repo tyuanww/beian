@@ -12,6 +12,7 @@ import {
   COMPRESSION_OWNER_ACTIVE,
   COMPRESSION_OWNER_SOURCE_BYTES,
   COMPRESSION_REQUIRED_FREE_BYTES,
+  compressionFileReady,
   compressionMagic,
   defaultCompressionTitle,
   isCompressionAssetField,
@@ -157,7 +158,9 @@ export async function startCompression(
     const capability = assessCapability();
     if (capability.budget !== "enforced") throw compressionProblem("platform_budget_unavailable");
     if (capability.diskFreeBytes < COMPRESSION_REQUIRED_FREE_BYTES) throw compressionProblem("disk_space");
-    if (!capability.toolsReady || capability.missing.length > 0) throw compressionProblem("dependency_missing");
+    if (files.some((file) => !compressionFileReady(file.media_type, capability))) {
+      throw compressionProblem("dependency_missing");
+    }
     const claim = claimReceipt(receiptId, owner);
     if (!claim) throw compressionProblem("upload_receipt_expired");
     const id = newCompressionId();

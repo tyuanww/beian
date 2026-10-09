@@ -91,6 +91,20 @@ export function compressionPolicyFingerprint(
 
 export type CompressionMediaType = "application/pdf" | "image/jpeg" | "image/png" | "image/webp";
 
+/** 图片只需要 Sharp。PDF 需要 qpdf、JDK 和 PDFBox，不拿 Java 堆代替进程预算。 */
+export function compressionToolsForMedia(media: CompressionMediaType): readonly string[] {
+  return media === "application/pdf" ? ["qpdf", "java", "pdfbox"] : ["sharp"];
+}
+
+export function compressionFileReady(
+  media: CompressionMediaType,
+  capability: { budget: string; missing: readonly string[]; diskFreeBytes: number },
+): boolean {
+  return capability.budget === "enforced" &&
+    capability.diskFreeBytes >= COMPRESSION_REQUIRED_FREE_BYTES &&
+    compressionToolsForMedia(media).every((tool) => !capability.missing.includes(tool));
+}
+
 export function isCompressionAssetField(field: string): boolean {
   return /^asset(?:[1-9]|1\d|20)$/.test(field);
 }

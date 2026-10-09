@@ -143,7 +143,7 @@ function sharpVersion(): string | null {
   }
 }
 
-function pdfboxJar(): string | null {
+export function pdfboxJar(): string | null {
   const configured = process.env.BEIAN_PDFBOX_JAR || "";
   if (configured && existsSync(configured)) return configured;
   const bundled = join(dirname(CONTAIN), "pdfbox.jar");
@@ -157,14 +157,12 @@ export function toolGenerationOf(input: {
   java: string | null;
   pdfbox: string | null;
 }): string {
+  const present = (["sharp", "qpdf", "java", "pdfbox"] as const).filter((name) => {
+    const version = input[name];
+    return typeof version === "string" && version.length > 0;
+  });
   return createHash("sha256")
-    .update(JSON.stringify({
-      mechanism: input.mechanism,
-      sharp: input.sharp,
-      qpdf: input.qpdf,
-      java: input.java,
-      pdfbox: input.pdfbox,
-    }))
+    .update(JSON.stringify({ mechanism: input.mechanism, tools: present }))
     .digest("hex");
 }
 

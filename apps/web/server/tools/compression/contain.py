@@ -49,6 +49,24 @@ def option(argv: list[str], flag: str) -> int | None:
     return int(argv[index + 1])
 
 
+def try_cgroup(memory: int) -> bool:
+    """Put this process in its own cgroup before exec, so the helper inherits it."""
+    path = os.path.join("/sys/fs/cgroup", f"beian-compression-{os.getpid()}")
+    try:
+        os.mkdir(path, 0o755)
+        with open(os.path.join(path, "memory.max"), "w", encoding="ascii") as handle:
+            handle.write(str(memory))
+        with open(os.path.join(path, "cgroup.procs"), "w", encoding="ascii") as handle:
+            handle.write(str(os.getpid()))
+    except OSError:
+        try:
+            os.rmdir(path)
+        except OSError:
+            pass
+        return False
+    return True
+
+
 def execute(argv: list[str]) -> int:
     if "--" not in argv:
         sys.stderr.write("containment=invalid\n")
@@ -56,18 +74,18 @@ def execute(argv: list[str]) -> int:
     split = argv.index("--")
     opts = argv[:split]
     command = argv[split + 1 :]
-    if len(command) < 1 or not command[0]:
+    if len(command) < 1 or not command[0] or command[0].startswith("-"):
         sys.stderr.write("containment=invalid\n")
         return 2
     memory = option(opts, "--as")
-    enforced = False
     if memory is not None:
-        enforced = (
+        cgroup_ok = try_cgroup(memory)
+        rlimit_ok = (
             try_limit("RLIMIT_AS", memory)
             or try_limit("RLIMIT_RSS", memory)
             or try_limit("RLIMIT_DATA", memory)
         )
-        if not enforced:
+        if not cgroup_ok and not rlimit_ok:
             sys.stderr.write("containment=unavailable\n")
             return 3
     fsize = option(opts, "--fsize")

@@ -1,4 +1,5 @@
 import type { CompressionCapability } from "./compressionProbe.js";
+import { runCompressionJob } from "./compressionTools.js";
 import type { CompressionFileRecord } from "./compressionStore.js";
 import type { CompressionFileStatus } from "./compressionModel.js";
 
@@ -28,17 +29,13 @@ export function setCompressionExecutorForTest(executor: CompressionExecutor | nu
 }
 
 /**
- * 生产路径在工具模块接入前不会假装成功。
- * 预算没强制或工具不齐时返回真实失败，不发布字节。
+ * 测试钩子只替换这一层。生产路径在预算没强制时直接失败，
+ * 工具齐备时才进入 contain.py 里的 Sharp、qpdf 或 PDFBox。
  */
 export async function executeCompressionFile(request: CompressionExecuteRequest): Promise<CompressionExecuteResult> {
   if (testExecutor) return testExecutor(request);
-  const capability = request.capability;
-  if (capability.budget !== "enforced") {
+  if (request.capability.budget !== "enforced") {
     return { status: "failed", reason: "platform_budget_unavailable", publish: "none" };
   }
-  if (!capability.toolsReady || capability.missing.length > 0) {
-    return { status: "failed", reason: "dependency_missing", publish: "none" };
-  }
-  return { status: "failed", reason: "dependency_missing", publish: "none" };
+  return runCompressionJob(request);
 }
