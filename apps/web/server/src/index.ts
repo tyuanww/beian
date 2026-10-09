@@ -1586,7 +1586,7 @@ app.get("/api/mockups/:id/files/:key", (c) => {
   const encoded = encodeURIComponent(f.name);
   const forceAttach = c.req.query("download") === "1";
   const disposition =
-    forceAttach || !(type.startsWith("image/") || type.startsWith("model/")) ? "attachment" : "inline";
+    forceAttach || !(type.startsWith("image/") || type.startsWith("model/") || key === "unfolded_print") ? "attachment" : "inline";
   const etag = fileEtag(f.path);
   const cacheControl = forceAttach ? "private, no-store" : "private, no-cache";
   if (!forceAttach && c.req.header("if-none-match") === etag) {

@@ -94,6 +94,10 @@ describe("unfolded print http", () => {
     const pdf = await app.request(`/api/mockups/${id}/files/unfolded_print`, { headers: { authorization: `Bearer ${token}` } });
     assert.equal(pdf.status, 200);
     assert.equal(pdf.headers.get("content-type"), "application/pdf");
+    assert.match(pdf.headers.get("content-disposition") || "", /^inline;/);
+    const download = await app.request(`/api/mockups/${id}/files/unfolded_print?download=1`, { headers: { authorization: `Bearer ${token}` } });
+    assert.match(download.headers.get("content-disposition") || "", /^attachment;/);
+    await download.arrayBuffer();
     const bytes = Buffer.from(await pdf.arrayBuffer());
     assert.equal(bytes.subarray(0, 5).toString(), "%PDF-");
     const measured = join(dir, "measured.pdf");
