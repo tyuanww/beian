@@ -25,3 +25,9 @@ Illustrator 语义导出只维护一份 JSX、一份曲线 helper 和一份 `una
 ## V2 实现状态与验收门
 
 网页新打样已固定走 V2，不再有 `PACKAGING_STRUCTURE_V2_ENABLED` 运行时开关；Phase 0 私有真值和杭州 Windows L1/L2 未绿前，不能把代码完成或身份冒烟写成真实生产验收。26H21A 仍是 land 后杭州人工金标，未跑不得宣称控制面已换。PR 不得在杭州生产 self-hosted runner 执行；Windows L1 由可信 `main` 发版在 transaction fence 内验证 COM→JSX，不替代真实稿 L2。GLB 除轴向和毫米尺寸外，还必须验证六个已确认面的纹理来源、方向与镜像，底面空贴图不得通过。
+
+## 净版展开源与关闭证据
+
+V2 预检通过后，只有显式完整语义网（六面及粘口/封口角色、连通且不重叠的真实多边形）才能生成绑定源 AI 哈希、源画板毫米边界和明确印刷层的 unfolded-source。不完整旧稿保持 geometry_incomplete。源稿图文必须来自真实 artwork PDF 并有可信分离证明；禁止把面矩形重绘成假净版，禁止按颜色/线宽猜删装饰。导出检查全部 pageItems，含文字及复合对象；不只检查 pathItems。
+
+净版沿 illustrator_worker.py、export_structure.jsx、export_close.confirm_export_close，协议 beian.illustrator.export/2，request_kind=unfolded_print。结果 JSON 不能单独证明关稿：必须另有匹配 source/attempt 的桥接退出和空文档观测，Windows 复用既有宿主后置探针，Mac 复用桥接退出与文档数探针。未知关闭保持围栏，不以杀 Illustrator 或启动第二个请求清理。D 原生文字必须扩展同一宿主合同，不新增入口。

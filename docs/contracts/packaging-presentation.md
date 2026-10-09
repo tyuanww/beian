@@ -14,13 +14,13 @@
 
 ## 资产与路由
 
-下载白底只给 `front_right` / `back_left`，不要把 `ai-raster` 或 PPT 质检 PNG 当成白底。`*_ground` 映射 `white_a_ground` / `white_b_ground`，不能当 `white_a` / `white_b`。`*_card` 映射 `white_*_card`，不能当产品静帧或地面。读字只给 `read_front` / `read_back` 等 key，对应 `assets/panel_{face}.png`；不要把印刷面当白底，也不要用 GLB 或 3/4 白底静帧读小字。预览 inline 带 ETag，`private, no-cache`，未改可 304；`?download=1` 才附件且 `private, no-store`，不要把 304 空文件当下载。侧栏版本号只读 `/api/status.version`，紧跟在姓名下面，不另写常量。地址按台分开：`/reviewup` `/reviewup/new` `/review/:id` `/mockup` `/mockup/new` `/mockup/:id` `/history` `/settings`，后退换台。旧 `/` `/new` `/review` 302 到审稿台新地址。
+下载白底只给 `front_right` / `back_left`，不要把 `ai-raster` 或 PPT 质检 PNG 当成白底。`*_ground` 映射 `white_a_ground` / `white_b_ground`，不能当 `white_a` / `white_b`。`*_card` 映射 `white_*_card`，不能当产品静帧或地面。读字只给 `read_front` / `read_back` 等 key，对应 `assets/panel_{face}.png`；不要把印刷面当白底，也不要用 GLB 或 3/4 白底静帧读小字。预览 inline 带 ETag，`private, no-cache`，未改可 304；`?download=1` 才附件且 `private, no-store`，不要把 304 空文件当下载。侧栏版本号只读 `/api/status.version`，紧跟在姓名下面，不另写常量。地址按台分开：`/reviewup` `/reviewup/new` `/review/:id` `/mockup` `/mockup/new` `/mockup/:id` `/compress` `/compress/:id` `/history` `/settings`，后退换台。旧 `/` `/new` `/review` 302 到审稿台新地址。
 
 调试：对外 `job_error` 用短中文。Node 日志写 problem + cause + fix。打开 `DATA_DIR/tasks/{tid}.json`。不要新 FastAPI 路由。
 
 ## 成片与导出补充
 
-打样台和打样单主区白底深字（深色主题也是）；GLB 中性环境；每张图右上角下载。有 `white_a_ground` / `white_b_ground` 的新单走 grounded 成片：canvas 铺 `rgb(228,228,232)` 再 multiply 地面、叠产品，预览和下载同一合成器；正面大约 480px 的 5:6 主图；页头藏「下载 PPT」，灯光收到「调灯」后面；地面坏了藏原图和下载。GroundedShot 第一屏先读 `white_*_card`（Blender 后最长边 1440），解码成功的 full 原位替换 canvas 源；卡 415/失败回退全图，full 失败保留卡图并提示重新打开此单。`*_card` 不能当产品静帧，也不能当 `*_ground`。`*_ground` 不能当产品静帧。Blender 先出产品 RGBA，再单独跑地面 pass（EEVEE 阴影 + 接触阴影，地面 albedo 0.91），地面失败不挡产品图；重试先 `unlinkSameGenerationStills`（含地面和核对卡）。没有地面图的旧单仍是三栏白底、浅底+内描边，页头「下载 PPT」（没写成仍显示，点了出「PPT 没写成，白底仍可下」）。不提供 PDF 下载入口；点下载底部提示不挡操作；GLB 全屏居中；截图时下载钮藏起来；全屏被拒写「全屏打不开」。打样单下面印刷面读字。网页把产品叠到可调白底上，所以产品和背景能分开辨认、分开调光；GLB 本来就只导出盒身、环境灯另算。产品灯光调静帧产品层和 GLB 曝光，背景灯光调白底/地面和 GLB 底色，下载跟当前灯光走。原图是同页灯箱，不是另开未调光 PNG。打样中和打样失败可重试，先确认当前 worker 已退出；仍运行时只按既有安全取消合同处理，不能用重试绕过 Illustrator 禁杀阶段，无法安全退出就 409，不必重传。读字只给 `read_*`，对应 `assets/panel_{face}.png`，走现有 `canvasZoom.ts` 1–6×；白底仍只给 `front_right` / `back_left`，不要用 GLB 或 3/4 白底静帧读小字。详情 `publicMockup` / `fileOf` 才按磁盘补印刷面，列表 `publicMockupSummary` 不扫盘。打样 PPT 先用两张白底写 OOXML，不依赖 Node；写不出才试演示文稿运行时。缺 PPT 不要把整单判失败；内部仍用两张白底合成 PDF（页底先铺白；pymupdf 写不出且还没落盘才用已装 Pillow，不要盖掉已写成的文件，不要新装包）。磁盘上的产品 PNG 要重新打样才会变；页上灯光立刻作用。
+打样台和打样单主区白底深字（深色主题也是）；GLB 中性环境；每张图右上角下载。有 `white_a_ground` / `white_b_ground` 的新单走 grounded 成片：canvas 铺 `rgb(228,228,232)` 再 multiply 地面、叠产品，预览和下载同一合成器；正面大约 480px 的 5:6 主图；页头藏「下载 PPT」，灯光收到「调灯」后面；地面坏了藏原图和下载。GroundedShot 第一屏先读 `white_*_card`（Blender 后最长边 1440），解码成功的 full 原位替换 canvas 源；卡 415/失败回退全图，full 失败保留卡图并提示重新打开此单。`*_card` 不能当产品静帧，也不能当 `*_ground`。`*_ground` 不能当产品静帧。Blender 先出产品 RGBA，再单独跑地面 pass（EEVEE 阴影 + 接触阴影，地面 albedo 0.91），地面失败不挡产品图；重试先 `unlinkSameGenerationStills`（含地面和核对卡）。没有地面图的旧单仍是三栏白底、浅底+内描边，页头「下载 PPT」（没写成仍显示，点了出「PPT 没写成，白底仍可下」）。成片不提供 PDF 下载入口（独立净版展开见下文）；点下载底部提示不挡操作；GLB 全屏居中；截图时下载钮藏起来；全屏被拒写「全屏打不开」。打样单下面印刷面读字。网页把产品叠到可调白底上，所以产品和背景能分开辨认、分开调光；GLB 本来就只导出盒身、环境灯另算。产品灯光调静帧产品层和 GLB 曝光，背景灯光调白底/地面和 GLB 底色，下载跟当前灯光走。原图是同页灯箱，不是另开未调光 PNG。打样中和打样失败可重试，先确认当前 worker 已退出；仍运行时只按既有安全取消合同处理，不能用重试绕过 Illustrator 禁杀阶段，无法安全退出就 409，不必重传。读字只给 `read_*`，对应 `assets/panel_{face}.png`，走现有 `canvasZoom.ts` 1–6×；白底仍只给 `front_right` / `back_left`，不要用 GLB 或 3/4 白底静帧读小字。详情 `publicMockup` / `fileOf` 才按磁盘补印刷面，列表 `publicMockupSummary` 不扫盘。打样 PPT 先用两张白底写 OOXML，不依赖 Node；写不出才试演示文稿运行时。缺 PPT 不要把整单判失败；内部仍用两张白底合成 PDF（页底先铺白；pymupdf 写不出且还没落盘才用已装 Pillow，不要盖掉已写成的文件，不要新装包）。磁盘上的产品 PNG 要重新打样才会变；页上灯光立刻作用。
 
 ### GLB 查看器显示
 
@@ -29,3 +29,11 @@
 默认视角为 `35deg 72deg` 三分之四构图；透视查看器不承诺与正交静帧像素一致。初始加载、复位、resize 和全屏等待 `updateFraming()` 后，按原盒身世界边界、实际 FOV 写入显式中心及米制距离，避免桌墙扩大取景。默认距离系数 145%，最大 155%，百分比只参与盒身距离计算。墙桌交线位于盒底附近，墙面仅从正面显示；从墙后观察时背面剔除，包装仍可完整查看，此时墙不显示。背景切换保留用户方位及缩放，复位按钮恢复默认构图。桌墙模式保留全周方位旋转，俯仰限制在桌面以上，避免穿到桌下；白底/银底不加该俯仰限制。极窄 FOV 下距离另有桌面范围内的安全上限。
 
 查看器使用仓库内原创无色偏 `carton-studio-v1.hdr` 和 commerce 色彩映射，曝光为 `0.7 × clampStudioLight`。桌墙模式另加随盒身边界生成的柔和接触影近似，不宣称等同 Blender 物理投影。显示房间使用独立自发光材质，按产品曝光倒数补偿，使背景灯只作用房间、产品灯不连带改变桌墙；原始包装材质与下载字节不变。静帧合成不受本查看器调整影响。该方案经过本地合成验证，真实包装画质与杭州实机仍需人工确认。
+
+## 净版展开与六面下载
+
+仅 `GET /api/mockups/:id` 详情增加 unfolded_print 与 print_faces_zip；列表不带这两个字段。unfolded_print.status 为 unavailable / queued / running / ready / failed，reason 仅有原因时出现；只有 ready 带 file_key=unfolded_print、width_mm、height_mm，单位为源稿毫米 1:1，不缩 A4。close_unconfirmed 只与 running 共存。原因集合为 source_missing、geometry_incomplete、separation_unreliable、host_unavailable、source_changed、close_unconfirmed、export_failed。POST 错误优先显示服务端 message，GET 没有 message 时才用稳定原因兜底。
+
+独立 print_faces_zip：0 面 unavailable、1–5 面 incomplete + faces_incomplete、六面才 ready + file_key=print_faces_zip。净版不能由六面拼接或 GLB 截图代替。
+
+两个文件都沿 `/api/mockups/:id/files/:key`：净版仅 ready 返回 application/pdf，坏 PDF 返回 415「净版展开不是可印刷的 PDF。」；六面不齐返回 404「六面印刷图还不齐」，齐全返回 application/zip、print-faces.zip。净版普通 GET 允许 inline 预览，download=1 才附件；缓存头沿既有预览/下载策略。未 ready 或源稿已变不提供旧净版。
