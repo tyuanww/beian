@@ -261,12 +261,15 @@ test("完成态打样单在三图下用印刷面读字并可放大", async ({ pa
 
   await page.goto(`/mockup/${mockup.id}`);
 
-  const read = page.getByRole("region", { name: "印刷面读字" });
+  const read = page.getByRole("region", { name: "2D 平面图" });
   await expect(page.getByText("不要用 GLB 读小字。")).toBeVisible();
-  await expect(read.getByRole("heading", { name: "读字" })).toBeVisible();
+  await expect(read.getByRole("heading", { name: "2D 平面图" })).toBeVisible();
   await expect(read.getByText("这单没有印刷面图。")).toHaveCount(0);
+  await page.getByRole("tab", { name: "正面", exact: true }).click();
   await expect(read.getByRole("img", { name: "正面印刷面" })).toBeVisible();
+  await page.getByRole("tab", { name: "反面", exact: true }).click();
   await expect(read.getByRole("img", { name: "反面印刷面" })).toBeVisible();
+  await page.getByRole("tab", { name: "正面", exact: true }).click();
   await expect(page.locator("canvas[aria-label='正面与侧面白底']")).toBeVisible();
   await expect(page.locator(".mockup-sheet-photos").getByRole("img", { name: /印刷面/ })).toHaveCount(0);
   await expect(read.getByRole("link", { name: "打开正面印刷面" })).toHaveAttribute(
@@ -300,14 +303,14 @@ test("完成态打样单没有印刷面时提示重新打样，不用 GLB 读字
   });
   await page.goto(`/mockup/${mockup.id}`);
 
-  const read = page.getByRole("region", { name: "印刷面读字" });
+  const read = page.getByRole("region", { name: "2D 平面图" });
   const alert = page.locator(".mockup-print-alert");
   await expect(alert).toContainText("这单没有可用底稿，无法补生成。请重新打样。");
   const alertBox = await alert.boundingBox();
   const photosBox = await page.locator(".mockup-sheet-photos").boundingBox();
   expect(alertBox && photosBox && alertBox.y < photosBox.y).toBeTruthy();
   await expect(page.getByRole("button", { name: "补印刷面" })).toHaveCount(0);
-  await expect(read.getByRole("img")).toHaveCount(0);
+  await expect(read.getByRole("img", { name: /印刷面/ })).toHaveCount(0);
   await expect(read.getByRole("link")).toHaveCount(0);
   await expect(page.locator("canvas[aria-label='正面与侧面白底']")).toBeVisible();
 });
@@ -342,6 +345,7 @@ test("缺印刷面且可补时点补印刷面后读字出现，看板仍已出�
   await expect(page.getByText("打样中", { exact: true })).toHaveCount(0);
   await page.getByRole("button", { name: "补印刷面" }).click();
   await expect(page.locator(".mockup-print-alert")).toHaveCount(0);
+  await page.getByRole("tab", { name: "正面", exact: true }).click();
   await expect(page.getByRole("img", { name: "正面印刷面" })).toBeVisible();
   expect(
     syntheticApi.calls.some((call) => call.method === "POST" && call.path === `/api/mockups/${mockup.id}/print-faces`),
@@ -377,7 +381,7 @@ test("旧单未取得逐动作授权时不能退回原位重渲棚", async ({ pa
   await expect(page.getByRole("heading", { name: mockup.title })).toBeVisible();
 });
 
-test("点反面芯片滚到读字并高亮", async ({ page, syntheticApi }) => {
+test("切换反面标签显示对应印刷面", async ({ page, syntheticApi }) => {
   const mockup = completedMockup("ee77ff001122", "读字芯片盒");
   mockup.files = [
     { key: "white_a", name: "正面与侧面.png" },
@@ -392,8 +396,8 @@ test("点反面芯片滚到读字并高亮", async ({ page, syntheticApi }) => {
     });
   }
   await page.goto(`/mockup/${mockup.id}`);
-  await page.getByRole("navigation", { name: "跳到印刷面" }).getByRole("button", { name: "反面" }).click();
-  await expect(page.locator("#read-face-back")).toHaveClass(/is-highlight/);
+  await page.getByRole("tab", { name: "反面", exact: true }).click();
+  await expect(page.locator("#read-face-back")).toBeVisible();
 });
 
 test("印刷面图损坏时隐藏原图和下载操作", async ({ page, syntheticApi }) => {
@@ -410,7 +414,8 @@ test("印刷面图损坏时隐藏原图和下载操作", async ({ page, syntheti
 
   await page.goto(`/mockup/${mockup.id}`);
 
-  const read = page.getByRole("region", { name: "印刷面读字" });
+  const read = page.getByRole("region", { name: "2D 平面图" });
+  await page.getByRole("tab", { name: "正面", exact: true }).click();
   await expect(read.getByText("这张印刷面图坏了，重新打样后才能读字。")).toBeVisible();
   await expect(read.getByRole("link")).toHaveCount(0);
   await expect(read.getByRole("button", { name: /印刷面/ })).toHaveCount(0);

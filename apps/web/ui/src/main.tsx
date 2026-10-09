@@ -6,6 +6,7 @@ import { applyAppearance, loadAppearance } from "./chrome/appearance";
 import { AppearanceRoot } from "./chrome/AppearanceRoot";
 import "./styles/tokens.css";
 import "./styles/app.css";
+import "./styles/batch.css";
 
 applyAppearance(
   loadAppearance(),

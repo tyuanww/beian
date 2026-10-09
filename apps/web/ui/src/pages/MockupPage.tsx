@@ -1,7 +1,7 @@
 import { MockupGlbViewer } from "./MockupGlbViewer";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { Alert, App, Button, ConfigProvider, Empty, Input, Segmented, Space, Table, Tag, theme as antdTheme } from "antd";
+import { Alert, App, Button, ConfigProvider, Empty, Input, Segmented, Space, Table, Tabs, Tag, theme as antdTheme } from "antd";
 import { api, ApiError, isUploadReceiptExpired, UPLOAD_TIMEOUT_MS, type MockupJob, type PendingUploadReceipt } from "../api";
 import {
   forgetMockupHandoff,
@@ -776,7 +776,9 @@ export function MockupJobPage({
   const [versionsOpen, setVersionsOpen] = useState(false);
   const [lightsOpen, setLightsOpen] = useState(false);
   const [backdrop, setBackdrop] = useState<BackdropPreset>(readBackdropPreset);
-  const [highlightedReadFace, setHighlightedReadFace] = useState<string | null>(null);
+  const [activePlane, setActivePlane] = useState("unfolded");
+  const [unfoldedSubmitting, setUnfoldedSubmitting] = useState(false);
+  const [unfoldedError, setUnfoldedError] = useState<string | null>(null);
   const glbBox = useRef<HTMLDivElement>(null);
   const hudTimer = useRef<number | null>(null);
   const announced = useRef("");
@@ -785,6 +787,7 @@ export function MockupJobPage({
   const seededJobId = useRef(jobId);
   const waiting = Boolean(job) && shouldShowWaitCard(job);
   const repairPending = job?.print_faces_repair?.status === "queued" || job?.print_faces_repair?.status === "running";
+  const unfoldedPending = job?.unfolded_print?.status === "queued" || job?.unfolded_print?.status === "running";
   const generation=job?.current_render_generation_id || job?.studio_relit_at || job?.job_finished_at || "";
   const visibleGeneration=useRef(generation);
   visibleGeneration.current=generation;
@@ -906,7 +909,7 @@ export function MockupJobPage({
   }, [jobId]);
 
   useEffect(() => {
-    if (!job?.id || (!waiting && !repairPending)) return;
+    if (!job?.id || (!waiting && !repairPending && !unfoldedPending)) return;
     let cancelled = false;
     const id = window.setInterval(() => {
       void api
@@ -940,7 +943,7 @@ export function MockupJobPage({
       cancelled = true;
       window.clearInterval(id);
     };
-  }, [job?.id, waiting, repairPending, message]);
+  }, [job?.id, waiting, repairPending, unfoldedPending, message]);
 
   if (error && !job) {
     return (
@@ -1276,49 +1279,28 @@ export function MockupJobPage({
           </figure>
         )}
       </div>}
-      {readFaces.length ? (
-        <div className="mockup-read-chips" role="navigation" aria-label="跳到印刷面">
-          <span className="mockup-backdrop-label">读字</span>
-          {readFaces.map((role) => (
-            <button
-              key={role}
-              type="button"
-              className={highlightedReadFace === role ? "mockup-read-chip is-current" : "mockup-read-chip"}
-              onClick={() => {
-                setHighlightedReadFace(role);
-                document.getElementById(`read-face-${role}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
-              }}
-            >
-              {READ_FACE_LABEL[role]}
-            </button>
-          ))}
+      <section className="mockup-read-faces" aria-label="2D 平面图">
+        <div className="batch-section-head">
+          <div><h2 className="mockup-read-title">2D 平面图</h2><p className="page-lead">净版展开用于原尺寸打印；各面 PNG 用于放大读字。</p></div>
+          <Button href={job.print_faces_zip?.status === "ready" ? fileHref(job.id, "print_faces_zip", true) : undefined}
+            disabled={job.print_faces_zip?.status !== "ready"}>下载六面 ZIP</Button>
         </div>
-      ) : null}
-      <section className="mockup-read-faces" aria-label="印刷面读字">
-        <h2 className="mockup-read-title">读字</h2>
-        <p className="page-lead">印刷面来自打样时已生成的各面图，不是 3D 截屏。滚轮或按钮可放到 6 倍。</p>
-        {readFaces.length ? (
-          <div className="mockup-read-grid">
-            {readFaces.map((role) => {
-              const fileKey = readFaceKey(role);
-              const file = (job.files || []).find((item) => item.key === fileKey);
-              return (
-                <ReadFaceShot
-                  key={fileKey}
-                  jobId={job.id}
-                  fileKey={fileKey}
-                  label={READ_FACE_LABEL[role]}
-                  highlighted={highlightedReadFace === role}
-                  faceId={`read-face-${role}`}
-                  downloadName={file?.name}
-                  onDownload={() => notice(downloadHudLine("印刷面"))}
-                />
-              );
-            })}
-          </div>
-        ) : showPrintAlert ? null : (
-          <p className="page-lead">这单没有印刷面图。要读字请重新打样。</p>
-        )}
+        <Tabs activeKey={activePlane} onChange={setActivePlane} items={[
+          { key: "unfolded", label: "2D展开图", children: <UnfoldedPanel job={job} canCreate={canCreate}
+            submitting={unfoldedSubmitting} error={unfoldedError} onRequest={async () => {
+              setUnfoldedSubmitting(true); setUnfoldedError(null);
+              try { const next = await api.requestUnfoldedPrint(job.id); if (alive.current) setJob(next); }
+              catch (err) { if (alive.current) { setUnfoldedError(err instanceof Error ? err.message : "净版展开没有做成，请稍后再试。"); void api.mockup(job.id).then(next => { if (alive.current) setJob(next); }).catch(() => undefined); } }
+              finally { if (alive.current) setUnfoldedSubmitting(false); }
+            }} /> },
+          ...(["front", "back", "left", "right", "top", "bottom"] as const).map(role => ({
+            key: role, label: READ_FACE_LABEL[role], children: readFaces.includes(role)
+              ? <ReadFaceShot jobId={job.id} fileKey={readFaceKey(role)} label={READ_FACE_LABEL[role]}
+                  highlighted={false} faceId={`read-face-${role}`} downloadName={job.files.find(item => item.key === readFaceKey(role))?.name}
+                  onDownload={() => notice(downloadHudLine("印刷面"))} />
+              : <Empty description={`${READ_FACE_LABEL[role]}还没有印刷面图，可使用上方“补印刷面”。`} />,
+          })),
+        ]} />
       </section>
       {hud && typeof document !== "undefined"
         ? createPortal(
@@ -2199,4 +2181,36 @@ function LegacyLitCanvas({ image, alt, productLight, backgroundLight, backdrop, 
     } catch { ctx.clearRect(0, 0, canvas.width, canvas.height); setError(true); }
   }, [image, size, full, productLight, backgroundLight, backdrop]);
   return <>{error ? <p className="page-lead">调灯失败，请重新加载图片。</p> : null}<canvas ref={setCanvasRef} className={full ? "mockup-studio-lightbox-canvas" : "mockup-studio-canvas"} aria-label={alt} /></>;
+}
+
+const UNFOLDED_COPY: Record<string, string> = {
+  source_missing: "找不到这单的源稿，不能做净版展开。",
+  geometry_incomplete: "展开几何不完整，不能确认粘口和封口。",
+  separation_unreliable: "刀线、折线和印刷装饰无法可靠分开，不能按颜色猜测删除。",
+  host_unavailable: "需要用 Illustrator 重新导出净版，但本机宿主现在不可用。",
+  source_changed: "源稿已经变了，这份净版不再对应当前稿。",
+  close_unconfirmed: "Illustrator 还没有确认关闭，净版先不算做好。",
+  export_failed: "净版展开没有做成，请稍后再试。",
+};
+function UnfoldedPanel({ job, canCreate, submitting, error, onRequest }: {
+  job: MockupJob; canCreate: boolean; submitting: boolean; error: string | null; onRequest: () => void;
+}) {
+  const result = job.unfolded_print;
+  const pending = result?.status === "queued" || result?.status === "running";
+  const ready = result?.status === "ready" && result.file_key === "unfolded_print";
+  return <div className="unfolded-panel">
+    <div className="batch-section-head"><div>
+      <h3>净版展开图</h3>
+      <p className="page-lead">保留图文、粘口与封口区域，去除刀线、折线和生产标注。打印时选择 100% 原尺寸。</p>
+      {ready ? <p className="physical-size">{result.width_mm} × {result.height_mm} mm · 1:1</p> : null}
+    </div><Space wrap>
+      {ready ? <><Button href={fileHref(job.id, "unfolded_print")} target="_blank">打开预览</Button><Button type="primary" href={fileHref(job.id, "unfolded_print", true)}>下载展开 PDF</Button></>
+        : <Button type="primary" disabled={!canCreate || pending} loading={submitting || pending} onClick={onRequest}>
+          {pending ? "正在生成" : result?.status === "failed" ? "重试生成" : "生成净版展开图"}
+        </Button>}
+    </Space></div>
+    {error || result?.reason ? <Alert type={pending ? "info" : "warning"} showIcon title={error || UNFOLDED_COPY[result?.reason || ""] || "净版展开暂不可用，请重试。"} /> : null}
+    {ready ? <iframe key={job.current_render_generation_id || "current"} title="净版展开图预览" className="unfolded-preview" src={fileHref(job.id, "unfolded_print")} />
+      : <Empty description={pending ? "已进入队列，可以离开此页，完成后在历史记录中查看。" : "生成后可预览并下载 1:1 的净版展开 PDF。"} />}
+  </div>;
 }

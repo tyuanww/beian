@@ -16,6 +16,7 @@ const HistoryPage = lazy(() =>
 const MockupDesk = lazy(() =>
   import("./pages/MockupPage").then((m) => ({ default: m.MockupDesk })),
 );
+const CompressionPage = lazy(() => import("./pages/CompressionPage").then(m => ({ default: m.CompressionPage })));
 const SettingsPage = lazy(() =>
   import("./pages/SettingsPage").then((m) => ({ default: m.SettingsPage })),
 );
@@ -63,6 +64,7 @@ function AuthShell({ title, children }: { title?: string; children: ReactNode })
 
 function navOf(view: View): NavKey {
   if (view === "mockup" || view === "mockupNew") return "mockup";
+  if (view === "compression") return "compression";
   if (view === "history") return "history";
   if (view === "settings") return "settings";
   return "review";
@@ -109,11 +111,12 @@ function bootRoute() {
       view: "tasks" as View,
       taskId: null as string | null,
       mockupId: null as string | null,
+      compressionId: null as string | null,
       receipt: null as string | null,
     };
   }
   const r = parsePath(window.location.pathname, window.location.search, window.location.hash);
-  return { view: r.view, taskId: r.taskId ?? null, mockupId: r.mockupId ?? null, receipt: r.receipt ?? null };
+  return { view: r.view, compressionId: r.compressionId ?? null, taskId: r.taskId ?? null, mockupId: r.mockupId ?? null, receipt: r.receipt ?? null };
 }
 
 export function App() {
@@ -124,6 +127,7 @@ export function App() {
   const [authError, setAuthError] = useState<string | null>(null);
   const [apiBroken, setApiBroken] = useState<string | null>(null);
   const [taskId, setTaskId] = useState<string | null>(boot.taskId);
+  const [compressionId, setCompressionId] = useState<string | null>(boot.compressionId);
   const [mockupId, setMockupId] = useState<string | null>(boot.mockupId);
   const [receiptId, setReceiptId] = useState<string | null>(boot.receipt);
   const [collapsed, setCollapsed] = useState(readCollapsed);
@@ -241,6 +245,7 @@ export function App() {
     setView(r.view);
     setTaskId(r.taskId ?? null);
     setMockupId(r.mockupId ?? null);
+    setCompressionId(r.compressionId ?? null);
     setReceiptId(r.receipt ?? null);
     const href = hrefOf(r);
     const pathNow = `${window.location.pathname.replace(/\/+$/, "") || "/"}${window.location.search}`;
@@ -258,6 +263,7 @@ export function App() {
       setView(r.view);
       setTaskId(r.taskId ?? null);
       setMockupId(r.mockupId ?? null);
+      setCompressionId(r.compressionId ?? null);
       setReceiptId(r.receipt ?? null);
     }
     window.addEventListener("popstate", onPop);
@@ -307,6 +313,7 @@ export function App() {
     setView(r.view);
     setTaskId(r.taskId ?? null);
     setMockupId(r.mockupId ?? null);
+    setCompressionId(r.compressionId ?? null);
     setReceiptId(r.receipt ?? null);
     const href = hrefOf(r);
     const cur = `${window.location.pathname.replace(/\/+$/, "") || "/"}${window.location.search}`;
@@ -328,6 +335,7 @@ export function App() {
       collapsePhoneSheet();
       return;
     }
+    if (key === "compression") { goRoute({ view: "compression" }); collapsePhoneSheet(); return; }
     if (key === "history") {
       goRoute({ view: "history" });
       collapsePhoneSheet();
@@ -413,15 +421,22 @@ export function App() {
             />
           </Suspense>
         ) : null}
+        {view === "compression" ? <Suspense fallback={<PaneFallback label="打开文件压缩…" />}>
+          <CompressionPage id={compressionId} receiptId={receiptId} owner={me.open_id || me.display_name || ""}
+            canCreate={me.perms.includes("create")} canExport={me.perms.includes("export")}
+            onOpen={id => goRoute({ view: "compression", compressionId: id })}
+            onBack={() => goRoute({ view: "compression" })} onHistory={() => goRoute({ view: "history" })} />
+        </Suspense> : null}
         {view === "history" ? (
           <Suspense fallback={<PaneFallback label="打开历史记录…" />}>
-            <HistoryPage
+            <HistoryPage key={me.open_id || me.display_name || ""} owner={me.open_id || me.display_name || ""}
+              onOpenCompression={id => goRoute({ view: "compression", compressionId: id })}
               canCreate={me.perms.includes("create")}
               canDelete={me.perms.includes("delete")}
               onOpenTask={(id) => goRoute({ view: "review", taskId: id })}
               onOpenMockup={(id) => goRoute({ view: "mockup", mockupId: id })}
               onOpenUpload={(kind, receipt) =>
-                kind === "compare"
+                kind === "compression" ? goRoute({ view: "compression", receipt: receipt || undefined }) : kind === "compare"
                   ? goRoute({ view: "new", receipt: receipt || undefined })
                   : goRoute({ view: "mockupNew", receipt: receipt || undefined })
               }

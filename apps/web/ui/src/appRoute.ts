@@ -1,17 +1,18 @@
 /** 浏览器地址。审稿台 `/reviewup`，工作台 `/reviewup/new`。旧 `/` `/new` `/review` 仍能解析，写出时用新地址。 */
 
-export type AppView = "tasks" | "new" | "review" | "mockup" | "mockupNew" | "history" | "settings";
+export type AppView = "tasks" | "new" | "review" | "mockup" | "mockupNew" | "history" | "settings" | "compression";
 
 export type AppRoute = {
   view: AppView;
   taskId?: string | null;
   mockupId?: string | null;
   receipt?: string | null;
+  compressionId?: string | null;
 };
 
 const TID = /^[0-9a-f]{12}$/i;
 const SPA =
-  /^(?:\/reviewup(?:\/new)?|\/new|\/history|\/settings|\/review(?:\/[0-9a-f]{12})?|\/mockup(?:\/(?:new|[0-9a-f]{12}))?)$/i;
+  /^(?:\/reviewup(?:\/new)?|\/new|\/history|\/settings|\/compress(?:\/[0-9a-f]{12})?|\/review(?:\/[0-9a-f]{12})?|\/mockup(?:\/(?:new|[0-9a-f]{12}))?)$/i;
 
 export function parsePath(pathname: string, search = "", hash = ""): AppRoute {
   const p = pathname.replace(/\/+$/, "") || "/";
@@ -20,6 +21,8 @@ export function parsePath(pathname: string, search = "", hash = ""): AppRoute {
   if (p === "/reviewup/new" || p === "/new") {
     return TID.test(receipt) ? { view: "new", receipt: receipt.toLowerCase() } : { view: "new" };
   }
+  const compression = p.match(/^\/compress(?:\/([0-9a-f]{12}))?$/i);
+  if (compression) return { view: "compression", compressionId: compression[1]?.toLowerCase() || null, ...(TID.test(receipt) ? { receipt: receipt.toLowerCase() } : {}) };
   if (p === "/history") return { view: "history" };
   if (p === "/settings") return { view: "settings" };
   const review = p.match(/^\/review\/([0-9a-f]{12})$/i);
@@ -44,6 +47,7 @@ export function parsePath(pathname: string, search = "", hash = ""): AppRoute {
 export function hrefOf(route: AppRoute): string {
   const receipt = route.receipt && TID.test(route.receipt) ? `?receipt=${route.receipt.toLowerCase()}` : "";
   if (route.view === "new") return `/reviewup/new${receipt}`;
+  if (route.view === "compression") return route.compressionId ? `/compress/${route.compressionId}` : `/compress${receipt}`;
   if (route.view === "history") return "/history";
   if (route.view === "settings") return "/settings";
   if (route.view === "review") return route.taskId ? `/review/${route.taskId}` : "/reviewup";

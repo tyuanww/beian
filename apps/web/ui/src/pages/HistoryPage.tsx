@@ -1,448 +1,155 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { Alert, App, Button, Checkbox, DatePicker, Empty, Pagination, Segmented, Select, Table, Tag } from "antd";
-import type { Dayjs } from "dayjs";
-import { api, ApiError, transientApiFailure, type MockupJob, type PendingUploadReceipt, type TaskSummary } from "../api";
-import { uploadStore, useUploadSnapshot, type UploadKind } from "../uploadStore";
-import {
-  filterHistoryRows,
-  historyActors,
-  historyCanDelete,
-  historyHasLive,
-  historyMockRow,
-  HISTORY_PAGE_SIZE,
-  paginateHistoryRows,
-  historyRowKey,
-  historySelectionState,
-  historyTaskRow,
-  historyUploadRow,
-  type HistoryKindFilter,
-  type HistoryRow,
-  type HistoryTimeFilter,
-} from "./historyRows";
-import { pendingUploadItems } from "./uploadDesk";
+import { useEffect, useRef, useState } from "react";
+import { Alert, App, Button, Checkbox, Empty, Input, Select, Space, Table, Tag } from "antd";
+import { api, ApiError, type PendingUploadReceipt } from "../api";
+import { uploadStore } from "../uploadStore";
+import type { HistoryItem, HistoryResult } from "../batchTypes";
+import { emptyHistoryFilters, historyDeletable, historyKey, historyLive, historyQuery, historyTypeLabels, type HistoryFilters } from "./historyQuery";
 
-type Props = {
-  canCreate: boolean;
-  canDelete: boolean;
-  onOpenTask: (id: string) => void;
-  onOpenMockup: (id: string) => void;
-  onOpenUpload: (kind: UploadKind, id?: string | null) => void;
-};
-
-type Row = HistoryRow;
-
-export type HistoryRowAction = "open-task" | "open-mockup" | "open-upload" | "toggle" | "blocked";
-
-export function historyRowAction(row: Row, editing: boolean): HistoryRowAction {
-  if (!editing) {
-    if (row.resource === "upload") return "open-upload";
-    return row.resource === "task" ? "open-task" : "open-mockup";
-  }
-  return historyCanDelete(row) ? "toggle" : "blocked";
+// Kept for callers of the existing row action helper during the data transition.
+import { historyCanDelete, type HistoryRow } from "./historyRows";
+export function historyRowAction(row: HistoryRow, editing: boolean) {
+  if (editing) return historyCanDelete(row) ? "toggle" : "blocked";
+  if (row.resource === "upload") return "open-upload";
+  return row.resource === "task" ? "open-task" : "open-mockup";
 }
 
-function clock(iso: string) {
-  if (!iso) return "—";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  const p = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+type Props = { owner: string; canCreate: boolean; canDelete: boolean;
+  onOpenTask: (id: string) => void; onOpenMockup: (id: string) => void; onOpenCompression: (id: string) => void;
+  onOpenUpload: (kind: PendingUploadReceipt["kind"], receipt?: string | null) => void };
+type Saved = { filters: HistoryFilters; cursors: string[]; page: number; scroll: number };
+function restore(key: string): Saved {
+  try {
+    const value = JSON.parse(sessionStorage.getItem(key) || "null") as Saved | null;
+    if (value && value.filters && Array.isArray(value.cursors) && value.cursors.length <= 5000 && Number.isInteger(value.page) && value.page >= 0 && value.page < value.cursors.length) {
+      const filters = Object.fromEntries(Object.keys(emptyHistoryFilters).map(field => [field, typeof value.filters[field as keyof HistoryFilters] === "string" ? value.filters[field as keyof HistoryFilters] : ""])) as HistoryFilters;
+      return { filters, cursors: value.cursors.filter(item => typeof item === "string"), page: value.page, scroll: Number(value.scroll) || 0 };
+    }
+  } catch { /* Storage may be disabled. */ }
+  return { filters: { ...emptyHistoryFilters }, cursors: [""], page: 0, scroll: 0 };
 }
+const stateLabels: Record<string, string> = { in_review: "待核对", comparing: "对照中", reworking: "对红中", uploaded: "待开工", queued: "排队中", running: "处理中", done: "已完成", completed: "已完成", signed: "已签字", failed: "失败", partial: "部分完成", ready: "待开工", uploading: "上传中", compared: "待核对", review_required: "待确认", unsupported: "暂不支持", reworked: "对红完成", idle: "待开工" };
 
-export function HistoryPage({ canCreate, canDelete, onOpenTask, onOpenMockup, onOpenUpload }: Props) {
+export function HistoryPage({ owner, canCreate, canDelete, onOpenTask, onOpenMockup, onOpenCompression, onOpenUpload }: Props) {
   const { message, modal } = App.useApp();
-  const [tasks, setTasks] = useState<TaskSummary[]>([]);
-  const [jobs, setJobs] = useState<MockupJob[]>([]);
-  const [uploads, setUploads] = useState<PendingUploadReceipt[]>([]);
-  const compareUpload = useUploadSnapshot("compare");
-  const mockupUpload = useUploadSnapshot("mockup");
+  const storageKey = `beian:history:v2:${owner}`;
+  const [state, setState] = useState<Saved>(() => restore(storageKey));
+  const [search, setSearch] = useState(state.filters.q);
+  const [creator, setCreator] = useState(state.filters.creator);
+  const [data, setData] = useState<HistoryResult | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [building, setBuilding] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [refresh, setRefresh] = useState(0);
   const [editing, setEditing] = useState(false);
-  const [selected, setSelected] = useState<string[]>([]);
-  const [kind, setKind] = useState<HistoryKindFilter>("全部");
-  const [time, setTime] = useState<HistoryTimeFilter>("全部");
-  const [actor, setActor] = useState("");
-  const [range, setRange] = useState<[Dayjs, Dayjs] | null>(null);
-  const [page, setPage] = useState(1);
-  const loadGen = useRef(0);
-
-  function load() {
-    const g = ++loadGen.current;
-    return Promise.all([
-      api.tasks(),
-      api.mockups().catch(() => [] as MockupJob[]),
-      canCreate ? api.uploads().catch(() => [] as PendingUploadReceipt[]) : Promise.resolve([] as PendingUploadReceipt[]),
-    ]).then(([t, m, u]) => {
-      if (g !== loadGen.current) return;
-      setTasks(t);
-      setJobs(m);
-      setUploads(u);
-    });
-  }
-
+  const [selected, setSelected] = useState<HistoryItem[]>([]);
+  const [deleting, setDeleting] = useState(false);
+  const restoreScroll = useRef(true);
+  const query = historyQuery(state.filters, state.cursors[state.page]);
+  useEffect(() => { try { sessionStorage.setItem(storageKey, JSON.stringify(state)); } catch { /* Use memory. */ } }, [state, storageKey]);
   useEffect(() => {
-    let cancelled = false;
-    load().catch((err: unknown) => {
-      if (cancelled) return;
-      if (err instanceof ApiError && err.status === 401) setError("未登录，请重新用飞书进入。");
-      else setError(err instanceof Error ? err.message : "加载失败");
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [canCreate]);
-
-  const rows = useMemo(() => {
-    const pending = [
-      ...pendingUploadItems("compare", compareUpload, uploads),
-      ...pendingUploadItems("mockup", mockupUpload, uploads),
-    ].map(historyUploadRow);
-    const out = [...pending, ...tasks.map(historyTaskRow), ...jobs.map(historyMockRow)];
-    out.sort((a, b) => (b.at || "").localeCompare(a.at || ""));
-    return out;
-  }, [compareUpload, jobs, mockupUpload, tasks, uploads]);
-
-  const live = historyHasLive(rows);
-  useEffect(() => {
-    if (!live) return;
-    const id = window.setInterval(() => {
-      void load().catch(() => undefined);
-    }, 2500);
-    return () => window.clearInterval(id);
-  }, [live]);
-
-  const actors = useMemo(() => historyActors(rows), [rows]);
-  const visibleRows = useMemo(
-    () =>
-      filterHistoryRows(rows, {
-        kind,
-        time,
-        actor,
-        range: range
-          ? {
-              from: range[0].startOf("day").toDate(),
-              to: range[1].endOf("day").toDate(),
-            }
-          : null,
-      }),
-    [actor, kind, range, rows, time],
-  );
-  const paged = useMemo(() => paginateHistoryRows(visibleRows, page), [page, visibleRows]);
-  const selection = useMemo(() => historySelectionState(paged.rows, selected), [paged.rows, selected]);
-
-  useEffect(() => {
-    setPage((current) => (current === paged.page ? current : Math.min(current, paged.page)));
-  }, [paged.page]);
-
-  useEffect(() => {
-    if (actor && !actors.includes(actor)) {
-      setActor("");
-      setPage(1);
-    }
-  }, [actor, actors]);
-
-  useEffect(() => {
-    const current = new Set(visibleRows.filter(historyCanDelete).map(historyRowKey));
-    setSelected((keys) => keys.filter((key) => current.has(key)));
-  }, [visibleRows]);
-
-  function toggle(row: Row) {
-    if (!historyCanDelete(row)) return;
-    const key = historyRowKey(row);
-    setSelected((keys) => (keys.includes(key) ? keys.filter((item) => item !== key) : [...keys, key]));
-  }
-
-  function toggleAll(checked: boolean) {
-    const pageKeys = new Set(selection.keys);
-    setSelected((keys) => checked
-      ? [...new Set([...keys, ...selection.keys])]
-      : keys.filter((key) => !pageKeys.has(key)));
-  }
-
-  function activateRow(row: Row) {
-    const action = historyRowAction(row, editing);
-    if (action === "toggle") toggle(row);
-    else if (action === "open-task") onOpenTask(row.id);
-    else if (action === "open-mockup") onOpenMockup(row.id);
-    else if (action === "open-upload" && row.uploadKind) onOpenUpload(row.uploadKind, row.uploadId);
-  }
-
-  async function removeOnce(row: Row): Promise<void> {
-    if (row.resource === "task") {
-      const result = await api.deleteTask(row.id);
-      if (!result.ok) throw new Error("服务器没有确认删除审核单");
-      return;
-    }
-    if (row.resource === "mockup") {
-      const result = await api.deleteMockup(row.id);
-      if (!result.ok) throw new Error("服务器没有确认删除打样单");
-      return;
-    }
-    if (row.uploadId) {
-      const result = await api.discardUpload(row.uploadId);
-      if (!result.ok) throw new Error("这份上传已经开工、过期或不属于当前账号");
-      if (row.uploadKind) uploadStore.clear(row.uploadKind, row.uploadId);
-      return;
-    }
-    if (row.uploadKind) await uploadStore.abandon(row.uploadKind);
-  }
-
-  async function removeWithRetry(row: Row): Promise<void> {
-    try {
-      await removeOnce(row);
-    } catch (err) {
-      if (!transientApiFailure(err)) throw err;
-      await new Promise((resolve) => window.setTimeout(resolve, 800));
-      await removeOnce(row);
-    }
-  }
-
-  async function removeMany(targets: Row[]) {
-    setBusy(true);
-    const failures: Array<{ title: string; reason: string }> = [];
-    try {
-      for (const row of targets) {
-        try {
-          await removeWithRetry(row);
-        } catch (err) {
-          failures.push({ title: row.title, reason: err instanceof Error ? err.message : "删除请求失败" });
-        }
-      }
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout>;
+    const controller = new AbortController();
+    async function load() {
+      setLoading(true);
       try {
-        await load();
-      } catch {
-        message.warning("记录已处理，但列表刷新失败，请稍后再进历史记录确认。 ");
+        const result = await api.history(query, controller.signal);
+        if (stopped) return;
+        setData(result); setError(null); setBuilding(false); setLoading(false);
+        if (restoreScroll.current) {
+          restoreScroll.current = false;
+          requestAnimationFrame(() => { document.querySelector(".stage")?.scrollTo(0, state.scroll); window.scrollTo(0, state.scroll); });
+        }
+        if (result.items.some(historyLive)) timer = setTimeout(load, 5000);
+      } catch (err) {
+        if (stopped) return;
+        const rebuilding = err instanceof ApiError && err.status === 503 && ["history_index_unavailable", "history_index_corrupt"].includes(err.code || "");
+        setBuilding(rebuilding); setLoading(false);
+        setError(rebuilding ? "正在整理历史记录，页面会自动继续加载。" : err instanceof Error ? err.message : "历史记录读取失败，请重试。");
+        // A 10,000-record index requires more than 50 bounded passes.
+        if (rebuilding) timer = setTimeout(load, 1200);
       }
-      if (failures.length) {
-        const summary = `已删除 ${targets.length - failures.length} 条，${failures.length} 条未删除`;
-        modal.warning({
-          className: "history-delete-modal",
-          centered: true,
-          title: null,
-          content: (
-            <div className="history-delete-errors">
-              <strong className="history-delete-summary">{summary}</strong>
-              {failures.map((failure) => (
-                <p key={`${failure.title}-${failure.reason}`}><strong>{failure.title}</strong>：{failure.reason}</p>
-              ))}
-            </div>
-          ),
-        });
-      }
-      else message.success(`已删除 ${targets.length} 条记录`);
-      setSelected([]);
-    } finally {
-      setBusy(false);
+    }
+    void load();
+    return () => { stopped = true; controller.abort(); clearTimeout(timer); };
+  }, [query, refresh]);
+  function filters(patch: Partial<HistoryFilters>) {
+    setState(current => ({ filters: { ...current.filters, ...patch }, cursors: [""], page: 0, scroll: 0 }));
+    setSelected([]); setEditing(false);
+  }
+  function rememberScroll() {
+    const scroll = document.querySelector(".stage")?.scrollTop || window.scrollY;
+    try { sessionStorage.setItem(storageKey, JSON.stringify({ ...state, scroll })); } catch { /* No persistence. */ }
+  }
+  async function open(row: HistoryItem) {
+    if (editing) { if (historyDeletable(row)) toggle(row); return; }
+    rememberScroll();
+    if (row.type === "review") onOpenTask(row.id);
+    else if (row.type === "mockup") onOpenMockup(row.id);
+    else if (row.type === "compression") onOpenCompression(row.id);
+    else if (canCreate) {
+      try {
+        const receipt = (await api.uploads()).find(item => item.id === row.id);
+        if (!receipt) throw new Error("这份上传已开工或过期，请刷新历史记录。");
+        onOpenUpload(receipt.kind, receipt.id);
+      } catch (err) { message.error(err instanceof Error ? err.message : "无法打开这份上传"); }
     }
   }
-
-  function confirmRemove() {
-    const chosen = rows.filter((row) => selected.includes(historyRowKey(row)) && historyCanDelete(row));
-    if (!chosen.length) return;
-    modal.confirm({
-      className: "history-delete-modal",
-      centered: true,
-      title: `删除这 ${chosen.length} 条记录？`,
-      content: "会删除选中的记录及其本地稿件或结果文件；已经发出的飞书消息不会撤回。删除后不能恢复。",
-      okText: "删除记录",
-      cancelText: "取消",
-      okButtonProps: { danger: true },
-      onOk: () => removeMany(chosen),
-    });
+  function toggle(row: HistoryItem) {
+    setSelected(current => current.some(item => historyKey(item) === historyKey(row)) ? current.filter(item => historyKey(item) !== historyKey(row)) : [...current, row]);
   }
-
-  return (
-    <section className={`history-page${editing ? " is-editing" : ""}`}>
-      <header className="page-head">
-        <div>
-          <h1 className="page-title">历史记录</h1>
-          <p className="page-lead">审稿和打样分列。进行中的也在这里，点进去看进度。</p>
-        </div>
-      </header>
-      {error ? <Alert type="error" showIcon title={error} style={{ marginBottom: 16 }} /> : null}
-      {rows.length === 0 && !error ? (
-        <div className="desk-empty">
-          <Empty
-            image={Empty.PRESENTED_IMAGE_SIMPLE}
-            description="还没有记录。审稿台签过的单、本机跑过的打样会落在这里。"
-          />
-        </div>
-      ) : (
-        <>
-          <div className="history-filterbar" aria-label="历史记录筛选">
-            {canDelete ? (
-              <Button
-                className="history-edit"
-                type={editing ? "primary" : "default"}
-                onClick={() => {
-                  setEditing((value) => !value);
-                  setSelected([]);
-                }}
-              >
-                {editing ? "完成" : "编辑"}
-              </Button>
-            ) : null}
-            <Segmented<HistoryKindFilter>
-              aria-label="类型"
-              options={["全部", "审稿台", "打样台"]}
-              value={kind}
-              onChange={(value) => {
-                setKind(value);
-                setPage(1);
-              }}
-            />
-            <Segmented<HistoryTimeFilter>
-              aria-label="时间"
-              options={["全部", "今天", "近 7 天", "近 30 天"]}
-              value={time}
-              onChange={(value) => {
-                setTime(value);
-                setRange(null);
-                setPage(1);
-              }}
-            />
-            <DatePicker.RangePicker
-              aria-label="日期范围"
-              className="history-range"
-              value={range}
-              placeholder={["开始日期", "结束日期"]}
-              onChange={(value) => {
-                setRange(value?.[0] && value[1] ? [value[0], value[1]] : null);
-                if (value?.[0] && value[1]) setTime("全部");
-                setPage(1);
-              }}
-            />
-            {actors.length > 1 ? (
-              <Select
-                aria-label="生成人"
-                className="history-actor"
-                value={actor || undefined}
-                placeholder="全部生成人"
-                allowClear
-                options={actors.map((name) => ({ label: name, value: name }))}
-                onChange={(value) => {
-                  setActor(value || "");
-                  setPage(1);
-                }}
-              />
-            ) : null}
-            <span className="history-filter-count" aria-live="polite">
-              {visibleRows.length} 条
-            </span>
-          </div>
-          <div className="history-table-shell">
-            <Table<Row>
-              rowKey={historyRowKey}
-              dataSource={paged.rows}
-              pagination={false}
-              scroll={{ x: 760 }}
-              locale={{ emptyText: "没有符合筛选的记录" }}
-              rowClassName={(row) => (!historyCanDelete(row) && editing ? "history-row-locked" : "")}
-              onRow={(row) => ({
-                onClick: () => activateRow(row),
-                style: { cursor: editing && !historyCanDelete(row) ? "not-allowed" : "pointer" },
-              })}
-              columns={[
-                ...(editing
-                  ? [
-                      {
-                        title: (
-                          <Checkbox
-                            aria-label="全选本页可删除记录"
-                            checked={selection.all}
-                            indeterminate={selection.some}
-                            disabled={!selection.keys.length}
-                            onChange={(event) => toggleAll(event.target.checked)}
-                          >
-                            全选本页
-                          </Checkbox>
-                        ),
-                        key: "select",
-                        width: 104,
-                        render: (_: unknown, row: Row) => (
-                          <span
-                            className="history-select-hitbox"
-                            onClick={(event) => event.stopPropagation()}
-                          >
-                            <Checkbox
-                              aria-label={`选择 ${row.title}`}
-                              checked={selected.includes(historyRowKey(row))}
-                              disabled={!historyCanDelete(row)}
-                              onChange={() => toggle(row)}
-                            />
-                          </span>
-                        ),
-                      },
-                    ]
-                  : []),
-                { title: "类型", dataIndex: "kind", width: 100 },
-                {
-                  title: "品名",
-                  dataIndex: "title",
-                  render: (_: unknown, row: Row) =>
-                    editing ? (
-                      <span>{row.title}</span>
-                    ) : (
-                      <button
-                        type="button"
-                        className="history-record-button"
-                        aria-label={`打开${row.kind}记录：${row.title}`}
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          activateRow(row);
-                        }}
-                      >
-                        {row.title}
-                      </button>
-                    ),
-                },
-                { title: "生成时间", dataIndex: "at", width: 180, render: (v: string) => clock(v) },
-                {
-                  title: "状态",
-                  dataIndex: "status",
-                  width: 220,
-                  render: (_: unknown, row: Row) => (
-                    <div>
-                      <Tag color={row.color}>{row.status}</Tag>
-                      {row.live ? <div className="review-card-live">{row.live}</div> : null}
-                    </div>
-                  ),
-                },
-                { title: "生成人", dataIndex: "actor", width: 120, render: (v: string) => v || "—" },
-              ]}
-            />
-          </div>
-          {visibleRows.length > HISTORY_PAGE_SIZE ? (
-            <Pagination
-              className="history-pagination"
-              aria-label="历史记录翻页"
-              current={paged.page}
-              pageSize={HISTORY_PAGE_SIZE}
-              total={visibleRows.length}
-              showSizeChanger={false}
-              onChange={setPage}
-            />
-          ) : null}
-          {editing ? (
-            <div className="history-bulkbar" role="toolbar" aria-label="批量删除记录">
-              <Checkbox
-                checked={selection.all}
-                indeterminate={selection.some}
-                disabled={!selection.keys.length}
-                onChange={(event) => toggleAll(event.target.checked)}
-              >
-                全选本页
-              </Checkbox>
-              <strong>已选 {selected.length} 条</strong>
-              <span>进行中的记录不会被选中</span>
-              <Button danger type="primary" loading={busy} disabled={!selected.length} onClick={confirmRemove}>
-                删除
-              </Button>
-            </div>
-          ) : null}
-        </>
-      )}
-    </section>
-  );
+  const pageRows = data?.items || [];
+  const deletable = pageRows.filter(historyDeletable);
+  const selectedKeys = new Set(selected.map(historyKey));
+  const all = deletable.length > 0 && deletable.every(row => selectedKeys.has(historyKey(row)));
+  async function removeSelected() {
+    setDeleting(true);
+    const failures: HistoryItem[] = [];
+    for (const row of selected) {
+      try {
+        const response = row.type === "review" ? await api.deleteTask(row.id) : row.type === "mockup" ? await api.deleteMockup(row.id)
+          : row.type === "compression" ? await api.deleteCompression(row.id) : await api.discardUpload(row.id);
+        if (!response.ok) throw new Error("服务器没有确认删除");
+        if (row.type === "upload") { uploadStore.clear("compare", row.id); uploadStore.clear("mockup", row.id); }
+      } catch { failures.push(row); }
+    }
+    setSelected(failures); setDeleting(false);
+    if (failures.length) message.warning(`${failures.length} 条未删除，可能正在处理或无管理权限，已保留选中。`);
+    else { message.success("已删除选中的记录"); setEditing(false); }
+    setState(current => ({ ...current, page: 0, cursors: [""], scroll: 0 })); setRefresh(value => value + 1);
+  }
+  const label = (status: string) => stateLabels[status] || status;
+  return <section className="batch-page history-page">
+    <header className="page-head"><div><h1 className="page-title">历史记录</h1><p className="page-lead">搜索品名、批次和子文件名，查看审稿、打样、上传与压缩记录。</p></div><Space><Button aria-label="刷新历史记录" onClick={() => setRefresh(value => value + 1)} loading={loading && !building}>刷新</Button>{canDelete ? <Button disabled={deleting} onClick={() => { setEditing(value => !value); setSelected([]); }}>{editing ? "退出编辑" : "编辑"}</Button> : null}</Space></header>
+    <div className="batch-card history-filterbar">
+      <Input.Search aria-label="搜索历史记录" placeholder="搜索品名、批次或文件名" allowClear value={search} onChange={event => { setSearch(event.target.value); if (!event.target.value) filters({ q: "" }); }} onSearch={q => filters({ q })} enterButton="搜索" />
+      <div className="history-filter-grid">
+        <Select aria-label="类型" value={state.filters.type} onChange={type => filters({ type, status: "" })} options={[{ value: "", label: "全部类型" }, ...Object.entries(historyTypeLabels).map(([value, text]) => ({ value, label: text }))]} />
+        <Select aria-label="状态" value={state.filters.status} onChange={status => filters({ status })} options={[{ value: "", label: "全部状态" }, ...Object.keys(data?.facets.status || {}).map(value => ({ value, label: label(value) }))]} />
+        <Input.Search aria-label="创建人" placeholder="创建人姓名或账号" value={creator} allowClear onChange={event => { setCreator(event.target.value); if (!event.target.value) filters({ creator: "" }); }} onSearch={value => filters({ creator: value })} />
+        <label className="history-date">开始日期<input type="date" value={state.filters.date_from} onChange={event => filters({ date_from: event.target.value })} /></label>
+        <label className="history-date">结束日期<input type="date" value={state.filters.date_to} min={state.filters.date_from} onChange={event => filters({ date_to: event.target.value })} /></label>
+        <Button onClick={() => { setSearch(""); setCreator(""); filters({ ...emptyHistoryFilters }); }}>清空筛选</Button>
+      </div>
+    </div>
+    {error ? <Alert type={building ? "info" : "error"} showIcon title={error} description={data ? "保留上次成功加载的记录。" : undefined} action={!building ? <Button onClick={() => setRefresh(value => value + 1)}>重试</Button> : undefined} /> : null}
+    <div className="history-table-shell batch-card">
+      <Table<HistoryItem> rowKey={historyKey} loading={loading && !data} dataSource={pageRows} pagination={false} scroll={{ x: 800 }}
+        locale={{ emptyText: error || building || loading ? <Empty description="记录暂未加载完成" /> : <Empty description="没有符合条件的记录，试试调整筛选。" /> }}
+        rowSelection={editing ? { selectedRowKeys: selected.map(historyKey), onSelect: row => toggle(row), onSelectAll: checked => setSelected(current => checked ? [...current.filter(item => !deletable.some(row => historyKey(row) === historyKey(item))), ...deletable] : current.filter(item => !deletable.some(row => historyKey(row) === historyKey(item)))), getCheckboxProps: row => ({ disabled: !historyDeletable(row), "aria-label": `选择 ${row.title}` }) } : undefined}
+        onRow={row => ({ onClick: event => { if (!(event.target as HTMLElement).closest("button,a,input,.ant-checkbox-wrapper")) void open(row); } })}
+        columns={[
+          { title: "记录 / 文件", key: "title", render: (_, row) => <div className="batch-file-name"><button className="history-title-button" aria-label={`打开${historyTypeLabels[row.type]}记录：${row.title}`} onClick={() => void open(row)}>{row.title || row.product_name || "未命名记录"}</button><small>{row.matched_names.length ? `命中文件：${row.matched_names.join("、")}` : row.names.join("、")}</small></div> },
+          { title: "类型", dataIndex: "type", width: 90, render: (type: HistoryItem["type"]) => historyTypeLabels[type] },
+          { title: "状态", dataIndex: "status", width: 130, render: (status: string) => <Tag color={["queued", "running", "uploading"].includes(status) ? "processing" : ["failed", "partial", "unsupported"].includes(status) ? "warning" : "default"}>{label(status)}</Tag> },
+          { title: "创建人", dataIndex: "creator_name", width: 160 },
+          { title: "创建时间", dataIndex: "created_at", width: 185, render: (iso: string) => new Date(iso).toLocaleString("zh-CN", { hour12: false, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }) },
+        ]} />
+      <div className="batch-section-head history-pagination"><span>{data ? `共 ${data.total} 条 · 第 ${state.page + 1} 页 · 每页 10 条` : "每页 10 条"}</span><Space>
+        <Button disabled={state.page === 0 || loading || Boolean(error)} onClick={() => setState(current => ({ ...current, page: current.page - 1, scroll: 0 }))}>上一页</Button>
+        <Button disabled={!data?.next_cursor || loading || Boolean(error)} onClick={() => setState(current => ({ ...current, cursors: [...current.cursors.slice(0, current.page + 1), data!.next_cursor!], page: current.page + 1, scroll: 0 }))}>下一页</Button>
+      </Space></div>
+    </div>
+    {editing ? <div className="history-bulkbar"><Checkbox disabled={!deletable.length || deleting} checked={all} indeterminate={!all && deletable.some(row => selectedKeys.has(historyKey(row)))} onChange={event => setSelected(current => event.target.checked ? [...current.filter(item => !deletable.some(row => historyKey(row) === historyKey(item))), ...deletable] : current.filter(item => !deletable.some(row => historyKey(row) === historyKey(item))))}>全选本页</Checkbox><span>已选 {selected.length} 条</span><Button danger disabled={!selected.length || deleting} loading={deleting} onClick={() => modal.confirm({ centered: true, title: `删除选中的 ${selected.length} 条记录？`, content: "删除后将无法从历史记录恢复。正在处理或无权限的记录会保留。", okText: "删除", cancelText: "取消", okButtonProps: { danger: true }, onOk: removeSelected })}>删除选中</Button></div> : null}
+  </section>;
 }
