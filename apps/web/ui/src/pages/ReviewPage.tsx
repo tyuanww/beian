@@ -692,7 +692,7 @@ export function ReviewPage({ taskId, userId, onBack }: Props) {
             currentHasBox={currentHasBox} pageNo={pageNo} reviewable={reviewable} busy={busy}
             note={current?.id ? notes[current.id] ?? current.note ?? "" : ""}
             emptyMessage={task?.status === "compare_failed" || task?.job_status === "failed" ? "对照没跑完，没有机审条目。" : "没有机审条目。仍请翻页看一遍。"}
-            reworkCheck={task?.rework_check} onPick={pickHit}
+            nativeTaskEvidence={task?.native_text} reworkCheck={task?.rework_check} onPick={pickHit}
             onDecide={(hit, decision, note) => void decide(hit, decision, note)}
             onNoteCommit={(hit, decision, note) => void decide(hit, decision, note)}
             onCopy={() => void copyList()}

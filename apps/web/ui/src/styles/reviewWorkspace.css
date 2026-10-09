@@ -43,3 +43,9 @@
 @media (max-width: 720px) { .review-page .page-head > div { min-width: 0; max-width: 100%; } .review-page .page-title { overflow-wrap: anywhere; } }
 
 .review-workspace .pin { transform: scale(var(--review-pin-scale, 1)); }
+.review-native-evidence { margin-block: 16px; padding: 14px; border: 1px solid var(--line); border-radius: 14px; }
+.review-native-evidence h3 { margin: 0 0 8px; font-size: 1em; }
+.review-native-evidence p { margin: 8px 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+.review-native-evidence summary { cursor: pointer; min-height: 40px; display: flex; align-items: center; text-decoration: underline; text-underline-offset: 3px; }
+.review-native-hint { color: var(--muted); font-size: .9em; }
+.review-native-readings { display: grid; gap: 12px; margin-top: 8px; }

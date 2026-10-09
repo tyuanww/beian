@@ -10,6 +10,7 @@ import {
 } from "@playwright/test";
 
 type SyntheticHit = {
+  native_text_evidence?: unknown;
   id: string;
   field: string;
   status: string;
@@ -26,6 +27,7 @@ type SyntheticHit = {
 };
 
 export type SyntheticTask = {
+  native_text?: { status: string; reason?: string; message?: string };
   id: string;
   title: string;
   product_name?: string;

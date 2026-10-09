@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Button, Input, Select, Tag } from "antd";
 import type { Decision, FieldHit, TaskDetail } from "../api";
 import { spokenAsk } from "./hitText";
+import { nativeEvidenceView } from "./nativeTextEvidence";
 import { REVIEW_DOCK_POPUP_LAYER } from "./reviewDock";
 import { issueOrdinal, reviewProgress } from "./reviewNav";
 import { issueNavigation } from "./reviewWorkspaceState";
@@ -24,6 +25,7 @@ type Props = {
   note: string;
   emptyMessage: string;
   reworkCheck?: TaskDetail["rework_check"];
+  nativeTaskEvidence?: TaskDetail["native_text"];
   onPick: (index: number) => void;
   onDecide: (hit: FieldHit, decision: Decision, note: string) => void;
   onNoteCommit: (hit: FieldHit, decision: Decision, note: string) => void;
@@ -65,6 +67,7 @@ export function ReviewDockPanel({
   note,
   emptyMessage,
   reworkCheck,
+  nativeTaskEvidence,
   onPick,
   onDecide,
   onNoteCommit,
@@ -75,6 +78,7 @@ export function ReviewDockPanel({
   const grouped = partitionReviewHits(hits);
   const navigation = issueNavigation(hits, active, pendingOnly);
   const evidence = current ? reviewEvidence(current) : null;
+  const nativeEvidence = nativeEvidenceView(current?.native_text_evidence);
   const selected =
     current?.decision === "confirm" || current?.decision === "issue" || current?.decision === "ignore"
       ? (current.decision as Decision)
@@ -85,6 +89,7 @@ export function ReviewDockPanel({
 
   return (
     <div className="review-dock-panel">
+      {nativeTaskEvidence?.message ? <p className="review-native-evidence" role="status">{nativeTaskEvidence.message}</p> : null}
       <section className="review-dock-issues" aria-label="疑点列表">
         <div className="review-issue-controls">
           <Button disabled={busy || navigation.previous == null} onClick={() => { if (navigation.previous != null) onPick(navigation.previous); }}>上一项</Button>
@@ -175,6 +180,22 @@ export function ReviewDockPanel({
             <EvidenceBlock title="Excel 应印" value={evidence.expected} />
             <EvidenceBlock title="稿上读到" value={evidence.observed} />
           </div>
+          {nativeEvidence ? (
+            <section className="review-native-evidence" aria-label="文字来源证据">
+              <h3>{nativeEvidence.title}</h3>
+              <p>{nativeEvidence.message}</p>
+              <p className="review-native-hint">文字来源只作核对依据，结论仍需你确认。</p>
+              {nativeEvidence.nativeText || nativeEvidence.ocrText ? (
+                <details key={current.id || active}>
+                  <summary>查看两种文字来源</summary>
+                  <div className="review-native-readings">
+                    <section><strong>原稿可编辑文字</strong><p className="mono">{nativeEvidence.nativeText || "没有可展示的可信文字"}</p></section>
+                    <section><strong>图像识别文字（OCR）</strong><p className="mono">{nativeEvidence.ocrText || "没有可展示的识别文字"}</p></section>
+                  </div>
+                </details>
+              ) : null}
+            </section>
+          ) : null}
           <div className="review-evidence-location">
             <span>包装定位</span>
             <strong>

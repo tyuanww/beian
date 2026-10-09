@@ -1,4 +1,5 @@
 import type { CompressionBatch, HistoryResult, UnfoldedPrint } from "./batchTypes";
+import type { NativeTextEvidence } from "./pages/nativeTextEvidence";
 import { API_DOWN_LOCAL } from "./apiHint";
 import { describeBrokenApi } from "./authGate";
 import { UPLOAD_TOO_LARGE } from "./uploadLimit";
@@ -573,6 +574,7 @@ export type TaskSummary = {
 };
 
 export type FieldHit = {
+  native_text_evidence?: NativeTextEvidence;
   id?: string;
   field?: string;
   status?: string;
@@ -629,6 +631,7 @@ export type TaskPage = {
 };
 
 export type TaskDetail = TaskSummary & {
+  native_text?: { status: "queued" | "running" | "ready" | "fallback"; reason?: string; message?: string };
   hits?: FieldHit[];
   hits_v2?: FieldHit[];
   disclaimer?: string;
