@@ -1066,6 +1066,7 @@ function unfoldedLayerIsPrint(layerName) {
 
 // Identity-only hide for a clean reprint. Color and stroke width are not consulted.
 function exportCleanUnfoldedPrint(documentRef, config, result) {
+    restoreUnattendedArtwork(documentRef, hostState);
     var items;
     var limit;
     var index;
