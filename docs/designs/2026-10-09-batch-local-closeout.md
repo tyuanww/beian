@@ -2,6 +2,8 @@
 
 这是一次性 Code/受影响本地回归记录，当前待办唯一入口为 [TODOS](../../TODOS.md)。未进入 ship、PR、main 或生产发布，也不是完整 L0、L1、L2/UAT 证明。
 
+下文保留 `d778144` 阶段快照。后续 D/A5 实施见[原生文字交付记录](2026-10-09-native-text-local-closeout.md)，代码评审修复及增量复审见[修复收口记录](2026-10-09-batch-review-fix-closeout.md)；下文“尚未实施”仅描述该历史阶段。
+
 ## 代码身份与范围
 
 集成分支 `codex/r05-r07-autoplan`，产品代码 HEAD `d7781442dfeb543e946c938f4d9273c14085e058`；随后的文档提交不改变产品代码。
