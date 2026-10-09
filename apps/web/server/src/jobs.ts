@@ -1,3 +1,5 @@
+import { nativeRequest, prepareNativeRun, prepareNativeRequests, nativeBlocksOcr, nativeQueue, nativePublic, recoverNativeRequests, nativeDirectory, startNative } from "./nativeTextJobs.js";
+import { runNativeText } from "./workers.js";
 import { createHash, randomBytes } from "node:crypto";
 import { closeSync, copyFileSync, existsSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
@@ -228,6 +230,7 @@ export type RenderGenerationPreparer = (input: RenderPlanVerifierInput & {
 }) => Promise<{ plan: VerifiedRenderPlanSnapshot; execute: RenderGenerationExecutor; lifecycle?: import("./renderGenerationBudget.js").RenderLifecycle }>;
 
 export type JobsTestHooks = {
+  runNativeText?: typeof runNativeText;
   runCompare?: typeof compareTask;
   runRework?: typeof reworkTask;
   runPack?: typeof runPackaging;
@@ -281,6 +284,7 @@ export type RenderGenerationMutationEnqueueResult = {
 };
 
 const TEST_MOCKUP_STOP: JobsTestHooks = {
+  runNativeText: async () => ({ code: 1, stdout: "", stderr: "test stop", timedOut: false }),
   runStructure: async () => ({ code: 1, stdout: "", stderr: '{"error":"test stop"}', timedOut: false }),
   runPack: async () => ({ code: 1, stdout: "", stderr: "test stop", timedOut: false }),
   runRaster: async () => ({ ok: false, message: "test stop" }),
@@ -333,7 +337,7 @@ export function queueSnapshot(): {
   const compression = compressionQueueSnapshot();
   const tasks = taskStore.tasks;
   const mocks = mockupStore.jobs;
-  const ocrQueued = tasks.filter((t) => isOcr(t.job_kind) && t.job_status === "queued").length;
+  const ocrQueued = tasks.filter((t) => isOcr(t.job_kind) && t.job_status === "queued" && !nativeBlocksOcr(t)).length;
   const ocrRunning = tasks.filter((t) => isOcr(t.job_kind) && t.job_status === "running").length;
   const ai = mocks.filter((j) => needsIllustrator(j));
   const rest = mocks.filter((j) => !needsIllustrator(j));
@@ -353,8 +357,8 @@ export function queueSnapshot(): {
     ocr: { running: Math.max(ocrRunning, live.ocr ? 1 : 0), queued: ocrQueued },
     blender: { running: Math.max(bRunning, live.blender ? 1 : 0), queued: bQueued },
     illustrator: {
-      running: Math.max(ai.filter((j) => j.job_status === "running").length + nativeRunning, live.illustrator ? 1 : 0),
-      queued: ai.filter((j) => j.job_status === "queued").length + nativeQueued,
+      running: Math.max(ai.filter((j) => j.job_status === "running").length + nativeRunning + nativeQueue().running.length, live.illustrator ? 1 : 0),
+      queued: ai.filter((j) => j.job_status === "queued").length + nativeQueued + nativeQueue().queued.length,
     },
     compression: { running: compression.running, queued: compression.queued },
     unknown: taskStore.unreadable + mockupStore.unreadable + compression.unknown,
@@ -389,6 +393,7 @@ export function decorateQueueAhead<T extends { id?: string; created_at?: string;
 export function publicTask(task: Task, viewer?: Viewer): Record<string, unknown> {
   if (viewer) assertCanAccessTask(task, viewer);
   const {
+    native_text_request: _native,
     job_pid: _pid,
     notify_job_id: _nk,
     notify_sent: _ns,
@@ -399,11 +404,13 @@ export function publicTask(task: Task, viewer?: Viewer): Record<string, unknown>
   } = task;
   return {
     ...rest,
+    ...(nativePublic(task) ? { native_text: nativePublic(task) } : {}),
     queue_ahead: queueAheadFrom(queueRanks(), task.id, task.job_kind, task.job_status),
   };
 }
 
 export function enqueue(opts: { kind: JobKind; id: string }): Task | MockupJob {
+  if (opts.kind !== "mockup") prepareNativeRun(loadTask(opts.id));
   try {
     tryStart();
   } catch (err) {
@@ -2616,6 +2623,7 @@ export function reclaimOnBoot(): void {
   for (const job of loadAllMockups()) reclaimMockup(job);
   recoverPrintFaceRepairsOnBoot();
   recoverUnfoldedPrintsOnBoot();
+  recoverNativeRequests();
   recoverRenderGenerationsOnBoot();
   for (const task of loadAllTasks()) {
     if (task.notify_job_id && !task.notify_sent && (task.job_status === "succeeded" || task.job_status === "failed")) {
@@ -2660,6 +2668,7 @@ function ensureIllustratorBusyPoll(): void {
         }
         tryStart();
       }
+      if (nativeQueue().queued.length) tryStart();
       illustratorBusyPollWasBusy = busy;
     } catch {
       /* next tick */
@@ -2668,6 +2677,7 @@ function ensureIllustratorBusyPoll(): void {
 }
 
 export function tryStart(): void {
+  prepareNativeRequests(unfoldedHostReady());
   if (!live.ocr) {
     const next = oldestOcrQueued();
     if (next) claimOcr(next);
@@ -2675,10 +2685,19 @@ export function tryStart(): void {
   if (!live.illustrator) {
     const nativeLive = loadAllMockups().find((job) => job.unfolded_print_request?.status === "running" && job.unfolded_print_request.mode === "native_export");
     if (nativeLive) live.illustrator = nativeLive.id;
+    const reviewNative = nativeQueue().running[0];
+    if (reviewNative) live.illustrator = `native:${reviewNative.id}`;
   }
-  if (!live.illustrator && !illustratorSlotBusy()) {
+  if (!live.illustrator && taskStoreSnapshot().unreadable === 0 && !illustratorSlotBusy()) {
     const next = oldestAiWaiter();
-    if (next?.kind === "unfolded") claimUnfoldedNative(next.job);
+    if (next?.kind === "native_text") {
+      live.illustrator = `native:${next.task.id}`;
+      startNative(next.task, hooks.runNativeText || runNativeText, () => {
+        if (!nativeQueue().running.some(t => t.id === next.task.id) && live.illustrator === `native:${next.task.id}`) live.illustrator = null;
+        tryStart();
+      });
+    }
+    else if (next?.kind === "unfolded") claimUnfoldedNative(next.job);
     else if (next) claimAi(next.job);
   }
   if (!live.blender) {
@@ -2727,7 +2746,7 @@ function allowedResultStatus(kind: string | undefined, raw: unknown): string {
 
 function oldestOcrQueued(): Task | undefined {
   return loadAllTasks()
-    .filter((t) => isOcr(t.job_kind) && t.job_status === "queued")
+    .filter((t) => isOcr(t.job_kind) && t.job_status === "queued" && !nativeBlocksOcr(t))
     .sort((a, b) => String(a.created_at || "").localeCompare(String(b.created_at || "")))[0];
 }
 
@@ -2743,7 +2762,7 @@ function needsIllustrator(job: MockupJob): boolean {
   return needsStructure(job) || needsRaster(job);
 }
 
-type AiWaiter = { kind: "structure" | "unfolded"; job: MockupJob; at: string };
+type AiWaiter = { kind: "structure" | "unfolded"; job: MockupJob; at: string } | { kind: "native_text"; task: Task; at: string };
 
 function oldestAiWaiter(): AiWaiter | undefined {
   const waiters: AiWaiter[] = [];
@@ -2755,7 +2774,8 @@ function oldestAiWaiter(): AiWaiter | undefined {
       waiters.push({ kind: "unfolded", job, at: job.unfolded_print_request.created_at });
     }
   }
-  waiters.sort((a, b) => a.at.localeCompare(b.at) || a.job.id.localeCompare(b.job.id));
+  for (const task of nativeQueue().queued) waiters.push({ kind: "native_text", task, at: nativeRequest(task)!.created_at });
+  waiters.sort((a, b) => a.at.localeCompare(b.at) || (a.kind === "native_text" ? a.task.id : a.job.id).localeCompare(b.kind === "native_text" ? b.task.id : b.job.id));
   return waiters[0];
 }
 
@@ -3163,6 +3183,7 @@ async function runOcr(id: string, startedAt: string): Promise<void> {
       const run = hooks.runRework || reworkTask;
       result = await run({
         tid: id,
+        nativeDir: nativeDirectory(task),
         pdf: join(DATA_DIR, "uploads", id, "artwork_v2.pdf"),
         actor: taskOwner(task),
         onSpawn,
@@ -3172,6 +3193,7 @@ async function runOcr(id: string, startedAt: string): Promise<void> {
       const run = hooks.runCompare || compareTask;
       result = await run({
         tid: id,
+        nativeDir: nativeDirectory(task),
         excel: join(DATA_DIR, "uploads", id, "source.xlsx"),
         pdf: join(DATA_DIR, "uploads", id, "artwork.pdf"),
         productName: String(task.product_name || task.title || ""),

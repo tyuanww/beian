@@ -1,3 +1,4 @@
+import type { NativeRequest } from "./nativeTextJobs.js";
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { DATA_DIR } from "./config.js";
@@ -48,6 +49,7 @@ export function canAccessOwner(owner: string, viewer: Viewer): boolean {
 }
 
 export type Task = {
+  native_text_request?: NativeRequest;
   id: string;
   title: string;
   product_name?: string;
@@ -157,6 +159,13 @@ const TASK_JOB_STATUSES = new Set(["queued", "running", "succeeded", "failed"]);
  * from the running/queued counters.
  */
 function hasValidTaskJobState(task: Task): boolean {
+  const native = task.native_text_request;
+  if (native !== undefined && (!native || native.version !== "native-text/1"
+      || !/^[0-9a-f]{32}$/.test(native.id) || !/^[0-9a-f]{64}$/.test(native.source_sha256)
+      || !["artwork.pdf", "artwork_v2.pdf"].includes(native.source_name)
+      || !["queued", "running", "ready", "fallback"].includes(native.status)
+      || !Number.isFinite(Date.parse(native.created_at))
+      || (native.pid !== undefined && (!Number.isSafeInteger(native.pid) || native.pid <= 0)))) return false;
   if (!TASK_STATUSES.has(task.status)) return false;
   const hasKind = task.job_kind !== undefined;
   const hasJobStatus = task.job_status !== undefined;
@@ -331,7 +340,7 @@ export function boardColumn(status: string, jobStatus?: string): BoardColumn {
 
 export function deleteTask(tid: string): void {
   const task = loadTask(tid);
-  if (task.job_status === "queued" || task.job_status === "running") {
+  if (task.native_text_request?.status === "running" || task.job_status === "queued" || task.job_status === "running") {
     throw Object.assign(new Error("对照还在跑，不能删。等结束或失败后再删。"), { status: 409 });
   }
   const p = join(tasksDir(), `${task.id}.json`);
