@@ -30,4 +30,4 @@ Illustrator 语义导出只维护一份 JSX、一份曲线 helper 和一份 `una
 
 V2 预检通过后，只有显式完整语义网（六面及粘口/封口角色、连通且不重叠的真实多边形）才能生成绑定源 AI 哈希、源画板毫米边界和明确印刷层的 unfolded-source。不完整旧稿保持 geometry_incomplete。源稿图文必须来自真实 artwork PDF 并有可信分离证明；禁止把面矩形重绘成假净版，禁止按颜色/线宽猜删装饰。导出检查全部 pageItems，含文字及复合对象；不只检查 pathItems。
 
-净版沿 illustrator_worker.py、export_structure.jsx、export_close.confirm_export_close，协议 beian.illustrator.export/2，request_kind=unfolded_print。结果 JSON 不能单独证明关稿：必须另有匹配 source/attempt 的桥接退出和空文档观测，Windows 复用既有宿主后置探针，Mac 复用桥接退出与文档数探针。未知关闭保持围栏，不以杀 Illustrator 或启动第二个请求清理。D 原生文字必须扩展同一宿主合同，不新增入口。
+净版沿 illustrator_worker.py、export_structure.jsx、export_close.confirm_export_close，协议 beian.illustrator.export/2，request_kind 支持 unfolded_print 与 native_text（标准结构种类继续保留）。结果 JSON 不能单独证明关稿：必须另有匹配 source/attempt 的桥接退出和空文档观测，Windows 复用既有宿主后置探针，Mac 复用桥接退出与文档数探针。未知关闭保持围栏，不以杀 Illustrator 或启动第二个请求清理。D 原生文字已扩展同一宿主合同，不新增入口。native_text 在该 JSX 提取对象/画板变换/字体/可见性并导出对照 PDF；沿同一个 export_close 与两平台后置观测。

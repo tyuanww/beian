@@ -44,3 +44,9 @@ UI 等待：`shouldShowWaitCard`（`queued` | `running` | `comparing`；`done`/`
 压缩上传使用 purpose=compression、asset1–asset20，现有分片/回执通道；总量 100MiB。任务创建复用 owner+receipt 幂等，逐文件持久状态，重试使用 expected_revision 和 file_ids，已成功文件不重压。queueSnapshot 独立计入 compression；离页不取消已受理任务。未知 output_bytes 保持 null。
 
 压缩工具须先证明可用的进程容器再领任务：Windows 复用有归属的 Job Object（聚合 commit 上限并采样 RSS），Linux 使用获授权的 cgroup v2；不能用 macOS RLIMIT 或一个 probe 标签冒充整树内存限制。所有取消等待归属子树退出，stdout/stderr、时间、候选/尝试磁盘都有边界。初值、具体执行器及许可记录随 compression 模块维护；Windows RSS/磁盘监控的现场行为仍须单独取证，不由 Mac 单测证明。
+
+## 审稿原生前置
+
+新审稿/对红输入含 Illustrator 私有数据提示时，由 jobs 在 OCR 前准备原生请求；提示仅用于分流，不能作文字可信证明。queued 前置不占 OCR 执行槽，与结构/净版按 FIFO 共享 Illustrator 槽。120 秒仅限制未派发的排队，过期用 native_busy 继续 OCR；派发后按原有 1260 秒生命周期，超时保留桥接和围栏，不把杀进程当关闭。
+
+持久 native_text_request 绑定源 hash、source_name、提取器版本及 attempt。私有物理副本独立目录留存；已知执行者结束和同代关闭记录都确认后才可恢复围栏，晚到证据不能替换已经选择的 OCR 回退。running + close_unconfirmed 即使审稿已完成也计入 drain，并阻止删除其被引用副本、再次原生请求；单次 idle 心跳不清围栏。损坏持久记录计 unknown 且阻止新 Illustrator 领单。缓存只在新的审核运行、同源/同提取器版本使用。
