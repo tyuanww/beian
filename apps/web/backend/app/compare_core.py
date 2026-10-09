@@ -239,7 +239,7 @@ def _surface_job(
     emit_stage("ocr")
     ocr_text, ocr_words, ocr_engine, ocr_meta = _ocr_pages(page_metas, ingested)
     candidates, native_reason = native_text.load_candidates(NATIVE_DIR, pdf, page_metas)
-    ocr_text, ocr_words, native_audit = native_text.fuse_words(ocr_text, ocr_words, candidates)
+    ocr_text, ocr_words, native_audit = native_text.fuse_with_audit(NATIVE_DIR, pdf, ocr_text, ocr_words, candidates)
     prefer_layer = has_layer or ingested.get("mode") == "live_text"
     pack_text, words, text_source = text_verify.merge_text_sources(
         layer_text,

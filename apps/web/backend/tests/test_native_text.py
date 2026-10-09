@@ -114,3 +114,27 @@ def test_native_reuses_close_contract_with_independent_observation():
     assert module.confirm_export_close(result, 0, observation)["request_kind"] == "native_text"
     assert module.confirm_export_close(result, 0, {**observation, "document_count": 1}) is None
     assert module.confirm_export_close(result, 2, observation) is None
+
+
+def test_fusion_requires_complete_persistent_audit(tmp_path, monkeypatch):
+    source, root, _, metas = fixture(tmp_path)
+    candidates, _ = native_text.load_candidates(root, source, metas)
+    words = [word("80ml", candidates[0]["bbox"])]
+    text, _, audit = native_text.fuse_with_audit(root, source, "80ml", words, candidates)
+    assert text == "30ml"
+    stored = json.loads((root / "fusion-audit.json").read_text())
+    assert stored["source_sha256"] == native_text.source_hash(source)
+    assert stored["evidence"] == audit
+    assert stored["evidence"][0]["ocr_text"] == "80ml"
+    def fail_replace(*args):
+        raise OSError("disk unavailable")
+    monkeypatch.setattr(native_text.os, "replace", fail_replace)
+    assert native_text.fuse_with_audit(root, source, "80ml", words, candidates) == ("80ml", words, [])
+    assert not list(root.glob(".fusion-*"))
+
+
+def test_compact_evidence_never_silently_truncates_readings():
+    hits = [{"page": 1, "bboxes": [{"left": 0, "top": 0, "width": 10, "height": 10}]}]
+    audit = [{"page": 1, "bbox": [0, 0, 10, 10], "status": "used", "native_text": "a" * 5000, "ocr_text": "b" * 5000}] * 2
+    native_text.attach_evidence(hits, audit)
+    assert "native_text_evidence" not in hits[0]

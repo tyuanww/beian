@@ -8,6 +8,8 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import os
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -159,6 +161,43 @@ def fuse_words(text: str, words: list[dict], candidates: list[dict]) -> tuple[st
     return text, output, audit
 
 
+
+def fuse_with_audit(directory: Path | None, source: Path, text: str, words: list[dict], candidates: list[dict]) -> tuple[str, list[dict], list[dict]]:
+    corrected, output, audit = fuse_words(text, words, candidates)
+    if not audit:
+        return corrected, output, audit
+    if directory is None:
+        return text, words, []
+    temporary = None
+    try:
+        result = _json(directory / "result.json")
+        sha = source_hash(source)
+        if result.get("source_sha256") != sha:
+            raise ValueError("source_changed")
+        payload = json.dumps({"version": VERSION, "attempt_id": result["attempt_id"],
+                              "source_sha256": sha, "evidence": audit}, ensure_ascii=False).encode("utf-8")
+        if len(payload) > MAX_JSON:
+            raise ValueError("native_limit")
+        with tempfile.NamedTemporaryFile(dir=directory, prefix=".fusion-", delete=False) as stream:
+            temporary = Path(stream.name)
+            stream.write(payload)
+            stream.flush()
+            os.fsync(stream.fileno())
+        if source_hash(source) != sha:
+            raise ValueError("source_changed")
+        os.replace(temporary, directory / "fusion-audit.json")
+        return corrected, output, audit
+    except (OSError, ValueError, KeyError):
+        # Keep the original OCR whenever complete evidence cannot be retained.
+        return text, words, []
+    finally:
+        if temporary is not None:
+            try:
+                temporary.unlink(missing_ok=True)
+            except OSError:
+                pass
+
+
 def attach_evidence(hits: list[dict], audit: list[dict]) -> None:
     for hit in hits:
         related = []
@@ -172,4 +211,10 @@ def attach_evidence(hits: list[dict], audit: list[dict]) -> None:
         if not related:
             continue
         status = "conflict" if any(e["status"] == "conflict" for e in related) else "used"
-        hit["native_text_evidence"] = {"version": 1, "status": status, "native_text": "\n".join(e["native_text"] for e in related)[:8192], "ocr_text": "\n".join(e["ocr_text"] for e in related)[:8192], "message": "两种文字来源无法唯一对应，请对照稿面。" if status == "conflict" else "已核对可见稿面及文字位置，原稿文字已参与现有核对规则。"}
+        native = "\n".join(e["native_text"] for e in related)
+        ocr = "\n".join(e["ocr_text"] for e in related)
+        # Full readings remain in the private fusion audit; never label a
+        # silently truncated compact card as the complete source evidence.
+        if len(native) > 8192 or len(ocr) > 8192:
+            continue
+        hit["native_text_evidence"] = {"version": 1, "status": status, "native_text": native, "ocr_text": ocr, "message": "两种文字来源无法唯一对应，请对照稿面。" if status == "conflict" else "已核对可见稿面及文字位置，原稿文字已参与现有核对规则。"}
