@@ -64,6 +64,56 @@ def test_unsupported_platform_does_not_fall_back_to_rlimit(monkeypatch):
     assert contain.probe()["enforced"] is False
 
 
+@pytest.mark.parametrize("fails", [False, True])
+def test_close_receipt_is_written_only_after_observed_tree_close(monkeypatch, tmp_path, fails):
+    owned = SyntheticContainer([0])
+    path = tmp_path / "closed.json"
+    def close():
+        assert not path.exists()
+        if fails:
+            raise RuntimeError("close_unconfirmed")
+        owned.closed = True
+    owned.close = close
+    monkeypatch.setattr(contain, "container", lambda *_: owned)
+    if fails:
+        with pytest.raises(RuntimeError, match="close_unconfirmed"):
+            contain.run(["synthetic"], 768, 1024, 1, close_file=path, token="a" * 32)
+        assert not path.exists()
+    else:
+        assert contain.run(["synthetic"], 768, 1024, 1, close_file=path, token="a" * 32) == 0
+        assert owned.closed
+        record = contain.json.loads(path.read_text())
+        assert record == {"schema": "compression-close/1", "token": "a" * 32, "pid": contain.os.getpid(), "closed": True}
+
+
+def test_windows_close_waits_for_owned_job_members_before_closing_handle(monkeypatch):
+    events = []
+    class Api:
+        def state(self, *_):
+            events.append("state")
+            return None, 0 if events.count("state") >= 3 else 1
+        def terminate(self, *_):
+            events.append("terminate")
+        def close(self, *_):
+            events.append("close")
+    owned = contain.WindowsContainer.__new__(contain.WindowsContainer)
+    owned.api, owned.job, owned.process = Api(), {}, None
+    monkeypatch.setattr(contain.time, "sleep", lambda _: None)
+    owned.close()
+    assert events == ["state", "terminate", "state", "state", "close"]
+
+
+def test_cooperative_cancellation_closes_tree_and_records_proof(monkeypatch, tmp_path):
+    owned = SyntheticContainer([None])
+    monkeypatch.setattr(contain, "container", lambda *_: owned)
+    path = tmp_path / "closed.json"
+    Path(str(path) + ".cancel").write_text("a" * 32)
+    with pytest.raises(RuntimeError, match="cancelled"):
+        contain.run(["synthetic"], 768, 1024, 1, close_file=path, token="a" * 32)
+    assert owned.closed
+    assert contain.json.loads(path.read_text())["closed"] is True
+
+
 def test_windows_reuses_owned_job_and_waits_for_descendants(monkeypatch):
     import types
     calls = []

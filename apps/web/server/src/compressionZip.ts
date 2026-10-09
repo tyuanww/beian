@@ -52,7 +52,7 @@ async function* generate(entries: readonly ZipEntry[], time: number, day: number
     const local = Buffer.alloc(30);
     u32(local, 0, 0x04034b50);
     u16(local, 4, 20);
-    u16(local, 6, 0x0008);
+    u16(local, 6, 0x0808);
     u16(local, 8, 0);
     u16(local, 10, time);
     u16(local, 12, day);
@@ -92,7 +92,7 @@ async function* generate(entries: readonly ZipEntry[], time: number, day: number
     u32(header, 0, 0x02014b50);
     u16(header, 4, 20);
     u16(header, 6, 20);
-    u16(header, 8, 0x0008);
+    u16(header, 8, 0x0808);
     u16(header, 10, 0);
     u16(header, 12, time);
     u16(header, 14, day);

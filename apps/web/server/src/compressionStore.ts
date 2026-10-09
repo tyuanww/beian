@@ -40,7 +40,23 @@ export type CompressionWriter = {
   pid: number | null;
   state: CompressionWriterState;
   started_at: string | null;
+  process_token?: string;
 };
+
+export function compressionProcessClosePath(id: string): string {
+  return join(compressionBatchDir(id), "executor-close.json");
+}
+
+export function compressionProcessClosed(id: string, token: string, pid: number | null): boolean {
+  if (!/^[a-f0-9]{32}$/.test(token)) return false;
+  try {
+    const path = compressionProcessClosePath(id);
+    if (statSync(path).size > 2048) return false;
+    const record = JSON.parse(readFileSync(path, "utf8"));
+    return record.schema === "compression-close/1" && record.token === token && record.closed === true &&
+      Number.isInteger(record.pid) && record.pid > 0 && (pid === null || record.pid === pid);
+  } catch { return false; }
+}
 
 export type CompressionFileRecord = {
   id: string;

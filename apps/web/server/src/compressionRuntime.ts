@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { existsSync, readdirSync, readFileSync, rmSync, statSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
+import type { Readable } from "node:stream";
 import { assessCapability } from "./compressionProbe.js";
 import { executeCompressionFile, type CompressionExecuteResult } from "./compressionExecute.js";
 import {
@@ -27,6 +28,8 @@ import {
   compressionHasTombstone,
   compressionManifestExists,
   compressionOutputPath,
+  compressionProcessClosePath,
+  compressionProcessClosed,
   compressionRoot,
   compressionSourcePath,
   compressionStoreSnapshot,
@@ -53,6 +56,8 @@ let chain: Promise<void> = Promise.resolve();
 let activeId: string | null = null;
 let nowFn = (): number => Date.now();
 let attemptTimeoutMs = PDF_MAX_MS;
+let recoveryTimer: ReturnType<typeof setTimeout> | null = null;
+const downloads = new Map<string, { progress: number; stop: () => void }>();
 
 export function setCompressionClockForTest(next: (() => number) | null): void {
   if (process.env.VITEST !== "1") throw new Error("压缩时钟测试钩子只能在 VITEST 使用");
@@ -70,7 +75,7 @@ export function compressionActiveLeases(): CompressionLease[] {
 }
 
 function processLiveness(pid: number | null, token: string): "missing" | "owned" | "unknown" {
-  if (!pid || pid <= 0) return "missing";
+  if (!pid || pid <= 0) return "unknown";
   try {
     process.kill(pid, 0);
   } catch (err) {
@@ -94,6 +99,11 @@ function processLiveness(pid: number | null, token: string): "missing" | "owned"
 function writerLiveness(batch: CompressionBatchRecord): "idle" | "owned" | "missing" | "unknown" {
   if (batch.writer.state === "idle") return "idle";
   if (batch.writer.token && inflight.get(batch.id) === batch.writer.token) return "owned";
+  if (batch.writer.process_token) {
+    if (compressionProcessClosed(batch.id, batch.writer.process_token, batch.writer.pid)) return "missing";
+    // A dead supervisor alone does not prove that its process tree stopped.
+    return processLiveness(batch.writer.pid, batch.writer.process_token) === "owned" ? "owned" : "unknown";
+  }
   if (batch.writer.state === "spawn_unconfirmed") return "unknown";
   return processLiveness(batch.writer.pid, batch.writer.token);
 }
@@ -277,6 +287,37 @@ async function runBatch(batchId: string): Promise<void> {
           token,
           signal: controller.signal,
           capability: assessCapability(),
+          processObserver: {
+            begin() {
+              const owned = reloadOwned(batchId, token);
+              if (!owned) throw new Error("压缩执行器已失去归属");
+              const processToken = randomBytes(16).toString("hex");
+              owned.writer = { ...owned.writer, pid: null, state: "spawn_unconfirmed", process_token: processToken };
+              owned.revision += 1;
+              saveCompressionBatch(owned);
+              return { token: processToken, closePath: compressionProcessClosePath(batchId) };
+            },
+            spawned(pid) {
+              const owned = reloadOwned(batchId, token);
+              if (!owned) throw new Error("压缩执行器已失去归属");
+              owned.writer.pid = pid;
+              owned.writer.state = "running";
+              owned.revision += 1;
+              saveCompressionBatch(owned);
+            },
+            closed() {
+              const owned = reloadOwned(batchId, token);
+              return Boolean(owned && (!owned.writer.process_token || compressionProcessClosed(batchId, owned.writer.process_token, owned.writer.pid)));
+            },
+            notSpawned() {
+              const owned = reloadOwned(batchId, token);
+              if (!owned) return;
+              delete owned.writer.process_token;
+              owned.writer.state = "running";
+              owned.revision += 1;
+              saveCompressionBatch(owned);
+            },
+          },
         });
       } catch (err) {
         console.warn(`compression execute failed: ${err instanceof Error ? err.message : err}`);
@@ -284,23 +325,30 @@ async function runBatch(batchId: string): Promise<void> {
       } finally {
         clearTimeout(timer);
       }
+      const owned = reloadOwned(batchId, token);
+      if (owned?.writer.process_token && !compressionProcessClosed(batchId, owned.writer.process_token, owned.writer.pid)) return;
       if (controller.signal.aborted) result = { status: "failed", reason: "timed_out", publish: "none" };
       applyResult(batchId, token, file.id, result);
     }
   } finally {
     if (inflight.get(batchId) === token) inflight.delete(batchId);
     const done = readCompressionBatch(batchId);
-    if (done && done.writer.token === token && !compressionHasTombstone(batchId)) {
+    if (done && done.writer.token === token && !compressionHasTombstone(batchId) &&
+        (!done.writer.process_token || compressionProcessClosed(batchId, done.writer.process_token, done.writer.pid))) {
       done.writer = idleWriter();
       done.revision += 1;
       saveCompressionBatch(done);
     }
+    scheduleCompressionRecovery();
   }
 }
 
 async function pumpOnce(): Promise<void> {
   if (activeId) return;
-  const next = compressionStoreSnapshot().batches
+  const snapshot = compressionStoreSnapshot();
+  // A recovered or unknown writer still occupies the single process-tree budget.
+  if (snapshot.unreadable || snapshot.batches.some((batch) => batch.writer.state !== "idle")) return;
+  const next = snapshot.batches
     .filter((batch) =>
       batch.writer.state === "idle" &&
       batch.delete_state === "none" &&
@@ -423,6 +471,17 @@ export function recoverCompressionJobs(): void {
     if (compressionHasTombstone(name)) finishCompressionDelete(name);
   }
   pumpCompressionQueue();
+  scheduleCompressionRecovery();
+}
+
+function scheduleCompressionRecovery(): void {
+  if (recoveryTimer || !compressionStoreSnapshot().batches.some((batch) => batch.writer.state !== "idle" && !inflight.has(batch.id))) return;
+  recoveryTimer = setTimeout(() => {
+    recoveryTimer = null;
+    try { recoverCompressionJobs(); }
+    catch { console.warn("compression recovery failed; existing executor fences retained"); scheduleCompressionRecovery(); }
+  }, 5000);
+  recoveryTimer.unref();
 }
 
 function safeNames(): string[] {
@@ -520,11 +579,14 @@ export function deleteCompressionBatch(id: string): { status: 200 | 202; body: {
 export function sweepCompressionLeases(now = nowFn()): void {
   for (const lease of readCompressionLeases()) {
     const started = Date.parse(lease.started_at);
-    const progress = Date.parse(lease.progress_at);
+    const download = downloads.get(lease.token);
+    const progress = download?.progress ?? Date.parse(lease.progress_at);
     const foreign = lease.pid !== process.pid;
     const idle = !Number.isFinite(progress) || now - progress > COMPRESSION_DOWNLOAD_IDLE_MS;
     const expired = !Number.isFinite(started) || now - started > COMPRESSION_DOWNLOAD_MAX_MS;
     if (!foreign && !idle && !expired) continue;
+    if (foreign && processLiveness(lease.pid, "") !== "missing") continue;
+    if (download) { download.stop(); continue; }
     removeCompressionLease(lease.batch_id, lease.token);
     finishCompressionDelete(lease.batch_id);
   }
@@ -537,7 +599,7 @@ export function acquireCompressionLease(batchId: string, ownerId: string): Compr
     throw compressionProblem("compression_download_busy");
   }
   if (leases.length >= COMPRESSION_DOWNLOADS_GLOBAL) throw compressionProblem("compression_download_busy");
-  const now = nowIso();
+  const now = new Date(nowFn()).toISOString();
   const lease: CompressionLease = {
     token: randomBytes(16).toString("hex"),
     owner_id: ownerId,
@@ -553,6 +615,62 @@ export function acquireCompressionLease(batchId: string, ownerId: string): Compr
 export function releaseCompressionLease(lease: CompressionLease): void {
   removeCompressionLease(lease.batch_id, lease.token);
   finishCompressionDelete(lease.batch_id);
+}
+
+/** Backpressure follows the HTTP reader; neither prefetch nor an open socket renews a lease. */
+export function compressionDownloadStream(batchId: string, ownerId: string, source: Readable): ReadableStream<Uint8Array> {
+  let lease: CompressionLease;
+  try { lease = acquireCompressionLease(batchId, ownerId); }
+  catch (error) { source.destroy(); throw error; }
+  const iterator = source[Symbol.asyncIterator]();
+  let released = false;
+  let stopping = false;
+  let controller: ReadableStreamDefaultController<Uint8Array>;
+  let savedAt = nowFn();
+  const finish = () => {
+    if (released) return;
+    released = true;
+    clearInterval(timer);
+    downloads.delete(lease.token);
+    try { releaseCompressionLease(lease); }
+    catch { console.warn("compression download closed; pending file cleanup will be retried"); }
+  };
+  const stop = (error?: Error) => {
+    if (stopping || released) return;
+    stopping = true;
+    if (error) controller.error(error);
+    source.destroy();
+    if (source.closed) finish();
+  };
+  const closed = new Promise<void>((resolve) => source.once("close", () => { if (stopping) finish(); resolve(); }));
+  source.once("error", () => { /* iterator.next propagates the read error to the HTTP reader. */ });
+  downloads.set(lease.token, { progress: savedAt, stop: () => stop(new Error("下载超时，请重新下载。")) });
+  const timer = setInterval(() => {
+    try { sweepCompressionLeases(); }
+    catch { console.warn("compression lease cleanup failed; downloads remain protected"); }
+  }, 1000);
+  timer.unref();
+  return new ReadableStream<Uint8Array>({
+    start(value) { controller = value; },
+    async pull() {
+      try {
+        const next = await iterator.next();
+        if (stopping) return;
+        if (next.done) { finish(); controller.close(); return; }
+        const now = nowFn();
+        downloads.get(lease.token)!.progress = now;
+        if (now - savedAt >= 1000) {
+          lease.progress_at = new Date(now).toISOString();
+          writeCompressionLease(lease);
+          savedAt = now;
+        }
+        controller.enqueue(next.value);
+      } catch (error) {
+        stop(error instanceof Error ? error : new Error("下载失败"));
+      }
+    },
+    async cancel() { stop(); if (!source.closed) await closed; },
+  }, { highWaterMark: 0 });
 }
 
 export function noteCompressionResultForTest(

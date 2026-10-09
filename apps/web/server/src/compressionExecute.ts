@@ -1,5 +1,5 @@
 import type { CompressionCapability } from "./compressionProbe.js";
-import { runCompressionJob } from "./compressionTools.js";
+import { runCompressionJob, type CompressionProcessObserver } from "./compressionTools.js";
 import type { CompressionFileRecord } from "./compressionStore.js";
 import type { CompressionFileStatus } from "./compressionModel.js";
 
@@ -11,6 +11,7 @@ export type CompressionExecuteRequest = {
   token: string;
   signal: AbortSignal;
   capability: CompressionCapability;
+  processObserver?: CompressionProcessObserver;
 };
 
 export type CompressionExecuteResult = {

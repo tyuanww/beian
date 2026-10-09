@@ -77,8 +77,18 @@ class WindowsContainer:
         return code if code is not None and active == 0 else None
 
     def close(self):
-        # Last owned handle kills descendants even if this supervisor crashes.
-        self.api.close(self.job, self.process)
+        # A closed handle is only a safety net, not observed process-tree exit.
+        try:
+            _, active = self.api.state(self.job, self.process)
+            if active:
+                self.api.terminate(self.job)
+                deadline = time.monotonic() + 5
+                while self.api.state(self.job, self.process)[1]:
+                    if time.monotonic() >= deadline:
+                        raise RuntimeError("close_unconfirmed")
+                    time.sleep(0.02)
+        finally:
+            self.api.close(self.job, self.process)
 
 
 class LinuxContainer:
@@ -119,11 +129,17 @@ class LinuxContainer:
         return code if code is not None and not populated else None
 
     def close(self):
+        confirmed = True
         if self.group.exists():
             try:
                 (self.group / "cgroup.kill").write_text("1", encoding="ascii")
+                deadline = time.monotonic() + 5
+                while "populated 1" in (self.group / "cgroup.events").read_text():
+                    if time.monotonic() >= deadline:
+                        raise RuntimeError("close_unconfirmed")
+                    time.sleep(0.02)
             except OSError:
-                pass
+                confirmed = False
         if self.process:
             self.process.wait(timeout=5)
         for path in (self.leaf, self.group):
@@ -131,6 +147,8 @@ class LinuxContainer:
                 path.rmdir()
             except OSError:
                 pass
+        if not confirmed:
+            raise RuntimeError("close_unconfirmed")
 
 
 def container(memory=MEMORY, group_memory=GROUP_MEMORY):
@@ -164,7 +182,17 @@ def check_disk(work_dir, candidate_bytes, disk_bytes):
                 raise RuntimeError("resource_limit")
 
 
-def run(command, memory, group_memory, seconds, work_dir=None, candidate_bytes=128 * 1024 * 1024, disk_bytes=2 * 1024 ** 3):
+def write_close(path, token):
+    dest = Path(path)
+    temp = dest.with_name(dest.name + "." + token + ".tmp")
+    with temp.open("w", encoding="utf8") as stream:
+        json.dump({"schema": "compression-close/1", "token": token, "pid": os.getpid(), "closed": True}, stream)
+        stream.flush()
+        os.fsync(stream.fileno())
+    os.replace(temp, dest)
+
+
+def run(command, memory, group_memory, seconds, work_dir=None, candidate_bytes=128 * 1024 * 1024, disk_bytes=2 * 1024 ** 3, close_file=None, token=None):
     owned = container(memory, group_memory)
     threads = []
     over_output = threading.Event()
@@ -193,6 +221,10 @@ def run(command, memory, group_memory, seconds, work_dir=None, candidate_bytes=1
             thread.start()
         deadline = time.monotonic() + seconds
         while True:
+            if close_file:
+                cancel = Path(str(close_file) + ".cancel")
+                if cancel.exists() and cancel.stat().st_size == 32 and cancel.read_text(encoding="ascii") == token:
+                    raise RuntimeError("cancelled")
             if over_output.is_set() or time.monotonic() >= deadline:
                 raise RuntimeError("resource_limit")
             check_disk(work_dir, candidate_bytes, disk_bytes)
@@ -204,6 +236,8 @@ def run(command, memory, group_memory, seconds, work_dir=None, candidate_bytes=1
         owned.close()
         for thread in threads:
             thread.join(2)
+        if close_file:
+            write_close(close_file, token)
 
 
 def probe():
@@ -231,11 +265,15 @@ def main():
         return int(options[options.index(flag) + 1])
     if not command or not os.path.isabs(command[0]):
         raise ValueError("invalid_command")
-    # Node's AbortSignal terminates this supervisor; close its owned tree first.
+    token = options[options.index("--compression-token") + 1] if "--compression-token" in options else None
+    close_file = options[options.index("--closed-file") + 1] if "--closed-file" in options else None
+    if close_file and (not os.path.isabs(close_file) or not token or len(token) != 32 or any(c not in "0123456789abcdef" for c in token)):
+        raise ValueError("invalid_execution_identity")
+    # POSIX fallback; normal cancellation uses the token-bound file on all hosts.
     signal.signal(signal.SIGTERM, lambda *_: (_ for _ in ()).throw(SystemExit(143)))
     return run(command, number("--as"), number("--group-memory"), number("--cpu"),
                options[options.index("--work-dir") + 1] if "--work-dir" in options else None,
-               number("--fsize"), number("--disk"))
+               number("--fsize"), number("--disk"), close_file, token)
 
 
 if __name__ == "__main__":

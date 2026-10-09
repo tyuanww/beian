@@ -1,5 +1,4 @@
 import { createReadStream, openSync, readSync, closeSync } from "node:fs";
-import { Readable } from "node:stream";
 import type { Context } from "hono";
 import type { Session } from "./auth.js";
 import { compressionProblem, type PublicCompressionBatch } from "./compressionModel.js";
@@ -23,8 +22,7 @@ import { assessCapability } from "./compressionProbe.js";
 import { additionalSourceUsage } from "./sourceQuota.js";
 import { compressionZipStream } from "./compressionZip.js";
 import {
-  acquireCompressionLease,
-  releaseCompressionLease,
+  compressionDownloadStream,
   toPublicCompression,
 } from "./compressionRuntime.js";
 import {
@@ -286,20 +284,11 @@ export function registerCompressionRoutes(
       throw compressionProblem("compression_file_missing");
     }
     const path = compressionOutputPath(id, file.id);
-    const lease = acquireCompressionLease(id, viewerFromSession(session).id);
-    const stream = createReadStream(path);
-    let released = false;
-    const release = (): void => {
-      if (released) return;
-      released = true;
-      releaseCompressionLease(lease);
-    };
-    stream.once("close", release);
-    stream.once("error", release);
+    const stream = compressionDownloadStream(id, viewerFromSession(session).id, createReadStream(path));
     c.header("content-type", file.media_type);
     c.header("content-length", String(file.output_bytes));
     c.header("content-disposition", `attachment; filename*=UTF-8''${encodeURIComponent(file.name)}`);
-    return c.body(Readable.toWeb(stream) as ReadableStream);
+    return c.body(stream);
   });
 
   app.get("/api/compressions/:id/zip", (c) => {
@@ -315,19 +304,10 @@ export function registerCompressionRoutes(
       path: compressionOutputPath(id, file.id),
     }));
     if (!entries.length) throw compressionProblem("compression_zip_empty");
-    const lease = acquireCompressionLease(id, viewerFromSession(session).id);
-    const stream = compressionZipStream(entries);
-    let released = false;
-    const release = (): void => {
-      if (released) return;
-      released = true;
-      releaseCompressionLease(lease);
-    };
-    stream.once("close", release);
-    stream.once("error", release);
+    const stream = compressionDownloadStream(id, viewerFromSession(session).id, compressionZipStream(entries));
     c.header("content-type", "application/zip");
     c.header("content-disposition", `attachment; filename*=UTF-8''${encodeURIComponent(`${batch.title || "compression"}.zip`)}`);
-    return c.body(Readable.toWeb(stream) as ReadableStream);
+    return c.body(stream);
   });
 
   app.delete("/api/compressions/:id", (c) => {

@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from "node:child_process";
-import { mkdirSync, renameSync, rmSync, statSync } from "node:fs";
+import { mkdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -41,12 +41,20 @@ export type CompressionJobResult = {
   publish: "copy_source" | "output" | "none";
 };
 
+export type CompressionProcessObserver = {
+  begin(): { token: string; closePath: string };
+  spawned(pid: number): void;
+  notSpawned(): void;
+  closed(): boolean;
+};
+
 type JobRequest = {
   file: CompressionFileRecord;
   sourcePath: string;
   outputPath: string;
   signal: AbortSignal;
   capability: CompressionCapability;
+  processObserver?: CompressionProcessObserver;
 };
 
 type ToolStop = { stop: CompressionJobResult };
@@ -121,16 +129,24 @@ function pythonBin(): string | null {
   return pythonPath;
 }
 
-function runContained(command: string[], signal: AbortSignal, workDir?: string): Promise<ToolStop | ToolOk> {
+function runContained(command: string[], request: Pick<JobRequest, "signal" | "processObserver">, workDir?: string): Promise<ToolStop | ToolOk> {
+  const { signal, processObserver } = request;
+  if (signal.aborted) return Promise.resolve({ stop: none("failed", "timed_out") });
   assertCompressionArgv(command);
   const python = pythonBin();
   if (!python) return Promise.resolve({ stop: none("failed", "platform_budget_unavailable") });
   const args = containArgs(command, workDir);
+  const execution = processObserver?.begin();
+  if (execution) args.splice(args.indexOf("--"), 0, "--compression-token", execution.token, "--closed-file", execution.closePath);
   assertCompressionArgv(args.filter((arg) => arg !== "--"));
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     let stdout = "";
     let stderr = "";
     let settled = false;
+    const notSpawned = () => {
+      try { processObserver?.notSpawned(); }
+      catch { console.warn("compression spawn record failed; executor remains fenced"); }
+    };
     const finish = (value: ToolStop | ToolOk): void => {
       if (settled) return;
       settled = true;
@@ -142,27 +158,50 @@ function runContained(command: string[], signal: AbortSignal, workDir?: string):
         shell: false,
         windowsHide: true,
         stdio: ["ignore", "pipe", "pipe"],
-        signal,
+        // Windows child.kill would bypass the supervisor's tree-close receipt.
+        ...(execution ? {} : { signal }),
       });
     } catch {
+      notSpawned();
       finish({ stop: none("failed", signal.aborted ? "timed_out" : "platform_budget_unavailable") });
       return;
     }
+    const requestStop = () => {
+      if (execution) {
+        try { writeFileSync(`${execution.closePath}.cancel`, execution.token); }
+        catch { console.warn("compression cancel record failed; waiting for supervisor deadline"); }
+      } else child.kill();
+    };
+    signal.addEventListener("abort", requestStop, { once: true });
+    if (signal.aborted) requestStop();
+    let identityFailed = false;
+    try { if (child.pid) processObserver?.spawned(child.pid); }
+    catch { identityFailed = true; requestStop(); }
     const take = (chunk: Buffer, into: "out" | "err"): void => {
+      if (stdout.length + stderr.length > STDOUT_LIMIT) return;
       const text = chunk.toString("utf8");
       if (into === "out") stdout += text;
       else stderr += text;
-      if (stdout.length + stderr.length > STDOUT_LIMIT) child.kill();
+      if (stdout.length + stderr.length > STDOUT_LIMIT) requestStop();
     };
     child.stdout?.on("data", (chunk: Buffer) => take(chunk, "out"));
     child.stderr?.on("data", (chunk: Buffer) => take(chunk, "err"));
     child.once("error", () => {
       // Abort waits for close: the supervisor must release its owned tree first.
       if (child.pid) return;
+      notSpawned();
       finish({ stop: none("failed", signal.aborted ? "timed_out" : "dependency_missing") });
     });
     child.once("close", (status) => {
-
+      signal.removeEventListener("abort", requestStop);
+      if (processObserver && !processObserver.closed()) {
+        // Do not let callers clean up candidate files while a writer is unconfirmed.
+        if (!settled) { settled = true; reject(new Error("压缩进程树尚未确认关闭")); }
+        return;
+      }
+      if (identityFailed) { finish({ stop: none("failed", "interrupted") }); return; }
+      if (signal.aborted) { finish({ stop: none("failed", "timed_out") }); return; }
+      if (stdout.length + stderr.length > STDOUT_LIMIT) { finish({ stop: none("failed", "resource_limit") }); return; }
       if (stderr.includes("containment=resource_limit")) {
         finish({ stop: none("failed", "resource_limit") });
         return;
@@ -173,14 +212,6 @@ function runContained(command: string[], signal: AbortSignal, workDir?: string):
       }
       if (stderr.includes("containment=unavailable") || (status === 3 && !stderr.includes("containment=ok"))) {
         finish({ stop: none("failed", "platform_budget_unavailable") });
-        return;
-      }
-      if (signal.aborted) {
-        finish({ stop: none("failed", "timed_out") });
-        return;
-      }
-      if (stdout.length + stderr.length > STDOUT_LIMIT) {
-        finish({ stop: none("failed", "resource_limit") });
         return;
       }
       finish({ status: status ?? 1, stdout });
@@ -196,7 +227,7 @@ async function executeImage(request: JobRequest): Promise<CompressionJobResult> 
   mkdirSync(dirname(request.outputPath), { recursive: true });
   const run = await runContained(
     imageWorkerCommand(request.sourcePath, request.outputPath, request.file.media_type),
-    request.signal,
+    request,
     dirname(request.outputPath),
   );
   if (isStop(run)) return run.stop;
@@ -214,12 +245,12 @@ async function executeImage(request: JobRequest): Promise<CompressionJobResult> 
   return { status: "succeeded", reason: null, publish: "output" };
 }
 
-async function qpdfCode(qpdf: string, args: string[], signal: AbortSignal): Promise<ToolStop | ToolOk> {
-  return runContained([qpdf, ...args], signal);
+async function qpdfCode(qpdf: string, args: string[], request: JobRequest): Promise<ToolStop | ToolOk> {
+  return runContained([qpdf, ...args], request);
 }
 
-async function pageCount(qpdf: string, path: string, signal: AbortSignal): Promise<number | CompressionJobResult> {
-  const run = await qpdfCode(qpdf, ["--show-npages", path], signal);
+async function pageCount(qpdf: string, path: string, request: JobRequest): Promise<number | CompressionJobResult> {
+  const run = await qpdfCode(qpdf, ["--show-npages", path], request);
   if (isStop(run)) return run.stop;
   const checked = interpretQpdfExit("check", run.status);
   if (!checked.ok) return none(checked.reason === "qpdf_error" ? "unsupported" : "failed", checked.reason === "qpdf_error" ? "corrupt" : checked.reason);
@@ -241,26 +272,26 @@ async function executePdf(request: JobRequest): Promise<CompressionJobResult> {
   const java = resolveExecutable("java");
   const jar = pdfboxJar();
   if (!qpdf || !java || !jar || !statOk(JAVA_SOURCE)) return none("failed", "dependency_missing");
-  const password = await qpdfCode(qpdf, ["--requires-password", request.sourcePath], request.signal);
+  const password = await qpdfCode(qpdf, ["--requires-password", request.sourcePath], request);
   if (isStop(password)) return password.stop;
   const passwordResult = interpretQpdfExit("requires_password", password.status);
   if (!passwordResult.ok) {
     return none("failed", passwordResult.reason === "qpdf_warning_unapproved" ? "qpdf_warning_unapproved" : "corrupt");
   }
   if (passwordResult.passwordRequired) return none("unsupported", "password_required");
-  const encrypted = await qpdfCode(qpdf, ["--is-encrypted", request.sourcePath], request.signal);
+  const encrypted = await qpdfCode(qpdf, ["--is-encrypted", request.sourcePath], request);
   if (isStop(encrypted)) return encrypted.stop;
   const encryptedResult = interpretQpdfExit("is_encrypted", encrypted.status);
   if (!encryptedResult.ok) {
     return none("failed", encryptedResult.reason === "qpdf_warning_unapproved" ? "qpdf_warning_unapproved" : "corrupt");
   }
-  const check = await qpdfCode(qpdf, qpdfCheckArgs(request.sourcePath), request.signal);
+  const check = await qpdfCode(qpdf, qpdfCheckArgs(request.sourcePath), request);
   if (isStop(check)) return check.stop;
   const checked = interpretQpdfExit("check", check.status);
   if (!checked.ok) {
     return none(checked.reason === "qpdf_error" ? "unsupported" : "failed", checked.reason === "qpdf_error" ? "corrupt" : checked.reason);
   }
-  const pages = await pageCount(qpdf, request.sourcePath, request.signal);
+  const pages = await pageCount(qpdf, request.sourcePath, request);
   if (typeof pages !== "number") return pages;
   if (pages > COMPRESSION_MAX_PDF_PAGES) return none("failed", "resource_limit");
   const inputBytes = statSync(request.sourcePath).size;
@@ -268,7 +299,7 @@ async function executePdf(request: JobRequest): Promise<CompressionJobResult> {
   if (encryptedResult.encrypted) return none("unsupported", "password_required");
 
   const javaBin = java;
-  const inspect = await runContained(javaHelperCommand(javaBin, jar, "inspect", [request.sourcePath]), request.signal);
+  const inspect = await runContained(javaHelperCommand(javaBin, jar, "inspect", [request.sourcePath]), request);
   if (isStop(inspect)) return inspect.stop;
   const inspectStop = javaStop(inspect.status);
   if (inspectStop) return inspectStop;
@@ -295,7 +326,7 @@ async function executePdf(request: JobRequest): Promise<CompressionJobResult> {
   });
   if (!decision.rewrite) return none(decision.status, decision.reason || "content_invalid");
 
-  const sourceBoxes = await runContained(javaHelperCommand(javaBin, jar, "boxes", [request.sourcePath]), request.signal);
+  const sourceBoxes = await runContained(javaHelperCommand(javaBin, jar, "boxes", [request.sourcePath]), request);
   if (isStop(sourceBoxes)) return sourceBoxes.stop;
   const sourceStop = javaStop(sourceBoxes.status);
   if (sourceStop) return sourceStop;
@@ -311,7 +342,7 @@ async function executePdf(request: JobRequest): Promise<CompressionJobResult> {
     const command = round.kind === "lossless"
       ? [qpdf, ...qpdfLosslessArgs(request.sourcePath, candidate)]
       : javaHelperCommand(javaBin, jar, "recompress", [request.sourcePath, candidate, String(round.quality)]);
-    const ran = await runContained(command, request.signal, dirname(request.outputPath));
+    const ran = await runContained(command, request, dirname(request.outputPath));
     if (isStop(ran)) {
       rmSync(candidate, { force: true });
       return ran.stop;
@@ -344,18 +375,18 @@ async function executePdf(request: JobRequest): Promise<CompressionJobResult> {
       rmSync(candidate, { force: true });
       continue;
     }
-    const again = await qpdfCode(qpdf, qpdfCheckArgs(candidate), request.signal);
+    const again = await qpdfCode(qpdf, qpdfCheckArgs(candidate), request);
     if (isStop(again)) {
       rmSync(candidate, { force: true });
       return again.stop;
     }
-    const candidatePages = await pageCount(qpdf, candidate, request.signal);
+    const candidatePages = await pageCount(qpdf, candidate, request);
     if (typeof candidatePages !== "number") {
       rmSync(candidate, { force: true });
       if (candidatePages.reason === "platform_budget_unavailable" || candidatePages.reason === "timed_out") return candidatePages;
       continue;
     }
-    const boxes = await runContained(javaHelperCommand(javaBin, jar, "boxes", [candidate]), request.signal);
+    const boxes = await runContained(javaHelperCommand(javaBin, jar, "boxes", [candidate]), request);
     if (isStop(boxes)) {
       rmSync(candidate, { force: true });
       return boxes.stop;

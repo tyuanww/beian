@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { beforeEach, describe, it } from "node:test";
 import { makeTestTempDir } from "./testTemp.js";
@@ -43,7 +43,10 @@ function ready() {
   };
 }
 
-beforeEach(() => {
+beforeEach(async () => {
+  await compressionSettled();
+  // Each scenario owns its fences; an unknown writer must block unrelated work.
+  rmSync(join(DATA_DIR, "compressions"), { recursive: true, force: true });
   setCompressionCapabilityForTest(ready());
   setCompressionExecutorForTest(async () => ({ status: "passthrough", reason: null, publish: "copy_source" }));
   setCompressionRenameHookForTest(null);
