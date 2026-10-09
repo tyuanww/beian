@@ -123,13 +123,13 @@ def test_barcode_no_must_hit_is_doubt():
 
 def test_barcode_does_not_match_inside_a_longer_number():
     hits = compare_fields(
-        [{"field": "条形码", "excel_value": "1234567890"}],
+        [{"field": "条形码", "excel_value": "12345678"}],
         [],
-        "包装上的数字是 01234567890",
+        "包装上的数字是 012345678",
         pack_profile={"active_spec": "30ml装"},
     )
     assert hits[0]["status"] in ("疑点", "缺失")
-    assert "1234567890" in (hits[0]["coverage"].get("miss") or [])
+    assert "12345678" in (hits[0]["coverage"].get("miss") or [])
 
 
 def test_net_content_focuses_active_ml_sku():

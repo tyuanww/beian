@@ -720,14 +720,14 @@ def test_native_gate_does_not_use_ocr_fuzzy_phrase_matching():
     assert gate["matched"] < gate["total"]
 
 
-# Value: protects=native and barcode gates reject numeric substring matches; fails_when=expected code 1234567890 is accepted inside 01234567890; why_new=phrase coverage tests cover text prefixes but not numeric token boundaries; seam=none
+# Value: protects=native and barcode gates reject numeric substring matches; fails_when=expected code 12345678 is accepted inside 012345678; why_new=phrase coverage tests cover text prefixes but not numeric token boundaries; seam=none
 def test_native_gate_requires_complete_barcode_token():
     from app import compare_core
 
     only_native, gate = compare_core._native_only_gate(
         _native_surface_ingest(),
-        [_native_candidate("01234567890")],
-        [{"field": "条码", "excel_value": "1234567890", "field_group": "条形码"}],
+        [_native_candidate("012345678")],
+        [{"field": "条码", "excel_value": "12345678", "field_group": "条形码"}],
     )
 
     assert only_native is False
