@@ -49,6 +49,7 @@ import {
   openRenderGenerationFile,
   renderGenerationView,
   repairMockupPrintFaces,
+  requestUnfoldedPrint,
   retryMockup,
 } from "./jobs.js";
 import {
@@ -89,6 +90,7 @@ import {
   deleteMockup,
   fileOf,
   findMockupBySourceReceipt,
+  printFacesZipBytes,
   getJob,
   isMockupJobFile,
   isStructureProposalId,
@@ -115,6 +117,7 @@ import {
   readIllustratorAgentStatus,
 } from "./illustratorAgent.js";
 import { confirmPackagingStructure } from "./workers.js";
+import { UnfoldedPrintHttpError } from "./unfoldedPrint.js";
 import { skipPackSheetField } from "./sheetSkip.js";
 import { CompressionProblem } from "./compressionModel.js";
 import { HistoryProblem, queryHistory } from "./historyIndex.js";
@@ -351,6 +354,19 @@ function boom(err: unknown): never {
 function fileEtag(path: string): string {
   const st = statSync(path);
   return `W/"${st.size.toString(16)}-${Math.trunc(st.mtimeMs).toString(16)}"`;
+}
+
+function pdfHeaderAt(path: string): boolean {
+  let fd: number | undefined;
+  try {
+    fd = openSync(path, "r");
+    const buf = Buffer.alloc(5);
+    return readSync(fd, buf, 0, 5, 0) === 5 && buf.toString("ascii") === "%PDF-";
+  } catch {
+    return false;
+  } finally {
+    if (fd !== undefined) closeSync(fd);
+  }
 }
 
 function pngMagicAt(path: string): boolean {
@@ -1489,6 +1505,20 @@ app.post("/api/mockups/:id/retry", (c) => {
   }
 });
 
+app.post("/api/mockups/:id/unfolded-print", async (c) => {
+  const s = need(c, "create");
+  try {
+    const job = await requestUnfoldedPrint(assertTid(c.req.param("id")), viewerFromSession(s));
+    const status = job.unfolded_print_request?.status;
+    return c.json(decorateQueueAhead([publishMockup(job, s)])[0], status === "queued" || status === "running" ? 202 : 200);
+  } catch (error) {
+    if (error instanceof UnfoldedPrintHttpError) {
+      return c.json({ message: error.message, reason: error.reason, unfolded_print: error.unfolded_print }, error.status as 409);
+    }
+    boom(error);
+  }
+});
+
 app.post("/api/mockups/:id/print-faces", async (c) => {
   const s = need(c, "create");
   try {
@@ -1521,6 +1551,18 @@ app.get("/api/mockups/:id/files/:key", (c) => {
   const job = getJob(assertTid(c.req.param("id")));
   if (!job) throw new HTTPException(404, { message: "没有这单打样" });
   const key = c.req.param("key");
+  if (key === "print_faces_zip") {
+    const bytes = printFacesZipBytes(job.id);
+    if (!bytes) throw new HTTPException(404, { message: "六面印刷图还不齐" });
+    return new Response(bytes, {
+      headers: {
+        "Content-Type": "application/zip",
+        "X-Content-Type-Options": "nosniff",
+        "Cache-Control": "private, no-store",
+        "Content-Disposition": "attachment; filename=\"print-faces.zip\"",
+      },
+    });
+  }
   const f = fileOf(job, key);
   if (!f?.path || !existsSync(f.path)) throw new HTTPException(404, { message: "文件还没有" });
   if (!isWhiteFile(key, f.name)) {
@@ -1536,6 +1578,9 @@ app.get("/api/mockups/:id/files/:key", (c) => {
         : "application/vnd.openxmlformats-officedocument.presentationml.presentation";
   if (type === "image/png" && !pngMagicAt(f.path)) {
     throw new HTTPException(415, { message: mockupFileBrokenMessage(key) });
+  }
+  if (key === "unfolded_print" && !pdfHeaderAt(f.path)) {
+    throw new HTTPException(415, { message: "净版展开不是可印刷的 PDF。" });
   }
   const ascii = f.name.replace(/[^\x20-\x7E]/g, "_").replace(/"/g, "");
   const encoded = encodeURIComponent(f.name);

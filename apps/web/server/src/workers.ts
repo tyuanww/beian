@@ -22,7 +22,9 @@ export type RunPythonOpts = {
 export type WorkerProcessIdentity = {
   kind: "compare" | "rework" | "mockup";
   id: string;
-} | { kind: "print_faces"; id: string; executionId: string } | { kind: "render_generation"; id: string; mutationId: string; executionId: string;
+} | { kind: "print_faces"; id: string; executionId: string }
+  | { kind: "unfolded_print"; id: string; executionId: string; mode: "publish_existing" | "native_export" }
+  | { kind: "render_generation"; id: string; mutationId: string; executionId: string;
   container?: "windows-job-object/1" };
 
 export type WorkerProcessState = "owned" | "missing" | "other" | "unknown";
@@ -112,6 +114,18 @@ export function workerCommandMatches(commandLine: string, expected: WorkerProces
     const job = tokens.indexOf("--job-dir", script + 1);
     return script >= 0 && execution > script && tokens[execution + 1] === expected.executionId
       && job > script && String(tokens[job + 1] || "").replace(/\\/g, "/").split("/").pop() === expected.id;
+  }
+  if (expected.kind === "unfolded_print") {
+    if (expected.mode === "publish_existing") {
+      const script = tokens.findIndex(token => /(^|[\\/])export_unfolded_print\.py$/i.test(token));
+      const execution = tokens.indexOf("--execution-id", script + 1);
+      const job = tokens.indexOf("--job-dir", script + 1);
+      return script >= 0 && execution > script && tokens[execution + 1] === expected.executionId
+        && job > script && String(tokens[job + 1] || "").replace(/\\/g, "/").split("/").pop() === expected.id;
+    }
+    const script = tokens.findIndex(token => /(^|[\\/])illustrator_worker\.py$/i.test(token));
+    const config = String(tokens[script + 1] || "").replace(/\\/g, "/");
+    return script >= 0 && config.includes(`/${expected.id}/`) && config.includes(expected.executionId);
   }
   if (expected.kind === "mockup") {
     const pipeline = tokens.findIndex((token) => /(^|[\\/])pipeline\.py$/i.test(token));
@@ -418,6 +432,51 @@ export type PrintFaceRepairOpts = {
   resolved: string;
   assets: string;
 };
+
+export type UnfoldedPublishOpts = {
+  executionId: string;
+  jobDir: string;
+  source: string;
+  output: string;
+  artwork?: string;
+  expectSha256: string;
+  artworkSha256?: string;
+  onSpawn?: (pid: number) => void;
+};
+
+export async function runUnfoldedPublish(opts: UnfoldedPublishOpts): Promise<RunPythonResult> {
+  const args = [
+    "export_unfolded_print.py",
+    "--source", opts.source,
+    "--output", opts.output,
+    "--expect-sha256", opts.expectSha256,
+    "--execution-id", opts.executionId,
+    "--job-dir", opts.jobDir,
+  ];
+  if (opts.artwork) args.push("--artwork", opts.artwork, "--artwork-sha256", opts.artworkSha256 || "");
+  return runPython({
+    args,
+    cwd: PACKAGING,
+    timeoutMs: 60_000,
+    onSpawn: opts.onSpawn,
+  });
+}
+
+export type UnfoldedNativeOpts = {
+  executionId: string;
+  configPath: string;
+  onSpawn?: (pid: number) => void;
+};
+
+/** Same Illustrator worker and single slot. Tests substitute this; production does not invent a host. */
+export async function runUnfoldedNative(opts: UnfoldedNativeOpts): Promise<RunPythonResult> {
+  return runPython({
+    args: ["illustrator/illustrator_worker.py", opts.configPath, "--timeout", "1260"],
+    cwd: PACKAGING,
+    timeoutMs: 1_260_000,
+    onSpawn: opts.onSpawn,
+  });
+}
 
 export async function runPrintFaceRepair(opts: PrintFaceRepairOpts): Promise<RunPythonResult> {
   return runPython({
