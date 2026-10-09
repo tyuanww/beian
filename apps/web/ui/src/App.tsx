@@ -92,6 +92,7 @@ function takeStashedTid(key: string): string | null {
 }
 
 function readCollapsed() {
+  if (window.matchMedia("(max-width: 1024px)").matches) return true;
   try {
     const raw = localStorage.getItem(SIDEBAR_KEY);
     if (raw === "1") return true;
@@ -263,11 +264,20 @@ export function App() {
     return () => window.removeEventListener("popstate", onPop);
   }, []);
 
+  useEffect(() => {
+    const narrow = window.matchMedia("(max-width: 1024px)");
+    const restore = () => setCollapsed(readCollapsed());
+    narrow.addEventListener("change", restore);
+    return () => narrow.removeEventListener("change", restore);
+  }, []);
+
   function toggleSidebar() {
     setCollapsed((cur) => {
       const next = !cur;
       try {
-        localStorage.setItem(SIDEBAR_KEY, next ? "1" : "0");
+        if (!window.matchMedia("(max-width: 1024px)").matches) {
+          localStorage.setItem(SIDEBAR_KEY, next ? "1" : "0");
+        }
       } catch {
         /* ignore */
       }
@@ -437,6 +447,8 @@ export function App() {
         ) : null}
         {view === "review" ? (
           <ReviewPage
+            key={`${me.open_id || "session-only"}:${taskId}`}
+            userId={me.open_id || null}
             taskId={taskId}
             onBack={() => goRoute({ view: "tasks" })}
           />

@@ -1,8 +1,10 @@
+import { useState } from "react";
 import { Button, Input, Select, Tag } from "antd";
 import type { Decision, FieldHit, TaskDetail } from "../api";
 import { spokenAsk } from "./hitText";
 import { REVIEW_DOCK_POPUP_LAYER } from "./reviewDock";
-import { reviewProgress } from "./reviewNav";
+import { issueOrdinal, reviewProgress } from "./reviewNav";
+import { issueNavigation } from "./reviewWorkspaceState";
 import {
   partitionReviewHits,
   reviewEvidence,
@@ -69,7 +71,9 @@ export function ReviewDockPanel({
   onCopy,
   onNoteChange,
 }: Props) {
+  const [pendingOnly, setPendingOnly] = useState(false);
   const grouped = partitionReviewHits(hits);
+  const navigation = issueNavigation(hits, active, pendingOnly);
   const evidence = current ? reviewEvidence(current) : null;
   const selected =
     current?.decision === "confirm" || current?.decision === "issue" || current?.decision === "ignore"
@@ -77,14 +81,21 @@ export function ReviewDockPanel({
       : undefined;
   const spoken = current ? spokenAsk(current, current.field, currentHasBox) : null;
   const progress = reviewProgress(hits, pageNo, active);
-  const noteDirty = note.trim() !== String(current?.note || "").trim();
+  const noteDirty = note !== (current?.note ?? "");
 
   return (
     <div className="review-dock-panel">
       <section className="review-dock-issues" aria-label="疑点列表">
-        <p className="field-label">疑点列表</p>
-        <div className="review-dock-issue-row">
-          {grouped.issues.length ? grouped.issues.map(({ hit, index }, ordinal) => (
+        <div className="review-issue-controls">
+          <Button disabled={busy || navigation.previous == null} onClick={() => { if (navigation.previous != null) onPick(navigation.previous); }}>上一项</Button>
+          <Button disabled={busy || navigation.next == null} onClick={() => { if (navigation.next != null) onPick(navigation.next); }}>下一项</Button>
+          <Button disabled={busy || navigation.nextPending == null} onClick={() => { if (navigation.nextPending != null) onPick(navigation.nextPending); }}>下一待确认</Button>
+        </div>
+        <label className="review-issue-filter"><input type="checkbox" checked={pendingOnly} onChange={(event) => setPendingOnly(event.target.checked)} />仅看待确认</label>
+        <details className="review-issue-directory" open>
+          <summary>疑点目录 · {navigation.visible.length} 项</summary>
+          <div className="review-dock-issue-row">
+          {navigation.visible.length ? navigation.visible.map(({ hit, index }) => (
             <button
               key={hit.id || index}
               type="button"
@@ -93,12 +104,13 @@ export function ReviewDockPanel({
               disabled={busy}
               onClick={() => onPick(index)}
             >
-              <span className="hit-no">{ordinal + 1}</span>
+              <span className="hit-no">{issueOrdinal(hits, index)}</span>
               <strong>{hit.field || "字段"}</strong>
               {statusTag(hit.status)}
             </button>
-          )) : <span className="review-dock-none">暂无疑点</span>}
-        </div>
+          )) : <span className="review-dock-none">{pendingOnly ? "没有待确认的疑点" : "暂无疑点"}</span>}
+          </div>
+        </details>
         {grouped.consistent.length ? (
           <details className="review-dock-consistent">
             <summary>一致列表 · {grouped.consistent.length}</summary>
@@ -124,6 +136,7 @@ export function ReviewDockPanel({
 
       {current && evidence ? (
         <>
+          <h2 className="review-current-title">{current.field || "当前字段"}</h2>
           {spoken ? (
             <section className="review-spoken" aria-label="嘱咐">
               <p>{spoken.lead}</p>
@@ -173,7 +186,9 @@ export function ReviewDockPanel({
           <p className="review-progress" aria-live="polite">
             当前：{current.field || "字段"} · 这单还剩 {progress.jobPending} 条 · 本页还有 {progress.pageLeft} 条
           </p>
-          <Input
+          <Input.TextArea
+            autoSize={{ minRows: 2, maxRows: 6 }}
+            aria-label="人工备注"
             className="review-evidence-note"
             placeholder="补充说明，会进改稿清单"
             value={note}
@@ -182,8 +197,12 @@ export function ReviewDockPanel({
             onBlur={() => {
               if (selected && noteDirty) onNoteCommit(current, selected, note);
             }}
-            onPressEnter={(event) => event.currentTarget.blur()}
+            onPressEnter={(event) => { if (!event.shiftKey) { event.preventDefault(); event.currentTarget.blur(); } }}
           />
+          <div className="review-issue-controls">
+            <Button disabled={!reviewable || busy || !selected || !noteDirty} onClick={() => { if (selected) onNoteCommit(current, selected, note); }}>保存备注</Button>
+            <p className="review-draft-status" role="status">{busy ? "正在保存…" : noteDirty ? "备注尚未保存到服务器" : "备注已与服务器同步"}</p>
+          </div>
         </>
       ) : (
         <p className="page-lead">{emptyMessage}</p>
