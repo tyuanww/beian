@@ -66,6 +66,7 @@ def cmd_compare(args: argparse.Namespace) -> int:
     data = Path(args.data_dir).expanduser().resolve() if args.data_dir else None
     compare_core.init_paths(data)
     compare_core.NATIVE_DIR = Path(args.native_dir).resolve() if getattr(args, "native_dir", None) else None
+    compare_core.NATIVE_ATTEMPTED = bool(getattr(args, "native_attempted", False))
     tid = (args.tid or "").strip()
     if not compare_core.TID_RE.fullmatch(tid):
         return _err("无效任务 id")
@@ -112,6 +113,7 @@ def cmd_rework(args: argparse.Namespace) -> int:
     data = Path(args.data_dir).expanduser().resolve() if args.data_dir else None
     compare_core.init_paths(data)
     compare_core.NATIVE_DIR = Path(args.native_dir).resolve() if getattr(args, "native_dir", None) else None
+    compare_core.NATIVE_ATTEMPTED = bool(getattr(args, "native_attempted", False))
     tid = (args.tid or "").strip()
     task = compare_core.load_task(tid)
     pdf = Path(args.pdf).resolve()
@@ -143,6 +145,7 @@ def cmd_rework(args: argparse.Namespace) -> int:
     task["pages_v2"] = result.get("pages") or []
     task["hits_v2"] = result.get("hits") or []
     task["ingest"] = result.get("ingest")
+    task["ocr_meta"] = result.get("ocr_meta")
     task["pack_layout"] = result.get("pack_layout")
     task["status"] = "in_review"
     prior = [
@@ -193,6 +196,7 @@ def main() -> int:
     c.add_argument("--data-dir", default="")
 
     c.add_argument("--native-dir", default="")
+    c.add_argument("--native-attempted", action="store_true")
 
     r = sub.add_parser("rework", help="对红第二轮 PDF；stdout 最后一行结果 JSON")
     r.add_argument("--tid", required=True)
@@ -202,6 +206,7 @@ def main() -> int:
     r.add_argument("--data-dir", default="")
 
     r.add_argument("--native-dir", default="")
+    r.add_argument("--native-attempted", action="store_true")
 
     pr = sub.add_parser("probe")
     pr.add_argument("--target", required=True, choices=("python", "baidu"))

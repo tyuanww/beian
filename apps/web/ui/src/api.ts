@@ -636,6 +636,23 @@ export type TaskPage = {
 
 export type TaskDetail = TaskSummary & {
   native_text?: { status: "queued" | "running" | "ready" | "fallback"; reason?: string; message?: string };
+  ocr_meta?: {
+    skipped?: boolean;
+    reason?: string;
+    engines?: string[];
+    pages_ran?: number;
+    words?: number;
+    native_coverage?: { matched?: number; total?: number };
+    surfaces?: Array<{
+      surface?: string;
+      skipped?: boolean;
+      reason?: string;
+      pages_ran?: number;
+      ocr_engine?: string;
+      words?: number;
+      native_coverage?: { matched?: number; total?: number };
+    }>;
+  };
   hits?: FieldHit[];
   hits_v2?: FieldHit[];
   disclaimer?: string;

@@ -395,7 +395,7 @@ export function computeHealth() {
     review: {
       ok: reviewOk,
       title: "今天能审一单吗",
-      detail: reviewOk ? "已填百度 OCR" : "缺百度 OCR 密钥；没有它机审几乎不能跑",
+      detail: reviewOk ? "已填百度 OCR（图片/转曲稿可回退）" : "缺百度 OCR；原生文字覆盖完整的稿件仍可审，图片/转曲区域需要它",
     },
     mockup: {
       ok: mockupOk,

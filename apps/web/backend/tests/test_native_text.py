@@ -104,6 +104,17 @@ def test_limits_and_missing_close_fail_closed(tmp_path):
     assert native_text.load_candidates(root, source, metas)[0] == []
 
 
+# Value: protects=load_candidates fails closed when a page content stream exceeds the pre-extraction budget; fails_when=the resource guard is removed and hostile PDF content reaches PyMuPDF text extraction; why_new=existing limits cover JSON and total candidates but not page-level content limits; seam=none
+def test_page_content_budget_fails_closed_before_text_extraction(tmp_path, monkeypatch):
+    source, root, _, metas = fixture(tmp_path)
+    monkeypatch.setattr(native_text, "_page_content_within_limit", lambda _page: False)
+
+    candidates, reason = native_text.load_candidates(root, source, metas)
+
+    assert candidates == []
+    assert reason == "native_mapping_unconfirmed"
+
+
 def test_native_reuses_close_contract_with_independent_observation():
     path = Path(__file__).resolve().parents[4] / "workers/packaging/illustrator/export_close.py"
     spec = importlib.util.spec_from_file_location("native_close_test", path)

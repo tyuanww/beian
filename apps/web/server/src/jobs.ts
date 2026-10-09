@@ -151,6 +151,7 @@ const MERGE_ALLOW = new Set([
   "surfaces",
   "multi_surface",
   "qrcodes",
+  "ocr_meta",
   "round",
   "artwork_v2",
   "rework_check",
@@ -394,6 +395,7 @@ export function publicTask(task: Task, viewer?: Viewer): Record<string, unknown>
   if (viewer) assertCanAccessTask(task, viewer);
   const {
     native_text_request: _native,
+    native_text_attempted: _nativeAttempted,
     job_pid: _pid,
     notify_job_id: _nk,
     notify_sent: _ns,
@@ -3219,6 +3221,9 @@ async function runAi(id: string, startedAt: string): Promise<void> {
 
 async function runOcr(id: string, startedAt: string): Promise<void> {
   const task = loadTask(id);
+  // Keep the fact that Illustrator was attempted even when prepareNativeRun
+  // has discarded a stale/fallback request before this worker starts.
+  const nativeAttempted = Boolean(nativeRequest(task) || task.native_text_attempted);
   const onSpawn = (pid: number) => {
     const t = loadTask(id);
     if (t.job_started_at !== startedAt || t.job_status !== "running") return;
@@ -3233,6 +3238,7 @@ async function runOcr(id: string, startedAt: string): Promise<void> {
       result = await run({
         tid: id,
         nativeDir: nativeDirectory(task),
+        nativeAttempted,
         pdf: join(DATA_DIR, "uploads", id, "artwork_v2.pdf"),
         actor: taskOwner(task),
         onSpawn,
@@ -3243,6 +3249,7 @@ async function runOcr(id: string, startedAt: string): Promise<void> {
       result = await run({
         tid: id,
         nativeDir: nativeDirectory(task),
+        nativeAttempted,
         excel: join(DATA_DIR, "uploads", id, "source.xlsx"),
         pdf: join(DATA_DIR, "uploads", id, "artwork.pdf"),
         productName: String(task.product_name || task.title || ""),
@@ -3270,6 +3277,7 @@ function finishOcr(id: string, startedAt: string, result: RunPythonResult): void
     tryStart();
     return;
   }
+  delete task.native_text_attempted;
   if (live.ocr === id) live.ocr = null;
   delete task.job_pid;
   task.job_finished_at = nowIso();

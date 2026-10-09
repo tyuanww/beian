@@ -301,7 +301,7 @@ export function NewTaskPage({ canCreate, receiptId, onCreated, onBack }: Props) 
         </UploadWell>
       </div>
 
-      <p className="new-ocr-hint">OCR 认不清会写成「待人工确认」，不会自动过审。一次只传一对。</p>
+      <p className="new-ocr-hint">优先读取 PDF / Illustrator 原生文字；图片或未覆盖区域才走 OCR，认不清会写成「待人工确认」。一次只传一对。</p>
 
       <div className="step-row">
         <article className="step-card">

@@ -9,6 +9,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from app.fields import numeric_code_in_text
+
 
 def infer_pack_profile(
     *,
@@ -46,7 +48,7 @@ def infer_pack_profile(
         if piece == "*":
             continue
         for c in codes:
-            if c in ocr or any(c in x or x in c for x in codes_on_pack):
+            if numeric_code_in_text(c, ocr) or any(c == x for x in codes_on_pack):
                 piece_from_code.append(piece)
                 break
 

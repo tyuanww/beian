@@ -287,6 +287,7 @@ export function runPython(opts: RunPythonOpts): Promise<RunPythonResult> {
 
 export async function compareTask(opts: {
   nativeDir?: string;
+  nativeAttempted?: boolean;
   tid: string;
   excel: string;
   pdf: string;
@@ -319,6 +320,7 @@ export async function compareTask(opts: {
       "--data-dir",
       DATA_DIR,
       ...(opts.nativeDir ? ["--native-dir", opts.nativeDir] : []),
+      ...(opts.nativeAttempted ? ["--native-attempted"] : []),
     ],
     timeoutMs: 180_000,
     onStderrLine: opts.onStderrLine,
@@ -328,6 +330,7 @@ export async function compareTask(opts: {
 
 export async function reworkTask(opts: {
   nativeDir?: string;
+  nativeAttempted?: boolean;
   tid: string;
   pdf: string;
   actor: string;
@@ -348,6 +351,7 @@ export async function reworkTask(opts: {
       "--data-dir",
       DATA_DIR,
       ...(opts.nativeDir ? ["--native-dir", opts.nativeDir] : []),
+      ...(opts.nativeAttempted ? ["--native-attempted"] : []),
     ],
     timeoutMs: 180_000,
     onStderrLine: opts.onStderrLine,

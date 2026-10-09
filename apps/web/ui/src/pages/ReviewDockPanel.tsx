@@ -26,6 +26,7 @@ type Props = {
   emptyMessage: string;
   reworkCheck?: TaskDetail["rework_check"];
   nativeTaskEvidence?: TaskDetail["native_text"];
+  ocrMeta?: TaskDetail["ocr_meta"];
   onPick: (index: number) => void;
   onDecide: (hit: FieldHit, decision: Decision, note: string) => void;
   onNoteCommit: (hit: FieldHit, decision: Decision, note: string) => void;
@@ -68,6 +69,7 @@ export function ReviewDockPanel({
   emptyMessage,
   reworkCheck,
   nativeTaskEvidence,
+  ocrMeta,
   onPick,
   onDecide,
   onNoteCommit,
@@ -90,6 +92,9 @@ export function ReviewDockPanel({
   return (
     <div className="review-dock-panel">
       {nativeTaskEvidence?.message ? <p className="review-native-evidence" role="status">{nativeTaskEvidence.message}</p> : null}
+      {ocrMeta?.skipped && ocrMeta.reason === "native_coverage" ? (
+        <p className="review-native-evidence" role="status">本单已用 Illustrator 原生文字完成文字识别，未调用百度文字 OCR。</p>
+      ) : null}
       <section className="review-dock-issues" aria-label="疑点列表">
         <div className="review-issue-controls">
           <Button disabled={busy || navigation.previous == null} onClick={() => { if (navigation.previous != null) onPick(navigation.previous); }}>上一项</Button>

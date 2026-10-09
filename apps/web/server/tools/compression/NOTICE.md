@@ -8,7 +8,7 @@
 |---|---|---|---|
 | sharp | 0.34.4 | Apache-2.0 | https://github.com/lovell/sharp |
 | sharp 附带的 libvips | 随 sharp 0.34.4 预编译包 | LGPL-3.0 | https://github.com/libvips/libvips |
-| qpdf | 运行机 PATH 上的发行版，不内置二进制 | Apache-2.0 | https://github.com/qpdf/qpdf |
+| qpdf | **12.4.2**（运行机 PATH 必须报告 `qpdf version 12.4.2`，不内置二进制） | Apache-2.0 | https://github.com/qpdf/qpdf/tree/v12.4.2 |
 | Apache PDFBox | 3.0.5，`pdfbox-app` | Apache-2.0 | https://pdfbox.apache.org/ |
 | JDK | 能执行 `java --source 17` 的本机 JDK | 由发行版声明 | 不内置 |
 

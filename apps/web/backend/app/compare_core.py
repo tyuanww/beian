@@ -13,9 +13,10 @@ from app import config, layout_zones, pack_profile, text_verify, native_text
 from app.baidu_ocr import qrcode_image_bytes
 from app.claims_rules import build_claims_report
 from app.field_verify import clip_hit_bboxes, verify_fields
-from app.fields import parse_excel_fields
+from app.fields import key_phrases, normalize, normalize_units, numeric_code_in_text, parse_excel_fields
+from app.layout_zones import skip_sheet_field
 from app.pack_layout import detect_regions, words_in_roles
-from app.pdf_ingest import ingest_pdf, public_ingest
+from app.pdf_ingest import FULL_PAGE_IMAGE_MIN_COVERAGE, ingest_pdf, public_ingest
 from app.pdf_render import render_pdf_pages
 from app.region_ocr import recognize_pages
 
@@ -25,6 +26,8 @@ DATA: Path
 TASKS: Path
 UPLOADS: Path
 NATIVE_DIR: Path | None = None
+NATIVE_ATTEMPTED = False
+NATIVE_ONLY_MAX_CANDIDATES = 10_000
 
 
 def init_paths(data_dir: Path | None = None) -> Path:
@@ -82,10 +85,96 @@ def _summary(hits: list[dict]) -> dict[str, int]:
 
 
 def _ocr_pages(
-    page_metas: list[dict], ingested: dict | None = None
+    page_metas: list[dict], ingested: dict | None = None, *, force_ocr: bool = False
 ) -> tuple[str, list[dict], str, dict]:
     """单引擎认字。活字跳过 OCR；禁止 zone_boost / Paddle-VL 拼进同一词表。"""
-    return recognize_pages(page_metas, ingested)
+    return recognize_pages(page_metas, ingested, force_ocr=force_ocr)
+
+
+def _native_coverage(fields: list[dict], source_text: str) -> dict[str, int]:
+    """用严格规范化的确认单短语判断原生文字是否覆盖本次核对输入。
+
+    native-only 是跳过 OCR 的安全门，不能复用面向 OCR 容错的模糊/前缀
+    匹配；单位归一仍保留，但任何缺字、软锚点或 fuzzy 命中都必须回退 OCR。
+    """
+    total = 0
+    matched = 0
+    normalized_source = normalize(source_text)
+    normalized_units = normalize_units(source_text)
+    for field in fields or []:
+        name = str(field.get("field") or "")
+        value = str(field.get("excel_value") or "").strip()
+        if skip_sheet_field(name) or not value:
+            continue
+        if field.get("remark"):
+            value = f"{value}\n{field.get('remark')}"
+        phrases = key_phrases(value)
+        for phrase in phrases:
+            normalized_phrase = normalize(phrase)
+            if len(normalized_phrase) < 3:
+                continue
+            total += 1
+            normalized_unit_phrase = normalize_units(phrase)
+            phrase_match = (
+                numeric_code_in_text(normalized_phrase, normalized_source)
+                if normalized_phrase.isdigit()
+                else normalized_phrase in normalized_source
+            )
+            unit_match = (
+                numeric_code_in_text(normalized_unit_phrase, normalized_units)
+                if normalized_unit_phrase.isdigit()
+                else normalized_unit_phrase in normalized_units
+            )
+            if phrase_match or unit_match:
+                matched += 1
+    return {"matched": matched, "total": total}
+
+
+def _native_only_gate(
+    ingested: dict[str, Any], candidates: list[dict], fields: list[dict]
+) -> tuple[bool, dict[str, Any]]:
+    """决定原生候选能否成为本次审稿的主文字来源。
+
+    只在候选已经通过 native_text 的稿面/关闭证明、每页仍是纯活字页、
+    并覆盖确认单全部可核对短语时跳过 OCR。任何不确定都回到原有 OCR。
+    """
+    pages = ingested.get("pages") or []
+    if not candidates:
+        return False, {"status": "unavailable", "reason": "no_candidates", "matched": 0, "total": 0}
+    if len(candidates) > NATIVE_ONLY_MAX_CANDIDATES:
+        return False, {"status": "fallback", "reason": "candidate_limit", "matched": 0, "total": 0}
+    page_numbers = {
+        int(page.get("page") or 0)
+        for page in pages
+        if int(page.get("page") or 0) > 0
+    }
+    candidate_pages = {
+        int(candidate.get("page") or 0)
+        for candidate in candidates
+        if int(candidate.get("page") or 0) > 0
+    }
+    if page_numbers - candidate_pages:
+        return False, {
+            "status": "fallback",
+            "reason": "page_coverage_incomplete",
+            "matched": 0,
+            "total": 0,
+        }
+    if any(str(page.get("mode") or "") != "live_text" for page in pages):
+        return False, {"status": "fallback", "reason": "non_live_page", "matched": 0, "total": 0}
+    if any(float(page.get("image_coverage") or 0) >= FULL_PAGE_IMAGE_MIN_COVERAGE for page in pages):
+        return False, {"status": "fallback", "reason": "image_content", "matched": 0, "total": 0}
+    candidate_text = "\n".join(
+        str(candidate.get("text") or "").strip()
+        for candidate in candidates
+        if str(candidate.get("text") or "").strip()
+    )
+    # The PDF text layer is not a visibility proof. A hidden, clipped, or
+    # off-canvas span must never be able to satisfy the native-only gate.
+    coverage = _native_coverage(fields, candidate_text)
+    if coverage["total"] <= 0 or coverage["matched"] < coverage["total"]:
+        return False, {"status": "fallback", "reason": "coverage_incomplete", **coverage}
+    return True, {"status": "ready", "reason": "native_coverage", **coverage}
 
 
 def _attach_page_size(words: list[dict], page_metas: list[dict]) -> None:
@@ -236,18 +325,71 @@ def _surface_job(
     has_layer = bool(ingested.get("has_layer"))
     layer_px = ingested.get("spans") or []
     layer_words = text_verify.words_from_text_blocks(layer_px)
-    emit_stage("ocr")
-    ocr_text, ocr_words, ocr_engine, ocr_meta = _ocr_pages(page_metas, ingested)
     candidates, native_reason = native_text.load_candidates(NATIVE_DIR, pdf, page_metas)
-    ocr_text, ocr_words, native_audit = native_text.fuse_with_audit(NATIVE_DIR, pdf, ocr_text, ocr_words, candidates)
-    prefer_layer = has_layer or ingested.get("mode") == "live_text"
-    pack_text, words, text_source = text_verify.merge_text_sources(
-        layer_text,
-        ocr_text,
-        layer_words,
-        ocr_words,
-        prefer_layer=prefer_layer,
-    )
+    candidate_budget_ok = len(candidates) <= NATIVE_ONLY_MAX_CANDIDATES
+    native_words = native_text.words_from_candidates(candidates) if candidate_budget_ok else []
+    native_blob = "\n".join(word.get("text") or "" for word in native_words)
+    native_only, native_gate = _native_only_gate(ingested, candidates, fields)
+    emit_stage("ocr")
+    # `load_candidates` returns an empty list when a native attempt exists but
+    # is rejected by its mapping/size/close checks. That is still an attempted
+    # native source, so live_text must not silently reuse the PDF layer.
+    native_attempted = NATIVE_ATTEMPTED or bool(candidates) or native_reason is not None
+    native_fallback_ocr = native_attempted and not native_only
+    if native_only:
+        # 只使用已经通过稿面证明的 Illustrator 候选。PDF 文字层只能沿用
+        # 原有 live_text 路由，不能成为跳过 OCR 的可见性证明。
+        ocr_text, ocr_words = native_blob, native_words
+        ocr_engine = "illustrator_native"
+        ocr_meta = {
+            "skipped": True,
+            "reason": "native_coverage",
+            "union": False,
+            "engines": ["illustrator_native"],
+            "pages_ran": 0,
+            "words": len(ocr_words),
+            "native_coverage": {"matched": native_gate["matched"], "total": native_gate["total"]},
+        }
+        native_audit = [
+            {
+                "status": "used",
+                "native_text": candidate.get("text") or "",
+                "ocr_text": None,
+                "page": int(candidate.get("page") or 1),
+                "bbox": candidate.get("bbox") or [],
+            }
+            for candidate in candidates
+        ]
+    else:
+        # A partial Illustrator result is not a license to trust a stale PDF
+        # layer. Force the raster OCR route for every page, including pages
+        # classified as live_text, until the native gate is complete.
+        if native_fallback_ocr:
+            ocr_text, ocr_words, ocr_engine, ocr_meta = _ocr_pages(
+                page_metas, ingested, force_ocr=True
+            )
+        else:
+            # Keep the existing seam for host-unavailable/no-candidate paths.
+            ocr_text, ocr_words, ocr_engine, ocr_meta = _ocr_pages(page_metas, ingested)
+        ocr_meta = dict(ocr_meta or {})
+        ocr_meta["native_coverage"] = {"matched": native_gate["matched"], "total": native_gate["total"]}
+        ocr_text, ocr_words, native_audit = native_text.fuse_with_audit(
+            NATIVE_DIR, pdf, ocr_text, ocr_words, candidates
+        )
+    if native_only:
+        # A native-only decision is also a source selection decision. Do not
+        # let a stale/hidden PDF text layer replace the visible native proof.
+        pack_text, words, text_source = native_blob, native_words, "illustrator_native"
+    else:
+        prefer_layer = (has_layer or ingested.get("mode") == "live_text") and not native_fallback_ocr
+        pack_text, words, text_source = text_verify.merge_text_sources(
+            layer_text,
+            ocr_text,
+            layer_words,
+            ocr_words,
+            prefer_layer=prefer_layer,
+            allow_layer_fallback=not native_fallback_ocr,
+        )
     _attach_page_size(words, page_metas)
     emit_stage("layout")
     layout = detect_regions(words, page_metas)
@@ -439,8 +581,8 @@ def run_excel_pdf_job(
     surface_b_label: str = "膜袋",
 ) -> dict[str, Any]:
     """
-    Text Verification 2.0：
-    PDF 分型 · 按页选源 · 单 OCR 引擎 · 区域路由 · 单钉证据 · 金标评测
+    Text Verification 2.1：
+    PDF 分型 · 原生文字优先 · 按页选源 · 单 OCR 引擎 · 区域路由 · 单钉证据 · 金标评测
     """
     tdir = UPLOADS / tid
     tdir.mkdir(parents=True, exist_ok=True)
@@ -537,6 +679,48 @@ def run_excel_pdf_job(
     dpi = (primary["page_metas"][0].get("dpi") if primary.get("page_metas") else None) or 220
     pages = primary["pages"]
     pages_b = secondary["pages"] if secondary else []
+    surface_ocr_meta = [
+        {
+            "surface": face.get("surface"),
+            "skipped": bool((face.get("ocr_meta") or {}).get("skipped")),
+            "reason": (face.get("ocr_meta") or {}).get("reason"),
+            "pages_ran": (face.get("ocr_meta") or {}).get("pages_ran", 0),
+            "ocr_engine": face.get("ocr_engine"),
+            "words": (face.get("ocr_meta") or {}).get("words", 0),
+            "native_coverage": (face.get("ocr_meta") or {}).get("native_coverage") or {},
+        }
+        for face in faces
+    ]
+    ocr_meta = dict(primary.get("ocr_meta") or {})
+    if secondary:
+        all_native_only = all(
+            item["skipped"] and item["reason"] == "native_coverage"
+            for item in surface_ocr_meta
+        )
+        ocr_meta["skipped"] = all_native_only
+        ocr_meta["surfaces"] = surface_ocr_meta
+        ocr_meta["pages_ran"] = sum(int(item["pages_ran"] or 0) for item in surface_ocr_meta)
+        ocr_meta["engines"] = list(dict.fromkeys(
+            engine
+            for item in surface_ocr_meta
+            for engine in ((item.get("ocr_engine") or "").split("+") if item.get("ocr_engine") else [])
+            if engine
+        ))
+        ocr_meta["words"] = sum(int(item.get("words") or 0) for item in surface_ocr_meta)
+        ocr_meta["native_coverage"] = {
+            "matched": sum(int((item.get("native_coverage") or {}).get("matched") or 0) for item in surface_ocr_meta),
+            "total": sum(int((item.get("native_coverage") or {}).get("total") or 0) for item in surface_ocr_meta),
+        }
+        # api/probability/zone details describe one OCR invocation. Keeping the
+        # primary surface's values at document level is misleading for a
+        # native-first carton plus OCR pouch, so consumers must use surfaces.
+        for key in ("api", "probability", "prob_mean", "zone_boost", "union"):
+            ocr_meta.pop(key, None)
+        ocr_meta.pop("_".join(("paddle", "vl")), None)
+        if all_native_only:
+            ocr_meta["reason"] = "native_coverage"
+        else:
+            ocr_meta.pop("reason", None)
 
     return {
         "id": tid,
@@ -552,7 +736,7 @@ def run_excel_pdf_job(
         "label_b": (secondary.get("surface") if secondary else None) or surface_b_label,
         "disclaimer": (
             "AI 仅标疑点，不构成过审结论。禁止一键全部通过。"
-            " 引擎 tvt-lite-2.0：活字直接读取 PDF，转曲或图稿按页单次 OCR，证据框按区域收钉。"
+            " 引擎 tvt-lite-2.1：优先使用已证明可见的 PDF/Illustrator 文字；未覆盖的图稿区域才按页单次 OCR，证据框按区域收钉。"
         ),
         "pages": pages,
         "pages_b": pages_b,
@@ -581,7 +765,7 @@ def run_excel_pdf_job(
             for q in (primary.get("qrcodes") or [])[:20]
         ],
         "qrcode_meta": primary.get("qrcode_meta"),
-        "ocr_meta": primary.get("ocr_meta"),
+        "ocr_meta": ocr_meta,
         "fields_count": len(fields),
         "excel_fields": [
             {
@@ -611,7 +795,7 @@ def run_excel_pdf_job(
             "inci_normalize": True,
             "multi_surface": bool(secondary),
             "pdf_ingest": "page_classified",
-            "ocr_policy": "single_engine_non_live_pages",
+            "ocr_policy": "native_first_then_ocr_uncovered",
             "vlm_typo_layer": "disabled",
         },
         "audit": [],

@@ -28,6 +28,12 @@ type SyntheticHit = {
 
 export type SyntheticTask = {
   native_text?: { status: string; reason?: string; message?: string };
+  ocr_meta?: {
+    skipped?: boolean;
+    reason?: string;
+    pages_ran?: number;
+    engines?: string[];
+  };
   id: string;
   title: string;
   product_name?: string;

@@ -7,8 +7,8 @@ process.env.VITEST = "1";
 process.env.WB_DATA_DIR = makeTestTempDir("beian-native-text-jobs-");
 const { DATA_DIR } = await import("./config.js");
 const { loadTask, saveTask, deleteTask } = await import("./tasks.js");
-const { tryStart, resetJobsTestHooks, setJobsTestHooks, queueSnapshot, publicTask, setJobsLiveForTest } = await import("./jobs.js");
-const { recoverNativeRequests, prepareNativeRequests } = await import("./nativeTextJobs.js");
+const { enqueue, tryStart, resetJobsTestHooks, setJobsTestHooks, queueSnapshot, publicTask, setJobsLiveForTest } = await import("./jobs.js");
+const { nativePublic, recoverNativeRequests, prepareNativeRequests } = await import("./nativeTextJobs.js");
 const id = "aabbccddeeff";
 const success = { code: 0, stdout: JSON.stringify({ status: "pending_review", hits: [] }), stderr: "", timedOut: false };
 function seed(tid = id) {
@@ -46,7 +46,7 @@ it("result JSON alone falls back to OCR but keeps drain fenced and prevents a se
   seed(); let calls = 0;
   setJobsTestHooks({ illustratorHostReady: true,
     runNativeText: async opts => { calls++; nativeFiles(opts.configPath, false); return success; },
-    runCompare: async opts => { assert.equal(opts.nativeDir, undefined); return success; }, notify: async () => ({ ok: false }) as never, bookkeeping: () => ({ compare_ok: true, recorded: false }) });
+    runCompare: async opts => { assert.equal(opts.nativeDir, undefined); assert.equal(opts.nativeAttempted, true); return success; }, notify: async () => ({ ok: false }) as never, bookkeeping: () => ({ compare_ok: true, recorded: false }) });
   tryStart(); await eventually(() => loadTask(id).job_status === "succeeded");
   assert.equal(loadTask(id).native_text_request?.reason, "close_unconfirmed");
   assert.equal(queueSnapshot().illustrator.running, 1);
@@ -54,6 +54,26 @@ it("result JSON alone falls back to OCR but keeps drain fenced and prevents a se
   seed("aabbccddee00"); tryStart();
   assert.equal(calls, 1); assert.equal(queueSnapshot().illustrator.queued, 1);
   recoverNativeRequests(); tryStart(); assert.equal(calls, 1);
+});
+
+it("maps an untrusted persisted native reason to the stable public fallback", () => {
+  const task = {
+    id,
+    native_text_request: {
+      version: "native-text/1",
+      id: "0123456789abcdef0123456789abcdef",
+      source_name: "artwork.pdf",
+      source_sha256: "a".repeat(64),
+      created_at: new Date().toISOString(),
+      status: "fallback",
+      reason: "/private/path/" + "x".repeat(10000),
+    },
+  } as never;
+  assert.deepEqual(nativePublic(task), {
+    status: "fallback",
+    reason: "native_failed",
+    message: "原稿文字未能可靠提取，本次继续图像识别。",
+  });
 });
 
 it("queue deadline only falls back before native dispatch", async () => {
@@ -95,6 +115,17 @@ it("unavailable host falls back once without dispatch", async () => {
   setJobsTestHooks({ illustratorHostReady: false, runNativeText: async () => { calls++; return success; }, runCompare: async opts => { assert.equal(opts.nativeDir, undefined); return success; }, notify: async () => ({ ok: false }) as never, bookkeeping: () => ({ compare_ok: true, recorded: false }) });
   tryStart(); await eventually(() => loadTask(id).job_status === "succeeded");
   assert.equal(calls, 0); assert.equal(loadTask(id).native_text_request?.reason, "native_offline");
+});
+
+it("keeps the attempted-native marker when a retry discards the fallback request", async () => {
+  seed(); prepareNativeRequests(false);
+  writeFileSync(join(DATA_DIR, "uploads", id, "artwork.pdf"), "%PDF no illustrator metadata");
+  setJobsTestHooks({ illustratorHostReady: false,
+    runCompare: async opts => { assert.equal(opts.nativeDir, undefined); assert.equal(opts.nativeAttempted, true); return success; },
+    notify: async () => ({ ok: false }) as never, bookkeeping: () => ({ compare_ok: true, recorded: false }) });
+  enqueue({ kind: "compare", id });
+  await eventually(() => loadTask(id).job_status === "succeeded");
+  assert.equal(loadTask(id).native_text_attempted, undefined);
 });
 
 it("a late closed result releases only proven recovery, never replaces chosen OCR evidence", async () => {

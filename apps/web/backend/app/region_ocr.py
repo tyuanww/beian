@@ -12,6 +12,7 @@ def recognize_pages(
     ingested: dict[str, Any] | None = None,
     *,
     ocr_fn: OcrFn | None = None,
+    force_ocr: bool = False,
 ) -> tuple[str, list[dict], str, dict]:
     ingested = ingested or {}
     page_modes = {
@@ -21,7 +22,7 @@ def recognize_pages(
     live_only = doc_mode == "live_text" or (
         page_modes and all(m == "live_text" for m in page_modes.values())
     )
-    if live_only:
+    if live_only and not force_ocr:
         return (
             "",
             [],
@@ -43,7 +44,7 @@ def recognize_pages(
     pages_ran = 0
     for meta in page_metas:
         page_n = int(meta.get("page") or 1)
-        if page_modes.get(page_n) == "live_text":
+        if page_modes.get(page_n) == "live_text" and not force_ocr:
             continue
         data = Path(meta["path"]).read_bytes()
         text, words, info = fn(data)

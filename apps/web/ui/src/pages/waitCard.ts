@@ -41,7 +41,7 @@ function leaveHint(kind: WaitKind, feishuReady?: boolean): string {
 /** Figma 等待卡 68:1218 正文。不要假取消。 */
 function figmaWaitBody(kind: WaitKind): string {
   if (kind === "mockup") return "本机 Blender。白底不要带尺寸标注再交备案。";
-  return "读表 + OCR 包装。机审只标疑点，不会自动过审。";
+  return "读表 + 原生文字优先，OCR 兜底。机审只标疑点，不会自动过审。";
 }
 
 function formatEta(etaS: number): string {

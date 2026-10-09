@@ -16,7 +16,7 @@ DocMode = Literal["live_text", "outlined", "image", "mixed"]
 # live_text: 去掉刀版尺寸数字与 U+FFFD 后，有足够活字且没有大面积图/密集路径
 # outlined: 几乎无活字且路径组或组内绘图指令足够密集
 # image: 几乎无活字且大图铺满 / 矢量很少
-# mixed: 大面积图或密集路径与活字同页；必须 OCR，不能因页脚/尺寸活字漏掉主体
+# mixed: 大面积图或密集路径与活字同页；原生未覆盖的区域才 OCR，不能因页脚/尺寸活字漏掉主体
 # 文档级：各页模式不一致即 mixed；具体 OCR 路由仍按页模式决定
 LIVE_TEXT_MIN_CHARS = 40
 OUTLINED_MIN_DRAWINGS = 400
@@ -26,7 +26,7 @@ FULL_PAGE_IMAGE_MIN_COVERAGE = 0.5
 
 WARNING_OUTLINED = "稿是转曲，没有活字，按扫描识别，钉框会比活字稿粗"
 WARNING_IMAGE = "稿页主要是图，没有可选中文字"
-WARNING_MIXED = "稿页混有转曲或图，按扫描识别，钉框会比活字稿粗"
+WARNING_MIXED = "稿页混有转曲或图，未被原生文字覆盖的区域按扫描识别，钉框会比活字稿粗"
 
 _DIELINE_TOKEN = re.compile(
     r"^\d{1,4}(?:\.\d{1,3})?(?:\s*(?:mm|cm))?$",

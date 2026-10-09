@@ -72,6 +72,15 @@ def normalize_units(s: str) -> str:
     return t
 
 
+def numeric_code_in_text(code: str, text: str) -> bool:
+    """匹配条码时要求完整数字 token，避免把更长错误数字当作命中。"""
+    normalized_code = normalize(code)
+    if not re.fullmatch(r"\d{8,14}", normalized_code):
+        return normalized_code in normalize(text)
+    normalized_text = normalize(text)
+    return re.search(rf"(?<!\d){re.escape(normalized_code)}(?!\d)", normalized_text) is not None
+
+
 def _field_alias_hit(field: str, canon: str) -> bool:
     fl = (field or "").strip().lower()
     aliases = FIELD_ALIASES.get(canon) or (canon,)
@@ -1117,8 +1126,8 @@ def match_field(
                     must_codes, ign_codes = codes, []
             except Exception:
                 must_codes, ign_codes = codes, []
-            hit_c = [c for c in must_codes if c in n_ocr]
-            miss_c = [c for c in must_codes if c not in n_ocr]
+            hit_c = [c for c in must_codes if numeric_code_in_text(c, n_ocr)]
+            miss_c = [c for c in must_codes if not numeric_code_in_text(c, n_ocr)]
             if hit_c:
                 miss_c = []
             # 仅必检码参与 coverage；忽略码不进 miss_phrases（避免 UI「建议核对」）
@@ -1930,8 +1939,8 @@ def compare_fields(
                         items.append(
                             {
                                 "code": c,
-                                "found": c in n_pack,
-                                "status": "一致" if c in n_pack else "缺失",
+                                "found": numeric_code_in_text(c, n_pack),
+                                "status": "一致" if numeric_code_in_text(c, n_pack) else "缺失",
                                 "required": True,
                             }
                         )
@@ -1939,7 +1948,7 @@ def compare_fields(
                         items.append(
                             {
                                 "code": c,
-                                "found": c in n_pack,
+                                "found": numeric_code_in_text(c, n_pack),
                                 "status": "忽略",
                                 "required": False,
                                 "note": "装型画像：非当前装，可不命中",
@@ -1948,7 +1957,7 @@ def compare_fields(
                     req_ok = any(i["found"] for i in items if i.get("required")) if must else False
                     # 覆盖 miss 与卡一致：忽略装不进 miss；当前规格命中一条即可
                     if h.get("coverage"):
-                        hit_req = [c for c in must if c in n_pack]
+                        hit_req = [c for c in must if numeric_code_in_text(c, n_pack)]
                         h["coverage"]["hit"] = hit_req
                         h["coverage"]["miss"] = [] if hit_req else list(must)
                         h["coverage"]["miss_phrases"] = h["coverage"]["miss"]

@@ -22,6 +22,12 @@ describe("native text evidence display", () => {
     assert.equal(view.title, "已参考原稿文字");
     assert.doesNotMatch(view.title, /一致|过审/);
   });
+  it("keeps the native-only evidence readable when OCR is intentionally absent", () => {
+    const view = nativeEvidenceView({ version: 1, status: "used", native_text: "Native Product", ocr_text: null, message: "原稿文字已直接参与核对规则。" })!;
+    assert.equal(view.nativeText, "Native Product");
+    assert.equal(view.ocrText, null);
+    assert.equal(view.title, "已参考原稿文字");
+  });
   it("does not display untrusted candidates from unknown or malformed contracts", () => {
     for (const value of [[], { version: 2 }, { version: 1, status: "used", native_text: null, ocr_text: null, message: "成功" }, { version: 1, status: "not_used", native_text: "x".repeat(8193), ocr_text: null, message: "不可用" }]) {
       const view = nativeEvidenceView(value)!;

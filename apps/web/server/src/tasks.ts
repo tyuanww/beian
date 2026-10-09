@@ -50,6 +50,8 @@ export function canAccessOwner(owner: string, viewer: Viewer): boolean {
 
 export type Task = {
   native_text_request?: NativeRequest;
+  /** 仅服务端用于把已失败的 Illustrator 尝试传给 OCR worker，不返回前端。 */
+  native_text_attempted?: boolean;
   id: string;
   title: string;
   product_name?: string;
@@ -152,6 +154,7 @@ export function saveTask(task: Task): void {
 const TASK_STATUSES = new Set(["comparing", "compare_failed", "pending_review", "in_review", "completed"]);
 const TASK_JOB_KINDS = new Set(["compare", "rework"]);
 const TASK_JOB_STATUSES = new Set(["queued", "running", "succeeded", "failed"]);
+const NATIVE_REASONS = new Set(["native_busy", "native_offline", "source_changed", "close_unconfirmed", "native_failed"]);
 
 /**
  * Durable job state is a release-safety contract, not just a TypeScript hint.
@@ -160,11 +163,13 @@ const TASK_JOB_STATUSES = new Set(["queued", "running", "succeeded", "failed"]);
  */
 function hasValidTaskJobState(task: Task): boolean {
   const native = task.native_text_request;
+  if (task.native_text_attempted !== undefined && typeof task.native_text_attempted !== "boolean") return false;
   if (native !== undefined && (!native || native.version !== "native-text/1"
       || !/^[0-9a-f]{32}$/.test(native.id) || !/^[0-9a-f]{64}$/.test(native.source_sha256)
       || !["artwork.pdf", "artwork_v2.pdf"].includes(native.source_name)
       || !["queued", "running", "ready", "fallback"].includes(native.status)
       || !Number.isFinite(Date.parse(native.created_at))
+      || (native.reason !== undefined && (typeof native.reason !== "string" || !NATIVE_REASONS.has(native.reason)))
       || (native.pid !== undefined && (!Number.isSafeInteger(native.pid) || native.pid <= 0)))) return false;
   if (!TASK_STATUSES.has(task.status)) return false;
   const hasKind = task.job_kind !== undefined;

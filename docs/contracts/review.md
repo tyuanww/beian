@@ -12,12 +12,14 @@
 
 ## 原生文字候选与公共证据
 
-原生提取仅作现有 PDF/OCR 链的证据补充，沿既有 CLI 的内部 `--native-dir` 参数传入当前已关闭 attempt；不接受 HTTP 任意路径。源稿和提取器版本不匹配时不复用，旧人工结论不回写。JSON 读取前 8MiB、深度 64、候选 50k 限制；异常保持 OCR。标准 PDF 文字层继续原有优先规则，原生只修正可唯一对应的 OCR 读法，不丢弃图像区域。
+原生提取沿既有 CLI 的内部 `--native-dir` 参数传入当前已关闭 attempt；不接受 HTTP 任意路径。源稿和提取器版本不匹配时不复用，旧人工结论不回写。JSON 读取前 8MiB、深度 64、候选最多 10k；进入 PyMuPDF 文字设备前先限制每页原始内容流 16MiB、图像资源 256 个、候选 2k，提取结果再限制每页 10k 个文字行/trace 和 1M 字符，超出即回退。标准 PDF 文字层沿原有活字页规则使用；跳过 OCR 的新门只接受已经过稿面和渲染证明的 Illustrator 候选，且当前渲染的每一页都是 `live_text` 并有候选证明。确认单短语未被这些候选覆盖，或页面不是纯活字页、含大面积图片/扫描内容时，才回退到 OCR；一旦发生过原生尝试却未通过门禁，即使 PDF 分类为 `live_text` 也必须强制 OCR，不能复用陈旧 PDF 文字层。任何证据不确定都保持原有 OCR 回退，不把原生结果直接当作业务结论。
 
 `native-text/1` 当前保守接受范围：原稿/导出 PDF 页数与物理尺寸一致，受限分辨率的可见稿面渲染逐字节相同；文字对象可见、无遮挡/剪裁、字体可用，且导出 PDF 在同位置含相同文字；OCR 与原生框唯一对应。bbox 相交不能单独构成证明。坐标/页面旋转、字体替换、遮挡或渲染差异不确定时不采用。纠正后的读法进入既有业务规则，不直接写“一致”或人工 confirm。
 
 详情新增安全投影 `native_text`：status 为 queued/running/ready/fallback，reason/message 仅有原因时出现。ready 仅表示候选提取已完成且宿主关闭，不代表字段已通过验证。公开稳定原因 native_busy/native_offline/source_changed/close_unconfirmed/native_failed；不暴露私有 request、hash、PID、路径。
 
-字段可选 `native_text_evidence`：version=1；status=used/conflict/not_used；native_text/ocr_text 为 string 或 null（各最多 8192 字符），message 为简短中文（最多 500 字符）。仅传属于当前字段的证据，隐藏/不可信候选正文不投影。UI 只展示，不覆盖 hit.status、decision、原有定位、hits_v2 或签字/对红门；旧单缺该字段不显示来源卡片。
+字段可选 `native_text_evidence`：version=1；status=used/conflict/not_used；native_text/ocr_text 为 string 或 null（各最多 8192 字符），message 为简短中文（最多 500 字符）。原生覆盖完整而跳过 OCR 时 `ocr_text` 可以为 null。仅传属于当前字段的证据，隐藏/不可信候选正文不投影。UI 只展示，不覆盖 hit.status、decision、原有定位、hits_v2 或签字/对红门；旧单缺该字段不显示来源卡片。
+
+数值条码按完整数字 token 匹配：8–14 位条码必须在文本中以非数字边界出现，不能把更长的错误数字串当作命中；条码框仍沿实际词框投影。
 
 融合采用前必须把完整原稿/OCR 读法、对应框及源/attempt 身份原子保存到私有 fusion-audit.json；保存失败或源稿变化保持原 OCR。单字段合并证据超过公共 8192 字符上限时不下发来源卡片，不静默截断冒充完整内容；完整融合审计仍私有保留。

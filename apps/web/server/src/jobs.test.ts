@@ -1625,12 +1625,18 @@ describe("jobs dispatcher", () => {
     assert.equal(queueSnapshot().unknown, 1);
   });
 
+  // Value: protects=successful rework persists worker ocr_meta for the review UI; fails_when=MERGE_ALLOW omits ocr_meta and native-only OCR provenance disappears from the durable task; why_new=the CLI payload contract does not exercise the server job merge lifecycle; seam=none
   it("rework success becomes in_review and keeps v1 hits", async () => {
     setJobsTestHooks({
       runRework: async () => ({
         code: 0,
         stdout:
-          JSON.stringify({ status: "in_review", hits_v2: [{ id: "v2" }], pages_v2: [{ name: "page_01.png" }] }) + "\n",
+          JSON.stringify({
+            status: "in_review",
+            hits_v2: [{ id: "v2" }],
+            pages_v2: [{ name: "page_01.png" }],
+            ocr_meta: { skipped: true, reason: "native_coverage", pages_ran: 0 },
+          }) + "\n",
         stderr: "",
         timedOut: false,
       }),
@@ -1656,6 +1662,7 @@ describe("jobs dispatcher", () => {
     assert.equal(t.job_status, "succeeded");
     assert.equal(t.hits?.[0]?.id, "h1");
     assert.equal(t.hits_v2?.[0]?.id, "v2");
+    assert.deepEqual(t.ocr_meta, { skipped: true, reason: "native_coverage", pages_ran: 0 });
   });
 
   it("worker status completed cannot skip the sign-off gate", async () => {

@@ -452,7 +452,7 @@ React: Mockup(2D) / Review(sidebar) / +Compression / History
                                       |--------- validated immutable files
 compare/rework -> native pre-stage -> existing Illustrator slot/Agent -> +fixed JSX
                 | candidate JSON(hash/page/visibility)                     |
-                +-> existing Python PDF ingest -> single OCR -> +evidence fusion
+                +-> existing Python PDF ingest -> native gate -> OCR fallback -> +evidence fusion
                                                    -> matching -> human review
 jobs/active download leases -> queueSnapshot + drain + recovery + readiness
 ```

@@ -6,7 +6,7 @@ import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 import sharp from "sharp";
 import { compressionPolicyFingerprint, compressionPolicySnapshot, compressionFileReady, compressionToolsForMedia } from "./compressionPolicy.js";
-import { toolGenerationOf, budgetFromProbe } from "./compressionProbe.js";
+import { QPDF_REQUIRED_VERSION, qpdfVersionMatches, toolGenerationOf, budgetFromProbe } from "./compressionProbe.js";
 import { setCompressionExecutorForTest, executeCompressionFile } from "./compressionExecute.js";
 import { qpdfLosslessArgs } from "./compressionModel.js";
 import {
@@ -46,7 +46,7 @@ describe("compression tools", () => {
     }
   });
 
-  it("pins helper commands and ignores tool version strings", () => {
+  it("pins helper commands and fingerprints qpdf version changes", () => {
     const lossless = qpdfLosslessArgs("in.pdf", "out.pdf");
     assert.equal(lossless.some((arg) => /no-warn|warning-exit-0|optimize-images/.test(arg)), false);
     const image = imageWorkerCommand("in.jpg", "out.jpg", "image/jpeg");
@@ -62,7 +62,7 @@ describe("compression tools", () => {
     assert.throws(() => assertCompressionArgv(["qpdf", "--optimize-images"]));
     const left = toolGenerationOf({ mechanism: "rlimit:as", sharp: "0.34.4", qpdf: "11.9", java: null, pdfbox: null });
     const right = toolGenerationOf({ mechanism: "rlimit:as", sharp: "9.9.9", qpdf: "12.2.0", java: null, pdfbox: null });
-    assert.equal(left, right);
+    assert.notEqual(left, right);
     assert.notEqual(left, toolGenerationOf({ mechanism: "rlimit:as", sharp: "0.34.4", qpdf: null, java: null, pdfbox: null }));
     assert.equal(compressionToolsForMedia("image/png").join(), "sharp");
     assert.deepEqual(compressionToolsForMedia("application/pdf"), ["qpdf", "java", "pdfbox"]);
@@ -74,6 +74,14 @@ describe("compression tools", () => {
     assert.equal(compressionFileReady("image/jpeg", capability), true);
     assert.equal(compressionFileReady("application/pdf", capability), false);
     assert.equal(compressionPolicyFingerprint({ version: "only-a-label" }), compressionPolicyFingerprint({ version: "other-label" }));
+  });
+
+  it("accepts only the pinned qpdf release", () => {
+    assert.equal(qpdfVersionMatches(`qpdf version ${QPDF_REQUIRED_VERSION}`), true);
+    assert.equal(qpdfVersionMatches(`qpdf version ${QPDF_REQUIRED_VERSION}.1`), false);
+    assert.equal(qpdfVersionMatches("qpdf version 11.9.1"), false);
+    assert.equal(qpdfVersionMatches("qpdf 12.4.2"), false);
+    assert.equal(qpdfVersionMatches(null), false);
   });
 
   it("normalizes EXIF, keeps ICC and alpha, and rejects a second frame", async () => {

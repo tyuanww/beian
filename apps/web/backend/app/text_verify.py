@@ -16,10 +16,10 @@ from typing import Any
 
 import pymupdf
 
-from app.fields import normalize, normalize_units
+from app.fields import normalize, normalize_units, numeric_code_in_text
 
 # 与前端 banner 对齐：低于此版本的 excel_pdf 任务提示「请重建」
-ENGINE_VERSION = "tvt-lite-2.0"
+ENGINE_VERSION = "tvt-lite-2.1"
 ENGINE_FEATURES = [
     "excel_brief_ssot",
     "pdf_text_layer",
@@ -77,6 +77,8 @@ ENGINE_FEATURES = [
     "pdf_ingest_classification",
     "page_source_routing",
     "live_text_no_ocr",
+    "native_text_first",
+    "native_coverage_gate",
     "single_ocr_engine",
     "pack_layout_regions",
     "single_pin_evidence",
@@ -478,11 +480,11 @@ def barcode_card(excel_value: str, pack_text: str, words: list[dict] | None = No
     n_pack = normalize(pack_text or "")
     items = []
     for c in codes:
-        found = c in n_pack or c in (pack_text or "")
+        found = numeric_code_in_text(c, n_pack)
         boxes = []
         if words and found:
             for w in words:
-                if c in (w.get("text") or ""):
+                if numeric_code_in_text(c, str(w.get("text") or "")):
                     loc = w.get("location") or {}
                     if loc.get("width"):
                         boxes.append(
@@ -521,8 +523,15 @@ def merge_text_sources(
     ocr_words: list[dict],
     *,
     prefer_layer: bool,
+    allow_layer_fallback: bool = True,
 ) -> tuple[str, list[dict], str]:
     """合并文字层与 OCR；同页 OCR 优先，不同页保留各自权威词框。"""
+    if not allow_layer_fallback:
+        # A rejected native attempt must never revive a stale/hidden PDF layer
+        # when OCR returns no result. Keep the OCR surface explicit, even when
+        # it is empty, so callers can surface an incomplete comparison instead
+        # of manufacturing a native match from the layer.
+        return ocr_text, list(ocr_words), "ocr"
     if prefer_layer and layer_text and len(normalize(layer_text)) >= 40:
         # OCR 只跑非活字页时，不能因为有 OCR 词就丢掉其他页的 PDF 文字框。
         # 同一页仍沿用 OCR 框优先，避免双源重复钉框。

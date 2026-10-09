@@ -41,6 +41,9 @@ export type RlimitProbe = {
   group_bytes?: number;
 };
 
+/** PDF 结构优化依赖固定的 qpdf 发行版本，避免 PATH 漂移改变产物语义。 */
+export const QPDF_REQUIRED_VERSION = "12.4.2";
+
 let override: CompressionCapability | null = null;
 let cached: { at: number; value: CompressionCapability } | null = null;
 
@@ -115,6 +118,10 @@ function commandVersion(command: string, args: string[]): string | null {
   return line.trim().slice(0, 160) || null;
 }
 
+export function qpdfVersionMatches(version: string | null): boolean {
+  return version?.trim().match(/^qpdf\s+version\s+(\d+\.\d+\.\d+)(?:\s|$)/i)?.[1] === QPDF_REQUIRED_VERSION;
+}
+
 function sharpVersion(): string | null {
   try {
     const packageJson = require.resolve("sharp/package.json");
@@ -144,7 +151,15 @@ export function toolGenerationOf(input: {
     return typeof version === "string" && version.length > 0;
   });
   return createHash("sha256")
-    .update(JSON.stringify({ mechanism: input.mechanism, tools: present }))
+    .update(JSON.stringify({
+      mechanism: input.mechanism,
+      tools: present.map((name) => ({
+        name,
+        // qpdf semantics are part of the PDF output contract; a PATH upgrade
+        // must create a new generation instead of reusing an old attempt.
+        version: name === "qpdf" ? input.qpdf : null,
+      })),
+    }))
     .digest("hex");
 }
 
@@ -160,7 +175,7 @@ export function assessCapabilityNow(): CompressionCapability {
   };
   const missing = [
     versions.sharp ? "" : "sharp",
-    versions.qpdf ? "" : "qpdf",
+    qpdfVersionMatches(versions.qpdf) ? "" : "qpdf",
     versions.java ? "" : "java",
     versions.pdfbox ? "" : "pdfbox",
   ].filter((item) => item.length > 0);

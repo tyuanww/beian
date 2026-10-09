@@ -19,7 +19,7 @@ import {
   type CompressionPolicySnapshot,
   type CompressionMediaType,
 } from "./compressionPolicy.js";
-import { pdfboxJar, probeResourceLimits, type CompressionCapability } from "./compressionProbe.js";
+import { pdfboxJar, probeResourceLimits, qpdfVersionMatches, type CompressionCapability } from "./compressionProbe.js";
 import type { CompressionFileRecord } from "./compressionStore.js";
 
 const TOOL_DIR = join(dirname(fileURLToPath(import.meta.url)), "../tools/compression");
@@ -111,6 +111,14 @@ function statOk(path: string): boolean {
   } catch {
     return false;
   }
+}
+
+function resolvePinnedQpdf(): string | null {
+  const path = resolveExecutable("qpdf");
+  if (!path) return null;
+  const run = spawnSync(path, ["--version"], { encoding: "utf8", timeout: 5_000, windowsHide: true });
+  const version = `${run.stdout || ""}\n${run.stderr || ""}`.trim().split(/\r?\n/).find((line) => line.trim()) || "";
+  return run.status === 0 && qpdfVersionMatches(version) ? path : null;
 }
 
 function none(status: CompressionFileStatus, reason: string): CompressionJobResult {
@@ -262,7 +270,7 @@ function javaStop(status: number): CompressionJobResult | null {
 
 async function executePdf(request: JobRequest): Promise<CompressionJobResult> {
   const policy = request.policy!;
-  const qpdf = resolveExecutable("qpdf");
+  const qpdf = resolvePinnedQpdf();
   const java = resolveExecutable("java");
   const jar = pdfboxJar();
   if (!qpdf || !java || !jar || !statOk(JAVA_SOURCE)) return none("failed", "dependency_missing");

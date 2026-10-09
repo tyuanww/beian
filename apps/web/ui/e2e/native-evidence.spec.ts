@@ -26,6 +26,15 @@ test("旧单不生成假来源，关稿未确认解释回退且不提供重开�
   expect(syntheticApi.calls.filter(call => call.path.includes("native-text"))).toHaveLength(0);
 });
 
+// Value: protects=review panel explains that complete native coverage skipped OCR; fails_when=task ocr_meta is dropped or the native-only status copy is removed; why_new=existing evidence tests cover field cards but never the task-level no-OCR provenance banner; seam=none
+test("原生覆盖完整时核对栏说明未调用 OCR", async ({ page, syntheticApi }) => {
+  const task = reviewTask();
+  task.ocr_meta = { skipped: true, reason: "native_coverage", pages_ran: 0, engines: ["illustrator_native"] };
+  syntheticApi.tasks.push(task);
+  await page.goto(`/review/${task.id}`);
+  await expect(page.getByRole("status").filter({ hasText: "本单已用 Illustrator 原生文字完成文字识别，未调用百度文字 OCR。" })).toBeVisible();
+});
+
 test("窄屏深色长文字来源可展开阅读，未知版本不会显示成功", async ({ page, syntheticApi }, info) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.addInitScript(() => localStorage.setItem("wb_appearance", JSON.stringify({ theme: "dark", fontPx: 20 })));

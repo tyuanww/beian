@@ -52,7 +52,7 @@ export const WIZARD: Record<string, WizardGuide> = {
     ],
   },
   "百度 OCR": {
-    intro: "做不到静默授权。绿的意思是对照真正会调用的识别接口通了。",
+    intro: "做不到静默授权。绿的意思是对照遇到图片或原生未覆盖区域时需要调用的识别接口通了；纯原生覆盖稿不依赖它。",
     steps: [
       "打开百度智能云文字识别控制台。",
       "建应用，复制 API Key 和 Secret。",

@@ -9,7 +9,7 @@ import { inspectWorkerProcess, runNativeText } from "./workers.js";
 export type NativeRequest = {
   version: "native-text/1"; id: string; source_name: string; source_sha256: string;
   created_at: string; status: "queued" | "running" | "ready" | "fallback";
-  reason?: string; pid?: number;
+  reason?: NativeReason; pid?: number;
 };
 const COPY: Record<string, string> = {
   native_busy: "原稿文字提取排队较久，本次继续图像识别。",
@@ -18,6 +18,11 @@ const COPY: Record<string, string> = {
   close_unconfirmed: "Illustrator 尚未确认关闭，本次继续图像识别，原生提取保持等待核实。",
   native_failed: "原稿文字未能可靠提取，本次继续图像识别。",
 };
+export type NativeReason = keyof typeof COPY;
+const NATIVE_REASONS = new Set(Object.keys(COPY));
+function safeReason(reason: unknown): NativeReason | undefined {
+  return typeof reason === "string" && NATIVE_REASONS.has(reason) ? reason as NativeReason : undefined;
+}
 export function nativeRequest(task: Task): NativeRequest | undefined { return task.native_text_request; }
 const taskRoot = (task: Task) => join(DATA_DIR, "uploads", task.id);
 const root = (task: Task, req: NativeRequest) => join(taskRoot(task), `.native-${req.id}`);
@@ -28,7 +33,7 @@ function bytes(path: string, limit = 100 * 1024 * 1024): Buffer {
   return readFileSync(path);
 }
 function hash(path: string): string { return createHash("sha256").update(bytes(path)).digest("hex"); }
-function fallback(task: Task, reason: string) {
+function fallback(task: Task, reason: NativeReason) {
   const req = nativeRequest(task)!;
   req.status = "fallback"; req.reason = reason;
   saveTask(task);
@@ -65,6 +70,9 @@ export function prepareNativeRun(task: Task) {
   try {
     if (req.status === "ready" && req.version === "native-text/1" && req.source_sha256 === hash(join(taskRoot(task), source(task))) && req.source_name === source(task)) return;
   } catch { /* The new review's ordinary input check will explain missing data. */ }
+  // Preserve the fact that a native attempt happened even when its private
+  // request record is discarded before the OCR retry is queued.
+  task.native_text_attempted = true;
   delete task.native_text_request;
   saveTask(task);
 }
@@ -80,7 +88,8 @@ export function nativeQueue() {
 export function nativePublic(task: Task) {
   const req = nativeRequest(task);
   if (!req) return undefined;
-  return { status: req.status, ...(req.reason ? { reason: req.reason, message: COPY[req.reason] || COPY.native_failed } : {}) };
+  const reason = req.reason ? safeReason(req.reason) || "native_failed" : undefined;
+  return { status: req.status, ...(reason ? { reason, message: COPY[reason] } : {}) };
 }
 function json(path: string) { return JSON.parse(bytes(path, 8 * 1024 * 1024).toString("utf8")) as Record<string, unknown>; }
 function closed(task: Task, req: NativeRequest): boolean {
