@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, it } from "node:test";
 import { makeTestTempDir } from "./testTemp.js";
 
@@ -196,6 +196,48 @@ it("requeues a publish only after the worker pid is confirmed gone", () => {
   assert.equal(restarted?.status === "queued" || restarted?.status === "running", true);
   assert.equal(queueSnapshot().blender.queued + queueSnapshot().blender.running >= 1, true);
   release();
+});
+
+it("publishes a native export only after a separate close record and ignores worker millimetres", async () => {
+  const dir = seed(id, {
+    ...net,
+    assembly: "attested-pdf",
+    export: "native",
+    separation: undefined,
+    attestation: {
+      schema: "unfolded-separation-attestation/1",
+      method: "semantic-identity",
+      hidden_roles: ["cut", "crease", "dimension", "production"],
+      covers_blank_structure: true,
+    },
+  });
+  const original = readFileSync(join(dir, "source.ai"));
+  setJobsTestHooks({
+    illustratorHostReady: true,
+    runUnfoldedPublish,
+    runUnfoldedNative: async (opts) => {
+      const root = dirname(opts.configPath);
+      const printPdf = join(root, "print.pdf");
+      execFileSync(PYTHON, ["-c", "import pymupdf,sys; d=pymupdf.open(); d.new_page(width=180*72/25.4, height=140*72/25.4); d.save(sys.argv[1]); d.close()", printPdf]);
+      writeFileSync(join(root, "close.json"), JSON.stringify({
+        protocol: "beian.illustrator.export/2",
+        request_kind: "unfolded_print",
+        attempt_id: opts.executionId,
+        document_closed: true,
+        bridge_exited: true,
+        inflight: false,
+        lock_returnable: true,
+      }));
+      return { code: 0, stdout: JSON.stringify({ width_mm: 1, height_mm: 1 }), stderr: "", timedOut: false };
+    },
+  });
+  await requestUnfoldedPrint(id, viewer);
+  const job = await settled();
+  assert.equal(job.unfolded_print_request?.status, "succeeded");
+  assert.equal(publicMockup(job).unfolded_print.width_mm, 180);
+  assert.equal(publicMockup(job).unfolded_print.height_mm, 140);
+  assert.deepEqual(readFileSync(join(dir, "source.ai")), original);
+  assert.equal(queueSnapshot().illustrator.running, 0);
 });
 
 it("holds the illustrator slot when close is unconfirmed and does not start another native export", async () => {
