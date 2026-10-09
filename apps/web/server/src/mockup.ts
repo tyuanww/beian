@@ -18,6 +18,7 @@ import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { DATA_DIR, PACKAGING } from "./config.js";
 import { blenderBin } from "./settings.js";
+import { forgetHistory, noteHistoryMockup } from "./historyIndex.js";
 import { canAccessOwner, isTid, replaceFile, type Viewer } from "./tasks.js";
 import { atomicReplaceJobJson } from "./mockupAtomicWrite.js";
 import { isRenderGenerationOutputKey, type RenderActivationFact } from "./renderGenerations.js";
@@ -351,6 +352,7 @@ export function saveMockup(job: MockupJob, checkpoint?: () => void): void {
     replaceFile(jobPath(job.id), payload);
   }
   rememberMockup(job);
+  try { noteHistoryMockup(job); } catch { /* 摘要失败不回滚打样记录 */ }
 }
 
 /** 提交代际指针时必须绕过 loadMockup 缓存；失败路径不要先改缓存对象。 */
@@ -1859,6 +1861,7 @@ export function deleteMockup(id: string): void {
   }
   rmSync(join(mockupRoot(false), job.id), { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
   cache.delete(job.id);
+  try { forgetHistory("mockup", job.id); } catch { /* 摘要失败不恢复已删除打样 */ }
 }
 
 export function queueMockup(opts: {

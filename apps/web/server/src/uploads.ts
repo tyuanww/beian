@@ -29,6 +29,7 @@ import {
   isCompressionAssetField,
 } from "./compressionPolicy.js";
 import { additionalSourceUsage } from "./sourceQuota.js";
+import { noteHistoryUploadId } from "./historyIndex.js";
 import { isTid, newTid, nowIso, viewerFromSession } from "./tasks.js";
 import { maxUploadBytes } from "./settings.js";
 
@@ -308,6 +309,10 @@ export function underReceiptDir(id: string, p: string): boolean {
   return Boolean(rel) && !rel.startsWith("..") && !isAbsolute(rel);
 }
 
+function touchHistoryUpload(id: string): void {
+  try { noteHistoryUploadId(id); } catch { /* 摘要失败不回滚上传 */ }
+}
+
 function purgeReceiptFiles(id: string): void {
   if (!isTid(id)) return;
   try {
@@ -315,6 +320,7 @@ function purgeReceiptFiles(id: string): void {
   } catch {
     /* already gone */
   }
+  touchHistoryUpload(id);
 }
 
 function unlinkQuietly(path: string): void {
@@ -576,6 +582,7 @@ export async function stageMultipart(
       files,
     };
     writeFileSync(receiptPath(finalId), JSON.stringify(receipt), { encoding: "utf8", flag: "wx" });
+    touchHistoryUpload(finalId);
     return receipt;
   } catch (err) {
     if (finalId) {
@@ -626,6 +633,7 @@ export function stageBuffers(
       files,
     };
     writeFileSync(receiptPath(id), JSON.stringify(rec), { encoding: "utf8", flag: "wx" });
+    touchHistoryUpload(id);
     return rec;
   } catch (err) {
     if (ownsDir) {
@@ -722,6 +730,7 @@ function uploadSessionFresh(session: UploadSession): boolean {
 
 function saveUploadSession(session: UploadSession): void {
   replaceJson(sessionPath(session.id), session);
+  touchHistoryUpload(session.id);
 }
 
 /**
@@ -731,17 +740,20 @@ function saveUploadSession(session: UploadSession): void {
 function retireUploadSession(id: string): void {
   try {
     rmSync(sessionDir(id), { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    touchHistoryUpload(id);
     return;
   } catch {
     // Windows 杀毒或索引可能短暂占用目录。
   }
   try {
     const session = JSON.parse(readFileSync(sessionPath(id), "utf8")) as UploadSession;
-    if (!uploadSessionShapeOk(id, session)) return;
-    saveUploadSession({ ...session, updated_at: "1970-01-01T00:00:00.000Z" });
+    if (uploadSessionShapeOk(id, session)) {
+      saveUploadSession({ ...session, updated_at: "1970-01-01T00:00:00.000Z" });
+    }
   } catch {
     // sweep 会继续尝试；有效回执或任务不能因清理失败回滚。
   }
+  touchHistoryUpload(id);
 }
 
 export function loadUploadSession(id: string, owner: string): UploadSession | null {
@@ -1139,6 +1151,7 @@ export function completeUploadSession(id: string, owner: string): ListedUploadRe
       files,
     };
     writeFileSync(receiptPath(id), JSON.stringify(receipt), { encoding: "utf8", flag: "wx" });
+    touchHistoryUpload(id);
     retireUploadSession(id);
     return listedReceipt(receipt);
   } catch (err) {
@@ -1412,6 +1425,7 @@ export function rollbackReceiptClaim(claim: ReceiptClaim): boolean {
   if (!receiptShapeOk(receipt.id, receipt) || !receiptFresh(receipt) || !claimFilesOk(receipt)) return false;
   try {
     renameSync(markerPath, receiptPath(receipt.id));
+    touchHistoryUpload(receipt.id);
     return true;
   } catch {
     // 留下 marker，让同一进程的重试保持 fail-closed，并由下次启动恢复。
@@ -1492,6 +1506,7 @@ export function recoverReceiptClaims(
     }
     try {
       renameSync(markerPath, receiptPath(id));
+      touchHistoryUpload(id);
       result.restored += 1;
     } catch {
       // 下次启动继续恢复；不能用复制制造两个可领取回执。

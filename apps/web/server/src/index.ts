@@ -117,6 +117,7 @@ import {
 import { confirmPackagingStructure } from "./workers.js";
 import { skipPackSheetField } from "./sheetSkip.js";
 import { CompressionProblem } from "./compressionModel.js";
+import { HistoryProblem, queryHistory } from "./historyIndex.js";
 import { registerCompressionRoutes } from "./compressionApi.js";
 import { recoverCompressionBeforeReceipts } from "./compressionRuntime.js";
 import { compressionReceiptPersisted } from "./compressionStore.js";
@@ -386,6 +387,9 @@ app.onError((err, c) => {
       err.status,
     );
   }
+  if (err instanceof HistoryProblem) {
+    return c.json({ detail: err.message, code: err.code }, err.status);
+  }
   if (err instanceof HTTPException) {
     return c.json({ detail: err.message }, err.status);
   }
@@ -626,6 +630,11 @@ app.get("/api/tasks", (c) => {
   const s = need(c, "read");
   const q = c.req.query("q") || "";
   return c.json(decorateQueueAhead(listTasks(q, viewerFromSession(s))));
+});
+
+app.get("/api/history", (c) => {
+  const session = need(c, "read");
+  return c.json(queryHistory(viewerFromSession(session), c.req.queries()));
 });
 
 app.get("/api/tasks/:tid", (c) => {

@@ -30,6 +30,7 @@ import {
   type CompressionFileStatus,
 } from "./compressionModel.js";
 import { registerSourceUsageProvider, type SourceUsage } from "./sourceQuota.js";
+import { noteHistoryCompression } from "./historyIndex.js";
 import { isTid, newTid, nowIso } from "./tasks.js";
 
 export type CompressionWriterState = "idle" | "spawn_unconfirmed" | "running";
@@ -285,6 +286,7 @@ export function saveCompressionBatch(batch: CompressionBatchRecord): void {
   if (!compressionBatchShapeOk(batch)) throw new Error("压缩批次不能保存");
   batch.status = rollupCompressionStatus(batch.files);
   atomicWriteJson(batchJsonPath(batch.id), batch);
+  try { noteHistoryCompression(batch); } catch { /* 摘要失败不回滚压缩记录 */ }
 }
 
 export function newCompressionId(): string {

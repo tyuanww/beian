@@ -1,6 +1,7 @@
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { DATA_DIR } from "./config.js";
+import { forgetHistory, noteHistoryReview } from "./historyIndex.js";
 import { skipPackSheetField } from "./sheetSkip.js";
 
 export type Hit = {
@@ -143,6 +144,7 @@ export function saveTask(task: Task): void {
   const tid = assertTid(task.id);
   const p = join(tasksDir(), `${tid}.json`);
   replaceFile(p, JSON.stringify(task, null, 2));
+  try { noteHistoryReview(task); } catch { /* 摘要失败不回滚审稿记录 */ }
 }
 
 const TASK_STATUSES = new Set(["comparing", "compare_failed", "pending_review", "in_review", "completed"]);
@@ -336,6 +338,7 @@ export function deleteTask(tid: string): void {
   const uploads = join(DATA_DIR, "uploads", task.id);
   if (existsSync(uploads)) rmSync(uploads, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
   unlinkSync(p);
+  try { forgetHistory("review", task.id); } catch { /* 摘要失败不恢复已删除审稿 */ }
 }
 
 export function nowIso(): string {
