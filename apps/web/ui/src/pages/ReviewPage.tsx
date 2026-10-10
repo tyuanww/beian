@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { Alert, App, Button, Empty, Input } from "antd";
+import { Alert, App, Button, Empty, Input, Tag } from "antd";
 import { ApiError, api, type Decision, type FieldHit, type TaskDetail, type TaskPage } from "../api";
 import { WaitCard } from "../chrome/WaitCard";
 import { forgetReviewHandoff, reviewHandoffFor } from "../jobHandoff";
@@ -19,7 +19,7 @@ import { reviewHits, shouldUseReworkView } from "./reviewVersion";
 import { ReviewDockPanel } from "./ReviewDockPanel";
 import { firstPendingIssueIndex, issueOrdinal, pageIndexForHit } from "./reviewNav";
 import { customerCopy } from "./customerCopy";
-import { statusLead } from "./reviewStatus";
+import { reviewVersionToggle, statusLead } from "./reviewStatus";
 import { buildRevisionList, partitionReviewHits, withLocalNotes } from "./reviewEvidence";
 import {
   prepareReviewMedia,
@@ -596,6 +596,10 @@ export function ReviewPage({ taskId, userId, onBack }: Props) {
             {reviewFullscreen ? "退出全屏" : "全屏"}
           </button>
           {Array.isArray(task?.pages_v2) && task.pages_v2.length > 0 ? (
+            <>
+            <Tag className="review-version-current" color={useV2 ? "processing" : "default"} style={{ alignSelf: "center", marginInlineEnd: 0 }}>
+              {reviewVersionToggle(useV2).current}
+            </Tag>
             <button
               type="button"
               className="btn-ghost"
@@ -607,8 +611,9 @@ export function ReviewPage({ taskId, userId, onBack }: Props) {
                 commitZoom(resetZoom());
               }}
             >
-              {useV2 ? "看新稿" : "看旧稿"}
+              {reviewVersionToggle(useV2).button}
             </button>
+            </>
           ) : (
             <button
               type="button"

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { NAV_LABEL, REVIEW_STATUS_LABEL, WAIT_TITLE, reviewCompletedLabel } from "./labels.js";
 import { statusLabel } from "../pages/TasksPage.js";
-import { statusLead } from "../pages/reviewStatus.js";
+import { reviewVersionToggle, statusLead } from "../pages/reviewStatus.js";
 import { historyTaskRow } from "../pages/historyRows.js";
 
 const done = (complete_kind?: string) => ({
@@ -51,5 +51,12 @@ describe("WAIT_TITLE", () => {
 describe("NAV_LABEL", () => {
   it("has a label for every menu key", () => {
     assert.deepEqual(Object.keys(NAV_LABEL), ["review", "mockup", "compression", "history", "settings"]);
+  });
+});
+
+describe("reviewVersionToggle", () => {
+  it("labels the button with the destination and the tag with the version being viewed", () => {
+    assert.deepEqual(reviewVersionToggle(true), { button: "看旧稿", current: "当前：新稿" });
+    assert.deepEqual(reviewVersionToggle(false), { button: "看新稿", current: "当前：旧稿" });
   });
 });
