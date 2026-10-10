@@ -1,5 +1,7 @@
 /** WaitCard 文案不画百分比；queued 不准写 40 秒。审稿台紧凑行的阶段百分比见文末。 */
 
+import { WAIT_TITLE as TITLE } from "../copy/labels";
+
 export type WaitKind = "compare" | "rework" | "mockup";
 
 export type WaitCardTask = {
@@ -16,11 +18,6 @@ export type WaitCardCopyOpts = {
   feishuReady?: boolean;
 };
 
-const TITLE: Record<WaitKind, string> = {
-  compare: "检查中",
-  rework: "复核中",
-  mockup: "生成中",
-};
 
 /** 等待圆盘逐字，和 WaitCard 标题同一套：检查中 / 复核中 / 生成中。 */
 export function waitLoaderLetters(kind: WaitKind): string[] {
@@ -35,7 +32,7 @@ function queueLine(queue_ahead?: number): string {
 
 function leaveHint(kind: WaitKind, feishuReady?: boolean): string {
   if (feishuReady) return "可以离开，完了飞书叫你";
-  return kind === "mockup" ? "完成后回到打样台" : "完成后回到审稿台";
+  return kind === "mockup" ? "完成后回到 3D 打样" : "完成后回到审稿台";
 }
 
 /** Figma 等待卡 68:1218 正文。不要假取消。 */

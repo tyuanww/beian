@@ -90,7 +90,7 @@ describe("setupBoard copy", () => {
     assert.equal(shortGroupLabel("飞书登录"), "登录设置");
     assert.equal(shortGroupLabel("飞书推送"), "消息通知");
     assert.equal(shortGroupLabel("百度 OCR"), "文字识别");
-    assert.equal(shortGroupLabel("MiniMax（可选）"), "智能复核");
+    assert.equal(shortGroupLabel("MiniMax（可选）"), "AI 复核");
     assert.equal(shortGroupLabel("本机依赖"), "运行环境");
   });
 

@@ -111,7 +111,7 @@ export function structureIssueCopy(
     return "这份稿已合并成一层。请上传保留刀线的源稿。";
   }
   if (job.structure_code === "structure_category_unsupported") {
-    return message || "当前不支持这类包装。内包和标贴不要送进打样台；膜袋只有两块相近刀线才走袋片。";
+    return message || "当前不支持这类包装。内包和标贴不要送进 3D 打样；膜袋只有两块相近刀线才走袋片。";
   }
   if (job.structure_code === "structure_open_boundary") {
     return "刀线或折线存在断口，闭合后重新识别；系统不会自动补线。";

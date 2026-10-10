@@ -177,7 +177,7 @@ export function ReviewDockPanel({
               options={[
                 { value: "confirm", label: "一致" },
                 { value: "issue", label: "有错" },
-                { value: "ignore", label: "忽略" },
+                { value: "ignore", label: "不算问题" },
               ]}
             />
             <Button onClick={onCopy}>复制修改清单</Button>

@@ -3,10 +3,11 @@ import { Alert, App, Button, Empty, Input, Modal, Progress, Space, Table, Tag } 
 import { api, UploadPausedError, type PendingUploadReceipt } from "../api";
 import type { CompressionBatch, CompressionFile } from "../batchTypes";
 import { customerCopy } from "./customerCopy";
+import { COMPRESSION_STATUS_LABEL } from "../copy/labels";
 
 export const compressionStatus: Record<string, string> = {
-  queued: "排队中", running: "处理中", succeeded: "已完成", passthrough: "未压缩",
-  unmet_target: "超出限制", unsupported: "不支持", failed: "处理失败", done: "已完成", partial: "部分完成",
+  queued: "排队中", running: "处理中", succeeded: "已完成", passthrough: COMPRESSION_STATUS_LABEL.passthrough,
+  unmet_target: COMPRESSION_STATUS_LABEL.unmet_target, unsupported: "不支持", failed: "处理失败", done: "已完成", partial: "部分完成",
 };
 export function displayBytes(bytes: number | null) {
   if (bytes === null) return "—";

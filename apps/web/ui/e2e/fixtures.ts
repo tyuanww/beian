@@ -56,6 +56,10 @@ export type SyntheticTask = {
     height: number;
   }>;
   conclusion?: string;
+  /** 后端目前列表不返回；合成数据用来验证有/无该字段都能显示。 */
+  complete_kind?: string;
+  pages_v2?: SyntheticTask["pages"];
+  hits_v2?: SyntheticHit[];
 };
 
 export type SyntheticMockup = {
@@ -351,7 +355,7 @@ async function installSyntheticApi(page: Page, state: SyntheticApi) {
 
       if (method === "GET" && path === "/api/history") {
         let rows = [
-          ...state.tasks.map(row => ({ id: row.id, type: "review", title: row.title, product_name: row.product_name || "", status: row.job_status === "running" ? "running" : row.status, created_at: row.created_at || FIXED_TIME, creator_id: "ou_e2e_synthetic", creator_name: row.owner || "合成用户", names: [], matched_names: [], visibility: "team" })),
+          ...state.tasks.map(row => ({ id: row.id, type: "review", title: row.title, product_name: row.product_name || "", status: row.job_status === "running" ? "running" : row.status, ...(row.complete_kind ? { complete_kind: row.complete_kind } : {}), created_at: row.created_at || FIXED_TIME, creator_id: "ou_e2e_synthetic", creator_name: row.owner || "合成用户", names: [], matched_names: [], visibility: "team" })),
           ...state.mockups.map(row => ({ id: row.id, type: "mockup", title: row.title, product_name: "", status: row.status, created_at: row.created_at || FIXED_TIME, creator_id: "ou_e2e_synthetic", creator_name: row.owner || "合成用户", names: row.files.map(file => file.name), matched_names: [], visibility: "team" })),
           ...state.receipts.map(row => ({ id: row.id, type: "upload", title: row.product_name || row.files[0]?.name || "上传", product_name: row.product_name || "", status: "ready", created_at: row.created_at, creator_id: "ou_e2e_synthetic", creator_name: "合成用户", names: row.files.map(file => file.name), matched_names: [], visibility: "upload_owner" })),
           ...state.uploads.map(row => ({ id: row.id, type: "upload", title: row.product_name || row.files[0]?.name || "上传", product_name: row.product_name || "", status: "uploading", created_at: row.created_at, creator_id: "ou_e2e_synthetic", creator_name: "合成用户", names: row.files.map(file => file.name), matched_names: [], visibility: "upload_owner" })),

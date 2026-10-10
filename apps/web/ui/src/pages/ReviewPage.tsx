@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { Alert, App, Button, Empty, Input } from "antd";
+import { Alert, App, Button, Empty, Input, Tag } from "antd";
 import { ApiError, api, type Decision, type FieldHit, type TaskDetail, type TaskPage } from "../api";
 import { WaitCard } from "../chrome/WaitCard";
 import { forgetReviewHandoff, reviewHandoffFor } from "../jobHandoff";
@@ -19,6 +19,7 @@ import { reviewHits, shouldUseReworkView } from "./reviewVersion";
 import { ReviewDockPanel } from "./ReviewDockPanel";
 import { firstPendingIssueIndex, issueOrdinal, pageIndexForHit } from "./reviewNav";
 import { customerCopy } from "./customerCopy";
+import { reviewVersionToggle, statusLead } from "./reviewStatus";
 import { buildRevisionList, partitionReviewHits, withLocalNotes } from "./reviewEvidence";
 import {
   prepareReviewMedia,
@@ -53,14 +54,6 @@ function pageList(task: TaskDetail | null): TaskPage[] {
   return raw.filter((p) => p && (p.url || p.name));
 }
 
-function statusLead(task: TaskDetail | null, pageIdx: number, pages: TaskPage[]) {
-  const pageNo = pages[pageIdx]?.page || pageIdx + 1;
-  if (!task) return "审核页";
-  if (task.status === "completed") return `审核页 · 第 ${pageNo} 页 · 已提交`;
-  if (isReviewable(task.status)) return `审核页 · 第 ${pageNo} 页 · 待确认`;
-  if (task.status === "compare_failed") return `审核页 · 第 ${pageNo} 页 · 检查中断`;
-  return `审核页 · 第 ${pageNo} 页`;
-}
 
 export function ReviewPage({ taskId, userId, onBack }: Props) {
   const { message } = App.useApp();
@@ -569,7 +562,7 @@ export function ReviewPage({ taskId, userId, onBack }: Props) {
   if (loadState === "waiting" && task) {
     return (
       <WaitCard
-        job={task.job_kind === "rework" ? "对红" : "对照"}
+        kind={task.job_kind === "rework" ? "rework" : "compare"}
         jobStatus={task.job_status}
         queueAhead={task.queue_ahead}
         stage={task.job_stage}
@@ -603,6 +596,10 @@ export function ReviewPage({ taskId, userId, onBack }: Props) {
             {reviewFullscreen ? "退出" : "全屏"}
           </button>
           {Array.isArray(task?.pages_v2) && task.pages_v2.length > 0 ? (
+            <>
+            <Tag className="review-version-current" color={useV2 ? "processing" : "default"} style={{ alignSelf: "center", marginInlineEnd: 0 }}>
+              {reviewVersionToggle(useV2).current}
+            </Tag>
             <button
               type="button"
               className="btn-ghost"
@@ -614,8 +611,9 @@ export function ReviewPage({ taskId, userId, onBack }: Props) {
                 commitZoom(resetZoom());
               }}
             >
-              {useV2 ? "看这一版" : "看上一版"}
+              {reviewVersionToggle(useV2).button}
             </button>
+            </>
           ) : (
             <button
               type="button"

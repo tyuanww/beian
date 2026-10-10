@@ -1,5 +1,5 @@
 import type { FieldHit } from "../api";
-import { coverageTally, doubtLines, excelText, humanMissLines, pdfText, spokenAsk } from "./hitText";
+import { coverageTally, doubtLines, excelText, humanMissLines, NOT_READ, pdfText, spokenAsk } from "./hitText";
 
 export type EvidenceText = {
   summary: string;
@@ -81,7 +81,7 @@ export function reviewEvidence(hit: FieldHit): ReviewEvidence {
     observed: tally
       ? {
           summary: observed.summary,
-          full: observed.full === "没读到" ? tally : `${observed.full}\n${tally}`,
+          full: observed.full === NOT_READ ? tally : `${observed.full}\n${tally}`,
           expandable: true,
         }
       : observed,

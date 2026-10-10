@@ -406,7 +406,7 @@ export function App() {
           </Suspense>
         ) : null}
         {view === "mockup" || view === "mockupNew" ? (
-          <Suspense fallback={<PaneFallback label="打开打样台…" />}>
+          <Suspense fallback={<PaneFallback label="打开 3D 打样…" />}>
             <MockupDesk
               canCreate={me.perms.includes("create")}
               canConfirmStructure={me.perms.includes("confirm_structure")}

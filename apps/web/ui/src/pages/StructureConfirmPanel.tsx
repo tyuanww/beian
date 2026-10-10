@@ -308,8 +308,8 @@ export function StructureConfirmPanel({ job, canConfirmStructure, canAdmin = fal
             <div className="structure-map-caption">
               <p>
                 {layerPreview
-                  ? "移到或勾选右侧图层，左侧会涂亮真实路径。紫色只表示当前选择；系统不会按颜色、白色区域或图层名称判断结构。"
-                  : "这份稿没有分层路径快照。重新识别后才能在勾选时涂亮真实刀线；系统不会伪造路径。"}
+                  ? "移到或勾选右侧图层，左侧会高亮真实路径。紫色只表示当前选择；系统不会按颜色、白色区域或图层名称判断结构。"
+                  : "这份稿没有分层路径快照。重新识别后才能在勾选时高亮真实刀线；系统不会伪造路径。"}
               </p>
             </div>
           </div>
@@ -323,7 +323,7 @@ export function StructureConfirmPanel({ job, canConfirmStructure, canAdmin = fal
                 role="dialog"
               >
                 <strong>三步完成结构确认</strong>
-                <span>1 选择候选图层　2 看左侧真实路径涂亮　3 点右下角重新识别完整盒型</span>
+                <span>1 选择候选图层　2 看左侧真实路径高亮　3 点右下角重新识别完整盒型</span>
                 <Button onClick={dismissLayerGuide} size="small" type="primary">开始选择</Button>
               </div>
             ) : null}
@@ -331,7 +331,7 @@ export function StructureConfirmPanel({ job, canConfirmStructure, canAdmin = fal
               <div className="structure-guide-step">
                 <span className="structure-step-index">1</span>
                 <div>
-                  <strong>点选图层，看左侧真实路径涂亮</strong>
+                  <strong>点选图层，看左侧真实路径高亮</strong>
                   <span>选择实际承载刀线、折线的纯描边层；鼠标移入可临时预览，分开放在多层时可以一起选。</span>
                 </div>
               </div>
@@ -359,7 +359,7 @@ export function StructureConfirmPanel({ job, canConfirmStructure, canAdmin = fal
                     <small>
                       {candidate.stroke_only_path_count} 条纯描边路径
                       {layerPreviewPaths.has(candidate.id)
-                        ? previewTruncatedIds.has(candidate.id) ? " · 预览已安全截取" : " · 可在左侧涂亮"
+                        ? previewTruncatedIds.has(candidate.id) ? " · 预览已安全截取" : " · 可在左侧高亮"
                         : " · 本次无分层预览"}
                     </small>
                   </Checkbox>
@@ -368,7 +368,7 @@ export function StructureConfirmPanel({ job, canConfirmStructure, canAdmin = fal
               {structureInput.preview_plates?.length ? (
                 <div className="structure-preview-plates" role="group" aria-label="工艺与印刷板">
                   <strong>工艺 / 印刷板</strong>
-                  <span>点一下只在左侧涂亮查看，不会当成刀线折盒。</span>
+                  <span>点一下只在左侧高亮查看，不会当成刀线折盒。</span>
                   {structureInput.preview_plates.map((plate) => (
                     <button
                       aria-pressed={previewedPlateId === plate.id}

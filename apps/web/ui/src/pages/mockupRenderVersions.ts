@@ -37,6 +37,31 @@ export function savePendingRenderRequest(jobId:string,pending:PendingRenderReque
   } else target.removeItem(storageKey(jobId));
 }
 
+const PLAIN={
+  viewOnly:"你的账号只能查看。",
+  busy:"正在处理，稍等一下再试。",
+  unavailable:"这个功能暂时用不了。",
+  changed:"内容有变化，请刷新后再试。",
+  broken:"这个版本的文件有问题，先用当前图。",
+  fallback:"暂时用不了，稍后再试。",
+} as const;
+const PLAIN_BY_REASON:Record<string,string>={
+  permission_denied:PLAIN.viewOnly,
+  mutation_busy:PLAIN.busy, ownership_unconfirmed:PLAIN.busy, audit_pending:PLAIN.busy,
+  production_registration_disabled:PLAIN.unavailable, runtime_quality_unwired:PLAIN.unavailable,
+  process_containment_unavailable:PLAIN.unavailable, upgrade_unwired:PLAIN.unavailable,
+  upgrade_candidate_identity_invalid:PLAIN.unavailable, idempotency_capacity:PLAIN.unavailable,
+  history_capacity:PLAIN.unavailable, generation_missing:PLAIN.unavailable,
+  source_changed:PLAIN.changed, current_changed:PLAIN.changed, request_id_conflict:PLAIN.changed,
+  payload_invalid:PLAIN.changed, cursor_invalid:PLAIN.changed,
+  generation_corrupt:PLAIN.broken,
+};
+
+/** 出图版本报错：先给一句大白话，原来的技术说明（detail）折叠起来留给开发排查。 */
+export function renderReasonCopy(reason?:string): {plain:string;detail:string} {
+  return {plain:PLAIN_BY_REASON[reason || ""] || PLAIN.fallback,detail:renderCapabilityCopy(reason)};
+}
+
 export function renderCapabilityCopy(reason?:string): string {
   const reasons:Record<string,string>={
     permission_denied:"此账号只能查看出图版本", mutation_busy:"这单正在生成或切换版本，请稍后操作",

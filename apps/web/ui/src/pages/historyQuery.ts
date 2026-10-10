@@ -2,6 +2,25 @@ import type { HistoryItem } from "../batchTypes";
 export type HistoryTimeMode = "all" | "recent" | "custom";
 export type HistoryFilters = { q: string; type: "" | HistoryItem["type"]; status: string; creator: string; date_from: string; date_to: string; time_mode: HistoryTimeMode };
 export const emptyHistoryFilters: HistoryFilters = { q: "", type: "", status: "", creator: "", date_from: "", date_to: "", time_mode: "all" };
+const FILTER_KEY = /^[a-z_]+$/;
+/** 只接受英文 key；中文（旧版存的显示值）或未知值回退为 ""（=「全部」）。 */
+export function normalizeHistoryFilters(raw: unknown): HistoryFilters {
+  const source = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  const text = (field: keyof HistoryFilters) => (typeof source[field] === "string" ? (source[field] as string) : "");
+  const type = text("type");
+  const status = text("status");
+  return {
+    q: text("q"),
+    type: type in historyTypeLabels ? (type as HistoryFilters["type"]) : "",
+    status: FILTER_KEY.test(status) ? status : "",
+    creator: text("creator"),
+    date_from: text("date_from"),
+    date_to: text("date_to"),
+    time_mode: (["all", "recent", "custom"] as const).includes(text("time_mode") as HistoryTimeMode)
+      ? (text("time_mode") as HistoryTimeMode)
+      : text("date_from") || text("date_to") ? "custom" : "all",
+  };
+}
 export function historyTimeFilters(mode: HistoryTimeMode, now = new Date()): Pick<HistoryFilters, "time_mode" | "date_from" | "date_to"> {
   if (mode !== "recent") return { time_mode: mode, date_from: "", date_to: "" };
   const from = new Date(now);

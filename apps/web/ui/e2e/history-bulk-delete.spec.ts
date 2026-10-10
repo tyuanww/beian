@@ -64,7 +64,7 @@ test("未达10MB筛选使用虚拟状态，失败标签采用错误色", async (
   await page.goto("/history");
   await expect(page.locator(".ant-tag-error").getByText("失败", { exact: true })).toBeVisible();
   await page.getByRole("combobox", { name: "状态" }).click();
-  await page.locator(".ant-select-dropdown:visible").getByText("超出限制", { exact: true }).click();
+  await page.locator(".ant-select-dropdown:visible").getByText("压不到 10MB", { exact: true }).click();
   await expect.poll(() => status).toBe("unmet_target");
   await expect(page.locator(".ant-tag-error").getByText("失败", { exact: true })).toBeVisible();
   await page.reload();

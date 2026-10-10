@@ -15,6 +15,7 @@ import { WaitCard } from "../chrome/WaitCard";
 import { mockupFailReason, mockupFailTag } from "./mockupError";
 import { AdminRotateFront, StructureConfirmPanel } from "./StructureConfirmPanel";
 import { RenderVersions } from "./RenderVersions";
+import { NAV_LABEL } from "../copy/labels";
 import { structureIssueCopy, structureStatusLabel } from "./mockupStructure";
 import { liveJobLine, mockupBoardProgress, shouldShowWaitCard } from "./waitCard";
 import { stemFromFilename } from "./stemName";
@@ -389,7 +390,7 @@ export function MockupPage({
     <section className="mockup-desk">
       <div className="desk-head">
         <div>
-          <h1 className="page-title">打样台</h1>
+          <h1 className="page-title">{NAV_LABEL.mockup}</h1>
           <p className="page-lead">查看包装的立体效果和印刷面。</p>
         </div>
         <Space wrap>
@@ -588,7 +589,7 @@ export function MockupNewPage({
         if (found) {
           setProductName(found.product_name || "");
         } else {
-          setResumeError("上传已失效，请返回打样台重新选择。");
+          setResumeError("上传已失效，请返回 3D 打样重新选择。");
         }
       })
       .catch((err: unknown) => {
@@ -937,7 +938,7 @@ export function MockupJobPage({
             forgetMockupHandoff(job.id);
             setJob(null);
           }
-          setError(err instanceof Error ? err.message : "出图记录加载失败");
+          setError(err instanceof Error ? err.message : "打样结果加载失败");
         });
     }, 2500);
     return () => {
@@ -950,9 +951,9 @@ export function MockupJobPage({
     return (
       <section>
         <header className="page-head">
-          <h1 className="page-title">出图记录</h1>
+          <h1 className="page-title">打样结果</h1>
           <button type="button" className="btn-ghost" onClick={onBack}>
-            返回打样台
+            返回 3D 打样
           </button>
         </header>
         <Alert type="error" showIcon title={error} />
@@ -964,13 +965,13 @@ export function MockupJobPage({
     return (
       <section>
         <header className="page-head">
-          <h1 className="page-title">出图记录</h1>
+          <h1 className="page-title">打样结果</h1>
           <button type="button" className="btn-ghost" onClick={onBack}>
-            返回打样台
+            返回 3D 打样
           </button>
         </header>
         <div className="desk-empty">
-          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="打开出图记录…" />
+          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="打开打样结果…" />
         </div>
       </section>
     );
@@ -991,12 +992,12 @@ export function MockupJobPage({
               </button>
             ) : null}
             <button type="button" className="btn-ghost" onClick={onBack}>
-              返回打样台
+              返回 3D 打样
             </button>
           </div>
         </header>
         <WaitCard
-          job="打样"
+          kind="mockup"
           jobStatus={job.job_status || (job.status === "queued" || job.status === "running" ? job.status : "queued")}
           queueAhead={job.queue_ahead}
           stage={job.job_stage}
@@ -1023,7 +1024,7 @@ export function MockupJobPage({
             </p>
           </div>
           <button type="button" className="btn-ghost" onClick={onBack}>
-            返回打样台
+            返回 3D 打样
           </button>
         </header>
         <StructureConfirmPanel
@@ -1084,7 +1085,7 @@ export function MockupJobPage({
             </button>
           ) : null}
           <button type="button" className="btn-ghost" onClick={onBack}>
-            返回打样台
+            返回 3D 打样
           </button>
           {grounded ? null : hasPpt ? (
             <a

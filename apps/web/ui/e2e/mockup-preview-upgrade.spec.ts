@@ -662,7 +662,7 @@ test("下载中重复点击、切背景或调灯仍只导出点击时的成片�
   await page.getByRole("slider", { name: "背景灯光", exact: true }).press("Home");
   await expect(page.getByRole("slider", { name: "产品灯光", exact: true })).toHaveValue("0.6");
   await expect(page.getByRole("slider", { name: "背景灯光", exact: true })).toHaveValue("0.6");
-  await page.getByRole("button", { name: "打样台", exact: true }).click();
+  await page.getByRole("button", { name: "3D 打样", exact: true }).click();
   product.release();
   const saved = await download;
   const bytes = readFileSync((await saved.path())!);
@@ -690,7 +690,7 @@ test("已启动下载在预览卸载后仍完成", async ({ page }) => {
     try { return new URL(href, "http://synthetic.invalid").pathname.endsWith("/white_a"); }
     catch { return false; }
   })).toBe(true);
-  await page.getByRole("button", { name: "打样台", exact: true }).click();
+  await page.getByRole("button", { name: "3D 打样", exact: true }).click();
   full.release();
   const saved = await download;
   const bytes = readFileSync((await saved.path())!);

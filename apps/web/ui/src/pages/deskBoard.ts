@@ -1,6 +1,8 @@
 /** 两台看板共用：短 ID、工作时间、待确认文案。列布局在 DeskCol。 */
 
-export const PENDING_REVIEW = "待确认";
+import { REVIEW_STATUS_LABEL } from "../copy/labels";
+
+export const PENDING_REVIEW = REVIEW_STATUS_LABEL.pending;
 
 export function deskShortId(id: string): string {
   const t = (id || "").trim();

@@ -73,7 +73,7 @@ test('桌墙显示资源保持原始下载并可复位，离页释放 blob', asy
   await expect.poll(()=>page.evaluate(()=>Boolean(document.fullscreenElement))).toBe(true);
   await loaded(page);await expect(page.locator('.mockup-sheet-glb a[download]')).toHaveAttribute('href',href!);
   await page.evaluate(()=>document.exitFullscreen());await loaded(page);
-  await page.getByRole('button',{name:'返回打样台',exact:true}).click();
+  await page.getByRole('button',{name:'返回 3D 打样',exact:true}).click();
   await expect.poll(()=>page.evaluate(url=>(window as any).__blobAudit.revoked.includes(url),sceneUrl)).toBe(true);
 });
 

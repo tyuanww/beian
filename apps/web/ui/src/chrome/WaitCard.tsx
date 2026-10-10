@@ -3,22 +3,15 @@ import { api } from "../api";
 import { feishuReadyFromHealth, waitCardActiveSteps, waitCardCopy, type WaitKind } from "../pages/waitCard";
 import { WaitLoader } from "./WaitLoader";
 
-type Job = "对照" | "对红" | "打样";
-
-const STEPS: Record<Job, string[]> = {
-  对照: ["读取表格", "读取稿件", "找出差异"],
-  对红: ["读取表格", "读取稿件", "找出差异"],
-  打样: ["读取平面稿", "生成盒型", "生成预览", "导出模型"],
+/** 逻辑只认 WaitKind；中文步骤只是显示。 */
+const STEPS: Record<WaitKind, string[]> = {
+  compare: ["读取表格", "读取稿件", "找出差异"],
+  rework: ["读取表格", "读取稿件", "找出差异"],
+  mockup: ["读取平面稿", "生成盒型", "生成预览", "导出模型"],
 };
 
-function waitKind(job: Job): WaitKind {
-  if (job === "对红") return "rework";
-  if (job === "打样") return "mockup";
-  return "compare";
-}
-
 type Props = {
-  job: Job;
+  kind: WaitKind;
   activeSteps?: number;
   queueAhead?: number;
   stage?: string;
@@ -30,7 +23,7 @@ type Props = {
 };
 
 export function WaitCard({
-  job,
+  kind,
   activeSteps,
   queueAhead,
   stage,
@@ -58,8 +51,7 @@ export function WaitCard({
     };
   }, [feishuReady]);
 
-  const steps = STEPS[job];
-  const kind = waitKind(job);
+  const steps = STEPS[kind];
   const copy = waitCardCopy({
     kind,
     job_status: jobStatus,
@@ -77,7 +69,7 @@ export function WaitCard({
         <p className="wait-eta">{copy.eta}</p>
         <p className="wait-hint">{hint ?? copy.hint}</p>
         <div className="wait-bar" aria-hidden>
-          <span className={job === "打样" ? "wait-bar-fill is-slow" : "wait-bar-fill"} />
+          <span className={kind === "mockup" ? "wait-bar-fill is-slow" : "wait-bar-fill"} />
         </div>
         <div className="wait-steps">
           {steps.map((s, i) => (

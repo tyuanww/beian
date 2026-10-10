@@ -37,8 +37,8 @@ test("审稿上传拿到回执后，换台再回来仍显示待检查", async ({
   await page.getByLabel("包装稿文件").setInputFiles(pdfFile);
   await expect(page.getByText("上传完成，可以开始检查。")).toBeVisible();
 
-  await page.getByRole("button", { name: "打样台" }).click();
-  await expect(page.getByRole("heading", { name: "打样台" })).toBeVisible();
+  await page.getByRole("button", { name: "3D 打样" }).click();
+  await expect(page.getByRole("heading", { name: "3D 打样" })).toBeVisible();
   await page.getByRole("button", { name: "审稿台" }).click();
 
   const pending = page.getByRole("button", { name: /review\s+e2e.*待检查/ });
@@ -53,7 +53,7 @@ test("打样上传拿到回执后，换台再回来仍显示待生成", async ({
 
   await page.getByRole("button", { name: "审稿台" }).click();
   await expect(page.getByRole("heading", { name: "审稿单" })).toBeVisible();
-  await page.getByRole("button", { name: "打样台" }).click();
+  await page.getByRole("button", { name: "3D 打样" }).click();
 
   const pending = page.getByRole("button", { name: /mockup\s+e2e.*待生成/ });
   await expect(pending).toBeVisible();

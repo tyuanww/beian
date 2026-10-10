@@ -5,6 +5,9 @@ import {
   historyActors,
   historyCanDelete,
   historyHasLive,
+  historyKindLabel,
+  normalizeHistoryKindFilter,
+  normalizeHistoryTimeFilter,
   historyMockRow,
   paginateHistoryRows,
   historyRowKey,
@@ -12,6 +15,7 @@ import {
   historyTaskRow,
   type HistoryRow,
 } from "./historyRows.js";
+import { NAV_LABEL } from "../copy/labels.js";
 
 describe("historyTaskRow", () => {
   it("shows live compare progress while the job is running", () => {
@@ -25,7 +29,7 @@ describe("historyTaskRow", () => {
       job_stage_label: "认字",
       job_eta_s: 40,
     });
-    assert.equal(row.kind, "审稿台");
+    assert.equal(row.kind, "compare");
     assert.equal(row.status, "检查中");
     assert.equal(row.color, "processing");
     assert.equal(row.live, "读取文字 · 大约还要 40 秒");
@@ -41,7 +45,7 @@ describe("historyTaskRow", () => {
       job_status: "queued",
       queue_ahead: 1,
     });
-    assert.equal(row.kind, "打样台");
+    assert.equal(row.kind, "mockup");
     assert.equal(row.status, "生成中");
     assert.equal(row.color, "processing");
     assert.equal(row.live, "前面还有 1 单");
@@ -153,7 +157,7 @@ describe("history filters and batch selection", () => {
   const rows: HistoryRow[] = [
     {
       resource: "task",
-      kind: "审稿台",
+      kind: "compare",
       id: "a",
       title: "喷雾",
       status: "已提交",
@@ -164,7 +168,7 @@ describe("history filters and batch selection", () => {
     },
     {
       resource: "mockup",
-      kind: "打样台",
+      kind: "mockup",
       id: "b",
       title: "花盒",
       status: "已完成",
@@ -175,7 +179,7 @@ describe("history filters and batch selection", () => {
     },
     {
       resource: "task",
-      kind: "审稿台",
+      kind: "compare",
       id: "c",
       title: "旧单",
       status: "检查中",
@@ -189,7 +193,7 @@ describe("history filters and batch selection", () => {
   it("combines desk, time and actor filters", () => {
     const filtered = filterHistoryRows(
       rows,
-      { kind: "审稿台", time: "近 7 天", actor: "籽烨" },
+      { kind: "compare", time: "7d", actor: "籽烨" },
       new Date("2026-08-26T12:00:00.000Z"),
     );
     assert.deepEqual(filtered.map((row) => row.id), ["a"]);
@@ -199,8 +203,8 @@ describe("history filters and batch selection", () => {
     const filtered = filterHistoryRows(
       rows,
       {
-        kind: "全部",
-        time: "今天",
+        kind: "all",
+        time: "today",
         actor: "魏炜",
         range: {
           from: new Date("2026-08-19T00:00:00.000Z"),
@@ -216,7 +220,7 @@ describe("history filters and batch selection", () => {
     const invalid = { ...rows[0], id: "bad", at: "not-a-date" };
     const filtered = filterHistoryRows(
       [...rows, invalid],
-      { kind: "全部", time: "今天", actor: "" },
+      { kind: "all", time: "today", actor: "" },
       new Date("2026-08-26T12:00:00.000Z"),
     );
     assert.deepEqual(filtered.map((row) => row.id), ["a"]);
@@ -265,7 +269,7 @@ describe("history filters and batch selection", () => {
       ...rows[index % 2],
       id: String(index + 1),
     }));
-    const mockups = filterHistoryRows(many, { kind: "打样台", time: "全部", actor: "" });
+    const mockups = filterHistoryRows(many, { kind: "mockup", time: "all", actor: "" });
 
     assert.equal(mockups.length, 11);
     assert.deepEqual(paginateHistoryRows(mockups, 3), {
@@ -273,5 +277,27 @@ describe("history filters and batch selection", () => {
       pageCount: 2,
       rows: mockups.slice(10),
     });
+  });
+});
+
+describe("history filter keys", () => {
+  it("falls back to all for legacy Chinese or unknown filter values", () => {
+    assert.equal(normalizeHistoryKindFilter("审稿台"), "all");
+    assert.equal(normalizeHistoryKindFilter("全部"), "all");
+    assert.equal(normalizeHistoryKindFilter(undefined), "all");
+    assert.equal(normalizeHistoryKindFilter("mockup"), "mockup");
+    assert.equal(normalizeHistoryTimeFilter("近 7 天"), "all");
+    assert.equal(normalizeHistoryTimeFilter("7d"), "7d");
+  });
+
+  it("does not throw or drop rows when a legacy filter object is passed", () => {
+    const legacy = { kind: "审稿台", time: "近 7 天", actor: "" } as unknown as Parameters<typeof filterHistoryRows>[1];
+    const row = historyTaskRow({ id: "t", title: "y", type: "pack", status: "completed", created_at: "2000-01-01T00:00:00Z" });
+    assert.deepEqual(filterHistoryRows([row], legacy), [row]);
+  });
+
+  it("shows the menu name for each kind", () => {
+    assert.equal(historyKindLabel("compare"), NAV_LABEL.review);
+    assert.equal(historyKindLabel("mockup"), NAV_LABEL.mockup);
   });
 });

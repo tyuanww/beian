@@ -23,10 +23,10 @@ export const BOARD_ROWS: {
   { id: "feishu", title: "登录设置", group: "飞书登录", kind: "wizard" },
   { id: "lark", title: "消息通知", group: "飞书推送", kind: "push" },
   { id: "baidu", title: "文字识别", group: "百度 OCR", kind: "wizard" },
-  { id: "minimax", title: "智能复核", group: "MiniMax（可选）", kind: "wizard" },
-  { id: "python", title: "脚本服务", group: "本机依赖", kind: "retry" },
-  { id: "blender", title: "3D 服务", group: "本机依赖", kind: "scan" },
-  { id: "illustrator", title: "排版服务", group: "本机依赖", kind: "scan" },
+  { id: "minimax", title: "AI 复核", group: "MiniMax（可选）", kind: "wizard" },
+  { id: "python", title: "Python", group: "本机依赖", kind: "retry" },
+  { id: "blender", title: "Blender", group: "本机依赖", kind: "scan" },
+  { id: "illustrator", title: "Illustrator", group: "本机依赖", kind: "scan" },
 ];
 
 export type WizardGuide = {
@@ -60,7 +60,7 @@ export const WIZARD: Record<string, WizardGuide> = {
     ],
   },
   "MiniMax（可选）": {
-    intro: "设置智能复核。",
+    intro: "设置 AI 复核。",
     steps: [
       "填写服务密钥。",
       "选择可用模型。",
@@ -99,7 +99,7 @@ export function shortGroupLabel(title: string): string {
     飞书登录: "登录设置",
     飞书推送: "消息通知",
     "百度 OCR": "文字识别",
-    "MiniMax（可选）": "智能复核",
+    "MiniMax（可选）": "AI 复核",
     本机依赖: "运行环境",
   };
   return labels[title] || title;
@@ -175,10 +175,10 @@ export function foldCatalogReason(
     const enabled = fields.find((f) => f.key === "MINIMAX_ENABLED");
     const key = fields.find((f) => f.key === "MINIMAX_API_KEY");
     if (enabled?.value === "false" || (probe && !("pending" in probe) && /未启用/.test(probe.message))) {
-      return "智能复核未启用。密钥已收起。";
+      return "AI 复核未启用。密钥已收起。";
     }
     if (key?.set || probeOk) {
-      return "智能复核已可用。密钥已收起。";
+      return "AI 复核已可用。密钥已收起。";
     }
   }
   return null;

@@ -20,3 +20,6 @@
 @media (prefers-reduced-motion: reduce) { .mockup-versions *, .mockup-versions *::before, .mockup-versions *::after { transition: none !important; animation: none !important; } }
 .mockup-sheet:has(.mockup-versions) { grid-template-columns: minmax(0, 1fr); min-width: 0; }
 .mockup-sheet:has(.mockup-versions) > *, .mockup-sheet:has(.mockup-versions) > .page-head > div { min-width: 0; max-width: 100%; }
+.mockup-render-reason { display: inline-flex; flex-direction: column; gap: 2px; }
+.mockup-render-reason .ant-collapse-header { font-size: 13px; color: var(--muted); }
+.mockup-render-reason-detail { font-size: 13px; color: var(--muted); }
