@@ -131,6 +131,12 @@ export type AdminNativeRecovery = "recovered" | "not_stuck" | "attempt_mismatch"
  * no customer documents open; this still requires the exact attempt id and the
  * recorded executor to be proven gone, and writes the same state as a proven
  * close (fallback/native_failed). It never touches OCR results or the copy. */
+/** Operator-facing text for the admin CLI; outcomes without a message need none. */
+export function adminRecoveryMessage(outcome: string): string | undefined {
+  if (outcome === "changed_during_check") return "核对期间任务变了，未写入；停掉 8787 后重试";
+  if (outcome === "overwritten_concurrently") return "已写入，但写后检测到并发修改，请人工核对这条任务";
+  return undefined;
+}
 export function adminRecoverNativeRequest(
   taskId: string, attemptId: string, inspect: typeof inspectWorkerProcess = inspectWorkerProcess,
 ): AdminNativeRecovery {

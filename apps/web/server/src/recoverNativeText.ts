@@ -9,7 +9,7 @@
  *
  * Exit 0 only when the record was recovered. No HTTP route can reach this.
  */
-import { adminRecoverNativeRequest, nativeRequest } from "./nativeTextJobs.js";
+import { adminRecoverNativeRequest, adminRecoveryMessage, nativeRequest } from "./nativeTextJobs.js";
 import { loadTask } from "./tasks.js";
 
 function arg(name: string): string | undefined {
@@ -41,7 +41,6 @@ if (outcome === "recovered") {
   if (after?.id !== attempt || after.status !== "fallback") outcome = "overwritten_concurrently";
 }
 console.log(JSON.stringify({ task, attempt, outcome }));
-if (outcome === "changed_during_check" || outcome === "overwritten_concurrently") {
-  console.error("refused: the task changed while checking; nothing was overwritten. Confirm no one is reviewing (or stop 8787) and retry.");
-}
+const message = adminRecoveryMessage(outcome);
+if (message) console.error(message);
 process.exit(outcome === "recovered" ? 0 : 1);

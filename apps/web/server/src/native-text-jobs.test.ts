@@ -9,7 +9,7 @@ process.env.WB_DATA_DIR = makeTestTempDir("beian-native-text-jobs-");
 const { DATA_DIR } = await import("./config.js");
 const { loadTask, saveTask, deleteTask } = await import("./tasks.js");
 const { enqueue, tryStart, resetJobsTestHooks, setJobsTestHooks, queueSnapshot, publicTask, setJobsLiveForTest } = await import("./jobs.js");
-const { nativePublic, recoverNativeRequests, prepareNativeRequests, adminRecoverNativeRequest } = await import("./nativeTextJobs.js");
+const { nativePublic, recoverNativeRequests, prepareNativeRequests, adminRecoverNativeRequest, adminRecoveryMessage } = await import("./nativeTextJobs.js");
 const id = "aabbccddeeff";
 const success = { code: 0, stdout: JSON.stringify({ status: "pending_review", hits: [] }), stderr: "", timedOut: false };
 function seed(tid = id) {
@@ -220,4 +220,10 @@ it("admin recovery does not overwrite a request that changed during the worker c
   });
   assert.equal(outcome, "changed_during_check");
   assert.equal(loadTask(id).native_text_request, undefined);
+});
+
+it("admin recovery messages distinguish an unwritten abort from a post-write conflict", () => {
+  assert.equal(adminRecoveryMessage("changed_during_check"), "核对期间任务变了，未写入；停掉 8787 后重试");
+  assert.equal(adminRecoveryMessage("overwritten_concurrently"), "已写入，但写后检测到并发修改，请人工核对这条任务");
+  assert.equal(adminRecoveryMessage("recovered"), undefined);
 });
