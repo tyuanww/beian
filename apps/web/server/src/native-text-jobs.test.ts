@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { afterEach, it } from "node:test";
 import { makeTestTempDir } from "./testTemp.js";
@@ -8,7 +9,7 @@ process.env.WB_DATA_DIR = makeTestTempDir("beian-native-text-jobs-");
 const { DATA_DIR } = await import("./config.js");
 const { loadTask, saveTask, deleteTask } = await import("./tasks.js");
 const { enqueue, tryStart, resetJobsTestHooks, setJobsTestHooks, queueSnapshot, publicTask, setJobsLiveForTest } = await import("./jobs.js");
-const { nativePublic, recoverNativeRequests, prepareNativeRequests } = await import("./nativeTextJobs.js");
+const { nativePublic, recoverNativeRequests, prepareNativeRequests, adminRecoverNativeRequest, adminRecoveryMessage } = await import("./nativeTextJobs.js");
 const id = "aabbccddeeff";
 const success = { code: 0, stdout: JSON.stringify({ status: "pending_review", hits: [] }), stderr: "", timedOut: false };
 function seed(tid = id) {
@@ -154,4 +155,75 @@ it("an older packaging request and native review share one FIFO Illustrator slot
   release(); await eventually(() => loadTask(id).job_status === "succeeded");
   assert.deepEqual(order, ["packaging", "native"]);
   rmSync(join(DATA_DIR, "mockups"), { recursive: true, force: true });
+});
+
+function stuck(pid: number | undefined) {
+  seed(); prepareNativeRequests(true); const task = loadTask(id); const req = task.native_text_request!;
+  req.status = "running"; req.reason = "close_unconfirmed"; if (pid) req.pid = pid; else delete req.pid;
+  task.job_status = "succeeded"; task.status = "pending_review"; saveTask(task); return req.id;
+}
+const exitedPid = () => spawnSync(process.execPath, ["-e", ""]).pid!;
+
+it("admin recovery releases a host-restart fence only for the exact attempt with a proven-gone worker", () => {
+  const attempt = stuck(exitedPid());
+  assert.equal(queueSnapshot().illustrator.running, 1);
+  recoverNativeRequests("late");
+  assert.equal(loadTask(id).native_text_request?.status, "running");
+  assert.equal(adminRecoverNativeRequest(id, "0".repeat(32)), "attempt_mismatch");
+  assert.equal(loadTask(id).native_text_request?.status, "running");
+  assert.equal(adminRecoverNativeRequest(id, attempt), "recovered");
+  const after = loadTask(id);
+  assert.equal(after.native_text_request?.status, "fallback");
+  assert.equal(after.native_text_request?.reason, "native_failed");
+  assert.equal(after.job_status, "succeeded");
+  assert.equal(queueSnapshot().illustrator.running, 0);
+  assert.equal(adminRecoverNativeRequest(id, attempt), "not_stuck");
+});
+
+it("admin recovery refuses a live or unrecorded executor", () => {
+  const live = stuck(process.pid);
+  assert.equal(adminRecoverNativeRequest(id, live), "worker_not_proven_gone");
+  assert.equal(loadTask(id).native_text_request?.status, "running");
+  const unrecorded = stuck(undefined);
+  assert.equal(adminRecoverNativeRequest(id, unrecorded), "worker_not_proven_gone");
+  assert.equal(loadTask(id).native_text_request?.status, "running");
+});
+
+it("admin recovery leaves an active native extraction alone", () => {
+  seed(); prepareNativeRequests(true); const task = loadTask(id); task.native_text_request!.status = "running";
+  task.native_text_request!.pid = exitedPid(); saveTask(task);
+  assert.equal(adminRecoverNativeRequest(id, task.native_text_request!.id), "not_stuck");
+  assert.equal(loadTask(id).native_text_request?.status, "running");
+});
+
+it("admin recovery aborts when a review submission lands during the worker check", () => {
+  const attempt = stuck(4242);
+  const outcome = adminRecoverNativeRequest(id, attempt, () => {
+    const t = loadTask(id); t.status = "completed"; (t as Record<string, unknown>).review_conclusion = "concurrent"; saveTask(t);
+    return "missing";
+  });
+  assert.equal(outcome, "changed_during_check");
+  const after = loadTask(id) as Record<string, unknown> & ReturnType<typeof loadTask>;
+  assert.equal(after.status, "completed");
+  assert.equal(after.review_conclusion, "concurrent");
+  assert.equal(after.native_text_request?.status, "running");
+  assert.equal(adminRecoverNativeRequest(id, attempt, () => "missing"), "recovered");
+  const retried = loadTask(id) as Record<string, unknown> & ReturnType<typeof loadTask>;
+  assert.equal(retried.review_conclusion, "concurrent");
+  assert.equal(retried.native_text_request?.status, "fallback");
+});
+
+it("admin recovery does not overwrite a request that changed during the worker check", () => {
+  const attempt = stuck(4243);
+  const outcome = adminRecoverNativeRequest(id, attempt, () => {
+    const t = loadTask(id); delete t.native_text_request; saveTask(t); return "missing";
+  });
+  assert.equal(outcome, "changed_during_check");
+  assert.equal(loadTask(id).native_text_request, undefined);
+});
+
+it("admin recovery messages distinguish an unwritten abort from a post-write conflict", () => {
+  assert.equal(adminRecoveryMessage("changed_during_check"), "核对期间任务变了，未写入；停掉 8787 后重试");
+  assert.equal(adminRecoveryMessage("overwritten_concurrently"), "已写入，但写后检测到并发修改，请人工核对这条任务");
+  assert.equal(adminRecoveryMessage("recovered"), undefined);
 });

@@ -74,6 +74,19 @@ Agent 只做会话桥：UTF-8 JSON 命名管道 `beian.illustrator.v1` → 现�
 powershell -ExecutionPolicy Bypass -File scripts\windows\install-illustrator-agent.ps1 -ClearFaultFence
 ```
 
+### 原生文字请求卡在 close_unconfirmed
+
+症状：Illustrator 已重启、Agent 心跳 `idle`、`illustrator-fault.json` 不存在，但 `/api/health` 的 `illustrator.running` 仍为 1，发版报 `jobs_active`。原因是任务 JSON 里 `native_text_request` 仍是 `running` + `close_unconfirmed`：宿主中途重启后 `close.json` 永远不会写出，正常恢复按合同保持围栏。不要编辑心跳、不要手改任务 JSON、不要伪造 `close.json`。
+
+**必须先停 8787**（`Stop-Service beian-server-8787`，维护窗内），并由管理员确认桌面 Illustrator 无客户稿、cscript/wscript 已退出，然后在杭州机交互式、已提升权限的 PowerShell 中（`D:\beian`）：
+
+```powershell
+$env:WB_DATA_DIR = "C:\supply\data"
+node_modules\.bin\tsx.cmd apps\web\server\src\recoverNativeText.ts --task <任务 id> --attempt <native_text_request.id> --confirm-no-open-documents
+```
+
+只有输出 `"outcome":"recovered"`（退出码 0）才算完成；`worker_not_proven_gone` 表示记录的执行者仍在或无法证明已退出，`attempt_mismatch` / `not_stuck` 表示参数或状态不符，均不改文件；`changed_during_check` 表示核对期间任务文件被改动，本命令未写入：确认 8787 已停后重跑。`overwritten_concurrently` 表示已写入但写后检测到并发修改，需人工核对这条任务。任务 JSON 没有文件锁，8787 在线时服务端写入可能与本命令交错，所以不支持在 8787 运行时执行。使用 `D:\beian` 已装的 tsx（发版以 `--include=dev` 安装，与 8787 同一启动器），不要用 `npx`（可能联网）。之后启动 8787，确认 health 的 `illustrator.running` 为 0，再按发布合同重跑同一条 push run。
+
 不要安装 PowerShell 7、.NET SDK 或 pywin32，也不要手工在 Session 0 启动 Illustrator。
 
 Clash 开系统代理时，备案域名和 `127.0.0.1` 必须直连。self-hosted runner 若走 `127.0.0.1:7897` 会被拒绝（`Runner connect error`），设 DIRECT 或关掉 Clash 再听 job。控制台里「所提供的模式无法找到文件」乱码，是 cmd/PowerShell 在 GBK 下找不到通配文件，不是 8787 挂了。

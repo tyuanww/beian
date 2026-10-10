@@ -3,7 +3,7 @@ import { copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, writeFile
 import { join } from "node:path";
 import { DATA_DIR } from "./config.js";
 import { illustratorBin } from "./settings.js";
-import { loadAllTasks, loadTask, saveTask, type Task } from "./tasks.js";
+import { loadAllTasks, loadTask, loadTaskWithRevision, saveTask, type Task } from "./tasks.js";
 import { inspectWorkerProcess, runNativeText } from "./workers.js";
 
 export type NativeRequest = {
@@ -100,10 +100,10 @@ function closed(task: Task, req: NativeRequest): boolean {
       && value.document_closed === true && value.bridge_exited === true && value.inflight === false && value.lock_returnable === true;
   } catch { return false; }
 }
-function workerGone(task: Task, req: NativeRequest): boolean {
+function workerGone(task: Task, req: NativeRequest, inspect: typeof inspectWorkerProcess = inspectWorkerProcess): boolean {
   if (!req.pid) return false;
   try {
-    return inspectWorkerProcess(req.pid, { kind: "native_text", id: task.id, executionId: req.id }) === "missing";
+    return inspect(req.pid, { kind: "native_text", id: task.id, executionId: req.id }) === "missing";
   } catch {
     return false;
   }
@@ -119,8 +119,43 @@ export function recoverNativeRequests(mode: "boot" | "late" = "boot") {
     // already recorded a fence, or after its executor is proven gone.
     if (mode === "late" && !req.reason && !gone) continue;
     if (gone && closed(task, req)) fallback(task, "native_failed");
-    else { req.reason = "close_unconfirmed"; saveTask(task); }
+    // Re-saving an unchanged fence would race an out-of-process admin
+    // recovery (read-before, write-after) and silently restore the fence.
+    else if (req.reason !== "close_unconfirmed") { req.reason = "close_unconfirmed"; saveTask(task); }
   }
+}
+export type AdminNativeRecovery = "recovered" | "not_stuck" | "attempt_mismatch" | "worker_not_proven_gone" | "changed_during_check";
+/** Administrator-confirmed exit for running + close_unconfirmed. When the
+ * host was restarted mid-attempt, close evidence can never arrive, so normal
+ * recovery keeps the fence forever. The administrator confirms Illustrator has
+ * no customer documents open; this still requires the exact attempt id and the
+ * recorded executor to be proven gone, and writes the same state as a proven
+ * close (fallback/native_failed). It never touches OCR results or the copy. */
+/** Operator-facing text for the admin CLI; outcomes without a message need none. */
+export function adminRecoveryMessage(outcome: string): string | undefined {
+  if (outcome === "changed_during_check") return "核对期间任务变了，未写入；停掉 8787 后重试";
+  if (outcome === "overwritten_concurrently") return "已写入，但写后检测到并发修改，请人工核对这条任务";
+  return undefined;
+}
+export function adminRecoverNativeRequest(
+  taskId: string, attemptId: string, inspect: typeof inspectWorkerProcess = inspectWorkerProcess,
+): AdminNativeRecovery {
+  const stuck = (req: NativeRequest | undefined) => !!req && req.status === "running" && req.reason === "close_unconfirmed";
+  const before = loadTaskWithRevision(taskId);
+  const req = nativeRequest(before.task);
+  if (!stuck(req)) return "not_stuck";
+  if (req!.id !== attemptId) return "attempt_mismatch";
+  // Process inspection can take seconds (ps / PowerShell). Never write back the
+  // snapshot read before it: reviews, completion or rework may land meanwhile.
+  if (!workerGone(before.task, req!, inspect)) return "worker_not_proven_gone";
+  // Re-read, compare and write in one synchronous run (no await). Any change to
+  // the file during the check aborts without writing; the admin retries.
+  const fresh = loadTaskWithRevision(taskId);
+  if (fresh.revision !== before.revision) return "changed_during_check";
+  const current = nativeRequest(fresh.task);
+  if (!stuck(current) || current!.id !== attemptId) return "attempt_mismatch";
+  fallback(fresh.task, "native_failed");
+  return "recovered";
 }
 export function nativeDirectory(task: Task): string | undefined {
   const req = nativeRequest(task);

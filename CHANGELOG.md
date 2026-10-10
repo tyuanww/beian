@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.31.1.3] - 2026-10-10
+
+### Added
+- 原生文字请求在 Illustrator 中途重启后会永久停在 running + close_unconfirmed，占住 Illustrator 计数并让发版报 `jobs_active`。新增仅限管理员的命令行出口 `recoverNativeText.ts`：要求确切 task/attempt id、管理员确认无客户稿，且记录的执行者已被证明退出，写入与已证明关闭相同的 fallback/native_failed；无 HTTP 入口。恢复步骤写入 Windows README 与 jobs/release 合同。
+
 ## [0.31.1.2] - 2026-10-10
 
 ### Changed
