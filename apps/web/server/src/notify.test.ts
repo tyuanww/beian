@@ -11,7 +11,7 @@ process.env.VITEST = "1";
 after(() => rmSync(dataDir, { recursive: true, force: true }));
 
 const { saveSettings } = await import("./settings.js");
-const { createTextSender, jobOpenPath, sendText } = await import("./notify.js");
+const { createTextSender, jobOpenPath, sendText, taskCompleteHeadline, taskCompleteText } = await import("./notify.js");
 
 function isolatedSender() {
   const calls = { cli: 0, app: 0 };
@@ -112,5 +112,25 @@ describe("sendText", () => {
     saveSettings({ FEISHU_ENABLED: "true", FEISHU_OPEN_ID: "ou_app" });
     assert.deepEqual(await sender("hi"), { ok: true, via: "app" });
     assert.deepEqual(calls, { cli: 1, app: 1 });
+  });
+});
+
+describe("taskCompleteText", () => {
+  it("titles signed tasks 已签字 and returned tasks 已退回", () => {
+    assert.equal(taskCompleteHeadline({ complete_kind: "signed" }), "已签字");
+    assert.equal(taskCompleteHeadline({ complete_kind: "rework" }), "已退回");
+    const signed = taskCompleteText({ id: "t1", title: "某精华", conclusion: "通过", complete_kind: "signed" }, "审核员");
+    assert.match(signed, /^【备案审核】已签字\n/);
+    assert.match(signed, /无改稿项/);
+    const returned = taskCompleteText({ id: "t2", complete_kind: "rework", hits: [{ field: "净含量", decision: "issue" }] }, "审核员");
+    assert.match(returned, /^【备案审核】已退回\n/);
+    assert.match(returned, /改稿 1 条\n· 净含量/);
+    assert.doesNotMatch(signed + returned, /待设计改稿|已通过/);
+  });
+
+  it("falls back to issue hits for legacy tasks without complete_kind", () => {
+    assert.equal(taskCompleteHeadline({}), "已签字");
+    assert.equal(taskCompleteHeadline({ hits: [{ decision: "confirm" }] }), "已签字");
+    assert.equal(taskCompleteHeadline({ hits: [{ decision: "issue" }] }), "已退回");
   });
 });
