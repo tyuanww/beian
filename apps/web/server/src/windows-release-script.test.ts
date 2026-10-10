@@ -1155,9 +1155,15 @@ describe("windows release.ps1 contract", () => {
       git("init", "-q");
       git("add", "-A");
       git("-c", "user.email=l0@example.invalid", "-c", "user.name=l0", "commit", "-q", "-m", "fixture");
-      const installed = (packages: Record<string, unknown>) => {
+      const installed = (packages: Record<string, { version?: string; link?: boolean; [key: string]: unknown } | undefined>, disk: Record<string, string> = {}) => {
+        rmSync(join(fixture, "node_modules"), { recursive: true, force: true });
         mkdirSync(join(fixture, "node_modules"), { recursive: true });
         writeFileSync(join(fixture, "node_modules/.package-lock.json"), JSON.stringify({ lockfileVersion: 3, packages }));
+        for (const [path, entry] of Object.entries(packages)) {
+          if (!entry || entry.link) continue;
+          mkdirSync(join(fixture, path), { recursive: true });
+          writeFileSync(join(fixture, path, "package.json"), JSON.stringify({ version: disk[path] ?? entry.version }));
+        }
         return spawnSync(process.execPath, [dependencyCheckPath, "installed", fixture, fixture, "HEAD"], { encoding: "utf8" });
       };
       const base = {
@@ -1177,6 +1183,8 @@ describe("windows release.ps1 contract", () => {
       assert.match(missing.stderr, /missing:node_modules\/a/);
       const drift = installed({ ...base, "node_modules/a": { version: "1.0.1", integrity: "sha512-a" } });
       assert.match(drift.stderr, /version:node_modules\/a/);
+      const stale = installed(base, { "node_modules/a": "0.9.0" });
+      assert.match(stale.stderr, /disk-version:node_modules\/a/);
       const extra = installed({ ...base, "node_modules/rogue": { version: "9.9.9" } });
       assert.match(extra.stderr, /extraneous:node_modules\/rogue/);
     } finally {

@@ -153,6 +153,16 @@ function installedProblems(directoryInput, rootInput, revisionInput) {
       continue;
     }
     if ((actual.version ?? "") !== (entry.version ?? "")) problems.push(`version:${path}`);
+    if (!entry.link) {
+      // The hidden lockfile is npm's own claim; the on-disk manifest is the fact.
+      let manifest = null;
+      try {
+        manifest = readTreeJson(directory, `${path}/package.json`);
+      } catch {
+        problems.push(`absent:${path}`);
+      }
+      if (manifest && (manifest.version ?? "") !== (entry.version ?? "")) problems.push(`disk-version:${path}`);
+    }
     if (Boolean(actual.link) !== Boolean(entry.link)) problems.push(`link:${path}`);
     for (const key of ["resolved", "integrity"]) {
       if (actual[key] && entry[key] && actual[key] !== entry[key]) problems.push(`${key}:${path}`);
