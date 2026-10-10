@@ -4568,6 +4568,7 @@ html[data-theme="dark"] .notes.is-float {
 .mockup-glb-skeleton { background: linear-gradient(90deg, rgba(0,0,0,.04) 25%, rgba(0,0,0,.08) 37%, rgba(0,0,0,.04) 63%); background-size: 400% 100%; animation: mockup-glb-skeleton 1.4s ease infinite; }
 @keyframes mockup-glb-skeleton { from { background-position: 100% 50%; } to { background-position: 0 50%; } }
 @media (prefers-reduced-motion: reduce) { .mockup-glb-skeleton { animation: none; } }
-.mockup-glb-progress { display: flex; flex-direction: column; align-items: center; gap: 6px; inset: auto 20px 16px; z-index: 1; }
+/* 左右各让出 72px：避开左下「复位」（44px 高、约 64px 宽）及顶部全屏/下载按钮，窄屏也不重叠。 */
+.mockup-glb-progress { display: flex; flex-direction: column; align-items: center; gap: 6px; inset: auto 72px 12px; z-index: 1; min-height: 44px; justify-content: center; }
 .mockup-glb-progress .ant-progress { width: min(240px, 100%); margin: 0; }
 .mockup-glb-progress-visual { display: flex; flex-direction: column; align-items: center; gap: 6px; width: min(240px, 100%); }
