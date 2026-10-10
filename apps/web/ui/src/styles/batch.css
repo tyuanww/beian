@@ -68,3 +68,4 @@
 @media (max-width: 900px) {
   .history-files-group { grid-template-columns: 1fr; gap: 2px; }
 }
+html[data-theme="dark"] .history-files { font-weight: 500; }
