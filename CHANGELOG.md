@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.31.1.4] - 2026-10-10
+
+### Changed
+- 3D 模型（GLB）不再经服务端实时 gzip：GLB 几乎压不小，压缩却会去掉 `Content-Length`，浏览器无法显示下载进度，且每次回源都在杭州机上实时压缩。现在 GLB 原样发送；打样文件下载与渲染代际文件都带 `Content-Length`（打样文件的长度与内容取自同一文件描述符）。JSON、HTML、JS 等文本响应照旧压缩；PNG、JPEG、PDF、ZIP 本就不压缩。ETag 与 Cache-Control 不变。
+
 ## [0.31.1.3] - 2026-10-10
 
 ### Added
