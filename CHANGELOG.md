@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.31.1.2] - 2026-10-10
+
+### Changed
+- 文档对齐仓库迁移：发布合同、Windows README 的 Actions 链接改指 `tyuanww/beian`，并写明新仓须启用 Actions、runner 服务账号须为 LocalSystem；TODOS 页首记录已核实的 `0.31.1.1` 发版 L1，标注旧仓链接已不可访问，R05–R07 标为仅发版 L1、未做 L2/UAT。
+- 新增仓库迁移 / runner 重注册与 WSL 预发副本两份操作指南，以及发版流程的开发者体验评审；TODOS 增加主分支保护重建、迁移收尾、Linux Rollup 原生包和 Linux health 文案等后续项。
+
 ## [0.31.1.1] - 2026-10-10
 
 ### Fixed

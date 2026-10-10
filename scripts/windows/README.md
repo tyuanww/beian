@@ -120,6 +120,8 @@ npm 依赖升级由发版事务的「离线依赖交接」处理；Python requir
 
 `-Restart` 现在多余，行为一样。Mac 禁止 `cloudflared tunnel run beian`。
 
+runner 必须注册在当前仓库 `tyuanww/beian`，以服务运行且账号为 **LocalSystem**（`config.cmd --runasservice` 默认的 `NETWORK SERVICE` 不行，需在服务属性里改成本地系统账户后重启服务）。换仓、重注册或改服务账号的完整步骤见 [仓库迁移与 runner 重注册](../../docs/howto-repo-migration.md)。
+
 不要用 GitHub-hosted runner（`ubuntu-latest` / `windows-latest`）升这台机。不要 SSH。self-hosted 只打标签 `hangzhou`。
 
 ## 升到本版之前

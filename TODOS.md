@@ -2,7 +2,11 @@
 
 这是当前未完成事项的唯一清单。已完成代码和版本历史写 `CHANGELOG.md`；设计理由写 ADR；阶段证据留在对应 closeout，真实稿与输出留在 Git 外的私有证据目录。
 
-实施更新：2026-10-09（A1–A5、B/C/D 已本地集成；D 改由 Codex 实现，真实稿/原生验证仍未执行）。以下发布记录沿用历史核实结果，本轮未重新核实生产。截至 `2026-09-15T10:30:43Z` 的最新已核实发布记录为 `e4f3cdb634febbbdb01c319a8236bc04d4c9bbd6` / `0.30.3.2`（[PR #121](https://github.com/weiweity/beian/pull/121) 已合入 `main`、同 SHA 的 [杭州发布](https://github.com/weiweity/beian/actions/runs/34958049990) 成功，公网 health HTTP 200、`ok=true`、`version=0.30.3.2`）。该版本把 TODOS 对齐已核实的 `0.30.3.1` 发版 L1，并补单张结构导出的刀版层 / 独立 OutDir / Mac `--dry-run` 说明。其上一版 `0.30.3.1`（[PR #120](https://github.com/weiweity/beian/pull/120)）对齐 `0.30.3.0` 文档。`0.30.3.0`（[PR #119](https://github.com/weiweity/beian/pull/119)）提供按 SHA-256 选稿的杭州单张结构导出。`0.30.2.0`（[PR #118](https://github.com/weiweity/beian/pull/118)）对齐 F02/TODOS 文档。`0.30.1.0`（[PR #117](https://github.com/weiweity/beian/pull/117)）修了监控 identity 的 UTF-8/UTF-16 BOM。`0.30.0.0`（[PR #116](https://github.com/weiweity/beian/pull/116)）交付独立飞书 bot 通道与杭州计划任务 `beian-monitor-local`。Q05 回执门禁与 R04 仓内探针计划仍以 `0.29.0.0` 为工具发版 L1；默认仍只跑轻量合成，不启动 Blender/浏览器压测或双 100MiB 上传，也不冻结正式预算。Q06.6 A 代码此前已完成发版 L1，生产候选未启用。Q01–Q04 合成补采、限定范围的人工视觉接受与 Q05 三轮 Mac 合成观察已完成，详见各主题；原有 **21 个未闭环主题（P1 10、P2 7、P3 4）**；2026-10-09 新增 R05–R07 后合计 **24 个未闭环主题（P1 10、P2 10、P3 4）**。B01 新增的审稿反馈和历史需求子项不重复计为主题。其中 F02 杭州托管与测试消息已按当前意图收口（未停 8787/cloudflared 做真实掉线，主题框仍开）；B02 放下；B03 保护已生效、归属暂缓。阶段实现与验证记录随下方条目更新；历史发布证据不替代本轮本地回归或业务验收。“待确认”表示未见批准/完成证据，不替用户判断外部事项已办或未办。不再重复派发 Q05 回执、R04 探针、clearcoat 修复、Q06.6 A 或监控核心。
+**最新已核实发布（发版 L1）**：截至 `2026-10-10T10:54:03Z`，`c67d1a9b28f7f92303b2328b6251f8ea15ddf598` / `0.31.1.1`（[PR #3](https://github.com/tyuanww/beian/pull/3) 于 `2026-10-10T10:51:01Z` squash 合入 `main`；同 SHA 的可信 `main` push [hangzhou-release 38046344478](https://github.com/tyuanww/beian/actions/runs/38046344478) 成功；公网 `https://www.jianghua.site/api/health` HTTP 200、`ok=true`、`version=0.31.1.1`）。这次是第一次走「离线依赖交接」的生产发版：npm 依赖图 `0.30.3.3 → 0.31.1.1` 变化（server 增 `sharp`），停服前 staging + 停服后换位 + 冒烟全部通过。同日此前两次 run 均在停服前安全失败：[38034011611](https://github.com/tyuanww/beian/actions/runs/38034011611)（`5a9d79d` / 0.31.0.0，未 staged 的依赖变化被拒）、[38043142770](https://github.com/tyuanww/beian/actions/runs/38043142770)（`dc49029` / 0.31.1.0，staged Hono 入口导入缺 UI dist）；两次都未停 8787。只覆盖发版 L1；R05–R07 的 L2/UAT、质量门杭州实跑不因此关闭。
+
+**仓库迁移（2026-10-10）**：原仓 `weiweity/beian` 所在账号被封，仓库已不可访问；代码迁到公开仓 `tyuanww/beian`，PR 编号从 #1 重新开始。下文及 closeout 中指向 `weiweity/beian` 的 PR/run 链接保留为历史证据，现已无法打开，以记录中的 merge SHA、run id 和 health 为准。迁移步骤与剩余缺口见 [仓库迁移操作指南](docs/howto-repo-migration.md)、B03 与 F06。
+
+实施更新：2026-10-09（A1–A5、B/C/D 已本地集成；D 改由 Codex 实现，真实稿/原生验证仍未执行）。以下发布记录沿用历史核实结果，本轮未重新核实生产。截至 `2026-09-15T10:30:43Z`（迁移前）的已核实发布记录为 `e4f3cdb634febbbdb01c319a8236bc04d4c9bbd6` / `0.30.3.2`（[PR #121](https://github.com/weiweity/beian/pull/121) 已合入 `main`、同 SHA 的 [杭州发布](https://github.com/weiweity/beian/actions/runs/34958049990) 成功，公网 health HTTP 200、`ok=true`、`version=0.30.3.2`）。该版本把 TODOS 对齐已核实的 `0.30.3.1` 发版 L1，并补单张结构导出的刀版层 / 独立 OutDir / Mac `--dry-run` 说明。其上一版 `0.30.3.1`（[PR #120](https://github.com/weiweity/beian/pull/120)）对齐 `0.30.3.0` 文档。`0.30.3.0`（[PR #119](https://github.com/weiweity/beian/pull/119)）提供按 SHA-256 选稿的杭州单张结构导出。`0.30.2.0`（[PR #118](https://github.com/weiweity/beian/pull/118)）对齐 F02/TODOS 文档。`0.30.1.0`（[PR #117](https://github.com/weiweity/beian/pull/117)）修了监控 identity 的 UTF-8/UTF-16 BOM。`0.30.0.0`（[PR #116](https://github.com/weiweity/beian/pull/116)）交付独立飞书 bot 通道与杭州计划任务 `beian-monitor-local`。Q05 回执门禁与 R04 仓内探针计划仍以 `0.29.0.0` 为工具发版 L1；默认仍只跑轻量合成，不启动 Blender/浏览器压测或双 100MiB 上传，也不冻结正式预算。Q06.6 A 代码此前已完成发版 L1，生产候选未启用。Q01–Q04 合成补采、限定范围的人工视觉接受与 Q05 三轮 Mac 合成观察已完成，详见各主题；原有 **21 个未闭环主题（P1 10、P2 7、P3 4）**；2026-10-09 新增 R05–R07 后合计 **24 个未闭环主题（P1 10、P2 10、P3 4）**。B01 新增的审稿反馈和历史需求子项不重复计为主题。其中 F02 杭州托管与测试消息已按当前意图收口（未停 8787/cloudflared 做真实掉线，主题框仍开）；B02 放下；B03 保护已生效、归属暂缓。阶段实现与验证记录随下方条目更新；历史发布证据不替代本轮本地回归或业务验收。“待确认”表示未见批准/完成证据，不替用户判断外部事项已办或未办。不再重复派发 Q05 回执、R04 探针、clearcoat 修复、Q06.6 A 或监控核心。
 
 此前发布证据：[PR #102](https://github.com/weiweity/beian/pull/102)、merge `c62caed`、[hangzhou-release 34244831374](https://github.com/weiweity/beian/actions/runs/34244831374) 成功及同次公网 health `0.23.0.0`。仓库外完整记录：`~/Desktop/beian-evidence/2026-09-08-two-pr-ship/REPORT.md`。以下 R01/Q05 的已发布状态复用此证据，不代表业务验收完成。
 
@@ -72,7 +76,8 @@ DESIGN、界面/作业/结构/资产/架构合同已随本地实现同步；历�
 | 5 | Q06.6 B–Q06.7：生产装配候选与 RF-12 | A 隔离候选代码已发布；B 仍依赖 .4 与八点审计。默认保持关闭，综合回归和耐久性分别取证 |
 | 6 | Q06.8–Q06.9：授权发布、受控验收与 RF-13 | 发布证据齐全后按批准的样本/操作者范围验证；真实稿通过后再作业务开放或默认切换决定 |
 | 独立推进 | R01 现场计划、B01 采用观察 | 不必等全部渲染任务结束；代码/生产动作仍按各自范围执行 |
-| 条件触发 | R02/R03、F01、F03/F05、B02 | 先满足需求、证据或瓶颈条件，不提前扩范围。B02 放下后，真稿出境处理仍不得开始 |
+| 迁移收尾（优先） | B03 主分支保护、F06 迁移清单 | 新仓 main 无保护，任何直推都会触发生产；先经授权重建保护，再做 secrets/凭据/镜像清单 |
+| 条件触发 | R02/R03、F01、F03/F05、F07/F08、B02 | 先满足需求、证据或瓶颈条件，不提前扩范围。B02 放下后，真稿出境处理仍不得开始 |
 
 RF-10–RF-13 的原始依赖见 [ADR-007 §20.7](docs/adr-007-packaging-render-fidelity.md#207-grok-可执行任务包)。下面 Q06 对执行包细分，未新增 RF 阶段。真实稿样本准备可以提前；实际调用、验收及业务开放分开。
 
@@ -230,7 +235,7 @@ RF-10–RF-13 的原始依赖见 [ADR-007 §20.7](docs/adr-007-packaging-render-
 
 - [ ] **R05 — 打样单新增净版展开图与六面平面图下载**
 
-  状态：2026-10-09 用户进一步纠正“2D”的歧义：保留现有六面，并在“正面”左边新增“2D展开图”。该图为同一 `.ai` 稿进入 3D 之前的完整净版展开稿，可下载后按原尺寸打印、裁切并手工折成对应盒型。已实现独立展开 PDF、七标签与六面 ZIP，绑定源稿身份及完整语义几何；修复了用占位几何代替真实图文和结果 JSON 冒充关稿证据的问题。缺粘口/封口的旧几何仍拒绝，不宣称所有 AI 可导出；真实 Illustrator/打印折盒未验证。
+  状态：2026-10-09 用户进一步纠正“2D”的歧义：保留现有六面，并在“正面”左边新增“2D展开图”。该图为同一 `.ai` 稿进入 3D 之前的完整净版展开稿，可下载后按原尺寸打印、裁切并手工折成对应盒型。已实现独立展开 PDF、七标签与六面 ZIP，绑定源稿身份及完整语义几何；修复了用占位几何代替真实图文和结果 JSON 冒充关稿证据的问题。缺粘口/封口的旧几何仍拒绝，不宣称所有 AI 可导出；真实 Illustrator/打印折盒未验证。2026-10-10 随 0.31.0.0 功能代码合入新仓 [PR #1](https://github.com/tyuanww/beian/pull/1)（`5a9d79d`），并在 `0.31.1.1` 完成发版 L1（见页首）；仅进程、版本与 health 已验证，原生导出、实际打印折盒 L2 与 UAT 均未做。
 
   1. 在既有打样结果中提供明确的「下载 2D 平面图」入口，保留 3D 预览与下载。以清理刀线/辅助线后的印刷内容为来源，不用 GLB 截图替代平面图，不另开独立打样流程。
   2. 覆盖已支持结构的各个有效印刷面；矩形盒核对六面完整性。复用现有 `read_*` / `panel_*.png` 与补面流程，缺面明确提示，不把四面齐全冒充六面齐全，不重写 3D 流水线。
@@ -242,7 +247,7 @@ RF-10–RF-13 的原始依赖见 [ADR-007 §20.7](docs/adr-007-packaging-render-
 
 - [ ] **R06 — 图片 / PDF 批量压缩与自动目标大小**
 
-  状态：2026-10-09 用户确认两类 PDF 场景：多张实拍图片组成的备案文件、带公章的检测报告；每个 PDF 最终小于 10MB，压缩力度自动调整。与图片压缩合并为侧栏「文件压缩」，放在打样台下方。本地前后端已接入，采用 Sharp 与 qpdf/PDFBox 路线并加入有归属的进程树资源约束；本机 macOS 没有所需强隔离时明确不可用，不伪称能试压。**真实样本试压、章/画质验证、Windows 工具安装及现场验收未执行**；Windows RSS 为采样监控，尚无现场硬边界证据。
+  状态：2026-10-09 用户确认两类 PDF 场景：多张实拍图片组成的备案文件、带公章的检测报告；每个 PDF 最终小于 10MB，压缩力度自动调整。与图片压缩合并为侧栏「文件压缩」，放在打样台下方。本地前后端已接入，采用 Sharp 与 qpdf/PDFBox 路线并加入有归属的进程树资源约束；本机 macOS 没有所需强隔离时明确不可用，不伪称能试压。**真实样本试压、章/画质验证、Windows 工具安装及现场验收未执行**；Windows RSS 为采样监控，尚无现场硬边界证据。2026-10-10 随 0.31.0.0（[PR #1](https://github.com/tyuanww/beian/pull/1)）合入，`0.31.1.1` 发版 L1 已核实（见页首）；生产机 sharp 原生模块已由离线依赖交接装入，但 qpdf/PDFBox 工具链、真实样本试压与章/画质 L2、UAT 均未做，不宣称可用。
 
   1. **入口与批量：** 侧栏顺序为审稿台 → 打样台 → 文件压缩 → 历史记录 → 设置。图片首版范围按 JPG/PNG/WebP，PDF 保持 PDF 输出；支持批量选择/拖入，逐文件显示进度、结果大小、节省比例和失败原因，提供单文件下载及整批 ZIP。保守初值每批 20 文件、总量 100MiB，资源限制按最终方案采证后调整；图片默认自动压缩、不新增目标输入，不把 PDF 的 10MB 套为整批 ZIP 上限。
   2. **目标大小：** PDF 默认硬上限为 `10,000,000` 字节，以实际输出字节数判定小于上限；`9,800,000` 字节仅作估算余量，首份内容与质量合格且小于硬上限的候选立即停止，不为追余量继续降质。界面无需用户调质量参数。已小于上限且通过格式/可读预检的原件按原字节直接作为结果，标明「已符合大小要求」，不能为了显示压缩率重写已达标文件。
@@ -256,7 +261,7 @@ RF-10–RF-13 的原始依赖见 [ADR-007 §20.7](docs/adr-007-packaging-render-
 
 - [ ] **R07 — 压缩任务与统一历史记录打通**
 
-  状态：2026-10-09 用户明确要求历史打通。依赖 R06 的任务/产物，属于同一压缩体验的独立交付切片；服务端有权限记录检索、游标分页、压缩详情与返回恢复已完成本地集成及合成回归，真实业务验收未完成。
+  状态：2026-10-09 用户明确要求历史打通。依赖 R06 的任务/产物，属于同一压缩体验的独立交付切片；服务端有权限记录检索、游标分页、压缩详情与返回恢复已完成本地集成及合成回归，真实业务验收未完成。2026-10-10 随 0.31.0.0（[PR #1](https://github.com/tyuanww/beian/pull/1)）合入，`0.31.1.1` 发版 L1 已核实；业务验收（L2/UAT）未做。
 
   1. 在现有历史入口增加文件压缩类型，记录创建人、时间、文件数量、图片/PDF 类型、目标大小、原始/结果大小，以及批次和逐文件状态。批量部分失败单独显示，不把整批一律标成功。 2026-10-09 用户确认补齐按品名、批次名称和批次内原文件名检索，显示命中文件；默认采用有辨识度的文件摘要命名，支持状态/类型/日期/创建人组合筛选及空结果恢复，进入详情返回后保留查询、页码和原记录位置。检索覆盖服务端有权限记录，采用每页 10 条的游标分页；旧审稿记录未保存的原文件名不能凭空检索，保留现有品名/标题检索。
   2. 上传提交成功后的处理脱离页面运行；切换 tab、关闭页面后后台继续，刷新后可找回真实状态，重复点击不创建重复处理。任务/产物持久化、重启恢复和失败重试沿用 [作业合同](docs/contracts/jobs.md)，不把浏览器局部状态当历史记录。
@@ -297,11 +302,13 @@ RF-10–RF-13 的原始依赖见 [ADR-007 §20.7](docs/adr-007-packaging-render-
 
   2026-09-14T13:57Z 只读回读与上述事实一致：collaborators 仍仅 `weiweity`，invitations 0，teams 0，保护字段未变。原始 JSON：`closeout-prep-20260914-r04plan/github-*.json`。未邀请、未迁移、未改保护。
 
+  2026-10-10 迁移更新：原仓 `weiweity/beian` 随账号封禁不可访问，上述保护随之失效。新仓 `tyuanww/beian`（公开）只读核实 `GET branches/main/protection` 返回 404 `Branch not protected`：**当前 main 没有任何保护**，任何有写权限的人或令牌可直接 push main，从而直接触发杭州生产发版。需按原 15 项重建：必须 PR，必需检查 `quality` / `windows-powershell-contract`（绑定 GitHub Actions app），strict、管理员受约束、禁止强推/删除、线性历史、对话解决。重建属于仓库设置变更，需用户授权；完成后只读回读核对，不用破坏性 push 试验。
+
   1. 复用上述仓库归属、管理员与主分支保护核实记录；聚焦仍待确认的公司归属、第二管理员与移交安排。
   2. 由用户确认组织仓迁移或第二管理员方案；具体设置变更、邀请人员或迁移仓库按对应授权落实，不重复启用已生效的 main 保护。
   3. 保护设置已完成只读回读；后续如获准变更，再只读复核有效设置与权限，不用破坏性 push 试验。**验收：归属/移交、管理人员、有效保护证据齐全；套餐不支持时保留明确缺口，脚本不冒充不可绕过保护。**
 
-## P3 — 独立后续（4 项）
+## P3 — 独立后续（7 项）
 
 - [ ] **F01 — 退役核对原型清理（独立 PR）**
 
@@ -332,6 +339,30 @@ RF-10–RF-13 的原始依赖见 [ADR-007 §20.7](docs/adr-007-packaging-render-
   1. 仅在现有 JSON 作业合同出现可复现一致性/吞吐瓶颈时收集最小复现与测量；没有证据就保持暂缓。
   2. 对比修复现有合同、SQLite、通用队列的收益/迁移成本、恢复与运维要求，形成决策稿。
   3. 记录继续现有方案或另立实施项目。**验收：评估有事实与决定；评估完成不代表存储迁移已实施。**
+
+- [ ] **F06 — 仓库迁移收尾（tyuanww/beian）**
+
+  状态：2026-10-10 已完成：新仓推送、启用 Actions、杭州 runner 以 `hangzhou-windows` / 标签 `hangzhou` 重新注册、服务账号从 `NETWORK SERVICE` 改为 LocalSystem、`D:\beian` 的 `origin` 改指新仓，`0.31.1.1` 发版 L1 已核实。分支保护见 B03。下列项未核实或未做，详见 [仓库迁移操作指南](docs/howto-repo-migration.md)。
+
+  1. 重建并只读核对 Actions secrets/variables（`hangzhou-release` 当前只用内置 `GITHUB_TOKEN`；如另有 secret 逐一列清）、deploy key、webhook、Environments、Actions 权限（默认 `GITHUB_TOKEN` 只读）和 fork PR 审批策略。
+  2. 轮换或作废原仓相关凭据：旧 runner 注册/PAT、`gh` 登录令牌、可能在 `D:\beian` 或 Mac 上缓存的旧 remote 凭据；确认杭州 `C:\supply\data` 的业务密钥不受仓库迁移影响。
+  3. 建立 GitHub 之外的只读镜像（例如定期 `git push --mirror` 到第二托管或离线 bundle），避免再次因单账号封禁失去仓库与 PR/run 证据。
+  4. **验收：** 设置与凭据清单逐项有回读证据；镜像可还原到指定 SHA；不以“发版成功”代替这些核对。
+
+- [ ] **F07 — Linux Rollup 原生包缺失（npm/cli#4828）**
+
+  状态：`package-lock.json` 由 Mac 生成，只含 `@rollup/rollup-darwin-arm64`，缺 Linux/Windows 原生包条目。Windows 发版已在 staging 中按 rollup 声明版本 `npm pack` 补齐；GitHub `quality` job 用 `npm install --no-save` 临时修复；WSL staging 等新的 Linux 部署需手动补装。
+
+  1. 评估在干净环境重新生成跨平台完整的 lock（或 `npm install --os/--cpu` 补齐条目），比较依赖图变化范围；变化会触发一次离线依赖交接。
+  2. 若采纳，删除各处临时修复并让 `installed` 校验覆盖原生包。**验收：** Linux/Windows 干净 `npm ci` 无需手动补装即可构建 UI；或记录不修的理由。
+
+- [ ] **F08 — WSL2 staging 副本与 Linux health 文案**
+
+  状态：杭州机 WSL2 Ubuntu 上有一份预发副本（`beian-wsl.service`、`127.0.0.1:18787`、`/opt/beian`、数据 `/srv/beian-data`），经 Tailscale 由 root 管理，操作见 [WSL staging 操作指南](docs/howto-wsl-staging.md)。计划的 Cloudflare 主机名 `beian-staging.jianghua.site`（挂在现有远程管理隧道 `customer-agent-hangzhou` 上）尚未添加。Linux 上 Illustrator/Blender 不可用，但 health 的 Illustrator 状态走非 win32 分支，返回“macOS 继续使用现有 AppleScript 桥”，`ready=true`，会误导。
+
+  1. 修正 `apps/web/server/src/illustratorAgent.ts` 非 win32 分支：区分 darwin 与 Linux，Linux 返回 `required=true`/`ready=false` 或明确“本平台不支持打样”，并让 UI 不对 staging 用户开放打样入口。
+  2. 经 DNS/隧道授权后再添加 staging 主机名，并要求登录，不得使用显示名裸登录；staging 的发布方式、数据隔离和是否保留在 TODOS 中说明。
+  3. **验收：** Linux health 不再声称 AppleScript；staging 访问有身份控制；不以 staging health 作为生产证据。
 
 - [ ] **F05 — 飞书机器人收文件回报告**
 

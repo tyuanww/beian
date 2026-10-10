@@ -13,6 +13,9 @@
 | 版本变更历史 | [CHANGELOG.md](../CHANGELOG.md) | 版本条目不等于已部署；发布需 SHA/run/health 证据 |
 | 一次性交付/验收/诊断 | 对应 `docs/designs/*closeout.md` 或带日期报告 | 标明日期、适用代码、证据层级与未确认项；历史结论不作为自动执行指令 |
 | 杭州发布与运维 | [发布合同](contracts/release.md)、[Windows README](../scripts/windows/README.md) | 前者约束权限/流程，后者维护平台操作实现（含单张结构导出的刀版层、独立 OutDir）；Mac `--dry-run` 见 [worker README](../workers/packaging/README.md)。状态查询不授权生产动作 |
+| 仓库迁移、runner 重注册 | [仓库迁移操作指南](howto-repo-migration.md) | 生产发布约束仍以发布合同为准；本指南只记录换仓时的操作顺序与核对 |
+| WSL 预发副本（非生产） | [WSL staging 操作指南](howto-wsl-staging.md) | 仅为预发/演示环境，不是发布合同的一部分；不得用它的 health 证明生产 |
+| 发版流程开发者体验评审 | [DX 评审 2026-10-10](designs/devex-review-release-20261010.md) | 评审结论与建议；具体待办只进 TODOS |
 | 本地运维工具操作与设计 | [监控操作指南](howto-local-monitoring.md)、[监控设计说明](explanation-local-monitoring.md)、[R04 资源采证指南](howto-resource-stress.md) | 合成回归与杭州计划任务安装步骤见操作指南；真实掉线（停生产服务）、正式预算仍以 TODO 与对应合同为准 |
 
 ## 当前进度从哪里读

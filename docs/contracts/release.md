@@ -6,8 +6,10 @@
 
 - Platform: 杭州 Windows（UU 远程「人事-台式」）+ Cloudflare Named Tunnel。不是 Fly / Vercel。生产发布的 GitHub Actions 只跑 **self-hosted `hangzhou`**（机器名 `hangzhou-windows`）；GitHub-hosted runner 只跑 `.github/workflows/quality.yml` 的质量合同，禁止升生产。
 - Production URL: https://www.jianghua.site
+- Repository: `https://github.com/tyuanww/beian`（公开仓）。2026-10-10 起替代已封禁、不可访问的 `weiweity/beian`；`D:\beian` 的 `origin` 已指向新仓。历史 PR/run 链接保留在 TODOS 与 closeout 中作证据，但原仓已无法打开。迁移步骤见 [仓库迁移与 runner 重注册](../howto-repo-migration.md)。
+- Runner 前提：新仓的 Actions 必须已启用；runner 以 Windows 服务运行且服务账号必须是 **LocalSystem**（不是默认的 `NETWORK SERVICE`），否则 `release.ps1` 无法管理 WinSW、计划任务和 ACL 运行时目录。
 - Deploy workflow: `.github/workflows/hangzhou-release.yml`（仅 `push` `main`；从事件 SHA 下载发布组件到 `RUNNER_TEMP`，再以不可变 `TargetSha` 操作 `D:\beian`；PR 与可选择 ref 的 `workflow_dispatch` 禁止触达生产 runner）。
-- Deploy status command: 无平台 CLI。看 [hangzhou-release](https://github.com/weiweity/beian/actions/workflows/hangzhou-release.yml) 是否绿。杭州环回才是杭州进程：`curl -sS http://127.0.0.1:8787/api/health`。公网 health 仅在 Named Tunnel 跑在杭州时有效。
+- Deploy status command: 无平台 CLI。看 [hangzhou-release](https://github.com/tyuanww/beian/actions/workflows/hangzhou-release.yml) 是否绿。杭州环回才是杭州进程：`curl -sS http://127.0.0.1:8787/api/health`。公网 health 仅在 Named Tunnel 跑在杭州时有效。
 - Merge method: squash
 - Project type: web app（Hono `:8787`）
 - Post-deploy health check: Actions 绿后再等约 20 秒，`https://www.jianghua.site/api/health` 的 `version` 等于刚合进去的 `VERSION`，且带 `jobs.illustrator`。隧道必须在杭州；Mac 上的 cloudflared 不当生产。`/api/health` 的 `version` 目前写死在 `apps/web/server/src/index.ts`，不能单独当发版证据；以杭州工作树 `VERSION` 文件和 merge SHA 为准。
@@ -36,5 +38,5 @@
   - 向杭州要密钥
 - 杭州运维（Mac 不改、不贴升级步骤）：Clash 系统代理时备案域名必须直连，否则进度条会绕日本节点；原记录把 Error 1033 归因为 Named Tunnel 和 `:8787` 都不在；该归因不能仅凭错误码确认，应分别核查 Tunnel 与杭州 listener。恢复仍由杭州在对应授权下处理，Mac 不动 DNS。站点拆包是以后的产品活。
 - `release.ps1` 起停 `:8787` 只走 WinSW 服务 `beian-server-8787`（`Restart-Service`），不要 `schtasks /Create ONLOGON`。cloudflared 是官方 Windows 服务（token），发版不动隧道。
-- Deploy status: [hangzhou-release](https://github.com/weiweity/beian/actions/workflows/hangzhou-release.yml) 绿 → 约 20 秒 → 公网 health 的 version 等于 VERSION。公网再用 `/canary https://www.jianghua.site` 前，先确认 Mac 没有 cloudflared。
+- Deploy status: [hangzhou-release](https://github.com/tyuanww/beian/actions/workflows/hangzhou-release.yml) 绿 → 约 20 秒 → 公网 health 的 version 等于 VERSION。公网再用 `/canary https://www.jianghua.site` 前，先确认 Mac 没有 cloudflared。
 - Health check: `https://www.jianghua.site/api/health` 必须打到杭州。细节见 `scripts/windows/README.md`。
