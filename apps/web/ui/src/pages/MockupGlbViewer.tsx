@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ModelViewerElement } from "@google/model-viewer";
+import { Progress, Spin } from "antd";
 import { composeGlbDisplaySet, DISPLAY_TABLE_MATERIAL, DISPLAY_WALL_MATERIAL } from "./glbDisplayAsset";
 import { DEFAULT_GLB_VIEW, glbCameraDistances } from "./mockupGlbCamera";
+import { GLB_LOADING_TEXT, type GlbProgress, glbProgressFromFraction, readGlbWithProgress } from "./mockupGlbProgress";
 import { GLB_ENVIRONMENT, glbViewerExposure, glbRoomEmission } from "./mockupGlbLighting";
 import { type BackdropPreset, studioBackdrop } from "./mockupStudio";
 
@@ -11,8 +13,8 @@ const initialView = (): View => ({ ...DEFAULT_GLB_VIEW });
 const degrees = (radians: number) => radians * 180 / Math.PI;
 
 /** The display scene is disposable; the caller keeps downloads bound to the original generation. */
-export function MockupGlbViewer({ source, backdrop, backgroundLight, productLight, onSourceError }: {
-  source: string; backdrop: BackdropPreset; backgroundLight: number; productLight: number;
+export function MockupGlbViewer({ source, poster, backdrop, backgroundLight, productLight, onSourceError }: {
+  source: string; poster?: string; backdrop: BackdropPreset; backgroundLight: number; productLight: number;
   onSourceError: () => void;
 }) {
   const set = backdrop === "white_set";
@@ -20,6 +22,8 @@ export function MockupGlbViewer({ source, backdrop, backgroundLight, productLigh
   const [asset, setAsset] = useState<{ identity: string; url: string; bounds?: Bounds } | null>(null);
   const [error, setError] = useState(false);
   const [readyUrl, setReadyUrl] = useState<string | null>(null);
+  const [progress, setProgress] = useState<GlbProgress>({ kind: "indeterminate" });
+  const [posterFailed, setPosterFailed] = useState<string | null>(null);
   const viewerRef = useRef<ModelViewerElement | null>(null);
   const view = useRef<View>(initialView());
   const lastSource = useRef(source);
@@ -65,6 +69,7 @@ export function MockupGlbViewer({ source, backdrop, backgroundLight, productLigh
     const abort = new AbortController();
     setReadyUrl(null);
     setError(false);
+    setProgress({ kind: "indeterminate" });
     if (!set) {
       setAsset({ identity, url: source });
     } else {
@@ -73,7 +78,7 @@ export function MockupGlbViewer({ source, backdrop, backgroundLight, productLigh
         if (!bytes) {
           const response = await fetch(source, { signal: abort.signal });
           if (!response.ok) throw new Error("glb_source_failed");
-          bytes = new Uint8Array(await response.arrayBuffer());
+          bytes = await readGlbWithProgress(response, (next) => { if (active) setProgress(next); });
           if (!active) return;
           raw.current = { source, bytes };
         }
@@ -163,6 +168,11 @@ export function MockupGlbViewer({ source, backdrop, backgroundLight, productLigh
       const base = sphere / Math.sin(viewer.getFieldOfView() * Math.PI / 360);
       view.current = { theta: degrees(orbit.theta), phi: degrees(orbit.phi), zoom: orbit.radius / base };
     };
+    const progressed = (event: Event) => {
+      // 白桌白墙的 blob 已在本地，进度只对直连 src 有意义。
+      if (active && !set) setProgress(glbProgressFromFraction((event as CustomEvent).detail?.totalProgress));
+    };
+    viewer.addEventListener("progress", progressed);
     viewer.addEventListener("load", loaded);
     viewer.addEventListener("error", failed);
     viewer.addEventListener("camera-change", moved);
@@ -173,17 +183,24 @@ export function MockupGlbViewer({ source, backdrop, backgroundLight, productLigh
       active = false;
       revision.current++;
       resize.disconnect();
+      viewer.removeEventListener("progress", progressed);
       viewer.removeEventListener("load", loaded);
       viewer.removeEventListener("error", failed);
       viewer.removeEventListener("camera-change", moved);
     };
-  }, [current, frame, failDisplay]);
+  }, [current, frame, failDisplay, set]);
 
+  const showPoster = Boolean(poster && posterFailed !== poster);
+  const loading = !error && !ready;
   return <>
+    {loading && (showPoster
+      ? <img className="mockup-glb-poster" src={poster} alt="" aria-hidden="true" onError={() => setPosterFailed(poster ?? null)} />
+      : <div className="mockup-glb-poster mockup-glb-skeleton" aria-hidden="true" />)}
     {current && !error && <model-viewer
       key={current.url}
       ref={setViewer}
       src={current.url}
+      poster={showPoster ? poster : undefined}
       camera-controls
       camera-orbit="35deg 72deg 145%"
       max-camera-orbit="auto auto 155%"
@@ -196,7 +213,12 @@ export function MockupGlbViewer({ source, backdrop, backgroundLight, productLigh
       style={{ background: studioBackdrop(backgroundLight, backdrop), opacity: ready ? 1 : 0 }}
     />}
     {error && <p role="alert" className="mockup-glb-message">3D 预览加载失败，请重新打开此单。下载仍为原始模型。</p>}
-    {!error && !ready && <p role="status" className="mockup-glb-message">正在加载 3D 预览…</p>}
+    {loading && <div role="status" className="mockup-glb-message mockup-glb-progress">
+      {progress.kind === "percent"
+        ? <Progress percent={progress.percent} size="small" status="active" aria-label={GLB_LOADING_TEXT} />
+        : <Spin size="small" />}
+      <span>{GLB_LOADING_TEXT}</span>
+    </div>}
     <button type="button" className="mockup-dl mockup-glb-reset" aria-label="复位模型视角"
       disabled={!ready || error} onClick={() => { void frame(true); }}>复位</button>
   </>;

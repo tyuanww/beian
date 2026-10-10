@@ -1,4 +1,5 @@
 import { MockupGlbViewer } from "./MockupGlbViewer";
+import { glbPosterKey } from "./mockupGlbProgress";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { Alert, App, Button, ConfigProvider, Empty, Input, Segmented, Space, Table, Tabs, Tag, theme as antdTheme } from "antd";
@@ -1261,6 +1262,7 @@ export function MockupJobPage({
         {hasGlb ? (
           <GlbShot
             jobId={job.id}
+            files={job.files}
             generation={generation}
             onSourceError={refreshSource}
             boxRef={glbBox}
@@ -1503,6 +1505,7 @@ function ReadFaceShot({
 
 function GlbShot({
   jobId,
+  files,
   generation,
   onSourceError,
   boxRef,
@@ -1513,6 +1516,7 @@ function GlbShot({
   onNotice,
 }: {
   jobId: string;
+  files?: Array<{ key: string }>;
   generation:string;
   onSourceError:()=>void;
   boxRef: { current: HTMLDivElement | null };
@@ -1523,6 +1527,7 @@ function GlbShot({
   onNotice: (text: string) => void;
 }) {
   const fill = glbBackdrop(backgroundLight, backdrop);
+  const posterKey = glbPosterKey(files, backdrop);
   return (
     <figure className="mockup-sheet-photo">
       <div
@@ -1532,6 +1537,7 @@ function GlbShot({
       >
         <MockupGlbViewer
           source={fileHref(jobId, "glb", false, generation)}
+          poster={posterKey ? fileHref(jobId, posterKey, false, generation) : undefined}
           backdrop={backdrop}
           backgroundLight={backgroundLight}
           productLight={productLight}
