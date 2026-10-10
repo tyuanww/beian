@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.31.1.0] - 2026-10-10
+
+### Added
+- 杭州发版支持 npm 依赖变化的「离线依赖交接」：8787 仍在线时在同卷 `D:\beian-deps` 用目标 SHA 的 lock 构建 `node_modules` 并断网验证（已装依赖与 lock 一致、`npm ls`、Hono 入口、sharp、Vite/Rollup、UI 构建试跑），停服后以目录重命名原子换入；失败时恢复脚本把备份换回再回到旧 SHA。
+
+### Changed
+- 停服前检查 D: 至少 4 GB 可用空间；提交后只保留最近一代依赖备份；`hangzhou-release` 超时放宽到 60 分钟。Python requirements 变化仍在停服前拒绝。
+- 离线冷启动探针改为同时识别根目录与 UI workspace 下的 Vite，兼容干净 `npm ci` 的安装布局。
+
 ## [0.31.0.0] - 2026-10-10
 
 ### Added

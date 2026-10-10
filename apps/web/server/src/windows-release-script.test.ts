@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -236,7 +237,7 @@ describe("windows release.ps1 contract", () => {
     assert.ok(mergeIdx >= 0 && secondDependencyCheck > mergeIdx && secondDependencyCheck < buildIdx);
   });
 
-  it("fails closed on dependency changes before stop and never installs during the transaction", () => {
+  it("fails closed on unstaged dependency changes before stop and never installs during the transaction", () => {
     assert.match(script, /function Get-NpmDependencyGraphFingerprint/);
     assert.match(script, /function Assert-OfflineDependencyHandoff/);
     assert.match(script, /真实 npm 依赖图变化/);
@@ -259,7 +260,17 @@ describe("windows release.ps1 contract", () => {
     assert.match(fingerprint.stdout.trim(), /^[0-9a-f]{64}$/);
     assert.ok(indexOf(/Assert-OfflineDependencyHandoff \$preSha \$TargetSha \$releasePython/) < indexOf(/Stop-Service beian-server-8787 so WinSW onfailure does not respawn/));
     assert.ok(indexOf(/Assert-OfflineDependencyHandoff \$preSha \$TargetSha \$releasePython/) < indexOf(/Set-ReleaseJournalStage "ui_build"/));
-    assert.doesNotMatch(script, /\bnpm\s+(?:ci|install)\b/);
+    // npm network access exists only in the pre-stop staging functions.
+    const stopIdx = indexOf(/Stop-Service beian-server-8787 so WinSW onfailure does not respawn/);
+    const afterStop = script.slice(stopIdx);
+    assert.doesNotMatch(afterStop, /@\("(?:ci|install|pack)"/);
+    assert.doesNotMatch(afterStop, /\b(?:Prepare-StagedDependencies|Invoke-StagedNpmCi|Repair-StagedRollupNative)\b/);
+    assert.doesNotMatch(script, /\bnpm\s+install\b/);
+    assert.equal([...script.matchAll(/@\("ci",/g)].length, 1);
+    assert.equal([...script.matchAll(/@\("pack",/g)].length, 1);
+    const ciFunction = script.slice(indexOf(/function Invoke-StagedNpmCi/), indexOf(/function Repair-StagedRollupNative/));
+    assert.match(ciFunction, /@\("ci", "--no-audit", "--no-fund", "--include=dev", "--include=optional"/);
+    assert.doesNotMatch(ciFunction, /--ignore-scripts/);
     assert.doesNotMatch(script, /pip\s+install/);
     assert.doesNotMatch(recovery, /\bnpm\s+(?:ci|install|run)\b/);
     assert.doesNotMatch(recovery, /pip\s+install/);
@@ -979,6 +990,222 @@ describe("windows release.ps1 contract", () => {
     assert.doesNotMatch(blenderSmoke, /sealGeneration/);
     assert.match(script, /Illustrator Session 1 冒烟失败/);
     assert.match(script, /illustrator-jsx-smoke\.ps1/);
+  });
+
+  it("stages a changed npm graph beside the checkout and proves it offline before stopping", () => {
+    assert.match(script, /\$DependencyStagingRoot = if \(\$RootParent\) \{ Join-Path \$RootParent "beian-deps" \}/);
+    assert.match(script, /\$DependencyMinimumFreeBytes = \[int64\]4GB/);
+    assert.match(script, /\$DependencyNpmCiTimeoutSeconds = 900/);
+    assert.match(script, /\$DependencyBackupGenerationsKept = 1/);
+    assert.match(script, /"@img\/sharp-win32-x64", "@rollup\/rollup-win32-x64-msvc", "@esbuild\/win32-x64"/);
+    const stopIdx = indexOf(/Stop-Service beian-server-8787 so WinSW onfailure does not respawn/);
+    const pythonIdx = indexOf(/^Assert-PythonRequirementsUnchanged \$preSha \$TargetSha$/m);
+    const planIdx = indexOf(/^\$DependencyHandoff = Get-DependencyHandoffPlan \$preSha \$TargetSha$/m);
+    const prepareIdx = indexOf(/^  Prepare-StagedDependencies \$DependencyHandoff \$preSha$/m);
+    const handoffIdx = indexOf(/^Assert-OfflineDependencyHandoff \$preSha \$TargetSha \$releasePython$/m);
+    assert.ok(pythonIdx < planIdx && planIdx < prepareIdx && prepareIdx < handoffIdx && handoffIdx < stopIdx);
+    assert.ok(prepareIdx < indexOf(/\$drain = Enter-ReleaseDrain/));
+
+    const prepare = script.slice(indexOf(/function Prepare-StagedDependencies/), indexOf(/function Assert-NoProcessUsesDependencyTrees/));
+    const order = [
+      "Assert-DependencyStagingLocation",
+      "Assert-DependencyStagingFreeSpace",
+      "Initialize-DependencyStagingRoot",
+      "Remove-StaleDependencyArtifacts $targetShort",
+      "Export-TargetSourceToStage $Plan",
+      "Invoke-StagedNpmCi $Plan",
+      "Repair-StagedRollupNative $Plan",
+      "Set-StagedWorkspaceJunctions $Plan.StageSource $Plan.StageSource",
+      "Assert-StagedOfflineIntegrity $Plan",
+      "Set-StagedWorkspaceJunctions $Plan.StageSource $Root",
+      "Write-StagedDependencyStamp $Plan",
+      "$Plan.Verified = $true",
+    ].map((needle) => {
+      const at = prepare.indexOf(needle);
+      assert.ok(at >= 0, `Prepare-StagedDependencies missing ${needle}`);
+      return at;
+    });
+    assert.deepEqual([...order].sort((a, b) => a - b), order);
+    assert.match(prepare, /Test-ReusableDependencyStage \$Plan/);
+    assert.match(prepare, /every offline probe is rerun/);
+
+    assert.match(script, /"archive", "--format=tar", "-o", \$archive, \$TargetSha/);
+    assert.match(script, /"fingerprint-tree", \$Plan\.StageSource/);
+    assert.match(script, /npm\/cli#4828/);
+    assert.match(script, /"pack", "\$nativeName@\$version"/);
+    const integrity = script.slice(indexOf(/function Assert-StagedOfflineIntegrity/), indexOf(/function Test-ReusableDependencyStage/));
+    assert.match(integrity, /Invoke-WithOfflineNetworkEnvironment \$emptyCache/);
+    for (const probe of [
+      /"installed", \$stage, \$Root, \$TargetSha/,
+      /"staged npm installed graph"/,
+      /Assert-IsolatedServerEntryImport \$tsx \$stage/,
+      /require\('sharp'\)/,
+      /sharp\.versions\.vips/,
+      /"staged Rollup native module"/,
+      /"staged UI build" \$npm\.Source @\("run", "build", "-w", "beian-ui", "--", "--outDir", \$uiProbeOut, "--emptyOutDir"\)/,
+    ]) {
+      assert.match(integrity, probe);
+    }
+    const offline = script.slice(indexOf(/function Invoke-WithOfflineNetworkEnvironment/), indexOf(/function Assert-StagedOfflineIntegrity/));
+    assert.match(offline, /npm_config_offline = "true"/);
+    assert.match(offline, /HTTPS_PROXY = "http:\/\/127\.0\.0\.1:9"/);
+    assert.match(offline, /npm_config_registry = "http:\/\/127\.0\.0\.1:9\/"/);
+    assert.match(offline, /finally \{[\s\S]*SetEnvironmentVariable\(\$name, \$prior\[\$name\], "Process"\)/);
+    assert.doesNotMatch(script, /netsh\s+advfirewall|New-NetFirewallRule/i);
+  });
+
+  it("copies the checkout ACL, checks D: space, and never follows junctions when deleting", () => {
+    const acl = script.slice(indexOf(/function Initialize-DependencyStagingRoot/), indexOf(/function Test-DependencyReparsePoint/));
+    assert.match(acl, /GetAccessControl\(\$Root, \$sections\)/);
+    assert.match(acl, /SetAccessControl\(\$DependencyStagingRoot, \$security\)/);
+    const space = script.slice(indexOf(/function Assert-DependencyStagingFreeSpace/), indexOf(/function Initialize-DependencyStagingRoot/));
+    assert.match(space, /System\.IO\.DriveInfo/);
+    assert.match(space, /拒绝停 8787/);
+    const location = script.slice(indexOf(/function Assert-DependencyStagingLocation/), indexOf(/function Assert-DependencyStagingFreeSpace/));
+    assert.match(location, /GetPathRoot\(\$DependencyStagingRoot\)/);
+    assert.match(location, /不在同一卷/);
+    const remove = script.slice(indexOf(/function Remove-DependencyTreeSafely/), indexOf(/function Get-DependencyArtifactTime/));
+    assert.ok(remove.indexOf("Remove-DependencyReparsePoints $full") < remove.indexOf("[System.IO.Directory]::Delete($full, $true)"));
+    assert.match(remove, /拒绝删除依赖暂存目录之外的路径/);
+    assert.doesNotMatch(script, /Remove-Item[^\n]*(?:node_modules|StageSource|BackupDir|StagingRoot)[^\n]*-Recurse/);
+    const junctions = script.slice(indexOf(/function Set-StagedWorkspaceJunctions/), indexOf(/function Get-WorkspaceJunctionTarget/));
+    assert.match(junctions, /未知 reparse point/);
+    assert.match(junctions, /\[System\.IO\.Directory\]::Delete\(\$link, \$false\)/);
+    assert.match(junctions, /New-Item -ItemType Junction/);
+  });
+
+  it("swaps node_modules after merge with a write-ahead journal and restores the backup before reset", () => {
+    const mergedIdx = indexOf(/Set-ReleaseJournalStage "merged"/);
+    const swapIdx = indexOf(/^    Invoke-DependencySwap \$DependencyHandoff$/m);
+    const liveIdx = indexOf(/^    Assert-LiveDependencyMatchesTarget \$DependencyHandoff \$releasePython$/m);
+    const buildIdx = indexOf(/Set-ReleaseJournalStage "ui_build"/);
+    assert.ok(mergedIdx < swapIdx && swapIdx < liveIdx && liveIdx < buildIdx);
+    const swap = script.slice(indexOf(/function Invoke-DependencySwap/), indexOf(/function Assert-LiveDependencyMatchesTarget/));
+    const mutated = swap.indexOf("$ReleaseJournalState.dependency_mutated = $true");
+    const stage = swap.indexOf('Set-ReleaseJournalStage "deps_swap"');
+    const firstMove = swap.indexOf("[System.IO.Directory]::Move($live, $backup)");
+    const stagedMove = swap.indexOf("[System.IO.Directory]::Move($staged, $live)");
+    const swapped = swap.indexOf('Set-ReleaseJournalStage "deps_swapped"');
+    assert.ok(mutated >= 0 && mutated < stage && stage < firstMove && firstMove < stagedMove && stagedMove < swapped);
+    assert.match(swap, /"\$backup\.absent"/);
+    assert.match(swap, /deps_swap_progress\[\$key\] = "backed_up"/);
+    assert.match(swap, /Assert-NoProcessUsesDependencyTrees/);
+    assert.match(swap, /stamp 与停服前记录不一致/);
+    assert.match(script, /"apps\\web\\server\\node_modules", "apps\\web\\ui\\node_modules", "node_modules"/);
+    for (const field of [
+      "deps_mode", "deps_old_fingerprint", "deps_new_fingerprint", "deps_root", "deps_stage_path",
+      "deps_backup_path", "deps_failed_path", "deps_set", "deps_old_presence", "deps_old_tree_marker",
+      "deps_stage_stamp", "deps_stage_stamp_sha256", "deps_swap_progress",
+    ]) {
+      assert.match(script, new RegExp(`^    ${field} = `, "m"), `journal missing ${field}`);
+    }
+    assert.ok(indexOf(/^  Disarm-ReleaseRecovery$/m) < indexOf(/Complete-DependencyHandoffRetention \$DependencyHandoff/));
+    const cleanupStart = indexOf(/function Remove-UnarmedReleaseRuntime/);
+    assert.ok(script.slice(cleanupStart, script.indexOf("\nfunction ", cleanupStart + 1)).includes("$DependencyStageStampRuntimePath"));
+
+    assert.match(recovery, /function Restore-DependencyBackup/);
+    assert.match(recovery, /function Get-DependencyRestoreAction/);
+    assert.match(recovery, /function Get-VerifiedDependencyRestorePlan/);
+    assert.match(recovery, /not the trusted sibling of the checkout/);
+    assert.match(recovery, /-not \[bool\]\$journal\.dependency_mutated -and/);
+    assert.match(recovery, /illegally mutated the Python environment; offline rollback cannot be proven/);
+    assert.doesNotMatch(recovery, /if \(\[bool\]\$journal\.dependency_mutated -or \[bool\]\$journal\.python_mutated\)/);
+    const stopIdx = recovery.indexOf("  Stop-BeianService\n  if ([bool]$journal.agent_mutated)");
+    const restoreIdx = recovery.indexOf("Restore-DependencyBackup $dependencyRestore $journal $root");
+    const uiIdx = recovery.indexOf("Restore-UiSnapshot $uiSnapshot");
+    const resetIdx = recovery.indexOf('"reset", "--hard", $preSha');
+    const probeIdx = recovery.indexOf("Assert-RecoveryRuntimeIntegrity $root $python");
+    assert.ok(stopIdx >= 0 && stopIdx < restoreIdx && restoreIdx < uiIdx && uiIdx < resetIdx && resetIdx < probeIdx);
+    const restore = recovery.slice(recovery.indexOf("function Restore-DependencyBackup"), recovery.indexOf("function Test-ReleaseProcess"));
+    assert.match(restore, /\[array\]::Reverse\(\$ordered\)/);
+    assert.match(restore, /8787 remains stopped/);
+    assert.match(restore, /pre-release dependency tree marker/);
+    assert.match(recovery, /deps_stage_stamp/);
+  });
+
+  it("verifies an installed npm tree against the target lock with platform-aware optional entries", () => {
+    const fixture = mkdtempSync(join(tmpdir(), "beian-installed-"));
+    try {
+      const git = (...args: string[]) => {
+        const result = spawnSync("git", ["-C", fixture, ...args], { encoding: "utf8" });
+        assert.equal(result.status, 0, result.stderr);
+      };
+      const otherOs = process.platform === "win32" ? "darwin" : "win32";
+      const lock = {
+        name: "beian",
+        lockfileVersion: 3,
+        packages: {
+          "": { name: "beian", workspaces: ["apps/web/ui", "apps/web/server"] },
+          "apps/web/server": { name: "beian-server", dependencies: { a: "1.0.0", native: "1.0.0" } },
+          "apps/web/ui": { name: "beian-ui" },
+          "node_modules/beian-server": { resolved: "apps/web/server", link: true },
+          "node_modules/beian-ui": { resolved: "apps/web/ui", link: true },
+          "node_modules/a": { version: "1.0.0", integrity: "sha512-a" },
+          "node_modules/native": { version: "1.0.0", optionalDependencies: { "native-other": "1.0.0" } },
+          "node_modules/native-other": { version: "1.0.0", optional: true, os: [otherOs], dependencies: { helper: "1.0.0" } },
+          "node_modules/helper": { version: "1.0.0", optional: true },
+        },
+      };
+      writeFileSync(join(fixture, "package-lock.json"), JSON.stringify(lock));
+      writeFileSync(join(fixture, "package.json"), JSON.stringify({ name: "beian", workspaces: ["apps/web/ui", "apps/web/server"] }));
+      for (const name of ["ui", "server"]) {
+        mkdirSync(join(fixture, "apps/web", name), { recursive: true });
+        writeFileSync(join(fixture, "apps/web", name, "package.json"), JSON.stringify({ name: `beian-${name}` }));
+      }
+      git("init", "-q");
+      git("add", "-A");
+      git("-c", "user.email=l0@example.invalid", "-c", "user.name=l0", "commit", "-q", "-m", "fixture");
+      const installed = (packages: Record<string, unknown>) => {
+        mkdirSync(join(fixture, "node_modules"), { recursive: true });
+        writeFileSync(join(fixture, "node_modules/.package-lock.json"), JSON.stringify({ lockfileVersion: 3, packages }));
+        return spawnSync(process.execPath, [dependencyCheckPath, "installed", fixture, fixture, "HEAD"], { encoding: "utf8" });
+      };
+      const base = {
+        "node_modules/beian-server": { resolved: "apps/web/server", link: true },
+        "node_modules/beian-ui": { resolved: "apps/web/ui", link: true },
+        "node_modules/a": { version: "1.0.0", integrity: "sha512-a" },
+        "node_modules/native": { version: "1.0.0", optionalDependencies: { "native-other": "1.0.0" } },
+      };
+      const expected = spawnSync(process.execPath, [dependencyCheckPath, "fingerprint", fixture, "HEAD"], { encoding: "utf8" });
+      const ok = installed(base);
+      assert.equal(ok.status, 0, ok.stderr);
+      assert.equal(ok.stdout.trim(), expected.stdout.trim());
+      const tree = spawnSync(process.execPath, [dependencyCheckPath, "fingerprint-tree", fixture], { encoding: "utf8" });
+      assert.equal(tree.stdout.trim(), expected.stdout.trim());
+      const missing = installed({ ...base, "node_modules/a": undefined });
+      assert.notEqual(missing.status, 0);
+      assert.match(missing.stderr, /missing:node_modules\/a/);
+      const drift = installed({ ...base, "node_modules/a": { version: "1.0.1", integrity: "sha512-a" } });
+      assert.match(drift.stderr, /version:node_modules\/a/);
+      const extra = installed({ ...base, "node_modules/rogue": { version: "9.9.9" } });
+      assert.match(extra.stderr, /extraneous:node_modules\/rogue/);
+    } finally {
+      rmSync(fixture, { recursive: true, force: true });
+    }
+    const rootLock = JSON.parse(readFileSync(join(repoRoot, "package-lock.json"), "utf8"));
+    assert.ok(Object.hasOwn(rootLock.packages, "node_modules/@img/sharp-win32-x64"), "sharp Windows native must be in the lock");
+    assert.ok(
+      Object.keys(rootLock.packages).some((path) => path.endsWith("node_modules/@esbuild/win32-x64")),
+      "esbuild Windows native must be in the lock",
+    );
+  });
+
+  it("runs the synthetic dependency handoff contract only on GitHub-hosted windows-2022", () => {
+    const qualityWorkflow = readFileSync(join(repoRoot, ".github/workflows/quality.yml"), "utf8");
+    const windowsJob = qualityWorkflow.slice(
+      qualityWorkflow.indexOf("windows-powershell-contract:"),
+      qualityWorkflow.indexOf("\n  quality:"),
+    );
+    assert.match(windowsJob, /runs-on: windows-2022/);
+    assert.match(windowsJob, /release-deps-handoff\.contract\.ps1/);
+    assert.doesNotMatch(windowsJob, /self-hosted|hangzhou|D:\\beian|C:\\supply/);
+    const contract = readFileSync(join(repoRoot, "scripts/windows/release-deps-handoff.contract.ps1"), "utf8");
+    assert.match(contract, /DEPS_HANDOFF_CONTRACT ok/);
+    assert.match(contract, /Never touches D:\\beian/);
+    assert.match(contract, /GetTempPath\(\)/);
+    assert.doesNotMatch(contract, /Stop-Service|Start-Service|Register-ScheduledTask|\.\s+\$releasePath|& \$releasePath/);
+    const yml = readFileSync(join(repoRoot, ".github/workflows/hangzhou-release.yml"), "utf8");
+    assert.match(yml, /^    timeout-minutes: 60$/m);
   });
 
   it("keeps VERSION, npm version, and the Hono health constant aligned", () => {

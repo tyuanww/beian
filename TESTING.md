@@ -15,7 +15,7 @@
 三层。`npm test` 只等于 L0。不要在杭州跑单测。不要单测打外网、OCR、Blender、Illustrator COM。
 
 - L0 单测（Mac，`/ship` 必绿）：仓库根目录 `npm test`。复杂度工具链独立运行，不把 Knip 的 Node 版本要求泄漏到产品 `Node >=20` 合同；`/ship` 还必须在 Node 20.19+ 或 22.12+ 下执行 `npm run test:quality` 和 `npm run quality`。
-  - 服务端：`npm run test -w beian-server`（`node:test`，`apps/web/server/src/*.test.ts`；`windows-release-script.test.ts` 另锁 `export-one-structure.ps1` 不停 8787、层名用码点、透传 `--out-dir` / `--proposal-layers`，且不把 `--dry-run` 传给 Python）
+  - 服务端：`npm run test -w beian-server`（`node:test`，`apps/web/server/src/*.test.ts`；`windows-release-script.test.ts` 另锁离线依赖交接的停服前 staging/换位/恢复顺序与 `installed` 指纹子命令，并锁 `export-one-structure.ps1` 不停 8787、层名用码点、透传 `--out-dir` / `--proposal-layers`，且不把 `--dry-run` 传给 Python）
   - 界面：`npm run test -w beian-ui`（`node:test`，`src/**/*.test.ts` 自动发现；纯函数，不引入 RTL）
   - 对照 worker：`cd apps/web/backend && .venv/bin/python -m pytest -q`（CLI 契约 + 对照/打样单测，含 `test_export_one_structure.py` 哈希选稿 / payload / dry-run，不启动 Illustrator COM。没有 FastAPI 测试）
 - 发版 L1（杭州 `hangzhou-release`）：`release.ps1` 在 transaction fence 内查 health.ok、version==VERSION、8787 listener、logo PNG，并通过生产 Session 1 Agent 验证管道 → VBS → 唯一 JSX 的身份链。不跑 `npm test`，也不替代真实稿 L2。这是 AGENTS「该版本已上线」的证据层。
@@ -24,7 +24,7 @@
 - 类型：`npm run typecheck -w beian-server` 与 `npm run build -w beian-ui`
 - 浏览器交互（Mac）：`npm run test:e2e`（Vite + 合成 API，只验证页面行为，不替代真实 Hono / 发版 L1）。Q05 `mockup-preview-upgrade.spec.ts` 默认自建临时目录并构建；显式 `BEIAN_Q05_DIST=<dir>` 只读复用已由 `buildQ05ArtifactInto` 盖章的产物，身份不匹配失败关闭、不回退构建、不删除该目录。这是测量隔离，不是正式性能预算。
 - 复杂度门禁（Mac / GitHub-hosted PR）：`npm run quality`；基线只读、只能经评审缩小，新增发现、过期条目或相对 base 扩张都失败。本地自动解析 `origin/HEAD`（再回退 `origin/main` / `main`），找不到目标分支就失败关闭；CI 使用 PR base 精确 SHA。同文件同名诊断按重数比较，行号移动不改变身份，但新增第二处不能被折叠。`npm run quality:deep` 只生成手工清理报告，不自动删除。`npm run test:quality` 还要求 `.agents/skills` 实际目录、审核清单与 `skills-lock.json` 完全一致；项目 skill 不自动授予 shell。`antd` 是仓库 vendored 源，只能经 `scripts/quality/antd-readonly.mjs` 调固定 6.6.1；禁止用上游 restore/update 覆盖本地 hardening，恢复走受信任 Git 提交并重验哈希。
-- `.github/workflows/quality.yml` 的 Linux Node 22 质量 job 与 `windows-2022` PowerShell 5.1 合同 job 都使用 GitHub-hosted runner；禁止使用杭州/self-hosted runner。Windows job 实跑 `.NET File.Replace` 无备份原子替换，并验证 Illustrator Agent 计划任务的隐藏窗口、持久/临时触发器和 `Quiesce` 顺序；它不注册或控制生产任务，不调用 `release.ps1`，也不替代发版 L1。Knip 只锁在 `tools/quality`，Vulture 只放 `requirements-quality.txt`，两者不得进入杭州生产依赖图。
+- `.github/workflows/quality.yml` 的 Linux Node 22 质量 job 与 `windows-2022` PowerShell 5.1 合同 job 都使用 GitHub-hosted runner；禁止使用杭州/self-hosted runner。Windows job 实跑 `.NET File.Replace` 无备份原子替换，验证 Illustrator Agent 计划任务的隐藏窗口、持久/临时触发器和 `Quiesce` 顺序，并用 `release-deps-handoff.contract.ps1` 在临时目录的合成 workspace 仓库里按 AST 加载发布/恢复函数，实跑 npm workspace junction 重指、不跟随 junction 的删除、保留策略、超时杀进程树、被占用时换位失败后的恢复、完整换位与幂等换回；它不注册或控制生产任务，不调用 `release.ps1`，也不替代发版 L1。Knip 只锁在 `tools/quality`，Vulture 只放 `requirements-quality.txt`，两者不得进入杭州生产依赖图。
 - 新增或修改产品逻辑要有相应行为测试（含失败路径）；纯文档、格式和不改行为的调整不机械新增测试。不要把密钥写进测试。
 
 ## 执行顺序与环境边界
