@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
-  glbInteractive, glbPosterKey, glbProgressFromBytes, glbStatusText, glbProgressFromFraction, parseContentLength, readGlbWithProgress,
+  glbInteractive, glbPosterKey, glbProgressFromBytes, glbStatusText, glbProgressFromFraction, glbTotalKnown, glbViewerProgress, parseContentLength, readGlbWithProgress,
   type GlbProgress,
 } from "./mockupGlbProgress.js";
 
@@ -101,5 +101,23 @@ describe("GLB 交互开关", () => {
     assert.equal(glbInteractive(false, true), false);
     assert.equal(glbInteractive(true, true), false);
     assert.equal(glbInteractive(true, false), true);
+  });
+});
+
+describe("model-viewer 直连进度是否可信", () => {
+  const h = (init: Record<string, string>) => new Headers(init);
+  it("只有 Content-Length 为正且无 Content-Encoding 时才认为总量已知", () => {
+    assert.equal(glbTotalKnown(h({ "content-length": "3450714" })), true);
+    assert.equal(glbTotalKnown(h({})), false);
+    assert.equal(glbTotalKnown(h({ "content-length": "0" })), false);
+    assert.equal(glbTotalKnown(h({ "content-length": "3450714", "content-encoding": "gzip" })), false);
+  });
+  it("总量未知时忽略 model-viewer 的分数（例如卡住的 0.88），一直显示不确定进度", () => {
+    assert.deepEqual(glbViewerProgress(0.88, false), { kind: "indeterminate" });
+    assert.deepEqual(glbViewerProgress(0.5, false), { kind: "indeterminate" });
+  });
+  it("总量已知时才把分数显示为百分比", () => {
+    assert.deepEqual(glbViewerProgress(0.88, true), { kind: "percent", percent: 88 });
+    assert.deepEqual(glbViewerProgress(1, true), { kind: "indeterminate" });
   });
 });

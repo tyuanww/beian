@@ -3,7 +3,7 @@ import type { ModelViewerElement } from "@google/model-viewer";
 import { Progress, Spin } from "antd";
 import { composeGlbDisplaySet, DISPLAY_TABLE_MATERIAL, DISPLAY_WALL_MATERIAL } from "./glbDisplayAsset";
 import { DEFAULT_GLB_VIEW, glbCameraDistances } from "./mockupGlbCamera";
-import { GLB_LOADING_TEXT, GLB_PREPARING_TEXT, type GlbProgress, glbInteractive, glbProgressFromFraction, glbStatusText, readGlbWithProgress } from "./mockupGlbProgress";
+import { GLB_LOADING_TEXT, GLB_PREPARING_TEXT, type GlbProgress, glbInteractive, glbTotalKnown, glbViewerProgress, glbStatusText, readGlbWithProgress } from "./mockupGlbProgress";
 import { GLB_ENVIRONMENT, glbViewerExposure, glbRoomEmission } from "./mockupGlbLighting";
 import { type BackdropPreset, studioBackdrop } from "./mockupStudio";
 
@@ -29,6 +29,7 @@ export function MockupGlbViewer({ source, poster, backdrop, backgroundLight, pro
   const lastSource = useRef(source);
   const raw = useRef<{ source: string; bytes: Uint8Array } | null>(null);
   const revision = useRef(0);
+  const totalKnown = useRef(false);
   const onErrorRef = useRef(onSourceError);
   onErrorRef.current = onSourceError;
   const current = asset?.identity === identity ? asset : null;
@@ -70,8 +71,13 @@ export function MockupGlbViewer({ source, poster, backdrop, backgroundLight, pro
     setReadyUrl(null);
     setError(false);
     setProgress({ kind: "indeterminate" });
+    totalKnown.current = false;
     if (!set) {
       setAsset({ identity, url: source });
+      // HEAD 只取响应头、不下载正文，用来判断 model-viewer 报的进度是否可信；失败就保持不确定进度。
+      void fetch(source, { method: "HEAD", signal: abort.signal })
+        .then((response) => { if (active && response.ok) totalKnown.current = glbTotalKnown(response.headers); })
+        .catch(() => undefined);
     } else {
       void (async () => {
         let bytes = raw.current?.source === source ? raw.current.bytes : undefined;
@@ -174,7 +180,7 @@ export function MockupGlbViewer({ source, poster, backdrop, backgroundLight, pro
     };
     const progressed = (event: Event) => {
       // 白桌白墙的 blob 已在本地，进度只对直连 src 有意义。
-      if (active && !set) setProgress(glbProgressFromFraction((event as CustomEvent).detail?.totalProgress));
+      if (active && !set) setProgress(glbViewerProgress((event as CustomEvent).detail?.totalProgress, totalKnown.current));
     };
     viewer.addEventListener("progress", progressed);
     viewer.addEventListener("load", loaded);

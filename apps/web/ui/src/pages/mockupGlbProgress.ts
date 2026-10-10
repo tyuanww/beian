@@ -35,6 +35,19 @@ export function glbProgressFromFraction(fraction: unknown): GlbProgress {
   return { kind: "percent", percent: Math.floor(fraction * 100) };
 }
 
+/** 只有真实总大小已知（有 Content-Length 且没有 Content-Encoding）时，百分比才可信。 */
+export function glbTotalKnown(headers: Pick<Headers, "get">): boolean {
+  return !headers.get("content-encoding") && parseContentLength(headers.get("content-length")) !== null;
+}
+
+/**
+ * model-viewer 直连 src 时的进度。总大小未知时它仍会报一个虚假的分数（实测卡在 88%），
+ * 所以这时一律显示不确定进度；加载完成由 load 事件处理。
+ */
+export function glbViewerProgress(fraction: unknown, totalKnown: boolean): GlbProgress {
+  return totalKnown ? glbProgressFromFraction(fraction) : { kind: "indeterminate" };
+}
+
 export function parseContentLength(header: string | null): number | null {
   if (!header || !/^\d+$/.test(header.trim())) return null;
   const value = Number(header.trim());
@@ -46,8 +59,7 @@ export async function readGlbWithProgress(
   response: Response,
   onProgress: (progress: GlbProgress) => void,
 ): Promise<Uint8Array> {
-  const encoded = Boolean(response.headers.get("content-encoding"));
-  const total = encoded ? null : parseContentLength(response.headers.get("content-length"));
+  const total = glbTotalKnown(response.headers) ? parseContentLength(response.headers.get("content-length")) : null;
   onProgress(glbProgressFromBytes(0, total));
   if (!response.body) return new Uint8Array(await response.arrayBuffer());
   const reader = response.body.getReader();
