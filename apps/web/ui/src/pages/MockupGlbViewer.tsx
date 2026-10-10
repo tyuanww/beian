@@ -3,7 +3,7 @@ import type { ModelViewerElement } from "@google/model-viewer";
 import { Progress, Spin } from "antd";
 import { composeGlbDisplaySet, DISPLAY_TABLE_MATERIAL, DISPLAY_WALL_MATERIAL } from "./glbDisplayAsset";
 import { DEFAULT_GLB_VIEW, glbCameraDistances } from "./mockupGlbCamera";
-import { GLB_LOADING_TEXT, type GlbProgress, glbProgressFromFraction, readGlbWithProgress } from "./mockupGlbProgress";
+import { GLB_LOADING_TEXT, GLB_PREPARING_TEXT, type GlbProgress, glbProgressFromFraction, readGlbWithProgress } from "./mockupGlbProgress";
 import { GLB_ENVIRONMENT, glbViewerExposure, glbRoomEmission } from "./mockupGlbLighting";
 import { type BackdropPreset, studioBackdrop } from "./mockupStudio";
 
@@ -82,6 +82,10 @@ export function MockupGlbViewer({ source, poster, backdrop, backgroundLight, pro
           if (!active) return;
           raw.current = { source, bytes };
         }
+        setProgress({ kind: "preparing" });
+        // 让「正在准备场景…」先绘制出来，再在主线程同步组装场景。
+        await new Promise<void>(resolve => requestAnimationFrame(() => setTimeout(resolve, 0)));
+        if (!active) return;
         const display = composeGlbDisplaySet(bytes);
         if (!active) return;
         blob = URL.createObjectURL(new Blob([new Uint8Array(display.bytes)], { type: "model/gltf-binary" }));
@@ -216,7 +220,7 @@ export function MockupGlbViewer({ source, poster, backdrop, backgroundLight, pro
       {progress.kind === "percent"
         ? <Progress percent={progress.percent} size="small" status="active" aria-label={GLB_LOADING_TEXT} />
         : <Spin size="small" />}
-      <span>{GLB_LOADING_TEXT}</span>
+      <span>{progress.kind === "preparing" ? GLB_PREPARING_TEXT : GLB_LOADING_TEXT}</span>
     </div>}
     <button type="button" className="mockup-dl mockup-glb-reset" aria-label="复位模型视角"
       disabled={!ready || error} onClick={() => { void frame(true); }}>复位</button>

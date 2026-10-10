@@ -3,9 +3,11 @@ import type { BackdropPreset } from "./mockupStudio";
 /** 3D 加载进度：total 未知（无 Content-Length，如服务端即时 gzip）时为 indeterminate。 */
 export type GlbProgress =
   | { kind: "indeterminate" }
-  | { kind: "percent"; percent: number };
+  | { kind: "percent"; percent: number }
+  | { kind: "preparing" };
 
 export const GLB_LOADING_TEXT = "正在加载 3D 模型…";
+export const GLB_PREPARING_TEXT = "正在准备场景…";
 
 export function glbProgressFromBytes(loaded: number, total: number | null | undefined): GlbProgress {
   if (!total || !Number.isFinite(total) || total <= 0 || !Number.isFinite(loaded) || loaded < 0) {
