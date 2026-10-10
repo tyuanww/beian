@@ -122,6 +122,22 @@ export function recoverNativeRequests(mode: "boot" | "late" = "boot") {
     else { req.reason = "close_unconfirmed"; saveTask(task); }
   }
 }
+export type AdminNativeRecovery = "recovered" | "not_stuck" | "attempt_mismatch" | "worker_not_proven_gone";
+/** Administrator-confirmed exit for running + close_unconfirmed. When the
+ * host was restarted mid-attempt, close evidence can never arrive, so normal
+ * recovery keeps the fence forever. The administrator confirms Illustrator has
+ * no customer documents open; this still requires the exact attempt id and the
+ * recorded executor to be proven gone, and writes the same state as a proven
+ * close (fallback/native_failed). It never touches OCR results or the copy. */
+export function adminRecoverNativeRequest(taskId: string, attemptId: string): AdminNativeRecovery {
+  const task = loadTask(taskId);
+  const req = nativeRequest(task);
+  if (!req || req.status !== "running" || req.reason !== "close_unconfirmed") return "not_stuck";
+  if (req.id !== attemptId) return "attempt_mismatch";
+  if (!workerGone(task, req)) return "worker_not_proven_gone";
+  fallback(task, "native_failed");
+  return "recovered";
+}
 export function nativeDirectory(task: Task): string | undefined {
   const req = nativeRequest(task);
   if (req?.status !== "ready" || req.source_name !== source(task)) return;

@@ -33,7 +33,7 @@
       ]
     },
     "apps/web/server": {
-      "entry": ["src/index.ts!"],
+      "entry": ["src/index.ts!", "src/recoverNativeText.ts!"],
       "project": [
         "src/**/*.ts!",
         "!src/**/*.test.ts!",
