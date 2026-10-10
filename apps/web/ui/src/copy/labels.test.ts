@@ -15,7 +15,7 @@ const done = (complete_kind?: string) => ({
 
 describe("reviewCompletedLabel", () => {
   it("splits the completed review by complete_kind", () => {
-    assert.equal(reviewCompletedLabel("signed"), "已通过");
+    assert.equal(reviewCompletedLabel("signed"), "已签字");
     assert.equal(reviewCompletedLabel("rework"), "已退回");
   });
 
@@ -29,7 +29,7 @@ describe("reviewCompletedLabel", () => {
 });
 
 describe("completed review labels on every surface", () => {
-  for (const [kind, text] of [["signed", "已通过"], ["rework", "已退回"], [undefined, "已提交"], ["weird", "已提交"]] as const) {
+  for (const [kind, text] of [["signed", "已签字"], ["rework", "已退回"], [undefined, "已提交"], ["weird", "已提交"]] as const) {
     it(`complete_kind=${String(kind)} → ${text}`, () => {
       assert.equal(statusLabel(done(kind)).text, text);
       assert.equal(historyTaskRow(done(kind)).status, text);
@@ -69,7 +69,7 @@ describe("API rows straight from /api/tasks", () => {
       { id: "c", title: "x", type: "pack", status: "completed" },
       JSON.parse('{"id":"d","title":"x","type":"pack","status":"completed","complete_kind":null}'),
     ];
-    assert.deepEqual(rows.map((row) => statusLabel(row).text), ["已通过", "已退回", "已提交", "已提交"]);
-    assert.deepEqual(rows.map((row) => historyTaskRow(row).status), ["已通过", "已退回", "已提交", "已提交"]);
+    assert.deepEqual(rows.map((row) => statusLabel(row).text), ["已签字", "已退回", "已提交", "已提交"]);
+    assert.deepEqual(rows.map((row) => historyTaskRow(row).status), ["已签字", "已退回", "已提交", "已提交"]);
   });
 });

@@ -36,12 +36,12 @@ export const REVIEW_STATUS_LABEL = {
   pending: "待确认",
   /** complete_kind 缺失或未知（老记录）时的完成态，保持原叫法。 */
   completed: "已提交",
-  signed: "已通过",
+  signed: "已签字",
   rework: "已退回",
 } as const;
 
 /**
- * 审稿完成态按 job 字段 complete_kind 区分：signed → 已通过，rework → 已退回；
+ * 审稿完成态按 job 字段 complete_kind 区分：signed → 已签字，rework → 已退回；
  * 老记录没有 complete_kind 或值未知时保持「已提交」。后端不变。
  * 注意：打样侧后端阶段文案「已提交」（server/src/jobs.ts）与此无关，不要改。
  */

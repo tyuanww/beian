@@ -10,7 +10,7 @@ test("审稿列表和历史页对有/无 complete_kind 的完成单都能正常�
   syntheticApi.tasks.push(signed, rework, legacy, unknown);
 
   await page.goto("/reviewup");
-  for (const [product, state] of [["签字通过产品", "已通过"], ["退回改稿产品", "已退回"], ["老记录产品", "已提交"], ["未知方式产品", "已提交"]] as const) {
+  for (const [product, state] of [["签字通过产品", "已签字"], ["退回改稿产品", "已退回"], ["老记录产品", "已提交"], ["未知方式产品", "已提交"]] as const) {
     const card = page.locator(".review-card").filter({ hasText: product });
     await expect(card.locator(".review-card-summary-state")).toHaveText(state);
   }
