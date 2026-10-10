@@ -175,7 +175,7 @@ test("第二 tab 的旧 CAS 得 409；保留灯光，只刷新不自动重投",a
   await page.getByRole("button",{name:"历史版本",exact:true}).click();await page.getByRole("button",{name:"重新出图",exact:true}).click();
   await expect.poll(()=>state.facts.size).toBe(1);state.complete(true);
   stale=false;await second.getByRole("button",{name:"重新出图",exact:true}).click();
-  await expect(second.locator(".mockup-version-status")).toContainText("当前版本已变化");
+  await expect(second.locator(".mockup-version-status")).toContainText("内容有变化，请刷新后再试。");
   await expect(second.locator(".mockup-sheet-photos")).toHaveAttribute("data-render-generation",G1);
   await expect(light).toHaveValue("1.2");
   expect(state.calls.filter(call=>call.method === "POST")).toHaveLength(2);expect(state.facts.size).toBe(1);
@@ -207,6 +207,9 @@ test("生产执行门关闭只禁新建，历史与原图下载仍可用",async(
   await serve(page,state);await page.goto(`/mockup/${ID}`);await page.getByRole("button",{name:"历史版本",exact:true}).click();
   await expect(page.getByRole("button",{name:"重新出图",exact:true})).toBeDisabled();
   await expect(page.getByRole("button",{name:"升级新版",exact:true})).toBeDisabled();
+  await expect(page.locator(".mockup-version-actions")).toContainText("这个功能暂时用不了。");
+  await expect(page.locator(".mockup-version-actions")).not.toContainText("重新出图尚未开放，历史仍可查看");
+  await page.locator(".mockup-version-actions").getByText("查看原因").click();
   await expect(page.locator(".mockup-version-actions")).toContainText("重新出图尚未开放，历史仍可查看");
   await expect(page.getByText("原图存档 · 未补验",{exact:true})).toBeVisible();
   await expect.poll(async()=>{const c=await centerColor(page);return c[0]>c[2];}).toBe(true);
@@ -261,7 +264,7 @@ test("历史分页失败保留原图与已读记录，重新读取后可加载�
   await page.goto(`/mockup/${ID}`);await page.getByRole("button",{name:"历史版本",exact:true}).click();
   await expect(page.locator(".mockup-version-list > li")).toHaveCount(1);
   await page.getByRole("button",{name:/^更\s*多$/}).click();
-  await expect(page.locator(".mockup-versions [role=alert]")).toContainText("版本列表已变化，请重新打开");
+  await expect(page.locator(".mockup-versions [role=alert]")).toContainText("内容有变化，请刷新后再试。");
   await expect(page.locator(`[data-generation-id="${G1}"]`)).toBeVisible();
   await expect(page.locator(".mockup-sheet-photos")).toHaveAttribute("data-render-generation",G1);
   await expect.poll(async()=>{const c=await centerColor(page);return c[2]>c[0];}).toBe(true);

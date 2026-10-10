@@ -1,9 +1,18 @@
-import { useEffect, useRef, useState } from "react";
-import { Button } from "antd";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { Button, Collapse } from "antd";
 import { api, ApiError, type MockupJob, type RenderGenerationHistory } from "../api";
 import { createRenderRequest, readPendingRenderRequest, savePendingRenderRequest,
-  renderCapabilityCopy, renderMutationLine, renderVersionLabel, type PendingRenderRequest } from "./mockupRenderVersions";
+  renderMutationLine, renderReasonCopy, renderVersionLabel, type PendingRenderRequest } from "./mockupRenderVersions";
 import "../styles/renderVersions.css";
+
+/** 报错先说一句大白话，原文默认折叠（Ant Design Collapse），开发排查时再展开。 */
+export function RenderReason({reason}:{reason?:string}) {
+  const copy=renderReasonCopy(reason);
+  return <div className="mockup-render-reason">
+    <span>{copy.plain}</span>
+    <Collapse ghost size="small" items={[{key:"detail",label:"查看原因",children:<span className="mockup-render-reason-detail">{copy.detail}</span>}]} />
+  </div>;
+}
 
 /** An independent mutation never replaces the completed job's three images with WaitCard. */
 export function RenderVersions({job,open,productLight,backgroundLight,onJob}: {
@@ -11,8 +20,8 @@ export function RenderVersions({job,open,productLight,backgroundLight,onJob}: {
 }) {
   const [history,setHistory]=useState<RenderGenerationHistory>({items:[],next_cursor:null});
   const [historyBusy,setHistoryBusy]=useState(false);
-  const [historyError,setHistoryError]=useState("");
-  const [notice,setNotice]=useState("");
+  const [historyError,setHistoryError]=useState<ReactNode>("");
+  const [notice,setNotice]=useState<ReactNode>("");
   const [writing,setWriting]=useState(false);
   const [pending,setPending]=useState<PendingRenderRequest | null>(()=>readPendingRenderRequest(job.id));
   const alive=useRef(true);
@@ -46,7 +55,7 @@ export function RenderVersions({job,open,productLight,backgroundLight,onJob}: {
       if (!alive.current || epoch !== historyEpoch.current) return;
       setHistory(previous=>({items:cursor ? [...previous.items,...page.items] : page.items,next_cursor:page.next_cursor}));
     } catch(error) {
-      if (alive.current && epoch === historyEpoch.current) setHistoryError(error instanceof ApiError ? renderCapabilityCopy(error.reason || undefined) : "版本列表暂时读不到");
+      if (alive.current && epoch === historyEpoch.current) setHistoryError(error instanceof ApiError ? <RenderReason reason={error.reason || undefined} /> : "版本列表暂时读不到");
     } finally { if (alive.current && epoch === historyEpoch.current) setHistoryBusy(false); }
   }
 
@@ -97,7 +106,7 @@ export function RenderVersions({job,open,productLight,backgroundLight,onJob}: {
       if (!alive.current) return;
       if (error instanceof ApiError && [400,401,403,409,412].includes(error.status)) {
         try { remember(null); } catch { /* same request remains safe to replay */ }
-        setNotice(renderCapabilityCopy(error.reason || (error.status === 403 ? "permission_denied" : undefined)));
+        setNotice(<RenderReason reason={error.reason || (error.status === 403 ? "permission_denied" : undefined)} />);
         // Refresh the view only; never substitute the current pointer into an automatic POST.
         try { await refresh(); } catch { /* retain current images and explicit error */ }
       } else {
@@ -122,7 +131,7 @@ export function RenderVersions({job,open,productLight,backgroundLight,onJob}: {
       try { next=await refresh(); } catch { /* no automatic activation retry */ }
       if (!alive.current) return;
       setNotice(next?.current_render_generation_id === generation ? "已切换团队当前版本"
-        : error instanceof ApiError && error.status === 409 ? renderCapabilityCopy(error.reason || "current_changed")
+        : error instanceof ApiError && error.status === 409 ? <RenderReason reason={error.reason || "current_changed"} />
         : "尚未确认切换结果，请查看当前版本后再操作");
     } finally {writingRef.current=false;if(alive.current)setWriting(false);}
   }
@@ -130,9 +139,9 @@ export function RenderVersions({job,open,productLight,backgroundLight,onJob}: {
   const unresolved=Boolean(pending && (!pending.mutationId || pending.mutationId !== job.render_mutation?.id || !inflight));
   const mutationLine=renderMutationLine(job.render_mutation);
   return <>
-    {notice || mutationLine || unresolved ? <p className="mockup-version-status" role="status" aria-live="polite">
+    {notice || mutationLine || unresolved ? <div className="mockup-version-status" role="status" aria-live="polite">
       {notice || (unresolved ? "有一条上次请求尚待确认，当前图片仍可用" : mutationLine)}
-    </p> : null}
+    </div> : null}
     <section id="mockup-render-versions" className="mockup-versions" aria-label="出图版本" hidden={!open}>
       <p className="mockup-versions-help">选中后全组看到这一版</p>
       {canManage ? <div className="mockup-version-actions">
@@ -140,9 +149,10 @@ export function RenderVersions({job,open,productLight,backgroundLight,onJob}: {
           {unresolved ? "确认上次操作" : "重新出图"}
         </Button>
         <Button disabled>升级新版</Button>
-        <span>{unresolved ? "继续使用上次的请求号与灯光值" : !caps?.legacy_relight.allowed ? renderCapabilityCopy(caps?.legacy_relight.reason) : "当前灯光值会随这次请求保存"} · 新版出图尚未开放</span>
+        {!unresolved && !caps?.legacy_relight.allowed ? <RenderReason reason={caps?.legacy_relight.reason} /> : null}
+        <span>{unresolved ? "继续使用上次的请求号与灯光值 · " : caps?.legacy_relight.allowed ? "当前灯光值会随这次请求保存 · " : ""}新版出图尚未开放</span>
       </div> : null}
-      {historyError ? <p className="mockup-versions-help" role="alert">{historyError} <Button disabled={historyBusy} onClick={()=>void loadHistory()}>重新读取</Button></p> : null}
+      {historyError ? <div className="mockup-versions-help" role="alert">{historyError} <Button disabled={historyBusy} onClick={()=>void loadHistory()}>重新读取</Button></div> : null}
       <ul className="mockup-version-list">
         {history.items.map(row=><li key={row.generation_id} data-generation-id={row.generation_id}>
           <time dateTime={row.created_at}>{new Date(row.created_at).toLocaleString("zh-CN",{month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",hour12:false})}</time>
@@ -153,7 +163,7 @@ export function RenderVersions({job,open,productLight,backgroundLight,onJob}: {
         </li>)}
       </ul>
       {!historyBusy && !historyError && !history.items.length ? <p className="mockup-versions-help">还没有其他版本</p> : null}
-      {canManage && history.items.length > 0 && !caps?.activate.allowed ? <p className="mockup-versions-help">{renderCapabilityCopy(caps?.activate.reason)}</p> : null}
+      {canManage && history.items.length > 0 && !caps?.activate.allowed ? <div className="mockup-versions-help"><RenderReason reason={caps?.activate.reason} /></div> : null}
       {historyBusy ? <p className="mockup-versions-help" role="status">正在读取版本…</p> : history.next_cursor ? <Button onClick={()=>void loadHistory(history.next_cursor!)}>更多</Button> : null}
     </section>
   </>;

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
-import { it } from "node:test";
+import { describe, it } from "node:test";
 import { createRenderRequest, readPendingRenderRequest, savePendingRenderRequest, renderCapabilityCopy,
-  renderMutationLine, renderVersionLabel } from "./mockupRenderVersions.js";
+  renderMutationLine, renderReasonCopy, renderVersionLabel } from "./mockupRenderVersions.js";
 import { studioAssetHref } from "./mockupStudio.js";
 
 it("one click freezes ID/current/lights, and session restore never allocates or resubmits", () => {
@@ -40,4 +40,25 @@ it("version copy distinguishes runtime checking from visual acceptance and keeps
   assert.match(renderMutationLine({id:"m1",mode:"legacy_relight",status:"running",stage:"出图"}),/当前图片仍可用/);
   assert.match(renderMutationLine({id:"m1",mode:"legacy_relight",status:"failed"}),/当前图片未变/);
   assert.match(renderCapabilityCopy("idempotency_capacity"),/历史仍可查看/);
+});
+
+describe("renderReasonCopy", () => {
+  it("prepends a plain sentence and keeps the original text as detail for every known reason", () => {
+    const reasons = ["permission_denied","mutation_busy","ownership_unconfirmed","production_registration_disabled",
+      "runtime_quality_unwired","process_containment_unavailable","upgrade_unwired","upgrade_candidate_identity_invalid",
+      "source_changed","current_changed","idempotency_capacity","history_capacity","audit_pending","generation_corrupt",
+      "generation_missing","request_id_conflict","payload_invalid","cursor_invalid"];
+    for (const reason of reasons) {
+      const copy = renderReasonCopy(reason);
+      assert.equal(copy.detail, renderCapabilityCopy(reason));
+      assert.notEqual(copy.plain, copy.detail);
+      assert.ok(copy.plain.length <= 20, `${reason}: ${copy.plain}`);
+      assert.doesNotMatch(copy.plain, /幂等|记账|候选|产物|校验/);
+    }
+  });
+
+  it("falls back to a plain sentence for unknown reasons", () => {
+    assert.equal(renderReasonCopy("nope").plain, "暂时用不了，稍后再试。");
+    assert.equal(renderReasonCopy(undefined).detail, "暂不可用，请稍后再试");
+  });
 });
