@@ -172,12 +172,19 @@ export function sendText(
   return productionTextSender(text, to, opts);
 }
 
-export async function notifyTaskComplete(task: TaskLike, actor: string): Promise<void> {
+/** 飞书标题按 complete_kind：signed→已签字，rework→已退回；旧任务没有 complete_kind 时按是否有改稿项推断。 */
+export function taskCompleteHeadline(task: TaskLike): "已签字" | "已退回" {
+  if (task.complete_kind === "rework") return "已退回";
+  if (task.complete_kind === "signed") return "已签字";
+  return (task.hits || []).some((h) => h.decision === "issue") ? "已退回" : "已签字";
+}
+
+export function taskCompleteText(task: TaskLike, actor: string): string {
   const issues = (task.hits || []).filter((h) => h.decision === "issue");
-  const headline = task.complete_kind === "rework" || issues.length ? "待设计改稿" : "已签字";
+  const headline = taskCompleteHeadline(task);
   const lines = issues.slice(0, 12).map((h) => `· ${h.field || "字段"}`);
   const more = issues.length > 12 ? `\n…另有 ${issues.length - 12} 条` : "";
-  const text = [
+  return [
     `【备案审核】${headline}`,
     `任务：${task.title || task.id || ""}`,
     `审核人：${actor}`,
@@ -189,6 +196,10 @@ export async function notifyTaskComplete(task: TaskLike, actor: string): Promise
   ]
     .filter(Boolean)
     .join("\n");
+}
+
+export async function notifyTaskComplete(task: TaskLike, actor: string): Promise<void> {
+  const text = taskCompleteText(task, actor);
   const r = await sendText(text);
   if (!r.ok && !r.skipped) {
     console.warn("feishu notify skipped:", r.reason);

@@ -81,6 +81,7 @@ type Stored = {
   access_owner: string;
   expires_at: string | null;
   has_unmet_target?: boolean;
+  complete_kind?: string | null;
 };
 
 type OverlayOp =
@@ -107,6 +108,8 @@ type HistoryItem = {
   names: string[];
   matched_names: string[];
   visibility: HistoryVisibility;
+  /** 仅 review：signed / rework；未完成或旧任务为 null。 */
+  complete_kind?: string | null;
 };
 
 export type HistoryPage = {
@@ -195,6 +198,7 @@ function storedFromParts(input: {
   access_owner: string;
   expires_at: string | null;
   has_unmet_target?: boolean;
+  complete_kind?: string | null;
 }): Stored | null {
   if (!TID.test(input.id) || !ISO.test(input.created_at)) return null;
   if (!STATUS[input.type].includes(input.status)) return null;
@@ -214,6 +218,7 @@ function storedFromParts(input: {
     access_owner: cleanText(input.access_owner, 120),
     expires_at: input.expires_at,
     ...(input.type === "compression" ? { has_unmet_target: input.has_unmet_target === true } : {}),
+    ...(input.type === "review" ? { complete_kind: cleanCompleteKind(input.complete_kind) } : {}),
   };
 }
 
@@ -222,6 +227,8 @@ function parseStored(value: unknown): Stored | null {
   if (!raw || typeof raw.type !== "string" || !isHistoryType(raw.type)) return null;
   // Old compression summaries cannot answer the virtual filter; rebuild in bounded passes.
   if (raw.type === "compression" && typeof raw.has_unmet_target !== "boolean") return null;
+  // Old review summaries lack complete_kind; rebuild in bounded passes like compression.
+  if (raw.type === "review" && !("complete_kind" in raw)) return null;
   if (typeof raw.id !== "string" || typeof raw.status !== "string" || typeof raw.created_at !== "string") return null;
   if (!Array.isArray(raw.names) || raw.visibility !== "owner" && raw.visibility !== "team" && raw.visibility !== "upload_owner") {
     return null;
@@ -240,7 +247,12 @@ function parseStored(value: unknown): Stored | null {
     access_owner: typeof raw.access_owner === "string" ? raw.access_owner : "",
     expires_at: raw.expires_at === null ? null : typeof raw.expires_at === "string" ? raw.expires_at : "bad",
     has_unmet_target: raw.has_unmet_target === true,
+    complete_kind: typeof raw.complete_kind === "string" ? raw.complete_kind : null,
   });
+}
+
+export function cleanCompleteKind(value: unknown): string | null {
+  return value === "signed" || value === "rework" ? value : null;
 }
 
 function parseDoc(value: unknown): Doc | null {
@@ -397,6 +409,7 @@ function projectReview(raw: Record<string, unknown>, id: string): Stored | null 
     visibility: "owner",
     access_owner: access,
     expires_at: null,
+    complete_kind: raw.status === "completed" ? cleanCompleteKind(raw.complete_kind) : null,
   });
 }
 
@@ -597,6 +610,7 @@ export function noteHistoryReview(task: {
   owner?: string;
   created_by?: string;
   actor?: string;
+  complete_kind?: string;
 }): void {
   const record = projectReview(task as unknown as Record<string, unknown>, task.id);
   if (record) upsertRecord(record);
@@ -892,6 +906,7 @@ function toItem(record: Stored, needle: string): HistoryItem {
     names: record.names,
     matched_names: matched,
     visibility: record.visibility,
+    ...(record.type === "review" ? { complete_kind: record.complete_kind ?? null } : {}),
   };
 }
 
