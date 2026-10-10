@@ -59,12 +59,27 @@ describe("GLB 加载进度", () => {
   });
 });
 
+// 镜像 apps/web/server/src/renderGenerationBridge.ts 的 RENDER_GENERATION_OUTPUT_KEYS 中 front_right* 的映射值
+// （与 renderGenerations.ts OPTIONAL_KEYS、mockup.ts stillKeyFromName 一致）。服务端改名时这里必须同步。
+const FRONT_RIGHT_JOB_KEYS = ["white_a", "white_a_card", "white_a_ground", "white_a_ground_card", "white_a_set", "white_a_set_card"];
+const BACK_LEFT_JOB_KEYS = ["white_b", "white_b_card", "white_b_ground", "white_b_ground_card", "white_b_set", "white_b_set_card"];
+const completed = [{ key: "glb" }, ...[...FRONT_RIGHT_JOB_KEYS, ...BACK_LEFT_JOB_KEYS].map((key) => ({ key }))];
+const without = (...drop: string[]) => completed.filter((file) => !drop.includes(file.key));
+
 describe("GLB poster 选择", () => {
-  it("白桌白墙优先桌墙审阅卡，其他背景用白底图，没有则 null", () => {
-    const files = [{ key: "white_a" }, { key: "white_a_card" }, { key: "white_a_set" }];
-    assert.equal(glbPosterKey(files, "white_set"), "white_a_set");
-    assert.equal(glbPosterKey(files, "white"), "white_a_card");
-    assert.equal(glbPosterKey([{ key: "glb" }], "silver"), null);
+  it("完整出图：白桌白墙用正面桌墙审阅卡，白底/银灰用正面审阅卡", () => {
+    assert.equal(glbPosterKey(completed, "white_set"), "white_a_set_card");
+    assert.equal(glbPosterKey(completed, "white"), "white_a_card");
+    assert.equal(glbPosterKey(completed, "silver"), "white_a_card");
+  });
+  it("缺审阅卡或桌墙图时逐级回退到原图", () => {
+    assert.equal(glbPosterKey(without("white_a_set_card"), "white_set"), "white_a_set");
+    assert.equal(glbPosterKey(without("white_a_set_card", "white_a_set"), "white_set"), "white_a_card");
+    assert.equal(glbPosterKey(without("white_a_card"), "white"), "white_a");
+  });
+  it("渲染器原始输出名 front_right* 不会出现在 job.files，不被误用；没有正面图时为 null", () => {
+    assert.equal(glbPosterKey([{ key: "front_right" }, { key: "front_right_set_card" }], "white_set"), null);
+    assert.equal(glbPosterKey(without(...FRONT_RIGHT_JOB_KEYS), "white"), null);
     assert.equal(glbPosterKey(undefined, "white_set"), null);
   });
 });

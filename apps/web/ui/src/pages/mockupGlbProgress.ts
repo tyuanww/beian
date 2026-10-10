@@ -56,7 +56,12 @@ export async function readGlbWithProgress(
   return bytes;
 }
 
-/** 选一张已有效果图做 poster：白桌白墙优先用桌墙图，审阅卡（小图）优先于原图。 */
+/**
+ * 选一张已有效果图做 poster：白桌白墙优先用桌墙图，审阅卡（小图）优先于原图。
+ * job.files 里的 key 是服务端映射后的 white_a*，不是渲染器输出名 front_right*：
+ * 见 apps/web/server/src/renderGenerationBridge.ts RENDER_GENERATION_OUTPUT_KEYS
+ * （front_right→white_a、front_right_set_card→white_a_set_card 等）。
+ */
 export function glbPosterKey(files: Array<{ key: string }> | undefined, backdrop: BackdropPreset): string | null {
   const keys = new Set((files || []).map((file) => file.key));
   const order = backdrop === "white_set"
