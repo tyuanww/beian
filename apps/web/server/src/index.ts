@@ -3,6 +3,7 @@ import {
   copyFileSync,
   createReadStream,
   existsSync,
+  fstatSync,
   mkdirSync,
   openSync,
   read,
@@ -18,7 +19,7 @@ import { serve, type Http2Bindings, type HttpBindings } from "@hono/node-server"
 import { serveStatic } from "@hono/node-server/serve-static";
 import { Hono, type Context } from "hono";
 import { bodyLimit } from "hono/body-limit";
-import { compress } from "hono/compress";
+import { COMPRESSIBLE_CONTENT_TYPE_REGEX, compress } from "hono/compress";
 import { getCookie, setCookie, deleteCookie } from "hono/cookie";
 import { HTTPException } from "hono/http-exception";
 import { cacheHeaderFor, REDIRECT_CACHE } from "./cacheHeaders.js";
@@ -221,7 +222,13 @@ app.use("*", async (c, next) => {
 });
 
 // 压缩属于应用内部实现；发布生命周期由外层 Node ServerResponse 决定。
-app.use(compress());
+// Hono 默认已跳过 PNG/JPEG/PDF/ZIP，但把 GLB 列为可压缩：GLB 体积几乎不降，
+// 却会丢掉 Content-Length（前端无进度）并为每次回源实时压缩。GLB 原样发送。
+const ALREADY_COMPACT_TYPE = /^\s*model\/gltf-binary(?:[;\s]|$)/i;
+function shouldCompressType(type: string): boolean {
+  return COMPRESSIBLE_CONTENT_TYPE_REGEX.test(type) && !ALREADY_COMPACT_TYPE.test(type);
+}
+app.use(compress({ contentTypeFilter: shouldCompressType }));
 
 function need(
   c: { get: (k: "session") => Session | undefined },
@@ -303,6 +310,7 @@ function generationFileResponse(c: Context, file: HeldGenerationFile): Response 
   try {
     const responseHeaders = {...headers,
       "Content-Type":file.name.endsWith(".glb") ? "model/gltf-binary" : "image/png",
+      "Content-Length":String(file.bytes),
       "Content-Disposition":`${download ? "attachment" : "inline"}; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(file.name)}`,
     };
     // Hono dispatches HEAD through GET but drops its response body. Do not leave an unread stream owning the descriptor.
@@ -1600,9 +1608,18 @@ app.get("/api/mockups/:id/files/:key", (c) => {
       },
     });
   }
-  return new Response(Readable.toWeb(createReadStream(f.path)) as ReadableStream, {
+  // Length and bytes come from one descriptor, so a concurrent replace cannot
+  // make the declared Content-Length disagree with the streamed body.
+  const fd = openSync(f.path, "r");
+  let size: number;
+  try { size = fstatSync(fd).size; } catch (error) { closeSync(fd); throw error; }
+  const body = size === 0
+    ? (closeSync(fd), new Uint8Array(0))
+    : (Readable.toWeb(createReadStream("", { fd, autoClose: true, start: 0, end: size - 1 })) as ReadableStream);
+  return new Response(body, {
     headers: {
       "Content-Type": type,
+      "Content-Length": String(size),
       "X-Content-Type-Options": "nosniff",
       ETag: etag,
       "Cache-Control": cacheControl,

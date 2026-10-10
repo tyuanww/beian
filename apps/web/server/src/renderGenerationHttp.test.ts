@@ -388,6 +388,7 @@ it("RF-04 ready reads are immutable, ETag works, downloads return bytes, corrupt
   const f=seed("f00400000004",true); const id="g0-legacy-original";
   const url=`/api/mockups/${f.id}/files/white_a?generation_id=${id}`;
   const first=await request(url); assert.equal(first.status,200); const etag=first.headers.get("etag")!;
+  assert.equal(first.headers.get("content-length"),String(png().length)); assert.equal(first.headers.get("content-encoding"),null);
   await first.arrayBuffer(); assert.equal((await request(url,reader,{"if-none-match":etag})).status,304);
   const download=await request(url+"&download=1",reader,{"if-none-match":etag}); assert.equal(download.status,200);
   assert.equal(download.headers.get("cache-control"),"private, no-store");

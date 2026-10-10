@@ -1452,6 +1452,30 @@ describe("mockup file bytes", () => {
     assert.equal(again.status, 304);
   });
 
+  it("sends glb and pdf uncompressed with Content-Length while JSON lists still gzip", async () => {
+    const glbBytes = Buffer.concat([Buffer.from("glTF"), Buffer.alloc(8192, 7)]);
+    seedOwnedFile("ee55ee55ee55", "glb", "big.glb", glbBytes);
+    const pdfBytes = Buffer.concat([Buffer.from("%PDF-1.4\n"), Buffer.alloc(4096, 32)]);
+    seedOwnedFile("ee55ee55ee56", "sheet", "big_sheet.pdf", pdfBytes);
+    for (let i = 0; i < 20; i++) seedOwnedFile(`ee55ee55e${String(i).padStart(3, "0")}`, "glb", "row.glb", Buffer.from("glTF"));
+    const sess = issueSessionForTest("籽烨", "reviewer", "ou_mockup_gzip");
+    const headers = { authorization: `Bearer ${sess.token}`, "accept-encoding": "gzip, deflate" };
+    const glb = await app.request("/api/mockups/ee55ee55ee55/files/glb", { headers });
+    assert.equal(glb.status, 200);
+    assert.equal(glb.headers.get("content-encoding"), null);
+    assert.equal(glb.headers.get("content-length"), String(glbBytes.length));
+    assert.match(glb.headers.get("etag") || "", /^W\/"/);
+    assert.deepEqual(Buffer.from(await glb.arrayBuffer()), glbBytes);
+    const pdf = await app.request("/api/mockups/ee55ee55ee56/files/sheet", { headers });
+    assert.equal(pdf.headers.get("content-encoding"), null);
+    assert.equal(pdf.headers.get("content-length"), String(pdfBytes.length));
+    await pdf.arrayBuffer();
+    const list = await app.request("/api/mockups", { headers });
+    assert.equal(list.status, 200);
+    assert.equal(list.headers.get("content-encoding"), "gzip");
+    await list.arrayBuffer();
+  });
+
   it("serves glb inline and ppt as attachment", async () => {
     seedOwnedFile("cc33cc33cc33", "glb", 'box"side.glb', Buffer.from("glTF"));
     seedOwnedFile("dd44dd44dd44", "ppt", "deck.pptx", Buffer.from("PK"));
