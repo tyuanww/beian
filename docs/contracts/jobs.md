@@ -49,4 +49,4 @@ UI 等待：`shouldShowWaitCard`（`queued` | `running` | `comparing`；`done`/`
 
 新审稿/对红输入含 Illustrator 私有数据提示时，由 jobs 在 OCR 前准备原生请求；提示仅用于分流，不能作文字可信证明。关闭证据和稿面覆盖检查通过后，原生文字可以成为本次审稿主来源并跳过百度 OCR；覆盖不足或页面含大面积图片时继续既有 OCR 回退。queued 前置不占 OCR 执行槽，与结构/净版按 FIFO 共享 Illustrator 槽。120 秒仅限制未派发的排队，过期用 native_busy 继续 OCR；派发后按原有 1260 秒生命周期，超时保留桥接和围栏，不把杀进程当关闭。
 
-持久 native_text_request 绑定源 hash、source_name、提取器版本及 attempt。私有物理副本独立目录留存；已知执行者结束和同代关闭记录都确认后才可恢复围栏，晚到证据不能替换已经选择的 OCR 回退。running + close_unconfirmed 即使审稿已完成也计入 drain，并阻止删除其被引用副本、再次原生请求；单次 idle 心跳不清围栏。损坏持久记录计 unknown 且阻止新 Illustrator 领单。缓存只在新的审核运行、同源/同提取器版本使用。
+持久 native_text_request 绑定源 hash、source_name、提取器版本及 attempt。私有物理副本独立目录留存；已知执行者结束和同代关闭记录都确认后才可恢复围栏，晚到证据不能替换已经选择的 OCR 回退。running + close_unconfirmed 即使审稿已完成也计入 drain，并阻止删除其被引用副本、再次原生请求；单次 idle 心跳不清围栏。损坏持久记录计 unknown 且阻止新 Illustrator 领单。宿主在执行中被重启（关闭记录永远不会到达）时，唯一出口是管理员确认 Illustrator 无客户稿后运行 `apps/web/server/src/recoverNativeText.ts`：必须给出确切 task 与 attempt id，且记录的执行者 PID 已被证明不存在（无 PID 或身份不明一律拒绝）；写入与已证明关闭相同的 fallback/native_failed，不改 OCR 结果、不删副本、无 HTTP 入口。缓存只在新的审核运行、同源/同提取器版本使用。
