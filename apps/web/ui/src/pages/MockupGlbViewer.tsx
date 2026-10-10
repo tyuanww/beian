@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ModelViewerElement } from "@google/model-viewer";
+import { Progress } from "antd";
 import { composeGlbDisplaySet, DISPLAY_TABLE_MATERIAL, DISPLAY_WALL_MATERIAL } from "./glbDisplayAsset";
 import { DEFAULT_GLB_VIEW, glbCameraDistances } from "./mockupGlbCamera";
+import { GLB_LOADING_TEXT, GLB_PREPARING_TEXT, type GlbProgress, glbInteractive, glbTotalKnown, glbViewerProgress, glbStatusText, readGlbWithProgress } from "./mockupGlbProgress";
 import { GLB_ENVIRONMENT, glbViewerExposure, glbRoomEmission } from "./mockupGlbLighting";
 import { type BackdropPreset, studioBackdrop } from "./mockupStudio";
 
@@ -11,8 +13,8 @@ const initialView = (): View => ({ ...DEFAULT_GLB_VIEW });
 const degrees = (radians: number) => radians * 180 / Math.PI;
 
 /** The display scene is disposable; the caller keeps downloads bound to the original generation. */
-export function MockupGlbViewer({ source, backdrop, backgroundLight, productLight, onSourceError }: {
-  source: string; backdrop: BackdropPreset; backgroundLight: number; productLight: number;
+export function MockupGlbViewer({ source, poster, backdrop, backgroundLight, productLight, onSourceError }: {
+  source: string; poster?: string; backdrop: BackdropPreset; backgroundLight: number; productLight: number;
   onSourceError: () => void;
 }) {
   const set = backdrop === "white_set";
@@ -20,11 +22,14 @@ export function MockupGlbViewer({ source, backdrop, backgroundLight, productLigh
   const [asset, setAsset] = useState<{ identity: string; url: string; bounds?: Bounds } | null>(null);
   const [error, setError] = useState(false);
   const [readyUrl, setReadyUrl] = useState<string | null>(null);
+  const [progress, setProgress] = useState<GlbProgress>({ kind: "indeterminate" });
+  const [posterFailed, setPosterFailed] = useState<string | null>(null);
   const viewerRef = useRef<ModelViewerElement | null>(null);
   const view = useRef<View>(initialView());
   const lastSource = useRef(source);
   const raw = useRef<{ source: string; bytes: Uint8Array } | null>(null);
   const revision = useRef(0);
+  const totalKnown = useRef(false);
   const onErrorRef = useRef(onSourceError);
   onErrorRef.current = onSourceError;
   const current = asset?.identity === identity ? asset : null;
@@ -65,18 +70,28 @@ export function MockupGlbViewer({ source, backdrop, backgroundLight, productLigh
     const abort = new AbortController();
     setReadyUrl(null);
     setError(false);
+    setProgress({ kind: "indeterminate" });
+    totalKnown.current = false;
     if (!set) {
       setAsset({ identity, url: source });
+      // HEAD 只取响应头、不下载正文，用来判断 model-viewer 报的进度是否可信；失败就保持不确定进度。
+      void fetch(source, { method: "HEAD", signal: abort.signal })
+        .then((response) => { if (active && response.ok) totalKnown.current = glbTotalKnown(response.headers); })
+        .catch(() => undefined);
     } else {
       void (async () => {
         let bytes = raw.current?.source === source ? raw.current.bytes : undefined;
         if (!bytes) {
           const response = await fetch(source, { signal: abort.signal });
           if (!response.ok) throw new Error("glb_source_failed");
-          bytes = new Uint8Array(await response.arrayBuffer());
+          bytes = await readGlbWithProgress(response, (next) => { if (active) setProgress(next); });
           if (!active) return;
           raw.current = { source, bytes };
         }
+        setProgress({ kind: "preparing" });
+        // 双 rAF：第二帧回调时上一帧（含「正在准备场景…」）已提交绘制，再在主线程同步组装场景。
+        await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+        if (!active) return;
         const display = composeGlbDisplaySet(bytes);
         if (!active) return;
         blob = URL.createObjectURL(new Blob([new Uint8Array(display.bytes)], { type: "model/gltf-binary" }));
@@ -163,6 +178,11 @@ export function MockupGlbViewer({ source, backdrop, backgroundLight, productLigh
       const base = sphere / Math.sin(viewer.getFieldOfView() * Math.PI / 360);
       view.current = { theta: degrees(orbit.theta), phi: degrees(orbit.phi), zoom: orbit.radius / base };
     };
+    const progressed = (event: Event) => {
+      // 白桌白墙的 blob 已在本地，进度只对直连 src 有意义。
+      if (active && !set) setProgress(glbViewerProgress((event as CustomEvent).detail?.totalProgress, totalKnown.current));
+    };
+    viewer.addEventListener("progress", progressed);
     viewer.addEventListener("load", loaded);
     viewer.addEventListener("error", failed);
     viewer.addEventListener("camera-change", moved);
@@ -173,18 +193,26 @@ export function MockupGlbViewer({ source, backdrop, backgroundLight, productLigh
       active = false;
       revision.current++;
       resize.disconnect();
+      viewer.removeEventListener("progress", progressed);
       viewer.removeEventListener("load", loaded);
       viewer.removeEventListener("error", failed);
       viewer.removeEventListener("camera-change", moved);
     };
-  }, [current, frame, failDisplay]);
+  }, [current, frame, failDisplay, set]);
 
+  const showPoster = Boolean(poster && posterFailed !== poster);
+  const loading = !error && !ready;
+  const interactive = glbInteractive(ready, error);
   return <>
+    {loading && (showPoster
+      ? <img className="mockup-glb-poster" src={poster} alt="" aria-hidden="true" onError={() => setPosterFailed(poster ?? null)} />
+      : <div className="mockup-glb-poster mockup-glb-skeleton" aria-hidden="true" />)}
     {current && !error && <model-viewer
       key={current.url}
       ref={setViewer}
       src={current.url}
-      camera-controls
+      // React 18 对自定义元素会把 false 写成字符串属性，必须用 undefined 才能真正移除。
+      camera-controls={interactive || undefined}
       camera-orbit="35deg 72deg 145%"
       max-camera-orbit="auto auto 155%"
       environment-image={GLB_ENVIRONMENT}
@@ -193,10 +221,16 @@ export function MockupGlbViewer({ source, backdrop, backgroundLight, productLigh
       shadow-softness="0.5"
       tone-mapping="commerce"
       interaction-prompt="none"
-      style={{ background: studioBackdrop(backgroundLight, backdrop), opacity: ready ? 1 : 0 }}
+      style={{ background: studioBackdrop(backgroundLight, backdrop), opacity: ready ? 1 : 0, pointerEvents: interactive ? "auto" : "none" }}
     />}
     {error && <p role="alert" className="mockup-glb-message">3D 预览加载失败，请重新打开此单。下载仍为原始模型。</p>}
-    {!error && !ready && <p role="status" className="mockup-glb-message">正在加载 3D 预览…</p>}
+    {loading && <div className="mockup-glb-message mockup-glb-progress">
+      <span className="mockup-glb-progress-visual" aria-hidden="true">
+        {progress.kind === "percent" ? <Progress percent={progress.percent} size="small" status="active" /> : null}
+        <span>{progress.kind === "preparing" ? GLB_PREPARING_TEXT : GLB_LOADING_TEXT}</span>
+      </span>
+      <span role="status" className="sr-only">{glbStatusText(progress)}</span>
+    </div>}
     <button type="button" className="mockup-dl mockup-glb-reset" aria-label="复位模型视角"
       disabled={!ready || error} onClick={() => { void frame(true); }}>复位</button>
   </>;

@@ -4562,5 +4562,13 @@ html[data-theme="dark"] .notes.is-float {
 }
 
 /* Viewer controls stay outside the product silhouette. */
+/* 3D 区是拖拽交互面：拖动时不选中按钮、进度文字等页面文本。 */
+.mockup-sheet-glb { -webkit-user-select: none; user-select: none; }
 .mockup-glb-reset { position: absolute; z-index: 2; left: 8px; bottom: 8px; top: auto; }
-.mockup-glb-message { position: absolute; inset: 45% 20px auto; text-align: center; color: var(--text-mute); }
+.mockup-glb-message { position: absolute; inset: 45% 20px auto; text-align: center; color: var(--muted); }
+.mockup-glb-poster { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; pointer-events: none; }
+.mockup-glb-skeleton { background: color-mix(in srgb, var(--ink) 4%, transparent); }
+/* 左右各让出 72px：避开左下「复位」（44px 高、约 64px 宽）及顶部全屏/下载按钮，窄屏也不重叠。 */
+.mockup-glb-progress { display: flex; flex-direction: column; align-items: center; gap: 8px; inset: auto 72px 16px; z-index: 1; min-height: 44px; justify-content: center; }
+.mockup-glb-progress .ant-progress { width: min(240px, 100%); margin: 0; }
+.mockup-glb-progress-visual { display: flex; flex-direction: column; align-items: center; gap: 8px; width: min(240px, 100%); }
