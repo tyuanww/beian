@@ -134,7 +134,7 @@ export function AppearancePane() {
 
       <div className={isGlassOn(prefs.glassStyle) ? "appear-row appear-row-stack" : "appear-row appear-row-stack is-dim"}>
         <div>
-          <div className="appear-label">透明度</div>
+          <div className="appear-label">对比度</div>
           <p className="appear-help">调整侧栏明暗。</p>
         </div>
         <div className="appear-control">
@@ -144,7 +144,7 @@ export function AppearancePane() {
             max={100}
             value={prefs.glassContrast}
             disabled={!isGlassOn(prefs.glassStyle)}
-            ariaLabel="侧栏玻璃透明度"
+            ariaLabel="侧栏玻璃对比度"
             onChange={(n) => setPrefs({ ...prefs, glassContrast: clampGlassContrast(n) })}
           />
           <span className="appear-ends">实</span>
