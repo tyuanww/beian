@@ -14,7 +14,6 @@ declare global {
         "shadow-softness"?: string;
         "tone-mapping"?: string;
         "interaction-prompt"?: string;
-        poster?: string;
       };
     }
   }

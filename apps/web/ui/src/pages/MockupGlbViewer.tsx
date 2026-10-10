@@ -200,7 +200,6 @@ export function MockupGlbViewer({ source, poster, backdrop, backgroundLight, pro
       key={current.url}
       ref={setViewer}
       src={current.url}
-      poster={showPoster ? poster : undefined}
       camera-controls
       camera-orbit="35deg 72deg 145%"
       max-camera-orbit="auto auto 155%"
