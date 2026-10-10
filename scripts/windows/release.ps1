@@ -52,6 +52,19 @@ $ReleaseLockStream = $null
 $ReleaseJournalState = $null
 $ReleaseUiSnapshotSha256 = ""
 $Utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+# Offline dependency handoff: a same-volume sibling of the checkout (D:\beian -> D:\beian-deps)
+# so the staged node_modules can be swapped in with atomic directory renames after stop.
+$RootParent = [System.IO.Path]::GetDirectoryName($Root)
+$DependencyStagingRoot = if ($RootParent) { Join-Path $RootParent "beian-deps" } else { "" }
+$DependencyStageStampRuntimePath = Join-Path $ReleaseRuntimeDir "deps-stage.json"
+$DependencyStageProtocol = "beian.deps-stage.v1"
+$DependencySetRelativePaths = @("apps\web\server\node_modules", "apps\web\ui\node_modules", "node_modules")
+$DependencyWorkspaceLinks = [ordered]@{ "beian-ui" = "apps\web\ui"; "beian-server" = "apps\web\server" }
+$DependencyRequiredWindowsNatives = @("@img/sharp-win32-x64", "@rollup/rollup-win32-x64-msvc", "@esbuild/win32-x64")
+$DependencyMinimumFreeBytes = [int64]4GB
+$DependencyNpmCiTimeoutSeconds = 900
+$DependencyBackupGenerationsKept = 1
+$DependencyHandoff = $null
 
 function Invoke-GitResult([object[]]$GitArgs) {
   if (-not $GitArgs -or $GitArgs.Count -eq 0) {
@@ -206,17 +219,15 @@ function Assert-OfflineDependencyHandoff(
 ) {
   $fromFingerprint = Get-NpmDependencyGraphFingerprint $FromRevision
   $toFingerprint = Get-NpmDependencyGraphFingerprint $ToRevision
+  $npmSummary = "npm=$fromFingerprint"
   if ($fromFingerprint -ne $toFingerprint) {
-    throw "真实 npm 依赖图变化，但当前发版没有离线 node_modules 快照；拒绝停 8787"
+    # Only a stage built and verified offline before stop may carry a changed graph.
+    if (-not (Test-StagedDependencyHandoffReady $fromFingerprint $toFingerprint)) {
+      throw "真实 npm 依赖图变化，但当前发版没有离线 node_modules 快照；拒绝停 8787"
+    }
+    $npmSummary = "npm=$fromFingerprint->$toFingerprint staged"
   }
-  & git diff --quiet $FromRevision $ToRevision -- apps/web/backend/requirements.txt
-  $requirementsDiff = $LASTEXITCODE
-  if ($requirementsDiff -eq 1) {
-    throw "Python requirements 变化，但当前发版没有离线虚拟环境快照；拒绝停 8787"
-  }
-  if ($requirementsDiff -ne 0) {
-    throw "无法核对 Python requirements 变化 exit=$requirementsDiff"
-  }
+  Assert-PythonRequirementsUnchanged $FromRevision $ToRevision
   if (-not (Test-Path -LiteralPath (Join-Path $Root "node_modules") -PathType Container)) {
     throw "node_modules 不存在；拒绝进入离线发版事务"
   }
@@ -234,7 +245,20 @@ function Assert-OfflineDependencyHandoff(
   if (-not (Test-Path -LiteralPath $distIndex -PathType Leaf)) {
     throw "旧版 UI dist 不完整；无法建立离线回滚快照"
   }
-  Write-Host "offline dependency handoff verified npm=$fromFingerprint requirements=unchanged"
+  Write-Host "offline dependency handoff verified $npmSummary requirements=unchanged"
+}
+
+# Phase 1 keeps Python requirements changes refused: a venv embeds absolute paths
+# and cannot be staged elsewhere and renamed into place.
+function Assert-PythonRequirementsUnchanged([string]$FromRevision, [string]$ToRevision) {
+  & git diff --quiet $FromRevision $ToRevision -- apps/web/backend/requirements.txt
+  $requirementsDiff = $LASTEXITCODE
+  if ($requirementsDiff -eq 1) {
+    throw "Python requirements 变化，但当前发版没有离线虚拟环境快照；拒绝停 8787"
+  }
+  if ($requirementsDiff -ne 0) {
+    throw "无法核对 Python requirements 变化 exit=$requirementsDiff"
+  }
 }
 
 function Assert-NativeOfflineProbe(
@@ -267,7 +291,7 @@ function Assert-NativeOfflineProbe(
   }
 }
 
-function Assert-IsolatedServerEntryImport([string]$TsxPath) {
+function Assert-IsolatedServerEntryImport([string]$TsxPath, [string]$WorkingDirectory = $Root) {
   $probeData = Join-Path ([System.IO.Path]::GetTempPath()) ("beian-release-server-probe-" + [Guid]::NewGuid().ToString("N"))
   $prior = @{}
   foreach ($name in @("VITEST", "WB_DATA_DIR", "WB_HOST", "WB_PORT")) {
@@ -280,7 +304,7 @@ function Assert-IsolatedServerEntryImport([string]$TsxPath) {
     $env:WB_HOST = "127.0.0.1"
     $env:WB_PORT = "0"
     $entryProbe = "import('./apps/web/server/src/index.ts').then((m) => { if (!m.app || typeof m.app.fetch !== 'function') throw new Error('missing Hono app export'); })"
-    Assert-NativeOfflineProbe "Hono service entry import" $TsxPath @("-e", $entryProbe) $Root
+    Assert-NativeOfflineProbe "Hono service entry import" $TsxPath @("-e", $entryProbe) $WorkingDirectory
   } finally {
     foreach ($name in $prior.Keys) {
       if ($null -eq $prior[$name]) {
@@ -297,11 +321,12 @@ function Assert-OfflineRuntimeIntegrity([string]$PythonPath) {
   $node = Get-Command node.exe -ErrorAction Stop
   $npm = Get-Command npm.cmd -ErrorAction Stop
   $tsx = Join-Path $Root "node_modules\.bin\tsx.cmd"
-  $vite = Join-Path $Root "node_modules\vite\bin\vite.js"
+  # A clean lockfile install keeps Vite under the UI workspace; older hand-provisioned trees hoisted it.
+  $vite = Get-ViteEntry $Root
   if (-not (Test-Path -LiteralPath $tsx -PathType Leaf)) {
     throw "tsx 启动器缺失；旧服务无法离线冷启动"
   }
-  if (-not (Test-Path -LiteralPath $vite -PathType Leaf)) {
+  if (-not $vite) {
     throw "Vite 构建入口缺失；目标 UI 无法离线构建"
   }
   $rollupNative = @(
@@ -353,6 +378,601 @@ function Snapshot-UiDist {
   }
   $script:ReleaseUiSnapshotSha256 = $snapshotFingerprint
   Write-Host "offline UI rollback snapshot ready sha256=$snapshotFingerprint"
+}
+
+function Get-DependencyHandoffPlan([string]$FromRevision, [string]$ToRevision) {
+  $fromFingerprint = Get-NpmDependencyGraphFingerprint $FromRevision
+  $toFingerprint = Get-NpmDependencyGraphFingerprint $ToRevision
+  $mode = "unchanged"
+  if ($fromFingerprint -ne $toFingerprint) { $mode = "npm-staged" }
+  return [PSCustomObject]@{
+    Mode = $mode
+    FromFingerprint = $fromFingerprint
+    ToFingerprint = $toFingerprint
+    StagingRoot = ""
+    StageSource = ""
+    StageWork = ""
+    BackupDir = ""
+    FailedDir = ""
+    StampPath = ""
+    StampSha256 = ""
+    OldPresence = [ordered]@{}
+    OldTreeMarker = ""
+    Verified = $false
+  }
+}
+
+function Test-StagedDependencyHandoffReady([string]$FromFingerprint, [string]$ToFingerprint) {
+  return [bool](
+    $DependencyHandoff -and
+    [string]$DependencyHandoff.Mode -eq "npm-staged" -and
+    $DependencyHandoff.Verified -eq $true -and
+    [string]$DependencyHandoff.FromFingerprint -eq $FromFingerprint -and
+    [string]$DependencyHandoff.ToFingerprint -eq $ToFingerprint
+  )
+}
+
+function Invoke-ReleaseDependencyCheck([string]$What, [string[]]$CheckArguments) {
+  $node = Get-Command node.exe -ErrorAction Stop
+  if (-not (Test-Path -LiteralPath $ReleaseDependencyCheckPath -PathType Leaf)) {
+    throw "release dependency checker is missing from the trusted runtime"
+  }
+  $previousPreference = $ErrorActionPreference
+  $ErrorActionPreference = "Continue"
+  try {
+    $lines = @(& $node.Source $ReleaseDependencyCheckPath @CheckArguments 2>&1)
+    $code = $LASTEXITCODE
+  } finally {
+    $ErrorActionPreference = $previousPreference
+  }
+  $last = ([string]($lines | Select-Object -Last 1)).Trim()
+  if ($null -eq $code -or [int]$code -ne 0) {
+    throw "$What 失败 exit=$code $last；拒绝停 8787"
+  }
+  $fingerprint = $last.ToLowerInvariant()
+  if ($fingerprint -notmatch '^[0-9a-f]{64}$') {
+    throw "$What 输出无效"
+  }
+  return $fingerprint
+}
+
+function Get-DependencyTreeMarker([string]$TreeRoot) {
+  $hidden = Join-Path $TreeRoot "node_modules\.package-lock.json"
+  if (-not (Test-Path -LiteralPath $hidden -PathType Leaf)) { return "absent" }
+  return (Get-FileHash -Algorithm SHA256 -LiteralPath $hidden).Hash.ToLowerInvariant()
+}
+
+function Get-InstalledPackageDirectory([string]$TreeRoot, [string]$PackageName) {
+  foreach ($prefix in @("node_modules", "apps\web\ui\node_modules", "apps\web\server\node_modules")) {
+    $candidate = Join-Path (Join-Path $TreeRoot $prefix) $PackageName.Replace('/', '\')
+    if (Test-Path -LiteralPath (Join-Path $candidate "package.json") -PathType Leaf) { return $candidate }
+  }
+  return ""
+}
+
+function Get-ViteEntry([string]$TreeRoot) {
+  $viteDir = Get-InstalledPackageDirectory $TreeRoot "vite"
+  if (-not $viteDir) { return "" }
+  $entry = Join-Path $viteDir "bin\vite.js"
+  if (-not (Test-Path -LiteralPath $entry -PathType Leaf)) { return "" }
+  return $entry
+}
+
+function Assert-DependencyStagingLocation {
+  if (-not $DependencyStagingRoot) {
+    throw "仓库位于卷根目录，无法建立同卷依赖暂存目录；拒绝停 8787"
+  }
+  $stagingVolume = [System.IO.Path]::GetPathRoot($DependencyStagingRoot)
+  $rootVolume = [System.IO.Path]::GetPathRoot($Root)
+  if (-not [string]::Equals($stagingVolume, $rootVolume, [StringComparison]::OrdinalIgnoreCase)) {
+    throw "依赖暂存目录 $DependencyStagingRoot 与仓库不在同一卷，无法原子换位；拒绝停 8787"
+  }
+  if (Test-DataDirInsideRepo $DependencyStagingRoot $Root) {
+    throw "依赖暂存目录不能在仓库内：$DependencyStagingRoot"
+  }
+}
+
+function Assert-DependencyStagingFreeSpace {
+  $drive = [System.IO.DriveInfo]::new([System.IO.Path]::GetPathRoot($Root))
+  $free = [int64]$drive.AvailableFreeSpace
+  $freeGb = [math]::Round($free / 1GB, 2)
+  $needGb = [math]::Round($DependencyMinimumFreeBytes / 1GB, 2)
+  if ($free -lt $DependencyMinimumFreeBytes) {
+    throw "$($drive.Name) 可用空间 $freeGb GB，低于离线依赖交接所需 $needGb GB；拒绝停 8787"
+  }
+  Write-Host "dependency staging free space ok drive=$($drive.Name) free_gb=$freeGb need_gb=$needGb"
+}
+
+function Initialize-DependencyStagingRoot {
+  New-Item -ItemType Directory -Force -Path $DependencyStagingRoot | Out-Null
+  # Same principals as the checkout: a same-volume move keeps object ACEs, so the
+  # swapped node_modules must not become stricter or looser than D:\beian itself.
+  $sections = [System.Security.AccessControl.AccessControlSections]::Access
+  $source = [System.IO.Directory]::GetAccessControl($Root, $sections)
+  $security = New-Object System.Security.AccessControl.DirectorySecurity
+  $security.SetSecurityDescriptorSddlForm($source.GetSecurityDescriptorSddlForm($sections), $sections)
+  [System.IO.Directory]::SetAccessControl($DependencyStagingRoot, $security)
+}
+
+function Test-DependencyReparsePoint([string]$Path) {
+  $info = [System.IO.DirectoryInfo]::new($Path)
+  return (($info.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0)
+}
+
+function Remove-DependencyReparsePoints([string]$Path) {
+  # Unlink junctions/symlinks before any recursive delete so it can never follow
+  # npm's workspace junction into a real source checkout.
+  $pending = New-Object 'System.Collections.Generic.Stack[System.IO.DirectoryInfo]'
+  $pending.Push([System.IO.DirectoryInfo]::new($Path))
+  while ($pending.Count -gt 0) {
+    $current = $pending.Pop()
+    foreach ($child in $current.GetDirectories()) {
+      if (($child.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+        [System.IO.Directory]::Delete($child.FullName, $false)
+      } else {
+        $pending.Push($child)
+      }
+    }
+  }
+}
+
+function Remove-DependencyTreeSafely([string]$Path) {
+  if (-not $Path -or -not [System.IO.Directory]::Exists($Path)) { return }
+  $full = [System.IO.Path]::GetFullPath($Path).TrimEnd('\', '/')
+  $boundary = $DependencyStagingRoot.TrimEnd('\', '/') + [System.IO.Path]::DirectorySeparatorChar
+  if (-not $full.StartsWith($boundary, [StringComparison]::OrdinalIgnoreCase)) {
+    throw "拒绝删除依赖暂存目录之外的路径：$full"
+  }
+  if (Test-DependencyReparsePoint $full) {
+    [System.IO.Directory]::Delete($full, $false)
+    return
+  }
+  Remove-DependencyReparsePoints $full
+  [System.IO.Directory]::Delete($full, $true)
+}
+
+function Get-DependencyArtifactTime([string]$Name) {
+  return $Name.Substring($Name.Length - 16)
+}
+
+function Remove-StaleDependencyArtifacts([string]$KeepShortSha) {
+  if (-not $DependencyStagingRoot -or -not [System.IO.Directory]::Exists($DependencyStagingRoot)) { return }
+  $entries = @(Get-ChildItem -LiteralPath $DependencyStagingRoot -Directory -Force -ErrorAction Stop)
+  foreach ($kind in @("backup", "failed")) {
+    $generations = @(
+      $entries |
+        Where-Object { $_.Name -match ('^' + $kind + '-[0-9a-f]{12}-\d{8}T\d{6}Z$') } |
+        Sort-Object -Property @{ Expression = { Get-DependencyArtifactTime $_.Name } } -Descending
+    )
+    foreach ($stale in @($generations | Select-Object -Skip $DependencyBackupGenerationsKept)) {
+      Write-Host "dependency retention removes $($stale.Name)"
+      Remove-DependencyTreeSafely $stale.FullName
+    }
+  }
+  foreach ($entry in $entries) {
+    if ($entry.Name -match '^(?:stage|work)-([0-9a-f]{12})$') {
+      if ($Matches[1] -ne $KeepShortSha) {
+        Write-Host "dependency retention removes stale $($entry.Name)"
+        Remove-DependencyTreeSafely $entry.FullName
+      }
+    } elseif ($entry.Name -notmatch '^(?:backup|failed)-[0-9a-f]{12}-\d{8}T\d{6}Z$') {
+      Write-Warning "dependency staging root keeps unknown entry $($entry.Name)"
+    }
+  }
+}
+
+function Get-DependencyReparsePointNames([string]$NodeModules) {
+  $names = New-Object 'System.Collections.Generic.List[string]'
+  if (-not [System.IO.Directory]::Exists($NodeModules)) { return @() }
+  foreach ($entry in ([System.IO.DirectoryInfo]::new($NodeModules)).GetDirectories()) {
+    if (($entry.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+      [void]$names.Add($entry.Name)
+    } elseif ($entry.Name.StartsWith("@")) {
+      foreach ($scoped in $entry.GetDirectories()) {
+        if (($scoped.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) {
+          [void]$names.Add($entry.Name + "/" + $scoped.Name)
+        }
+      }
+    }
+  }
+  return @($names)
+}
+
+function Set-StagedWorkspaceJunctions([string]$StageSource, [string]$TargetRoot) {
+  $nodeModules = Join-Path $StageSource "node_modules"
+  foreach ($relative in $DependencySetRelativePaths) {
+    $unknown = @(
+      Get-DependencyReparsePointNames (Join-Path $StageSource $relative) |
+        Where-Object { $relative -ne "node_modules" -or -not $DependencyWorkspaceLinks.Contains($_) }
+    )
+    if ($unknown.Count -gt 0) {
+      throw "staged $relative 含未知 reparse point：$($unknown -join ',')；拒绝停 8787"
+    }
+  }
+  foreach ($name in @($DependencyWorkspaceLinks.Keys)) {
+    $link = Join-Path $nodeModules $name
+    $target = Join-Path $TargetRoot $DependencyWorkspaceLinks[$name]
+    if ([System.IO.Directory]::Exists($link)) {
+      if (-not (Test-DependencyReparsePoint $link)) {
+        throw "staged workspace link 不是 junction：$name；拒绝停 8787"
+      }
+      [System.IO.Directory]::Delete($link, $false)
+    }
+    New-Item -ItemType Junction -Path $link -Target $target | Out-Null
+  }
+}
+
+function Get-WorkspaceJunctionTarget([string]$Link) {
+  if (-not [System.IO.Directory]::Exists($Link) -or -not (Test-DependencyReparsePoint $Link)) { return "" }
+  $item = Get-Item -LiteralPath $Link -Force
+  return [string](@($item.Target) | Select-Object -First 1)
+}
+
+function ConvertTo-CmdArgument([string]$Value) {
+  if ($Value -match '[\s"&|<>^()%!,;=]') {
+    return '"' + $Value.Replace('"', '""') + '"'
+  }
+  return $Value
+}
+
+function Stop-ProcessTree([int]$RootProcessId) {
+  $children = @(Get-CimInstance Win32_Process -Filter "ParentProcessId = $RootProcessId" -ErrorAction SilentlyContinue)
+  foreach ($child in $children) {
+    Stop-ProcessTree ([int]$child.ProcessId)
+  }
+  Stop-Process -Id $RootProcessId -Force -ErrorAction SilentlyContinue
+}
+
+function Invoke-BoundedProcess(
+  [string]$Label,
+  [string]$FilePath,
+  [string[]]$Arguments,
+  [string]$WorkingDirectory,
+  [string]$LogPath,
+  [int]$TimeoutSeconds
+) {
+  $parts = @('"' + $FilePath + '"') + @($Arguments | ForEach-Object { ConvertTo-CmdArgument ([string]$_) })
+  $commandLine = '"' + ($parts -join " ") + ' > ' + (ConvertTo-CmdArgument $LogPath) + ' 2>&1"'
+  $startInfo = New-Object System.Diagnostics.ProcessStartInfo
+  $startInfo.FileName = $env:ComSpec
+  $startInfo.Arguments = "/d /s /c $commandLine"
+  $startInfo.WorkingDirectory = $WorkingDirectory
+  $startInfo.UseShellExecute = $false
+  $startInfo.CreateNoWindow = $true
+  $process = [System.Diagnostics.Process]::Start($startInfo)
+  try {
+    if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
+      Stop-ProcessTree ([int]$process.Id)
+      throw "$Label 超过 $TimeoutSeconds 秒，已终止进程树；8787 未停"
+    }
+    $process.WaitForExit()
+    $code = [int]$process.ExitCode
+  } finally {
+    $process.Dispose()
+  }
+  if ($code -ne 0) {
+    $tail = @(Get-Content -LiteralPath $LogPath -Tail 40 -ErrorAction SilentlyContinue) -join "`n"
+    Write-Host $tail
+    throw "$Label 失败 exit=$code；8787 未停，日志 $LogPath"
+  }
+}
+
+function Export-TargetSourceToStage([object]$Plan) {
+  $archive = Join-Path $Plan.StageWork "source.tar"
+  Invoke-GitChecked "git archive TargetSha" @("archive", "--format=tar", "-o", $archive, $TargetSha) | Out-Null
+  New-Item -ItemType Directory -Force -Path $Plan.StageSource | Out-Null
+  $tar = Join-Path $env:SystemRoot "System32\tar.exe"
+  & $tar -x -f $archive -C $Plan.StageSource
+  if ($LASTEXITCODE -ne 0) { throw "解包 TargetSha 源码失败 exit=$LASTEXITCODE；拒绝停 8787" }
+  Remove-Item -LiteralPath $archive -Force
+  Assert-StagedSourceFingerprint $Plan
+}
+
+function Assert-StagedSourceFingerprint([object]$Plan) {
+  $treeFingerprint = Invoke-ReleaseDependencyCheck "staged source fingerprint" @("fingerprint-tree", $Plan.StageSource)
+  if ($treeFingerprint -ne [string]$Plan.ToFingerprint) {
+    throw "staged 源码依赖指纹与 TargetSha 不一致；拒绝停 8787"
+  }
+}
+
+function Invoke-StagedNpmCi([object]$Plan) {
+  $npm = Get-Command npm.cmd -ErrorAction Stop
+  $cache = Join-Path $Plan.StageWork "npm-cache"
+  New-Item -ItemType Directory -Force -Path $cache | Out-Null
+  $proxyConfigured = [bool]($env:HTTPS_PROXY -or $env:HTTP_PROXY)
+  Write-Host "staged npm ci start dir=$($Plan.StageSource) proxy_configured=$proxyConfigured timeout_s=$DependencyNpmCiTimeoutSeconds"
+  # The only networked dependency step: it runs while 8787 still serves, inside an
+  # isolated sibling tree, and never touches the production checkout or its lockfile.
+  Invoke-BoundedProcess `
+    "staged npm ci" `
+    $npm.Source `
+    @("ci", "--no-audit", "--no-fund", "--include=dev", "--include=optional", "--foreground-scripts", "--cache", $cache) `
+    $Plan.StageSource `
+    (Join-Path $Plan.StageWork "logs\npm-ci.log") `
+    $DependencyNpmCiTimeoutSeconds
+}
+
+function Repair-StagedRollupNative([object]$Plan) {
+  # Mac-generated locks omit Rollup's Windows optional native (npm/cli#4828), which
+  # is why the live tree had it pre-provisioned. Fetch the exact version Rollup
+  # declares while still online; the installed-graph check stays bound to the lock.
+  $rollupDir = Get-InstalledPackageDirectory $Plan.StageSource "rollup"
+  if (-not $rollupDir) { throw "staged tree 缺少 rollup；拒绝停 8787" }
+  $nativeName = "@rollup/rollup-win32-x64-msvc"
+  $nativeDir = Join-Path ([System.IO.Path]::GetDirectoryName($rollupDir)) "@rollup\rollup-win32-x64-msvc"
+  if (Test-Path -LiteralPath (Join-Path $nativeDir "package.json") -PathType Leaf) { return }
+  $rollupManifest = [System.IO.File]::ReadAllText((Join-Path $rollupDir "package.json"), $Utf8NoBom) | ConvertFrom-Json
+  $declared = $rollupManifest.optionalDependencies.PSObject.Properties[$nativeName]
+  $version = if ($declared) { [string]$declared.Value } else { "" }
+  if ($version -notmatch '^\d+\.\d+\.\d+$') {
+    throw "rollup 未声明精确的 $nativeName 版本；拒绝停 8787"
+  }
+  $npm = Get-Command npm.cmd -ErrorAction Stop
+  $packDir = Join-Path $Plan.StageWork "packs"
+  New-Item -ItemType Directory -Force -Path $packDir | Out-Null
+  Invoke-BoundedProcess `
+    "staged Rollup Windows native pack" `
+    $npm.Source `
+    @("pack", "$nativeName@$version", "--pack-destination", $packDir, "--cache", (Join-Path $Plan.StageWork "npm-cache")) `
+    $Plan.StageWork `
+    (Join-Path $Plan.StageWork "logs\npm-pack-rollup.log") `
+    300
+  $tarball = Join-Path $packDir "rollup-rollup-win32-x64-msvc-$version.tgz"
+  if (-not (Test-Path -LiteralPath $tarball -PathType Leaf)) { throw "npm pack 未产出 $tarball；拒绝停 8787" }
+  New-Item -ItemType Directory -Force -Path $nativeDir | Out-Null
+  $tar = Join-Path $env:SystemRoot "System32\tar.exe"
+  & $tar -x -f $tarball -C $nativeDir --strip-components 1
+  if ($LASTEXITCODE -ne 0) { throw "解包 $nativeName 失败 exit=$LASTEXITCODE；拒绝停 8787" }
+  $installed = [System.IO.File]::ReadAllText((Join-Path $nativeDir "package.json"), $Utf8NoBom) | ConvertFrom-Json
+  if ([string]$installed.version -ne $version) { throw "$nativeName 版本不符；拒绝停 8787" }
+  Write-Host "staged Rollup Windows native $version restored next to rollup (lockfile omits it)"
+}
+
+function Invoke-WithOfflineNetworkEnvironment([string]$EmptyCache, [scriptblock]$Body) {
+  $offline = [ordered]@{
+    HTTP_PROXY = "http://127.0.0.1:9"
+    HTTPS_PROXY = "http://127.0.0.1:9"
+    ALL_PROXY = "http://127.0.0.1:9"
+    NO_PROXY = "127.0.0.1,localhost"
+    npm_config_offline = "true"
+    npm_config_registry = "http://127.0.0.1:9/"
+    npm_config_proxy = "http://127.0.0.1:9"
+    npm_config_https_proxy = "http://127.0.0.1:9"
+    npm_config_cache = $EmptyCache
+    npm_config_update_notifier = "false"
+  }
+  $prior = @{}
+  foreach ($name in @($offline.Keys)) {
+    $prior[$name] = [Environment]::GetEnvironmentVariable($name, "Process")
+  }
+  try {
+    foreach ($name in @($offline.Keys)) {
+      [Environment]::SetEnvironmentVariable($name, [string]$offline[$name], "Process")
+    }
+    & $Body
+  } finally {
+    foreach ($name in $prior.Keys) {
+      [Environment]::SetEnvironmentVariable($name, $prior[$name], "Process")
+    }
+  }
+}
+
+function Assert-StagedOfflineIntegrity([object]$Plan) {
+  $node = Get-Command node.exe -ErrorAction Stop
+  $npm = Get-Command npm.cmd -ErrorAction Stop
+  $stage = [string]$Plan.StageSource
+  $emptyCache = Join-Path $Plan.StageWork ("offline-cache-" + [Guid]::NewGuid().ToString("N"))
+  $uiProbeOut = Join-Path $Plan.StageWork "ui-dist-probe"
+  New-Item -ItemType Directory -Force -Path $emptyCache | Out-Null
+  try {
+    Invoke-WithOfflineNetworkEnvironment $emptyCache {
+      $installed = Invoke-ReleaseDependencyCheck "staged installed graph" @("installed", $stage, $Root, $TargetSha)
+      if ($installed -ne [string]$Plan.ToFingerprint) {
+        throw "staged node_modules 与目标 npm 依赖图不一致；拒绝停 8787"
+      }
+      foreach ($package in $DependencyRequiredWindowsNatives) {
+        if (-not (Get-InstalledPackageDirectory $stage $package)) {
+          throw "staged tree 缺少 Windows 原生包 $package；拒绝停 8787"
+        }
+      }
+      $tsx = Join-Path $stage "node_modules\.bin\tsx.cmd"
+      $vite = Get-ViteEntry $stage
+      if (-not (Test-Path -LiteralPath $tsx -PathType Leaf)) { throw "staged tsx 启动器缺失；拒绝停 8787" }
+      if (-not $vite) { throw "staged Vite 构建入口缺失；拒绝停 8787" }
+      $rollupNative = Get-ChildItem `
+        -LiteralPath (Get-InstalledPackageDirectory $stage "@rollup/rollup-win32-x64-msvc") `
+        -Filter "*.node" -File -ErrorAction Stop | Select-Object -First 1
+      if (-not $rollupNative) { throw "staged Rollup 原生模块缺失；拒绝停 8787" }
+      $logo = Join-Path $stage "apps\web\ui\public\brand\logo-mark.png"
+      $sharpProbe = "const sharp = require('sharp'); if (!sharp.versions || !sharp.versions.vips) throw new Error('sharp has no libvips'); sharp(process.argv[1]).metadata().then((m) => { if (!m.width || !m.height) throw new Error('empty sharp metadata'); })"
+
+      Assert-NativeOfflineProbe "staged npm installed graph" $npm.Source @("ls", "--all", "--offline", "--ignore-scripts", "--silent") $stage
+      Assert-NativeOfflineProbe "staged tsx launcher" $tsx @("--version") $stage
+      Assert-IsolatedServerEntryImport $tsx $stage
+      Assert-NativeOfflineProbe "staged sharp native module" $node.Source @("-e", $sharpProbe, $logo) (Join-Path $stage "apps\web\server")
+      Assert-NativeOfflineProbe "staged Vite CLI" $node.Source @($vite, "--version") $stage
+      Assert-NativeOfflineProbe "staged Rollup native module" $node.Source @("-e", "require(process.argv[1])", [string]$rollupNative.FullName) $stage
+      Assert-NativeOfflineProbe "staged UI build" $npm.Source @("run", "build", "-w", "beian-ui", "--", "--outDir", $uiProbeOut, "--emptyOutDir") $stage
+      if (-not (Test-Path -LiteralPath (Join-Path $uiProbeOut "index.html") -PathType Leaf)) {
+        throw "staged UI build 未产出 index.html；拒绝停 8787"
+      }
+    }
+  } finally {
+    Remove-Item -LiteralPath $emptyCache -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $uiProbeOut -Recurse -Force -ErrorAction SilentlyContinue
+  }
+  Write-Host "staged offline integrity verified: installed graph, npm ls, tsx, Hono entry, sharp, Vite, Rollup, UI build"
+}
+
+function Test-ReusableDependencyStage([object]$Plan) {
+  $stampPath = Join-Path $Plan.StageWork "stamp.json"
+  if (-not (Test-Path -LiteralPath $stampPath -PathType Leaf)) { return $false }
+  if (-not [System.IO.Directory]::Exists((Join-Path $Plan.StageSource "node_modules"))) { return $false }
+  try {
+    $stamp = [System.IO.File]::ReadAllText($stampPath, $Utf8NoBom) | ConvertFrom-Json
+  } catch {
+    return $false
+  }
+  if (
+    [string]$stamp.protocol -ne $DependencyStageProtocol -or
+    [string]$stamp.target_sha -ne $TargetSha -or
+    [string]$stamp.target_npm_fingerprint -ne [string]$Plan.ToFingerprint
+  ) {
+    return $false
+  }
+  Assert-StagedSourceFingerprint $Plan
+  return $true
+}
+
+function Write-StagedDependencyStamp([object]$Plan) {
+  $stagedPresence = [ordered]@{}
+  foreach ($relative in $DependencySetRelativePaths) {
+    $present = [System.IO.Directory]::Exists((Join-Path $Plan.StageSource $relative))
+    $stagedPresence[$relative.Replace('\', '/')] = if ($present) { "present" } else { "absent" }
+  }
+  $junctions = [ordered]@{}
+  foreach ($name in @($DependencyWorkspaceLinks.Keys)) {
+    $junctions["node_modules/$name"] = Join-Path $Root $DependencyWorkspaceLinks[$name]
+  }
+  $stamp = [ordered]@{
+    protocol = $DependencyStageProtocol
+    target_sha = $TargetSha
+    target_npm_fingerprint = [string]$Plan.ToFingerprint
+    stage_path = [string]$Plan.StageSource
+    depset = $stagedPresence
+    junctions = $junctions
+    verified_at = [DateTime]::UtcNow.ToString("o")
+  }
+  $stagePath = Join-Path $Plan.StageWork "stamp.json"
+  [System.IO.File]::WriteAllText($stagePath, (($stamp | ConvertTo-Json -Depth 6 -Compress) + "`n"), $Utf8NoBom)
+  Copy-AtomicFile $stagePath $DependencyStageStampRuntimePath
+  $Plan.StampPath = $DependencyStageStampRuntimePath
+  $Plan.StampSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $DependencyStageStampRuntimePath).Hash.ToLowerInvariant()
+}
+
+function Prepare-StagedDependencies([object]$Plan, [string]$FromRevision) {
+  Assert-DependencyStagingLocation
+  Assert-DependencyStagingFreeSpace
+  Initialize-DependencyStagingRoot
+  $targetShort = $TargetSha.Substring(0, 12)
+  $utc = [DateTime]::UtcNow.ToString("yyyyMMddTHHmmssZ")
+  $Plan.StagingRoot = $DependencyStagingRoot
+  $Plan.StageSource = Join-Path $DependencyStagingRoot ("stage-" + $targetShort)
+  $Plan.StageWork = Join-Path $DependencyStagingRoot ("work-" + $targetShort)
+  $Plan.BackupDir = Join-Path $DependencyStagingRoot ("backup-" + $FromRevision.Substring(0, 12) + "-" + $utc)
+  $Plan.FailedDir = Join-Path $DependencyStagingRoot ("failed-" + $targetShort + "-" + $utc)
+  Remove-StaleDependencyArtifacts $targetShort
+
+  if (Test-ReusableDependencyStage $Plan) {
+    Write-Host "reuse staged dependency tree for $TargetSha; every offline probe is rerun"
+  } else {
+    Remove-DependencyTreeSafely $Plan.StageSource
+    Remove-DependencyTreeSafely $Plan.StageWork
+    New-Item -ItemType Directory -Force -Path $Plan.StageWork, (Join-Path $Plan.StageWork "logs") | Out-Null
+    Export-TargetSourceToStage $Plan
+    Invoke-StagedNpmCi $Plan
+  }
+  Repair-StagedRollupNative $Plan
+  Set-StagedWorkspaceJunctions $Plan.StageSource $Plan.StageSource
+  Assert-StagedOfflineIntegrity $Plan
+  # Point the workspace junctions at their final checkout location before the
+  # swap so moving node_modules never leaves a link into the staging tree.
+  Set-StagedWorkspaceJunctions $Plan.StageSource $Root
+
+  foreach ($relative in $DependencySetRelativePaths) {
+    $present = [System.IO.Directory]::Exists((Join-Path $Root $relative))
+    $Plan.OldPresence[$relative.Replace('\', '/')] = if ($present) { "present" } else { "absent" }
+  }
+  $Plan.OldTreeMarker = Get-DependencyTreeMarker $Root
+  Write-StagedDependencyStamp $Plan
+  $Plan.Verified = $true
+  Write-Host "offline dependency stage ready $($Plan.StageSource) npm=$($Plan.FromFingerprint)->$($Plan.ToFingerprint)"
+}
+
+function Assert-NoProcessUsesDependencyTrees {
+  $ancestors = @(Get-ReleaseProcessAncestors)
+  $needles = @(
+    $DependencySetRelativePaths | ForEach-Object { (Join-Path $Root $_).ToLowerInvariant() }
+  ) + @($DependencyStagingRoot.ToLowerInvariant())
+  $holders = New-Object 'System.Collections.Generic.List[string]'
+  foreach ($process in @(Get-CimInstance Win32_Process -ErrorAction Stop)) {
+    $processId = [int]$process.ProcessId
+    if ($ancestors -contains $processId) { continue }
+    $text = ([string]$process.ExecutablePath + " " + [string]$process.CommandLine).ToLowerInvariant()
+    foreach ($needle in $needles) {
+      if ($text.Contains($needle)) {
+        [void]$holders.Add("${processId}:$($process.Name)")
+        break
+      }
+    }
+  }
+  if ($holders.Count -gt 0) {
+    throw "仍有进程使用 node_modules，拒绝依赖换位：$($holders -join ',')"
+  }
+}
+
+function Invoke-DependencySwap([object]$Plan) {
+  if (-not (Test-StagedDependencyHandoffReady $Plan.FromFingerprint $Plan.ToFingerprint)) {
+    throw "依赖换位缺少停服前已验证的 staging"
+  }
+  $stampHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $DependencyStageStampRuntimePath).Hash.ToLowerInvariant()
+  if ($stampHash -ne [string]$Plan.StampSha256) {
+    throw "staged 依赖 stamp 与停服前记录不一致"
+  }
+  $stagedFingerprint = Invoke-ReleaseDependencyCheck "staged installed graph before swap" @("installed", $Plan.StageSource, $Root, $TargetSha)
+  if ($stagedFingerprint -ne [string]$Plan.ToFingerprint) {
+    throw "staged node_modules 在停服后发生变化"
+  }
+  Assert-NoProcessUsesDependencyTrees
+
+  # Write-ahead: recovery must know dependencies may have moved before the first rename.
+  $ReleaseJournalState.dependency_mutated = $true
+  Set-ReleaseJournalStage "deps_swap"
+  New-Item -ItemType Directory -Force -Path $Plan.BackupDir | Out-Null
+  foreach ($relative in $DependencySetRelativePaths) {
+    $key = $relative.Replace('\', '/')
+    $live = Join-Path $Root $relative
+    $backup = Join-Path $Plan.BackupDir $relative
+    $staged = Join-Path $Plan.StageSource $relative
+    New-Item -ItemType Directory -Force -Path ([System.IO.Path]::GetDirectoryName($backup)) | Out-Null
+    if ([System.IO.Directory]::Exists($live)) {
+      [System.IO.Directory]::Move($live, $backup)
+    } else {
+      [System.IO.File]::WriteAllText("$backup.absent", "absent`n", $Utf8NoBom)
+    }
+    $ReleaseJournalState.deps_swap_progress[$key] = "backed_up"
+    Write-AtomicReleaseJournal
+    if ([System.IO.Directory]::Exists($staged)) {
+      [System.IO.Directory]::Move($staged, $live)
+    }
+    $ReleaseJournalState.deps_swap_progress[$key] = "swapped"
+    Write-AtomicReleaseJournal
+  }
+  Set-ReleaseJournalStage "deps_swapped"
+}
+
+function Assert-LiveDependencyMatchesTarget([object]$Plan, [string]$PythonPath) {
+  $live = Invoke-ReleaseDependencyCheck "live installed graph after swap" @("installed", $Root, $Root, $TargetSha)
+  if ($live -ne [string]$Plan.ToFingerprint) {
+    throw "换位后的 node_modules 与目标 npm 依赖图不一致"
+  }
+  foreach ($name in @($DependencyWorkspaceLinks.Keys)) {
+    $expected = [System.IO.Path]::GetFullPath((Join-Path $Root $DependencyWorkspaceLinks[$name])).TrimEnd('\', '/')
+    $actual = Get-WorkspaceJunctionTarget (Join-Path $Root "node_modules\$name")
+    if (-not $actual -or -not [string]::Equals([System.IO.Path]::GetFullPath($actual).TrimEnd('\', '/'), $expected, [StringComparison]::OrdinalIgnoreCase)) {
+      throw "换位后 workspace junction $name 未指向 $expected"
+    }
+  }
+  Assert-OfflineRuntimeIntegrity $PythonPath
+  Write-Host "live node_modules swapped to target npm graph $live"
+}
+
+function Complete-DependencyHandoffRetention([object]$Plan) {
+  if (-not $Plan -or [string]$Plan.Mode -ne "npm-staged") { return }
+  Remove-DependencyTreeSafely $Plan.StageSource
+  Remove-DependencyTreeSafely $Plan.StageWork
+  Remove-StaleDependencyArtifacts ""
+  Write-Host "dependency retention keeps one previous generation: $($Plan.BackupDir)"
 }
 
 # Actions runner may not have Git Credential Manager. Never print GITHUB_TOKEN.
@@ -1028,6 +1648,19 @@ function Arm-ReleaseRecovery(
     git_transaction_start_filetime_utc = ""
     git_transaction_owner = ""
     dependency_mutated = $false
+    deps_mode = [string]$DependencyHandoff.Mode
+    deps_old_fingerprint = [string]$DependencyHandoff.FromFingerprint
+    deps_new_fingerprint = [string]$DependencyHandoff.ToFingerprint
+    deps_root = [string]$DependencyHandoff.StagingRoot
+    deps_stage_path = [string]$DependencyHandoff.StageSource
+    deps_backup_path = [string]$DependencyHandoff.BackupDir
+    deps_failed_path = [string]$DependencyHandoff.FailedDir
+    deps_set = @($DependencySetRelativePaths | ForEach-Object { $_.Replace('\', '/') })
+    deps_old_presence = $DependencyHandoff.OldPresence
+    deps_old_tree_marker = [string]$DependencyHandoff.OldTreeMarker
+    deps_stage_stamp = [string]$DependencyHandoff.StampPath
+    deps_stage_stamp_sha256 = [string]$DependencyHandoff.StampSha256
+    deps_swap_progress = [ordered]@{}
     ui_mutated = $false
     python_mutated = $false
     agent_mutated = $false
@@ -1065,6 +1698,7 @@ function Disarm-ReleaseRecovery {
   Remove-Item -LiteralPath $ReleaseRecoveryPath -Force -ErrorAction SilentlyContinue
   Remove-Item -LiteralPath $ReleaseInstallerPath -Force -ErrorAction SilentlyContinue
   Remove-Item -LiteralPath $ReleaseDependencyCheckPath -Force -ErrorAction SilentlyContinue
+  Remove-Item -LiteralPath $DependencyStageStampRuntimePath -Force -ErrorAction SilentlyContinue
   $script:ReleaseJournalState = $null
 }
 
@@ -1108,6 +1742,7 @@ function Remove-UnarmedReleaseRuntime {
     $ReleaseRecoveryPath,
     $ReleaseInstallerPath,
     $ReleaseDependencyCheckPath,
+    $DependencyStageStampRuntimePath,
     $ReleaseLockPath
   )) {
     try {
@@ -1237,6 +1872,12 @@ if (-not $releasePython) {
   $releasePython = Join-Path $Root "apps\web\backend\.venv\Scripts\python.exe"
 }
 $releasePython = [System.IO.Path]::GetFullPath($releasePython)
+Assert-PythonRequirementsUnchanged $preSha $TargetSha
+$DependencyHandoff = Get-DependencyHandoffPlan $preSha $TargetSha
+if ([string]$DependencyHandoff.Mode -eq "npm-staged") {
+  Write-Host "npm dependency graph changed; build and verify an offline stage while :8787 still serves"
+  Prepare-StagedDependencies $DependencyHandoff $preSha
+}
 Assert-OfflineDependencyHandoff $preSha $TargetSha $releasePython
 Assert-OfflineRuntimeIntegrity $releasePython
 Snapshot-UiDist
@@ -1352,8 +1993,16 @@ try {
   Write-Host "tree $sha VERSION=$ver"
 
   Clear-GithubToken
+  if ([string]$DependencyHandoff.Mode -eq "npm-staged") {
+    Invoke-DependencySwap $DependencyHandoff
+    Assert-LiveDependencyMatchesTarget $DependencyHandoff $releasePython
+  }
   Assert-OfflineDependencyHandoff $preSha $TargetSha $releasePython
-  Write-Host "dependency graph unchanged; reuse verified offline node_modules and Python environment"
+  if ([string]$DependencyHandoff.Mode -eq "npm-staged") {
+    Write-Host "dependency graph changed; swapped verified offline node_modules from $($DependencyHandoff.StageSource)"
+  } else {
+    Write-Host "dependency graph unchanged; reuse verified offline node_modules and Python environment"
+  }
 
   $ReleaseJournalState.ui_mutated = $true
   Set-ReleaseJournalStage "ui_build"
@@ -1451,6 +2100,11 @@ try {
   Commit-ReleaseRecovery $mergedHeadSha $ver
   Open-TargetReleaseDrain $targetDrain $ver
   Disarm-ReleaseRecovery
+  try {
+    Complete-DependencyHandoffRetention $DependencyHandoff
+  } catch {
+    Write-Warning "dependency retention cleanup failed after commit: $($_.Exception.Message)"
+  }
   Write-Host "不要动 cloudflared。Mac 不要 run beian。不要并行跑本脚本。"
   Write-Host "公网核对: curl https://www.jianghua.site/api/health  （version 应等于本机）"
 } catch {

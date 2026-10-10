@@ -22,6 +22,7 @@ if (-not $JournalPath) {
 $JournalPath = [System.IO.Path]::GetFullPath($JournalPath)
 $ReleaseRuntimeDir = [System.IO.Path]::GetDirectoryName($JournalPath)
 $ReleaseLockPath = Join-Path $ReleaseRuntimeDir "release.lock"
+$DependencyAllowedRelativePaths = @("apps/web/server/node_modules", "apps/web/ui/node_modules", "node_modules")
 
 function Invoke-GitResult([string]$RepositoryRoot, [object[]]$GitArgs) {
   if (-not $GitArgs -or $GitArgs.Count -eq 0) {
@@ -499,11 +500,15 @@ function Assert-RecoveryRuntimeIntegrity([string]$Root, [string]$PythonPath) {
   $node = Get-Command node.exe -ErrorAction Stop
   $npm = Get-Command npm.cmd -ErrorAction Stop
   $tsx = Join-Path $Root "node_modules\.bin\tsx.cmd"
-  $vite = Join-Path $Root "node_modules\vite\bin\vite.js"
+  # A clean lockfile install keeps Vite under the UI workspace; older hand-provisioned trees hoisted it.
+  $vite = @(
+    (Join-Path $Root "node_modules\vite\bin\vite.js"),
+    (Join-Path $Root "apps\web\ui\node_modules\vite\bin\vite.js")
+  ) | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
   if (-not (Test-Path -LiteralPath $tsx -PathType Leaf)) {
     throw "release recovery requires the tsx service launcher"
   }
-  if (-not (Test-Path -LiteralPath $vite -PathType Leaf)) {
+  if (-not $vite) {
     throw "release recovery requires the Vite build runtime"
   }
   $rollupNative = @(
@@ -537,6 +542,131 @@ function Assert-RecoveryRuntimeIntegrity([string]$Root, [string]$PythonPath) {
       $env:PYTHONPATH = $priorPythonPath
     }
   }
+}
+
+function Get-DependencyTreeMarker([string]$TreeRoot) {
+  $hidden = Join-Path $TreeRoot "node_modules\.package-lock.json"
+  if (-not (Test-Path -LiteralPath $hidden -PathType Leaf)) { return "absent" }
+  return (Get-FileHash -Algorithm SHA256 -LiteralPath $hidden).Hash.ToLowerInvariant()
+}
+
+# Decide one dependency directory from disk facts, not from the (possibly one step
+# stale) journal progress. release.ps1 always moves live -> backup (or writes an
+# .absent marker) before moving staged -> live, so an existing backup proves any
+# live directory is the target tree.
+function Get-DependencyRestoreAction(
+  [bool]$LiveExists,
+  [bool]$BackupExists,
+  [bool]$AbsentMarker,
+  [bool]$WasPresent
+) {
+  if ($BackupExists) {
+    if ($LiveExists) { return "swap-back" }
+    return "restore"
+  }
+  if ($AbsentMarker) {
+    if ($LiveExists) { return "discard-target" }
+    return "clear-marker"
+  }
+  if ($LiveExists) { return "none" }
+  if (-not $WasPresent) { return "none" }
+  return "lost"
+}
+
+function Get-VerifiedDependencyRestorePlan([object]$Journal, [string]$Root) {
+  if ([string](JournalProperty $Journal "deps_mode") -ne "npm-staged") {
+    throw "release transaction mutated dependencies without a staged handoff plan; offline rollback cannot be proven"
+  }
+  $parent = [System.IO.Path]::GetDirectoryName($Root)
+  $journalRoot = [string](JournalProperty $Journal "deps_root")
+  if (-not $parent -or -not $journalRoot) {
+    throw "release recovery dependency root is missing"
+  }
+  $expectedRoot = (Join-Path $parent "beian-deps").TrimEnd('\', '/')
+  $depsRoot = [System.IO.Path]::GetFullPath($journalRoot).TrimEnd('\', '/')
+  if (-not [string]::Equals($depsRoot, $expectedRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+    throw "release recovery dependency root is not the trusted sibling of the checkout"
+  }
+  $backup = Assert-PathUnder ([string](JournalProperty $Journal "deps_backup_path")) $depsRoot "dependency backup"
+  $failed = Assert-PathUnder ([string](JournalProperty $Journal "deps_failed_path")) $depsRoot "failed dependency tree"
+  $set = @(JournalProperty $Journal "deps_set" | ForEach-Object { [string]$_ })
+  if (($set -join "|") -ne ($DependencyAllowedRelativePaths -join "|")) {
+    throw "release recovery dependency set does not match the allowlist"
+  }
+  $marker = [string](JournalProperty $Journal "deps_old_tree_marker")
+  if ($marker -notmatch '^(?:absent|[0-9a-f]{64})$') {
+    throw "release recovery dependency tree marker is invalid"
+  }
+  return [PSCustomObject]@{
+    Backup = $backup
+    Failed = $failed
+    Set = $set
+    Presence = JournalProperty $Journal "deps_old_presence"
+    Marker = $marker
+  }
+}
+
+function Move-DependencyTreeAside([string]$Source, [string]$Destination) {
+  $target = $Destination
+  if ([System.IO.Directory]::Exists($target) -or [System.IO.File]::Exists($target)) {
+    $target = $Destination + "-" + [Guid]::NewGuid().ToString("N").Substring(0, 8)
+  }
+  New-Item -ItemType Directory -Force -Path ([System.IO.Path]::GetDirectoryName($target)) | Out-Null
+  [System.IO.Directory]::Move($Source, $target)
+}
+
+function Restore-DependencyBackup([object]$Plan, [object]$Journal, [string]$Root) {
+  $progress = JournalProperty $Journal "deps_swap_progress"
+  if ($null -eq $progress) {
+    $progress = New-Object PSObject
+    $Journal | Add-Member -NotePropertyName "deps_swap_progress" -NotePropertyValue $progress -Force
+  }
+  $ordered = @($Plan.Set)
+  [array]::Reverse($ordered)
+  foreach ($key in $ordered) {
+    $relative = $key.Replace('/', '\')
+    $live = Join-Path $Root $relative
+    $backup = Join-Path $Plan.Backup $relative
+    $marker = "$backup.absent"
+    $failed = Join-Path $Plan.Failed $relative
+    $wasPresent = $true
+    if ($null -ne $Plan.Presence) {
+      $wasPresent = ([string](JournalProperty $Plan.Presence $key) -ne "absent")
+    }
+    $action = Get-DependencyRestoreAction `
+      ([System.IO.Directory]::Exists($live)) `
+      ([System.IO.Directory]::Exists($backup)) `
+      ([System.IO.File]::Exists($marker)) `
+      $wasPresent
+    switch ($action) {
+      "swap-back" {
+        Move-DependencyTreeAside $live $failed
+        [System.IO.Directory]::Move($backup, $live)
+      }
+      "restore" {
+        New-Item -ItemType Directory -Force -Path ([System.IO.Path]::GetDirectoryName($live)) | Out-Null
+        [System.IO.Directory]::Move($backup, $live)
+      }
+      "discard-target" {
+        Move-DependencyTreeAside $live $failed
+        [System.IO.File]::Delete($marker)
+      }
+      "clear-marker" {
+        [System.IO.File]::Delete($marker)
+      }
+      "none" { }
+      default {
+        throw "release recovery cannot prove the pre-release dependency tree for $key; 8787 remains stopped"
+      }
+    }
+    $progress | Add-Member -NotePropertyName $key -NotePropertyValue "restored" -Force
+    $Journal.updated_at = [DateTime]::UtcNow.ToString("o")
+    Write-AtomicJournal $Journal
+  }
+  if ((Get-DependencyTreeMarker $Root) -ne [string]$Plan.Marker) {
+    throw "restored node_modules does not match the pre-release dependency tree marker"
+  }
+  Write-Host "RELEASE_RECOVERY restored pre-release node_modules from $($Plan.Backup)"
 }
 
 function Test-ReleaseProcess([object]$Journal) {
@@ -659,6 +789,13 @@ function Remove-WatchdogArtifacts([object]$Journal) {
   }
   if ([string]$Journal.ui_snapshot) {
     Remove-Item -LiteralPath ([string]$Journal.ui_snapshot) -Recurse -Force -ErrorAction SilentlyContinue
+  }
+  $dependencyStamp = [string](JournalProperty $Journal "deps_stage_stamp")
+  if ($dependencyStamp) {
+    try {
+      $trustedStamp = Assert-PathUnder $dependencyStamp $ReleaseRuntimeDir "dependency stage stamp"
+      Remove-Item -LiteralPath $trustedStamp -Force -ErrorAction SilentlyContinue
+    } catch { }
   }
 }
 
@@ -791,6 +928,7 @@ try {
   )
   if (
     $fastRecoveryStage -and
+    -not [bool]$journal.dependency_mutated -and
     -not [bool]$journal.ui_mutated -and
     -not [bool]$journal.agent_mutated -and
     $preDistMatchesSnapshot -and
@@ -834,10 +972,15 @@ try {
     }
   }
 
-  if ([bool]$journal.dependency_mutated -or [bool]$journal.python_mutated) {
-    throw "release transaction illegally mutated dependencies; offline rollback cannot be proven"
+  if ([bool]$journal.python_mutated) {
+    throw "release transaction illegally mutated the Python environment; offline rollback cannot be proven"
   }
-  if (-not (Test-Path -LiteralPath (Join-Path $root "node_modules") -PathType Container)) {
+  $dependencyRestore = $null
+  if ([bool]$journal.dependency_mutated) {
+    # The staged npm handoff moved node_modules after stop; the backup is restored
+    # below, after 8787 and the Agent are stopped and before the tree is reset.
+    $dependencyRestore = Get-VerifiedDependencyRestorePlan $journal $root
+  } elseif (-not (Test-Path -LiteralPath (Join-Path $root "node_modules") -PathType Container)) {
     throw "release recovery requires the verified offline node_modules tree"
   }
   $python = Assert-PathUnder ([string]$journal.python_executable) $root "Python executable"
@@ -857,6 +1000,12 @@ try {
   Stop-BeianService
   if ([bool]$journal.agent_mutated) {
     Stop-IllustratorAgentTaskForRecovery $journal $dataRoot
+  }
+  if ($dependencyRestore) {
+    Restore-DependencyBackup $dependencyRestore $journal $root
+  }
+  if (-not (Test-Path -LiteralPath (Join-Path $root "node_modules") -PathType Container)) {
+    throw "release recovery requires the verified offline node_modules tree"
   }
   Restore-UiSnapshot $uiSnapshot ([string]$journal.ui_snapshot_sha256) $root
   Invoke-GitChecked $root "git reset to the pre-release SHA failed" @(

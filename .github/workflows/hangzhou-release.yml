@@ -18,7 +18,7 @@ jobs:
   release:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: [self-hosted, hangzhou]
-    timeout-minutes: 40
+    timeout-minutes: 60
     env:
       WB_DATA_DIR: C:\supply\data
       WB_PUBLIC: "1"
