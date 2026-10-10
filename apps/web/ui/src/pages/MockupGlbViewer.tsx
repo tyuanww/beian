@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ModelViewerElement } from "@google/model-viewer";
-import { Progress, Spin } from "antd";
+import { Progress } from "antd";
 import { composeGlbDisplaySet, DISPLAY_TABLE_MATERIAL, DISPLAY_WALL_MATERIAL } from "./glbDisplayAsset";
 import { DEFAULT_GLB_VIEW, glbCameraDistances } from "./mockupGlbCamera";
 import { GLB_LOADING_TEXT, GLB_PREPARING_TEXT, type GlbProgress, glbInteractive, glbTotalKnown, glbViewerProgress, glbStatusText, readGlbWithProgress } from "./mockupGlbProgress";
@@ -226,9 +226,7 @@ export function MockupGlbViewer({ source, poster, backdrop, backgroundLight, pro
     {error && <p role="alert" className="mockup-glb-message">3D 预览加载失败，请重新打开此单。下载仍为原始模型。</p>}
     {loading && <div className="mockup-glb-message mockup-glb-progress">
       <span className="mockup-glb-progress-visual" aria-hidden="true">
-        {progress.kind === "percent"
-          ? <Progress percent={progress.percent} size="small" status="active" />
-          : <Spin size="small" />}
+        {progress.kind === "percent" ? <Progress percent={progress.percent} size="small" status="active" /> : null}
         <span>{progress.kind === "preparing" ? GLB_PREPARING_TEXT : GLB_LOADING_TEXT}</span>
       </span>
       <span role="status" className="sr-only">{glbStatusText(progress)}</span>
