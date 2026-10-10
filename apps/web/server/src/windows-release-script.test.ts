@@ -1042,7 +1042,7 @@ describe("windows release.ps1 contract", () => {
       /require\('sharp'\)/,
       /sharp\.versions\.vips/,
       /"staged Rollup native module"/,
-      /"staged UI build" \$npm\.Source @\("run", "build", "-w", "beian-ui", "--", "--outDir", \$uiProbeOut, "--emptyOutDir"\)/,
+      /Invoke-BoundedProcess "staged UI build" \$npm\.Source @\("run", "build", "-w", "beian-ui"\) \$stage \(Join-Path \$Plan\.StageWork "logs\\ui-build\.log"\) 600/,
     ]) {
       assert.match(integrity, probe);
     }
@@ -1052,6 +1052,48 @@ describe("windows release.ps1 contract", () => {
     assert.match(offline, /npm_config_registry = "http:\/\/127\.0\.0\.1:9\/"/);
     assert.match(offline, /finally \{[\s\S]*SetEnvironmentVariable\(\$name, \$prior\[\$name\], "Process"\)/);
     assert.doesNotMatch(script, /netsh\s+advfirewall|New-NetFirewallRule/i);
+  });
+
+  it("builds the stage's own UI dist before importing the Hono entry, and never swaps dist into the checkout", () => {
+    const integrity = script.slice(indexOf(/function Assert-StagedOfflineIntegrity/), indexOf(/function Test-ReusableDependencyStage/));
+    const buildIdx = integrity.indexOf('"staged UI build"');
+    const distIdx = integrity.indexOf('Join-Path $stageDist "index.html"');
+    const importIdx = integrity.indexOf("Assert-IsolatedServerEntryImport $tsx $stage");
+    assert.ok(buildIdx >= 0 && distIdx > buildIdx && importIdx > distIdx, "UI build must precede the Hono entry import");
+    assert.match(integrity, /\$stageDist = Join-Path \$stage "apps\\web\\ui\\dist"/);
+    assert.doesNotMatch(integrity, /--outDir/);
+    assert.doesNotMatch(integrity, /Join-Path \$Root "apps\\web\\ui\\dist"/);
+    assert.doesNotMatch(script, /"apps\\web\\ui\\dist"[^\n]*\$DependencySetRelativePaths|DependencySetRelativePaths = @\([^)]*dist/);
+    const index = readFileSync(join(repoRoot, "apps/web/server/src/index.ts"), "utf8");
+    assert.match(index, /serveStatic\(\{ root: UI_DIST \}\)/, "probe ordering exists because the entry mounts UI_DIST at import");
+    const contract = readFileSync(join(repoRoot, "scripts/windows/release-deps-handoff.contract.ps1"), "utf8");
+    assert.match(contract, /staged UI build must run before the Hono entry import/);
+  });
+
+  it("rehearses the real pre-stop staging path end to end on windows-2022 only", () => {
+    const qualityWorkflow = readFileSync(join(repoRoot, ".github/workflows/quality.yml"), "utf8");
+    const windowsJob = qualityWorkflow.slice(
+      qualityWorkflow.indexOf("windows-powershell-contract:"),
+      qualityWorkflow.indexOf("\n  quality:"),
+    );
+    assert.match(windowsJob, /fetch-depth: 0/);
+    assert.match(windowsJob, /release-staging-rehearsal\.ps1/);
+    assert.ok(windowsJob.indexOf("release-deps-handoff.contract.ps1") < windowsJob.indexOf("release-staging-rehearsal.ps1"));
+    const rehearsal = readFileSync(join(repoRoot, "scripts/windows/release-staging-rehearsal.ps1"), "utf8");
+    assert.match(rehearsal, /STAGING_REHEARSAL ok/);
+    assert.match(rehearsal, /GetTempPath\(\)/);
+    assert.match(rehearsal, /Prepare-StagedDependencies \$DependencyHandoff \$BaseSha/);
+    assert.match(rehearsal, /Get-DependencyHandoffPlan \$BaseSha \$TargetSha/);
+    assert.match(rehearsal, /FunctionDefinitionAst/);
+    assert.match(rehearsal, /eb2ceb86eb698d16ae8e532e885fdc19fadbbd48/);
+    assert.match(rehearsal, /staging leaked a UI dist into the checkout/);
+    assert.doesNotMatch(rehearsal, /Stop-Service|Start-Service|Register-ScheduledTask|\.\s+\$releasePath|& \$releasePath|Invoke-DependencySwap/);
+    const baseLock = spawnSync("git", ["-C", repoRoot, "cat-file", "-e", "eb2ceb86eb698d16ae8e532e885fdc19fadbbd48^{commit}"]);
+    if (baseLock.status === 0) {
+      const base = spawnSync(process.execPath, [dependencyCheckPath, "fingerprint", repoRoot, "eb2ceb86eb698d16ae8e532e885fdc19fadbbd48"], { encoding: "utf8" });
+      const head = spawnSync(process.execPath, [dependencyCheckPath, "fingerprint", repoRoot, "HEAD"], { encoding: "utf8" });
+      assert.notEqual(base.stdout.trim(), head.stdout.trim(), "rehearsal base must differ from HEAD in npm graph");
+    }
   });
 
   it("copies the checkout ACL, checks D: space, and never follows junctions when deleting", () => {

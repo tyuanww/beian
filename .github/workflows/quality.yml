@@ -14,10 +14,12 @@ permissions:
 jobs:
   windows-powershell-contract:
     runs-on: windows-2022
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - name: Verify Windows PowerShell 5.1 atomic replace contract
         shell: powershell
         run: |
@@ -64,6 +66,11 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
           & (Join-Path $env:GITHUB_WORKSPACE "scripts\windows\release-deps-handoff.contract.ps1")
+      - name: Rehearse full pre-stop dependency staging (temp clone, real release functions loaded by AST)
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          & (Join-Path $env:GITHUB_WORKSPACE "scripts\windows\release-staging-rehearsal.ps1")
 
   quality:
     runs-on: ubuntu-latest
