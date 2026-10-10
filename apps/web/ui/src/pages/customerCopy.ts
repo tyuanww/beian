@@ -11,6 +11,9 @@ export function customerCopy(raw: string): string {
     .replace(/对照失败/g, "检查失败")
     .replace(/对照中/g, "检查中")
     .replace(/对红中/g, "复核中")
+    // 对外统一叫「检查/复核」；后端阶段值不改，这里只改显示。
+    .replace(/对照/g, "检查")
+    .replace(/对红/g, "复核")
     .replace(/已签字/g, "已提交")
     .replace(/机审/g, "自动检查")
     .replace(/Illustrator|Blender/gi, "")
