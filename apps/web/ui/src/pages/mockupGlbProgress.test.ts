@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
-  glbPosterKey, glbProgressFromBytes, glbProgressFromFraction, parseContentLength, readGlbWithProgress,
+  glbPosterKey, glbProgressFromBytes, glbStatusText, glbProgressFromFraction, parseContentLength, readGlbWithProgress,
   type GlbProgress,
 } from "./mockupGlbProgress.js";
 
@@ -56,6 +56,17 @@ describe("GLB 加载进度", () => {
   it("流读取出错时向上抛出，由调用方切到 error", async () => {
     const body = new ReadableStream<Uint8Array>({ pull(controller) { controller.error(new Error("net")); } });
     await assert.rejects(readGlbWithProgress(new Response(body), () => undefined), /net/);
+  });
+});
+
+describe("GLB 读屏播报", () => {
+  it("百分比只在 25/50/75/100 档位变化，准备场景单独提示", () => {
+    const texts = [0, 10, 24, 25, 49, 50, 74, 75, 99, 100].map((percent) => glbStatusText({ kind: "percent", percent }));
+    assert.deepEqual([...new Set(texts)], [
+      "正在加载 3D 模型…", "正在加载 3D 模型… 25%", "正在加载 3D 模型… 50%", "正在加载 3D 模型… 75%", "正在加载 3D 模型… 100%",
+    ]);
+    assert.equal(glbStatusText({ kind: "indeterminate" }), "正在加载 3D 模型…");
+    assert.equal(glbStatusText({ kind: "preparing" }), "正在准备场景…");
   });
 });
 

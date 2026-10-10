@@ -9,6 +9,14 @@ export type GlbProgress =
 export const GLB_LOADING_TEXT = "正在加载 3D 模型…";
 export const GLB_PREPARING_TEXT = "正在准备场景…";
 
+/** 读屏播报文本：百分比只在 25/50/75/100 档位变化，避免 live region 每个分块都播报。 */
+export function glbStatusText(progress: GlbProgress): string {
+  if (progress.kind === "preparing") return GLB_PREPARING_TEXT;
+  if (progress.kind === "indeterminate") return GLB_LOADING_TEXT;
+  const milestone = Math.floor(progress.percent / 25) * 25;
+  return milestone > 0 ? `${GLB_LOADING_TEXT} ${milestone}%` : GLB_LOADING_TEXT;
+}
+
 export function glbProgressFromBytes(loaded: number, total: number | null | undefined): GlbProgress {
   if (!total || !Number.isFinite(total) || total <= 0 || !Number.isFinite(loaded) || loaded < 0) {
     return { kind: "indeterminate" };

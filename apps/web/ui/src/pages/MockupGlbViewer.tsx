@@ -3,7 +3,7 @@ import type { ModelViewerElement } from "@google/model-viewer";
 import { Progress, Spin } from "antd";
 import { composeGlbDisplaySet, DISPLAY_TABLE_MATERIAL, DISPLAY_WALL_MATERIAL } from "./glbDisplayAsset";
 import { DEFAULT_GLB_VIEW, glbCameraDistances } from "./mockupGlbCamera";
-import { GLB_LOADING_TEXT, GLB_PREPARING_TEXT, type GlbProgress, glbProgressFromFraction, readGlbWithProgress } from "./mockupGlbProgress";
+import { GLB_LOADING_TEXT, GLB_PREPARING_TEXT, type GlbProgress, glbProgressFromFraction, glbStatusText, readGlbWithProgress } from "./mockupGlbProgress";
 import { GLB_ENVIRONMENT, glbViewerExposure, glbRoomEmission } from "./mockupGlbLighting";
 import { type BackdropPreset, studioBackdrop } from "./mockupStudio";
 
@@ -216,11 +216,14 @@ export function MockupGlbViewer({ source, poster, backdrop, backgroundLight, pro
       style={{ background: studioBackdrop(backgroundLight, backdrop), opacity: ready ? 1 : 0 }}
     />}
     {error && <p role="alert" className="mockup-glb-message">3D 预览加载失败，请重新打开此单。下载仍为原始模型。</p>}
-    {loading && <div role="status" className="mockup-glb-message mockup-glb-progress">
-      {progress.kind === "percent"
-        ? <Progress percent={progress.percent} size="small" status="active" aria-label={GLB_LOADING_TEXT} />
-        : <Spin size="small" />}
-      <span>{progress.kind === "preparing" ? GLB_PREPARING_TEXT : GLB_LOADING_TEXT}</span>
+    {loading && <div className="mockup-glb-message mockup-glb-progress">
+      <span className="mockup-glb-progress-visual" aria-hidden="true">
+        {progress.kind === "percent"
+          ? <Progress percent={progress.percent} size="small" status="active" />
+          : <Spin size="small" />}
+        <span>{progress.kind === "preparing" ? GLB_PREPARING_TEXT : GLB_LOADING_TEXT}</span>
+      </span>
+      <span role="status" className="sr-only">{glbStatusText(progress)}</span>
     </div>}
     <button type="button" className="mockup-dl mockup-glb-reset" aria-label="复位模型视角"
       disabled={!ready || error} onClick={() => { void frame(true); }}>复位</button>
