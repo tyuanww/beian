@@ -6,7 +6,7 @@ import { createRenderRequest, readPendingRenderRequest, savePendingRenderRequest
 import "../styles/renderVersions.css";
 
 /** 报错先说一句大白话，原文默认折叠（Ant Design Collapse），开发排查时再展开。 */
-export function RenderReason({reason}:{reason?:string}) {
+function RenderReason({reason}:{reason?:string}) {
   const copy=renderReasonCopy(reason);
   return <div className="mockup-render-reason">
     <span>{copy.plain}</span>
