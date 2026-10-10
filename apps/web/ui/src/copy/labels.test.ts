@@ -60,3 +60,16 @@ describe("reviewVersionToggle", () => {
     assert.deepEqual(reviewVersionToggle(false), { button: "看新稿", current: "当前：旧稿" });
   });
 });
+
+describe("API rows straight from /api/tasks", () => {
+  it("accepts rows with signed / rework / missing / null complete_kind without throwing", () => {
+    const rows = [
+      { id: "a", title: "x", type: "pack", status: "completed", complete_kind: "signed" },
+      { id: "b", title: "x", type: "pack", status: "completed", complete_kind: "rework" },
+      { id: "c", title: "x", type: "pack", status: "completed" },
+      JSON.parse('{"id":"d","title":"x","type":"pack","status":"completed","complete_kind":null}'),
+    ];
+    assert.deepEqual(rows.map((row) => statusLabel(row).text), ["已通过", "已退回", "已提交", "已提交"]);
+    assert.deepEqual(rows.map((row) => historyTaskRow(row).status), ["已通过", "已退回", "已提交", "已提交"]);
+  });
+});
