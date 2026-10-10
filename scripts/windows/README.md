@@ -85,7 +85,7 @@ $env:WB_DATA_DIR = "C:\supply\data"
 node_modules\.bin\tsx.cmd apps\web\server\src\recoverNativeText.ts --task <任务 id> --attempt <native_text_request.id> --confirm-no-open-documents
 ```
 
-只有输出 `"outcome":"recovered"`（退出码 0）才算完成；`worker_not_proven_gone` 表示记录的执行者仍在或无法证明已退出，`attempt_mismatch` / `not_stuck` 表示参数或状态不符，均不改文件；`overwritten_concurrently` 表示写入后复读发现被同一瞬间的服务端写入覆盖，原样重跑即可。无需停 8787：服务端所有任务写入方都在最后一次 await 后重新读盘并同步落盘（`jobs.ts`、`index.ts` 审稿接口），不存在持有旧对象跨 await 回写。使用 `D:\beian` 已装的 tsx（发版以 `--include=dev` 安装，与 8787 同一启动器），不要用 `npx`（可能联网）。之后确认 health 的 `illustrator.running` 为 0，再按发布合同重跑同一条 push run。
+只有输出 `"outcome":"recovered"`（退出码 0）才算完成；`worker_not_proven_gone` 表示记录的执行者仍在或无法证明已退出，`attempt_mismatch` / `not_stuck` 表示参数或状态不符，均不改文件；`overwritten_concurrently` 表示写入后复读发现被同一瞬间的服务端写入覆盖，原样重跑即可。可以不停 8787，但不是零风险：任务 JSON 没有文件锁，服务端写入方（`jobs.ts`、`index.ts` 审稿接口）与本命令都是「读盘→同步改→整份写回」。本命令在耗时数秒的执行者核对之后会重新读盘、再核对同一 attempt 仍卡住，只改 `native_text_request`；剩余风险只有两进程在同一瞬间写同一任务，写后复读会报 `overwritten_concurrently`。为彻底排除，宜在无人审稿时执行；要求零风险就在维护窗停 8787 后执行。使用 `D:\beian` 已装的 tsx（发版以 `--include=dev` 安装，与 8787 同一启动器），不要用 `npx`（可能联网）。之后确认 health 的 `illustrator.running` 为 0，再按发布合同重跑同一条 push run。
 
 不要安装 PowerShell 7、.NET SDK 或 pywin32，也不要手工在 Session 0 启动 Illustrator。
 
