@@ -119,7 +119,9 @@ export function recoverNativeRequests(mode: "boot" | "late" = "boot") {
     // already recorded a fence, or after its executor is proven gone.
     if (mode === "late" && !req.reason && !gone) continue;
     if (gone && closed(task, req)) fallback(task, "native_failed");
-    else { req.reason = "close_unconfirmed"; saveTask(task); }
+    // Re-saving an unchanged fence would race an out-of-process admin
+    // recovery (read-before, write-after) and silently restore the fence.
+    else if (req.reason !== "close_unconfirmed") { req.reason = "close_unconfirmed"; saveTask(task); }
   }
 }
 export type AdminNativeRecovery = "recovered" | "not_stuck" | "attempt_mismatch" | "worker_not_proven_gone";
