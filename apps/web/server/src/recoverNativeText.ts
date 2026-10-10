@@ -1,8 +1,9 @@
 /**
  * Admin-only CLI: release a native-text request stuck in running +
  * close_unconfirmed after the Illustrator host was restarted. Run on the
- * production host from an elevated shell, with WB_DATA_DIR set, only after an
- * administrator has confirmed Illustrator has no customer documents open:
+ * production host from an elevated shell, with WB_DATA_DIR set, ONLY after
+ * beian-server-8787 has been stopped and an administrator has confirmed
+ * Illustrator has no customer documents open:
  *
  *   node_modules\.bin\tsx.cmd apps/web/server/src/recoverNativeText.ts --task <task id> --attempt <32-hex id> --confirm-no-open-documents
  *
@@ -18,7 +19,7 @@ function arg(name: string): string | undefined {
 const task = arg("--task");
 const attempt = arg("--attempt");
 if (!task || !/^[0-9a-f]{12}$/.test(task) || !attempt || !/^[0-9a-f]{32}$/.test(attempt)) {
-  console.error("usage: --task <12-hex task id> --attempt <32-hex attempt id> --confirm-no-open-documents");
+  console.error("usage (stop beian-server-8787 first): --task <12-hex task id> --attempt <32-hex attempt id> --confirm-no-open-documents");
   process.exit(2);
 }
 if (!process.argv.includes("--confirm-no-open-documents")) {
