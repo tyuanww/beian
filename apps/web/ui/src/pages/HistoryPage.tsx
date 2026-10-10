@@ -5,6 +5,7 @@ import { uploadStore } from "../uploadStore";
 import type { HistoryItem, HistoryResult } from "../batchTypes";
 import { customerCopy } from "./customerCopy";
 import { COMPRESSION_STATUS_LABEL } from "../copy/labels";
+import { HistoryFiles } from "./HistoryFiles";
 import { emptyHistoryFilters, historyDeletable, historyKey, historyLive, historyQuery, historyStatusColor, historyTimeFilters, historyTypeLabels, normalizeHistoryFilters, type HistoryFilters, type HistoryTimeMode } from "./historyQuery";
 
 // Kept for callers of the existing row action helper during the data transition.
@@ -162,9 +163,9 @@ export function HistoryPage({ owner, canCreate, canDelete, onOpenTask, onOpenMoc
       <Table<HistoryItem> rowKey={historyKey} loading={loading && !data} dataSource={pageRows} pagination={false} scroll={{ x: 800 }}
         locale={{ emptyText: error || building || loading ? <Empty description="记录加载中…" /> : <Empty description="没有找到相关记录。" /> }}
         rowSelection={editing ? { selectedRowKeys: selected.map(historyKey), onSelect: row => toggle(row), onSelectAll: checked => setSelected(current => checked ? [...current.filter(item => !deletable.some(row => historyKey(row) === historyKey(item))), ...deletable] : current.filter(item => !deletable.some(row => historyKey(row) === historyKey(item)))), getCheckboxProps: row => ({ disabled: !historyDeletable(row), title: !historyDeletable(row) ? "处理完成后可删除" : undefined, "aria-label": `选择 ${row.title}` }) } : undefined}
-        onRow={row => ({ onClick: event => { if (!(event.target as HTMLElement).closest("button,a,input,.ant-checkbox-wrapper")) void open(row); } })}
+        onRow={row => ({ onClick: event => { if (!(event.target as HTMLElement).closest("button,a,input,.ant-checkbox-wrapper,.history-files")) void open(row); } })}
         columns={[
-          { title: "记录 / 文件", key: "title", render: (_, row) => <div className="batch-file-name"><button className="history-title-button" aria-label={`打开${historyTypeLabels[row.type]}记录：${row.title}`} onClick={() => void open(row)}>{row.title || row.product_name || "未命名记录"}</button><small>{row.matched_names.length ? `相关文件：${row.matched_names.join("、")}` : row.names.join("、")}</small>{editing && !historyDeletable(row) ? <small>处理完成后可删除</small> : null}</div> },
+          { title: "记录 / 文件", key: "title", render: (_, row) => <div className="batch-file-name"><button className="history-title-button" aria-label={`打开${historyTypeLabels[row.type]}记录：${row.title}`} onClick={() => void open(row)}>{row.title || row.product_name || "未命名记录"}</button><HistoryFiles key={`${historyKey(row)}:${row.matched_names.join("\n")}`} names={row.names} matched={row.matched_names} query={state.filters.q} />{editing && !historyDeletable(row) ? <small>处理完成后可删除</small> : null}</div> },
           { title: "类型", dataIndex: "type", width: 90, render: (type: HistoryItem["type"]) => historyTypeLabels[type] },
           { title: "状态", dataIndex: "status", width: 130, render: (status: string) => <Tag color={historyStatusColor(status)}>{label(status)}</Tag> },
           { title: "创建人", dataIndex: "creator_name", width: 160 },
