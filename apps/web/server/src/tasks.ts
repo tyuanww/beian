@@ -287,6 +287,7 @@ export function listTasks(q: string, viewer: Viewer): Record<string, unknown>[] 
     created_at: t.created_at,
     owner: t.created_by || t.actor || t.owner,
     completed_by: t.completed_by,
+    complete_kind: t.status === "completed" ? t.complete_kind : undefined,
     round: t.round || 1,
     board: boardColumn(t.status, t.job_status),
     error: typeof t.error === "string" ? t.error : t.job_error || "",

@@ -183,3 +183,19 @@ describe("review gates", () => {
     );
   });
 });
+
+describe("listTasks complete_kind", () => {
+  it("exposes complete_kind on signed and returned rows, undefined while open", () => {
+    saveTask({ id: "c1c1c1c1c1c1", title: "签字件", type: "excel_pdf", status: "completed", complete_kind: "signed", created_at: "2026-08-18T09:00:00Z" });
+    saveTask({ id: "c2c2c2c2c2c2", title: "退回件", type: "excel_pdf", status: "completed", complete_kind: "rework", created_at: "2026-08-18T08:00:00Z" });
+    const rows = listTasks("", admin);
+    assert.equal(rows.find((r) => r.id === "c1c1c1c1c1c1")?.complete_kind, "signed");
+    assert.equal(rows.find((r) => r.id === "c2c2c2c2c2c2")?.complete_kind, "rework");
+    assert.equal(rows.find((r) => r.id === "aaaaaaaaaaaa")?.complete_kind, undefined);
+  });
+
+  it("hides a stale complete_kind once a returned task is reopened for rework", () => {
+    saveTask({ id: "c3c3c3c3c3c3", title: "改稿中", type: "excel_pdf", status: "in_review", complete_kind: "rework", created_at: "2026-08-18T07:00:00Z" });
+    assert.equal(listTasks("", admin).find((r) => r.id === "c3c3c3c3c3c3")?.complete_kind, undefined);
+  });
+});
