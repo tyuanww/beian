@@ -1,6 +1,8 @@
+import { nativeRequest, prepareNativeRun, prepareNativeRequests, nativeBlocksOcr, nativeQueue, nativePublic, recoverNativeRequests, nativeDirectory, startNative } from "./nativeTextJobs.js";
+import { runNativeText } from "./workers.js";
 import { createHash, randomBytes } from "node:crypto";
-import { closeSync, copyFileSync, existsSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, rmSync } from "node:fs";
-import { isAbsolute, join, relative, resolve } from "node:path";
+import { closeSync, copyFileSync, existsSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { DATA_DIR, PACKAGING, PYTHON } from "./config.js";
 import { compareBookkeeping } from "./billing.js";
 import { notifyJobFinished } from "./notify.js";
@@ -24,6 +26,7 @@ import {
   printFaceRepairSource,
   printFaceRepairActive,
   publicRenderMutation,
+  unfoldedPrintActive,
   readMockupFromDisk,
   requiredPrintFacesReady,
   resetMockupCache,
@@ -68,16 +71,44 @@ import {
   runPackaging,
   runPackagingBlenderOnly,
   runPrintFaceRepair,
+  runUnfoldedNative,
+  runUnfoldedPublish,
   type RunPythonResult,
   type WorkerProcessIdentity,
   type WorkerProcessState,
 } from "./workers.js";
 import { inspectRenderGenerationGroup, recoverWindowsRenderGeneration, signalRenderGenerationGroup } from "./renderGenerationProcess.js";
+import { illustratorBin } from "./settings.js";
 import { rasterAiFile } from "./aiRaster.js";
 import { readIllustratorAgentStatus } from "./illustratorAgent.js";
+import {
+  UNFOLDED_BINARY_MAX_BYTES,
+  UNFOLDED_MESSAGE,
+  UNFOLDED_PRINT_NAME,
+  UNFOLDED_PROTOCOL,
+  UNFOLDED_SOURCE_MAX_BYTES,
+  UNFOLDED_SOURCE_NAME,
+  UnfoldedPrintHttpError,
+  parseUnfoldedPublishStdout,
+  pdfHeaderRegularFile,
+  projectUnfoldedPrint,
+  readUnfoldedSourcePlan,
+  sha256RegularFile,
+  type UnfoldedPrintMode,
+  type UnfoldedPrintRequest,
+  type UnfoldedReason,
+} from "./unfoldedPrint.js";
 import type { RenderBridgeObserver } from "./renderGenerationBridge.js";
 import { releaseRenderReservation } from "./renderGenerationBudget.js";
 import { getRenderGenerationRuntime } from "./renderGenerationRuntime.js";
+import {
+  compressionDownloadActivity,
+  compressionQueueSnapshot,
+  deleteCompressionBatch,
+  pumpCompressionQueue,
+  recoverCompressionJobs,
+  retryCompressionBatch,
+} from "./compressionRuntime.js";
 
 const STAGE_LABEL: Record<string, string> = {
   structure: "正在出图",
@@ -120,6 +151,7 @@ const MERGE_ALLOW = new Set([
   "surfaces",
   "multi_surface",
   "qrcodes",
+  "ocr_meta",
   "round",
   "artwork_v2",
   "rework_check",
@@ -199,12 +231,17 @@ export type RenderGenerationPreparer = (input: RenderPlanVerifierInput & {
 }) => Promise<{ plan: VerifiedRenderPlanSnapshot; execute: RenderGenerationExecutor; lifecycle?: import("./renderGenerationBudget.js").RenderLifecycle }>;
 
 export type JobsTestHooks = {
+  runNativeText?: typeof runNativeText;
   runCompare?: typeof compareTask;
   runRework?: typeof reworkTask;
   runPack?: typeof runPackaging;
   runStructure?: typeof preflightPackaging;
   confirmStructure?: typeof confirmPackagingStructure;
   runPrintFaceRepair?: typeof runPrintFaceRepair;
+  runUnfoldedPublish?: typeof runUnfoldedPublish;
+  runUnfoldedNative?: typeof runUnfoldedNative;
+  /** VITEST defaults this off so a test cannot launch Illustrator by omission. */
+  illustratorHostReady?: boolean;
   runRelight?: typeof runPackagingBlenderOnly;
   runRaster?: (opts: { source: string; outDir: string }) => Promise<{ ok: boolean; png?: string; message: string }>;
   notify?: typeof notifyJobFinished;
@@ -248,11 +285,14 @@ export type RenderGenerationMutationEnqueueResult = {
 };
 
 const TEST_MOCKUP_STOP: JobsTestHooks = {
+  runNativeText: async () => ({ code: 1, stdout: "", stderr: "test stop", timedOut: false }),
   runStructure: async () => ({ code: 1, stdout: "", stderr: '{"error":"test stop"}', timedOut: false }),
   runPack: async () => ({ code: 1, stdout: "", stderr: "test stop", timedOut: false }),
   runRaster: async () => ({ ok: false, message: "test stop" }),
   confirmStructure: async () => ({ code: 1, stdout: "", stderr: "test stop", timedOut: false }),
   runPrintFaceRepair: async () => ({ code: 1, stdout: "", stderr: "test stop", timedOut: false }),
+  runUnfoldedPublish: async () => ({ code: 1, stdout: "", stderr: "test stop", timedOut: false }),
+  runUnfoldedNative: async () => ({ code: 1, stdout: "", stderr: "test stop", timedOut: false }),
   runRelight: async () => ({ code: 1, stdout: "", stderr: "test stop", timedOut: false }),
 };
 
@@ -290,34 +330,56 @@ export function queueSnapshot(): {
   ocr: { running: number; queued: number };
   blender: { running: number; queued: number };
   illustrator: { running: number; queued: number };
+  compression: { running: number; queued: number };
   unknown: number;
 } {
   const taskStore = taskStoreSnapshot();
   const mockupStore = mockupStoreSnapshot();
+  const compression = compressionQueueSnapshot();
   const tasks = taskStore.tasks;
   const mocks = mockupStore.jobs;
-  const ocrQueued = tasks.filter((t) => isOcr(t.job_kind) && t.job_status === "queued").length;
+  const ocrQueued = tasks.filter((t) => isOcr(t.job_kind) && t.job_status === "queued" && !nativeBlocksOcr(t)).length;
   const ocrRunning = tasks.filter((t) => isOcr(t.job_kind) && t.job_status === "running").length;
   const ai = mocks.filter((j) => needsIllustrator(j));
   const rest = mocks.filter((j) => !needsIllustrator(j));
   const bQueued =
     rest.filter((j) => j.job_status === "queued").length +
     mocks.filter((j) => j.status === "done" && j.render_mutation?.status === "queued").length +
-    mocks.filter((j) => j.print_faces_request?.status === "queued").length;
+    mocks.filter((j) => j.print_faces_request?.status === "queued").length +
+    mocks.filter((j) => j.unfolded_print_request?.status === "queued" && j.unfolded_print_request.mode === "publish_existing").length;
   const bRunning = rest.filter((j) => j.job_status === "running" && j.job_stage !== "illustrator").length +
-    mocks.filter((j) => j.print_faces_request?.status === "running").length;
+    mocks.filter((j) => j.print_faces_request?.status === "running").length +
+    mocks.filter((j) => j.unfolded_print_request?.status === "running" && j.unfolded_print_request.mode === "publish_existing").length;
+  const nativeQueued = mocks.filter((j) => j.unfolded_print_request?.status === "queued" && j.unfolded_print_request.mode === "native_export").length;
+  const nativeRunning = mocks.filter((j) => j.unfolded_print_request?.status === "running" && j.unfolded_print_request.mode === "native_export").length;
   return {
     // Disk state is durable; live slots close the short window before a worker
     // PID/status update is persisted and keep corrupted active records fail-closed.
     ocr: { running: Math.max(ocrRunning, live.ocr ? 1 : 0), queued: ocrQueued },
     blender: { running: Math.max(bRunning, live.blender ? 1 : 0), queued: bQueued },
     illustrator: {
-      running: Math.max(ai.filter((j) => j.job_status === "running").length, live.illustrator ? 1 : 0),
-      queued: ai.filter((j) => j.job_status === "queued").length,
+      running: Math.max(ai.filter((j) => j.job_status === "running").length + nativeRunning + nativeQueue().running.length, live.illustrator ? 1 : 0),
+      queued: ai.filter((j) => j.job_status === "queued").length + nativeQueued + nativeQueue().queued.length,
     },
-    unknown: taskStore.unreadable + mockupStore.unreadable,
+    compression: { running: compression.running, queued: compression.queued },
+    unknown: taskStore.unreadable + mockupStore.unreadable + compression.unknown,
   };
 }
+
+export function enqueueCompression(id: string): void {
+  void id;
+  pumpCompressionQueue();
+}
+
+export function retryCompression(id: string, expectedRevision: number, fileIds?: string[]) {
+  return retryCompressionBatch(id, expectedRevision, fileIds);
+}
+
+export function removeCompression(id: string) {
+  return deleteCompressionBatch(id);
+}
+
+export { compressionDownloadActivity };
 
 export function decorateQueueAhead<T extends { id?: string; created_at?: string; job_kind?: string; job_status?: string }>(
   rows: T[],
@@ -332,6 +394,8 @@ export function decorateQueueAhead<T extends { id?: string; created_at?: string;
 export function publicTask(task: Task, viewer?: Viewer): Record<string, unknown> {
   if (viewer) assertCanAccessTask(task, viewer);
   const {
+    native_text_request: _native,
+    native_text_attempted: _nativeAttempted,
     job_pid: _pid,
     notify_job_id: _nk,
     notify_sent: _ns,
@@ -342,11 +406,13 @@ export function publicTask(task: Task, viewer?: Viewer): Record<string, unknown>
   } = task;
   return {
     ...rest,
+    ...(nativePublic(task) ? { native_text: nativePublic(task) } : {}),
     queue_ahead: queueAheadFrom(queueRanks(), task.id, task.job_kind, task.job_status),
   };
 }
 
 export function enqueue(opts: { kind: JobKind; id: string }): Task | MockupJob {
+  if (opts.kind !== "mockup") prepareNativeRun(loadTask(opts.id));
   try {
     tryStart();
   } catch (err) {
@@ -450,6 +516,7 @@ export async function repairMockupPrintFaces(id: string, viewer: Viewer): Promis
     || job.render_generation_request?.worker_pid !== undefined || structureConfirmationActive(id)) {
     throw Object.assign(new Error("这单渲染版本或结构尚未结束，暂时不能补切面。"), { status: 409, code: "render_generation_busy" });
   }
+  if (unfoldedPrintActive(job)) throw Object.assign(new Error("正在做净版展开，暂时不能补切面。"), { status: 409 });
   if (live.blender === id || job.status === "queued" || job.status === "running") {
     throw Object.assign(new Error("出图还在跑，现在不能补切面。"), { status: 409 });
   }
@@ -565,6 +632,499 @@ function recoverPrintFaceRepairsOnBoot(): void {
     delete request.started_at;
     saveMockup(job);
   }
+}
+
+function unfoldedPublic(job: MockupJob) {
+  const root = mockupJobDir(job.id);
+  return projectUnfoldedPrint({
+    request: job.unfolded_print_request,
+    asset: job.unfolded_print_asset,
+    generationId: job.current_render_generation_id || "",
+    sourceSha256: sha256RegularFile(join(root, UNFOLDED_SOURCE_NAME), root, UNFOLDED_SOURCE_MAX_BYTES),
+    pdfReady: pdfHeaderRegularFile(join(root, "assets", UNFOLDED_PRINT_NAME), root),
+  });
+}
+
+function unfoldedHostReady(): boolean {
+  if (process.env.VITEST === "1") return hooks.illustratorHostReady === true;
+  const status = readIllustratorAgentStatus();
+  if (!status.ready || status.state === "faulted" || status.state === "offline") return false;
+  return status.state === "not_required" || status.state === "idle" || status.state === "busy";
+}
+
+function unfoldedBusy(job: MockupJob): boolean {
+  return printFaceRepairActive(job)
+    || structureConfirmationActive(job.id)
+    || job.render_mutation?.status === "queued"
+    || job.render_mutation?.status === "running"
+    || job.render_generation_request?.worker_pid !== undefined
+    || job.status !== "done"
+    || job.job_status === "queued"
+    || job.job_status === "running"
+    || live.blender === job.id
+    || live.illustrator === job.id;
+}
+
+function failUnfolded(job: MockupJob, viewer: Viewer, reason: UnfoldedReason, mode: UnfoldedPrintMode = "publish_existing", sourceSha = "0".repeat(64), nativeSha?: string): never {
+  job.unfolded_print_request = {
+    id: randomBytes(16).toString("hex"),
+    status: "failed",
+    mode,
+    created_at: nowIso(),
+    finished_at: nowIso(),
+    actor_id: viewer.id,
+    source_sha256: sourceSha,
+    generation_id: job.current_render_generation_id || "",
+    ...(nativeSha ? { native_source_sha256: nativeSha } : {}),
+    reason,
+    error: UNFOLDED_MESSAGE[reason],
+  };
+  saveMockup(job);
+  throw new UnfoldedPrintHttpError(409, reason, unfoldedPublic(readMockupFromDisk(job.id) || job));
+}
+
+function unfoldedDrift(job: MockupJob, request: UnfoldedPrintRequest): "source_missing" | "source_changed" | null {
+  if ((job.current_render_generation_id || "") !== request.generation_id) return "source_changed";
+  const root = mockupJobDir(job.id);
+  const sha = sha256RegularFile(join(root, UNFOLDED_SOURCE_NAME), root, UNFOLDED_SOURCE_MAX_BYTES);
+  if (!sha) return "source_missing";
+  if (sha !== request.source_sha256) return "source_changed";
+  if (request.native_source_sha256) {
+    const native = job.source_path ? sha256RegularFile(job.source_path, root, UNFOLDED_BINARY_MAX_BYTES) : null;
+    if (!native) return "source_missing";
+    if (native !== request.native_source_sha256) return "source_changed";
+  }
+  return null;
+}
+
+function finishUnfolded(id: string, requestId: string, reason?: UnfoldedReason): void {
+  const job = readMockupFromDisk(id);
+  const request = job?.unfolded_print_request;
+  if (!job || !request || request.id !== requestId || request.status !== "running") return;
+  if (!reason && request.host_fence === "unconfirmed") return;
+  request.status = reason ? "failed" : "succeeded";
+  request.finished_at = nowIso();
+  if (reason) {
+    request.reason = reason;
+    request.error = UNFOLDED_MESSAGE[reason];
+  } else {
+    delete request.reason;
+    delete request.error;
+  }
+  delete request.worker_pid;
+  delete request.host_fence;
+  saveMockup(job);
+}
+
+function commitUnfoldedPdf(job: MockupJob, request: UnfoldedPrintRequest, fromPath: string, width: number, height: number): void {
+  const root = mockupJobDir(job.id);
+  const dest = join(root, "assets", UNFOLDED_PRINT_NAME);
+  mkdirSync(join(root, "assets"), { recursive: true });
+  let previous: Buffer | null = null;
+  try {
+    const stat = lstatSync(dest);
+    if (stat.isSymbolicLink()) throw new Error(UNFOLDED_MESSAGE.export_failed);
+    previous = readFileSync(dest);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+  renameSync(fromPath, dest);
+  if (!pdfHeaderRegularFile(dest, root)) {
+    if (previous) writeFileSync(dest, previous);
+    else rmSync(dest, { force: true });
+    throw new Error(UNFOLDED_MESSAGE.export_failed);
+  }
+  job.unfolded_print_asset = {
+    source_sha256: request.source_sha256,
+    generation_id: request.generation_id,
+    width_mm: width,
+    height_mm: height,
+    file_name: UNFOLDED_PRINT_NAME,
+  };
+  saveMockup(job);
+}
+
+function rememberUnfoldedPid(jobId: string, requestId: string, pid: number): void {
+  const fresh = readMockupFromDisk(jobId);
+  if (!fresh || fresh.unfolded_print_request?.id !== requestId || fresh.unfolded_print_request.status !== "running") {
+    throw new Error(UNFOLDED_MESSAGE.source_changed);
+  }
+  fresh.unfolded_print_request.worker_pid = pid;
+  saveMockup(fresh);
+}
+
+function unfoldedReasonFromMessage(message: string): UnfoldedReason {
+  const match = (Object.keys(UNFOLDED_MESSAGE) as UnfoldedReason[]).find((key) => UNFOLDED_MESSAGE[key] === message);
+  return match && match !== "busy" && match !== "close_unconfirmed" ? match : "export_failed";
+}
+
+async function executeUnfoldedPublish(job: MockupJob, requestId: string): Promise<void> {
+  const jobRoot = mockupJobDir(job.id);
+  const root = join(jobRoot, `.unfolded-${requestId}`);
+  try {
+    const current = readMockupFromDisk(job.id);
+    const request = current?.unfolded_print_request;
+    if (!current || !request || request.id !== requestId || request.status !== "running") return;
+    const drift = unfoldedDrift(current, request);
+    if (drift) {
+      finishUnfolded(job.id, requestId, drift);
+      return;
+    }
+    mkdirSync(root, { recursive: false });
+    const sourceCopy = join(root, UNFOLDED_SOURCE_NAME);
+    copyFileSync(join(jobRoot, UNFOLDED_SOURCE_NAME), sourceCopy);
+    if (sha256RegularFile(sourceCopy, root, UNFOLDED_SOURCE_MAX_BYTES) !== request.source_sha256) {
+      finishUnfolded(job.id, requestId, "source_changed");
+      return;
+    }
+    const plan = readUnfoldedSourcePlan(readFileSync(sourceCopy, "utf8"));
+    if (!plan.ok || plan.mode !== "publish_existing") {
+      finishUnfolded(job.id, requestId, plan.ok ? "geometry_incomplete" : plan.reason);
+      return;
+    }
+    let artwork: string | undefined;
+    let artworkSha: string | undefined;
+    if (plan.mode === "publish_existing") {
+      const original = current.structure_artwork_path || "";
+      artworkSha = sha256RegularFile(original, jobRoot, UNFOLDED_BINARY_MAX_BYTES) || undefined;
+      if (!artworkSha) {
+        finishUnfolded(job.id, requestId, "source_missing");
+        return;
+      }
+      artwork = join(root, "artwork.pdf");
+      copyFileSync(original, artwork);
+    }
+    const output = join(root, UNFOLDED_PRINT_NAME);
+    const run = hooks.runUnfoldedPublish || runUnfoldedPublish;
+    const result = await run({
+      executionId: requestId,
+      jobDir: jobRoot,
+      source: sourceCopy,
+      output,
+      artwork,
+      expectSha256: request.source_sha256,
+      artworkSha256: artworkSha,
+      onSpawn: (pid) => rememberUnfoldedPid(job.id, requestId, pid),
+    });
+    const parsed = parseUnfoldedPublishStdout(result.stdout);
+    if (result.timedOut || result.code !== 0 || !parsed.ok) {
+      finishUnfolded(job.id, requestId, parsed.ok ? "export_failed" : parsed.reason);
+      return;
+    }
+    const fresh = readMockupFromDisk(job.id);
+    if (!fresh?.unfolded_print_request || fresh.unfolded_print_request.id !== requestId || fresh.unfolded_print_request.status !== "running") return;
+    const again = unfoldedDrift(fresh, fresh.unfolded_print_request);
+    if (again) {
+      finishUnfolded(job.id, requestId, again);
+      return;
+    }
+    if (!pdfHeaderRegularFile(output, root)) {
+      finishUnfolded(job.id, requestId, "export_failed");
+      return;
+    }
+    commitUnfoldedPdf(fresh, fresh.unfolded_print_request, output, parsed.width_mm, parsed.height_mm);
+    finishUnfolded(job.id, requestId);
+  } catch (error) {
+    finishUnfolded(job.id, requestId, unfoldedReasonFromMessage(error instanceof Error ? error.message : ""));
+  } finally {
+    const fresh = readMockupFromDisk(job.id);
+    if (!(fresh?.unfolded_print_request?.id === requestId && fresh.unfolded_print_request.status === "running")) {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }
+}
+
+function unfoldedCloseConfirmed(path: string, attemptId: string, sourceHash?: string): boolean {
+  try {
+    const value = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
+    return value.protocol === UNFOLDED_PROTOCOL
+      && value.request_kind === "unfolded_print"
+      && value.attempt_id === attemptId
+      && Boolean(sourceHash) && value.source_sha256 === sourceHash
+      && value.document_closed === true
+      && value.bridge_exited === true
+      && value.inflight === false
+      && value.lock_returnable === true
+      && value.close_confirmed !== true;
+  } catch {
+    return false;
+  }
+}
+
+async function publishAttestedUnfolded(job: MockupJob, requestId: string, printPdf: string): Promise<void> {
+  const request = job.unfolded_print_request;
+  const root = join(mockupJobDir(job.id), `.unfolded-${requestId}`);
+  if (!request || request.id !== requestId) return;
+  const artworkSha = sha256RegularFile(printPdf, root, UNFOLDED_BINARY_MAX_BYTES);
+  if (!artworkSha) {
+    finishUnfolded(job.id, requestId, "export_failed");
+    return;
+  }
+  const output = join(root, UNFOLDED_PRINT_NAME);
+  const run = hooks.runUnfoldedPublish || runUnfoldedPublish;
+  const result = await run({
+    executionId: requestId,
+    jobDir: mockupJobDir(job.id),
+    source: join(root, UNFOLDED_SOURCE_NAME),
+    output,
+    artwork: printPdf,
+    expectSha256: request.source_sha256,
+    artworkSha256: artworkSha,
+  });
+  const parsed = parseUnfoldedPublishStdout(result.stdout);
+  if (result.timedOut || result.code !== 0 || !parsed.ok) {
+    finishUnfolded(job.id, requestId, parsed.ok ? "export_failed" : parsed.reason);
+    return;
+  }
+  const fresh = readMockupFromDisk(job.id);
+  if (!fresh?.unfolded_print_request || fresh.unfolded_print_request.id !== requestId || fresh.unfolded_print_request.status !== "running") return;
+  const drift = unfoldedDrift(fresh, fresh.unfolded_print_request);
+  if (drift) {
+    finishUnfolded(job.id, requestId, drift);
+    return;
+  }
+  delete fresh.unfolded_print_request.host_fence;
+  commitUnfoldedPdf(fresh, fresh.unfolded_print_request, output, parsed.width_mm, parsed.height_mm);
+  finishUnfolded(job.id, requestId);
+}
+
+function holdUnconfirmedUnfolded(job: MockupJob, requestId: string): void {
+  const request = job.unfolded_print_request;
+  if (!request || request.id !== requestId || request.status !== "running") return;
+  request.host_fence = "unconfirmed";
+  request.reason = "close_unconfirmed";
+  request.error = UNFOLDED_MESSAGE.close_unconfirmed;
+  saveMockup(job);
+}
+
+async function executeUnfoldedNative(job: MockupJob, requestId: string): Promise<void> {
+  const jobRoot = mockupJobDir(job.id);
+  const root = join(jobRoot, `.unfolded-${requestId}`);
+  let dispatched = false;
+  try {
+    const current = readMockupFromDisk(job.id);
+    const request = current?.unfolded_print_request;
+    if (!current || !request || request.id !== requestId || request.status !== "running" || request.mode !== "native_export") return;
+    const drift = unfoldedDrift(current, request);
+    if (drift) {
+      finishUnfolded(job.id, requestId, drift);
+      return;
+    }
+    mkdirSync(root, { recursive: false });
+    copyFileSync(join(jobRoot, UNFOLDED_SOURCE_NAME), join(root, UNFOLDED_SOURCE_NAME));
+    const aiCopy = join(root, "source.ai");
+    copyFileSync(current.source_path || "", aiCopy);
+    if (sha256RegularFile(aiCopy, root, UNFOLDED_BINARY_MAX_BYTES) !== request.native_source_sha256) {
+      finishUnfolded(job.id, requestId, "source_changed");
+      return;
+    }
+    const printPdf = join(root, "print.pdf");
+    const closeJson = join(root, "close.json");
+    const configPath = join(root, "config.json");
+    writeFileSync(configPath, JSON.stringify({
+      application: illustratorBin() || (process.platform === "darwin" ? "/Applications/Adobe Illustrator 2026/Adobe Illustrator.app" : ""),
+      source_ai: aiCopy,
+      print_layers: JSON.parse(readFileSync(join(root, UNFOLDED_SOURCE_NAME), "utf8")).print_layers || [],
+      print_pdf: printPdf,
+      result_json: join(root, "result.json"),
+      close_json: closeJson,
+      attempt_id: requestId,
+      source_sha256: request.native_source_sha256,
+      protocol: UNFOLDED_PROTOCOL,
+      request_kind: "unfolded_print",
+      debug_log: join(root, "debug.log"),
+    }));
+    const run = hooks.runUnfoldedNative || runUnfoldedNative;
+    dispatched = true;
+    const result = await run({
+      executionId: requestId,
+      configPath,
+      onSpawn: (pid) => rememberUnfoldedPid(job.id, requestId, pid),
+    });
+    const fresh = readMockupFromDisk(job.id);
+    if (!fresh?.unfolded_print_request || fresh.unfolded_print_request.id !== requestId || fresh.unfolded_print_request.status !== "running") return;
+    const closed = !result.timedOut && unfoldedCloseConfirmed(closeJson, requestId, request.native_source_sha256);
+    if (!closed) {
+      holdUnconfirmedUnfolded(fresh, requestId);
+      return;
+    }
+    if (result.code !== 0) {
+      finishUnfolded(job.id, requestId, "export_failed");
+      return;
+    }
+    await publishAttestedUnfolded(fresh, requestId, printPdf);
+  } catch (error) {
+    const fresh = readMockupFromDisk(job.id);
+    if (dispatched && fresh && !unfoldedCloseConfirmed(join(root, "close.json"), requestId, fresh.unfolded_print_request?.native_source_sha256)) {
+      holdUnconfirmedUnfolded(fresh, requestId);
+    } else {
+      finishUnfolded(job.id, requestId, unfoldedReasonFromMessage(error instanceof Error ? error.message : ""));
+    }
+  } finally {
+    const fresh = readMockupFromDisk(job.id);
+    if (!(fresh?.unfolded_print_request?.id === requestId && fresh.unfolded_print_request.status === "running")) {
+      rmSync(root, { recursive: true, force: true });
+    }
+  }
+}
+
+function claimUnfoldedPublish(job: MockupJob): void {
+  const request = job.unfolded_print_request;
+  if (!request || request.mode !== "publish_existing") return;
+  request.status = "running";
+  request.started_at = nowIso();
+  saveMockup(job);
+  live.blender = job.id;
+  const requestId = request.id;
+  void executeUnfoldedPublish(job, requestId).finally(() => {
+    const fresh = readMockupFromDisk(job.id);
+    if (fresh?.unfolded_print_request?.id === requestId && fresh.unfolded_print_request.status === "running") return;
+    if (live.blender === job.id) live.blender = null;
+    tryStart();
+  });
+}
+
+function claimUnfoldedNative(job: MockupJob): void {
+  const request = job.unfolded_print_request;
+  if (!request || request.mode !== "native_export") return;
+  request.status = "running";
+  request.started_at = nowIso();
+  saveMockup(job);
+  live.illustrator = job.id;
+  const requestId = request.id;
+  void executeUnfoldedNative(job, requestId).finally(() => {
+    const fresh = readMockupFromDisk(job.id);
+    if (fresh?.unfolded_print_request?.id === requestId && fresh.unfolded_print_request.status === "running") {
+      live.illustrator = job.id;
+      return;
+    }
+    if (live.illustrator === job.id) live.illustrator = null;
+    tryStart();
+  });
+}
+
+function releaseNativeSlot(jobId: string, requestId: string): void {
+  const fresh = readMockupFromDisk(jobId);
+  if (fresh?.unfolded_print_request?.id === requestId && fresh.unfolded_print_request.status === "running") {
+    live.illustrator = jobId;
+    return;
+  }
+  if (live.illustrator === jobId) live.illustrator = null;
+  tryStart();
+}
+
+function recoverUnfoldedPrintsOnBoot(): void {
+  for (const job of loadAllMockups()) {
+    const request = job.unfolded_print_request;
+    if (request?.status !== "running") continue;
+    if (request.mode === "native_export") {
+      const attempt = join(mockupJobDir(job.id), `.unfolded-${request.id}`);
+      let gone = false;
+      if (request.worker_pid) {
+        try {
+          gone = (hooks.inspectWorker || inspectWorkerProcess)(request.worker_pid, {
+            kind: "unfolded_print", id: job.id, executionId: request.id, mode: "native_export",
+          }) === "missing";
+        } catch {
+          gone = false;
+        }
+      }
+      if (gone && unfoldedCloseConfirmed(join(attempt, "close.json"), request.id, request.native_source_sha256)) {
+        const recoveryKey = `${job.id}:${request.id}`;
+        recoveringUnfolded.add(recoveryKey);
+        live.illustrator = job.id;
+        const requestId = request.id;
+        void publishAttestedUnfolded(job, requestId, join(attempt, "print.pdf")).finally(() => {
+          recoveringUnfolded.delete(recoveryKey);
+          releaseNativeSlot(job.id, requestId);
+        });
+        continue;
+      }
+      request.host_fence = "unconfirmed";
+      request.reason = "close_unconfirmed";
+      request.error = UNFOLDED_MESSAGE.close_unconfirmed;
+      saveMockup(job);
+      live.illustrator = job.id;
+      continue;
+    }
+    if (!request.worker_pid) continue;
+    if (!clearPersistedWorker(request.worker_pid, { kind: "unfolded_print", id: job.id, executionId: request.id, mode: "publish_existing" })) continue;
+    request.id = randomBytes(16).toString("hex");
+    request.status = "queued";
+    delete request.worker_pid;
+    delete request.started_at;
+    delete request.host_fence;
+    saveMockup(job);
+  }
+}
+
+/** Reuse a ready net from the same source. Native export shares the Illustrator slot; it does not start Blender. */
+export async function requestUnfoldedPrint(id: string, viewer: Viewer): Promise<MockupJob> {
+  const job = readMockupFromDisk(id);
+  if (!job) throw Object.assign(new Error("没有这单打样"), { status: 404 });
+  assertCanManageMockup(job, viewer);
+  if (unfoldedPublic(job).status === "ready" || unfoldedPrintActive(job)) return job;
+  if (unfoldedBusy(job)) throw new UnfoldedPrintHttpError(409, "busy", unfoldedPublic(job));
+  const root = mockupJobDir(job.id);
+  const generated = mockupRenderPlanBytes(job);
+  if (generated) {
+    const candidate = join(dirname(generated.path), UNFOLDED_SOURCE_NAME);
+    if (candidate !== join(root, UNFOLDED_SOURCE_NAME) && sha256RegularFile(candidate, root, UNFOLDED_SOURCE_MAX_BYTES)) {
+      let bytes: Buffer;
+      let source: Record<string, unknown>;
+      try {
+        bytes = readFileSync(candidate);
+        source = JSON.parse(bytes.toString("utf8")) as Record<string, unknown>;
+        if (!source || typeof source !== "object") return failUnfolded(job, viewer, "geometry_incomplete");
+      } catch {
+        return failUnfolded(job, viewer, "geometry_incomplete");
+      }
+      const aiHash = job.source_path ? sha256RegularFile(job.source_path, root, UNFOLDED_BINARY_MAX_BYTES) : null;
+      if (!aiHash || source.source_ai_sha256 !== aiHash) return failUnfolded(job, viewer, "source_changed");
+      writeFileSync(join(root, UNFOLDED_SOURCE_NAME), bytes);
+    }
+  }
+  const sourceSha = sha256RegularFile(join(root, UNFOLDED_SOURCE_NAME), root, UNFOLDED_SOURCE_MAX_BYTES);
+  if (!sourceSha) {
+    const ai = job.source_path && /\.ai$/i.test(job.source_path)
+      ? sha256RegularFile(job.source_path, root, UNFOLDED_BINARY_MAX_BYTES)
+      : null;
+    return failUnfolded(job, viewer, ai ? "geometry_incomplete" : "source_missing");
+  }
+  let planText = "";
+  try {
+    planText = readFileSync(join(root, UNFOLDED_SOURCE_NAME), "utf8");
+  } catch {
+    return failUnfolded(job, viewer, "source_missing", "publish_existing", sourceSha);
+  }
+  const plan = readUnfoldedSourcePlan(planText);
+  if (!plan.ok) return failUnfolded(job, viewer, plan.reason, "publish_existing", sourceSha);
+  let nativeSha: string | undefined;
+  if (plan.mode === "native_export") {
+    nativeSha = job.source_path && /\.ai$/i.test(job.source_path)
+      ? sha256RegularFile(job.source_path, root, UNFOLDED_BINARY_MAX_BYTES) || undefined
+      : undefined;
+    if (!nativeSha) return failUnfolded(job, viewer, "source_missing", "native_export", sourceSha);
+    if (!unfoldedHostReady()) return failUnfolded(job, viewer, "host_unavailable", "native_export", sourceSha, nativeSha);
+  } else if (plan.mode === "publish_existing") {
+    const artwork = job.structure_artwork_path || "";
+    if (!sha256RegularFile(artwork, root, UNFOLDED_BINARY_MAX_BYTES)) {
+      return failUnfolded(job, viewer, "source_missing", "publish_existing", sourceSha);
+    }
+  }
+  job.unfolded_print_request = {
+    id: randomBytes(16).toString("hex"),
+    status: "queued",
+    mode: plan.mode,
+    created_at: nowIso(),
+    actor_id: viewer.id,
+    source_sha256: sourceSha,
+    generation_id: job.current_render_generation_id || "",
+    ...(nativeSha ? { native_source_sha256: nativeSha } : {}),
+  };
+  saveMockup(job);
+  queueMicrotask(() => { try { tryStart(); } catch { /* queued fact remains for boot recovery */ } });
+  return readMockupFromDisk(id) || job;
 }
 
 /** Old clients get in-flight deduplication only; never overwrite root output files. */
@@ -1088,6 +1648,7 @@ function commitActivatedGeneration(next: MockupJob, fromId: string, actorId: str
 function legacyGenerationReadBusy(job: MockupJob): boolean {
   return job.status !== "done" || job.job_pid !== undefined || job.job_status === "running"
     || job.job_status === "queued" || relightStudioJobs.has(job.id) || printFaceRepairActive(job)
+    || unfoldedPrintActive(job)
     || structureConfirmationActive(job.id);
 }
 
@@ -2068,6 +2629,8 @@ export function reclaimOnBoot(): void {
   for (const task of loadTasksForRecovery()) reclaimTask(task);
   for (const job of loadAllMockups()) reclaimMockup(job);
   recoverPrintFaceRepairsOnBoot();
+  recoverUnfoldedPrintsOnBoot();
+  recoverNativeRequests();
   recoverRenderGenerationsOnBoot();
   for (const task of loadAllTasks()) {
     if (task.notify_job_id && !task.notify_sent && (task.job_status === "succeeded" || task.job_status === "failed")) {
@@ -2078,6 +2641,11 @@ export function reclaimOnBoot(): void {
     if (job.notify_job_id && !job.notify_sent && (job.job_status === "succeeded" || job.job_status === "failed")) {
       launchNotification(`mockup ${job.id}`, () => fireMockupNotify(job, job.job_status === "succeeded"));
     }
+  }
+  try {
+    recoverCompressionJobs();
+  } catch (err) {
+    console.warn(`compression recover failed: ${err instanceof Error ? err.message : err}`);
   }
   tryStart();
   ensureIllustratorBusyPoll();
@@ -2090,11 +2658,55 @@ function illustratorSlotBusy(): boolean {
 
 let illustratorBusyPoll: ReturnType<typeof setInterval> | undefined;
 let illustratorBusyPollWasBusy = false;
+const recoveringUnfolded = new Set<string>();
+
+/** Native text uses the same preserved Illustrator host fence as unfolded
+ * export. Recheck it in-process so a late close can release the slot without
+ * waiting for a service restart. */
+function recoverNativeTextFences(): void {
+  recoverNativeRequests("late");
+  if (!live.illustrator?.startsWith("native:")) return;
+  const taskId = live.illustrator.slice("native:".length);
+  const task = loadTask(taskId);
+  if (nativeRequest(task)?.status === "running") return;
+  live.illustrator = null;
+  tryStart();
+}
+
+/** A preserved native timeout resolves before Illustrator exits. Keep the
+ * shared slot fenced, then promote the attempt once both the exact worker and
+ * the close evidence are independently gone/confirmed. */
+function recoverUnfoldedNativeFences(): void {
+  for (const job of loadAllMockups()) {
+    const request = job.unfolded_print_request;
+    if (request?.status !== "running" || request.mode !== "native_export" || request.host_fence !== "unconfirmed" || !request.worker_pid) continue;
+    const key = `${job.id}:${request.id}`;
+    if (recoveringUnfolded.has(key)) continue;
+    let gone = false;
+    try {
+      gone = (hooks.inspectWorker || inspectWorkerProcess)(request.worker_pid, {
+        kind: "unfolded_print", id: job.id, executionId: request.id, mode: "native_export",
+      }) === "missing";
+    } catch {
+      gone = false;
+    }
+    const attempt = join(mockupJobDir(job.id), `.unfolded-${request.id}`);
+    if (!gone || !unfoldedCloseConfirmed(join(attempt, "close.json"), request.id, request.native_source_sha256)) continue;
+    recoveringUnfolded.add(key);
+    live.illustrator = job.id;
+    void publishAttestedUnfolded(job, request.id, join(attempt, "print.pdf")).finally(() => {
+      recoveringUnfolded.delete(key);
+      releaseNativeSlot(job.id, request.id);
+    });
+  }
+}
 
 function ensureIllustratorBusyPoll(): void {
   if (illustratorBusyPoll || process.env.VITEST === "1") return;
   illustratorBusyPoll = setInterval(() => {
     try {
+      recoverNativeTextFences();
+      recoverUnfoldedNativeFences();
       const busy = illustratorSlotBusy();
       if (illustratorBusyPollWasBusy && !busy && !live.illustrator) {
         for (const job of loadAllMockups()) {
@@ -2107,6 +2719,7 @@ function ensureIllustratorBusyPoll(): void {
         }
         tryStart();
       }
+      if (nativeQueue().queued.length) tryStart();
       illustratorBusyPollWasBusy = busy;
     } catch {
       /* next tick */
@@ -2115,16 +2728,35 @@ function ensureIllustratorBusyPoll(): void {
 }
 
 export function tryStart(): void {
+  prepareNativeRequests(unfoldedHostReady());
   if (!live.ocr) {
     const next = oldestOcrQueued();
     if (next) claimOcr(next);
   }
-  if (!live.illustrator && !illustratorSlotBusy()) {
-    const next = oldestAiQueued();
-    if (next) claimAi(next);
+  if (!live.illustrator) {
+    const nativeLive = loadAllMockups().find((job) => job.unfolded_print_request?.status === "running" && job.unfolded_print_request.mode === "native_export");
+    if (nativeLive) live.illustrator = nativeLive.id;
+    const reviewNative = nativeQueue().running[0];
+    if (reviewNative) live.illustrator = `native:${reviewNative.id}`;
+  }
+  if (!live.illustrator && taskStoreSnapshot().unreadable === 0 && !illustratorSlotBusy()) {
+    const next = oldestAiWaiter();
+    if (next?.kind === "native_text") {
+      live.illustrator = `native:${next.task.id}`;
+      startNative(next.task, hooks.runNativeText || runNativeText, () => {
+        if (!nativeQueue().running.some(t => t.id === next.task.id) && live.illustrator === `native:${next.task.id}`) live.illustrator = null;
+        tryStart();
+      });
+    }
+    else if (next?.kind === "unfolded") claimUnfoldedNative(next.job);
+    else if (next) claimAi(next.job);
   }
   if (!live.blender) {
     const interrupted = loadAllMockups().find(job => job.print_faces_request?.status === "running");
+    if (interrupted) live.blender = interrupted.id;
+  }
+  if (!live.blender) {
+    const interrupted = loadAllMockups().find((job) => job.unfolded_print_request?.status === "running" && job.unfolded_print_request.mode === "publish_existing");
     if (interrupted) live.blender = interrupted.id;
   }
   if (!live.blender) occupyUnconfirmedGenerationBlenderFence();
@@ -2138,9 +2770,15 @@ export function tryStart(): void {
         continue;
       }
       if (next.kind === "print_faces") claimPrintFaceRepair(next.job);
+      else if (next.kind === "unfolded") claimUnfoldedPublish(next.job);
       else claimMockup(next.job);
       break;
     }
+  }
+  try {
+    pumpCompressionQueue();
+  } catch (err) {
+    console.warn(`compression pump failed: ${err instanceof Error ? err.message : err}`);
   }
 }
 
@@ -2159,7 +2797,7 @@ function allowedResultStatus(kind: string | undefined, raw: unknown): string {
 
 function oldestOcrQueued(): Task | undefined {
   return loadAllTasks()
-    .filter((t) => isOcr(t.job_kind) && t.job_status === "queued")
+    .filter((t) => isOcr(t.job_kind) && t.job_status === "queued" && !nativeBlocksOcr(t))
     .sort((a, b) => String(a.created_at || "").localeCompare(String(b.created_at || "")))[0];
 }
 
@@ -2175,10 +2813,21 @@ function needsIllustrator(job: MockupJob): boolean {
   return needsStructure(job) || needsRaster(job);
 }
 
-function oldestAiQueued(): MockupJob | undefined {
-  return loadAllMockups()
-    .filter((j) => j.job_status === "queued" && needsIllustrator(j))
-    .sort((a, b) => a.created_at.localeCompare(b.created_at))[0];
+type AiWaiter = { kind: "structure" | "unfolded"; job: MockupJob; at: string } | { kind: "native_text"; task: Task; at: string };
+
+function oldestAiWaiter(): AiWaiter | undefined {
+  const waiters: AiWaiter[] = [];
+  for (const job of loadAllMockups()) {
+    if (job.job_status === "queued" && needsIllustrator(job)) {
+      waiters.push({ kind: "structure", job, at: job.created_at });
+    }
+    if (job.unfolded_print_request?.status === "queued" && job.unfolded_print_request.mode === "native_export") {
+      waiters.push({ kind: "unfolded", job, at: job.unfolded_print_request.created_at });
+    }
+  }
+  for (const task of nativeQueue().queued) waiters.push({ kind: "native_text", task, at: nativeRequest(task)!.created_at });
+  waiters.sort((a, b) => a.at.localeCompare(b.at) || (a.kind === "native_text" ? a.task.id : a.job.id).localeCompare(b.kind === "native_text" ? b.task.id : b.job.id));
+  return waiters[0];
 }
 
 function oldestMockupQueued(): MockupJob | undefined {
@@ -2192,7 +2841,7 @@ function oldestMockupQueued(): MockupJob | undefined {
     .sort((a, b) => a.created_at.localeCompare(b.created_at))[0];
 }
 
-type BlenderWaiter = { kind: "pipeline" | "generation" | "print_faces"; job: MockupJob; at: string };
+type BlenderWaiter = { kind: "pipeline" | "generation" | "print_faces" | "unfolded"; job: MockupJob; at: string };
 
 function oldestBlenderWaiter(): BlenderWaiter | undefined {
   const waiters: BlenderWaiter[] = [];
@@ -2212,6 +2861,9 @@ function oldestBlenderWaiter(): BlenderWaiter | undefined {
   for (const job of loadAllMockups()) {
     if (job.status === "done" && job.print_faces_request?.status === "queued") {
       waiters.push({ kind: "print_faces", job, at: job.print_faces_request.created_at });
+    }
+    if (job.status === "done" && job.unfolded_print_request?.status === "queued" && job.unfolded_print_request.mode === "publish_existing") {
+      waiters.push({ kind: "unfolded", job, at: job.unfolded_print_request.created_at });
     }
   }
   waiters.sort((a, b) => a.at.localeCompare(b.at) || a.job.id.localeCompare(b.job.id));
@@ -2569,6 +3221,9 @@ async function runAi(id: string, startedAt: string): Promise<void> {
 
 async function runOcr(id: string, startedAt: string): Promise<void> {
   const task = loadTask(id);
+  // Keep the fact that Illustrator was attempted even when prepareNativeRun
+  // has discarded a stale/fallback request before this worker starts.
+  const nativeAttempted = Boolean(nativeRequest(task) || task.native_text_attempted);
   const onSpawn = (pid: number) => {
     const t = loadTask(id);
     if (t.job_started_at !== startedAt || t.job_status !== "running") return;
@@ -2582,6 +3237,8 @@ async function runOcr(id: string, startedAt: string): Promise<void> {
       const run = hooks.runRework || reworkTask;
       result = await run({
         tid: id,
+        nativeDir: nativeDirectory(task),
+        nativeAttempted,
         pdf: join(DATA_DIR, "uploads", id, "artwork_v2.pdf"),
         actor: taskOwner(task),
         onSpawn,
@@ -2591,6 +3248,8 @@ async function runOcr(id: string, startedAt: string): Promise<void> {
       const run = hooks.runCompare || compareTask;
       result = await run({
         tid: id,
+        nativeDir: nativeDirectory(task),
+        nativeAttempted,
         excel: join(DATA_DIR, "uploads", id, "source.xlsx"),
         pdf: join(DATA_DIR, "uploads", id, "artwork.pdf"),
         productName: String(task.product_name || task.title || ""),
@@ -2618,6 +3277,7 @@ function finishOcr(id: string, startedAt: string, result: RunPythonResult): void
     tryStart();
     return;
   }
+  delete task.native_text_attempted;
   if (live.ocr === id) live.ocr = null;
   delete task.job_pid;
   task.job_finished_at = nowIso();

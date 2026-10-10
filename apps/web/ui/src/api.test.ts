@@ -792,3 +792,24 @@ describe("uploadWithProgress", () => {
     });
   });
 });
+
+it("compression uploads retain purpose and stable asset fields in the existing chunk protocol", async () => {
+  const original = globalThis.fetch;
+  const calls: Array<{ path: string; body?: unknown }> = [];
+  const fd = new FormData();
+  fd.set("purpose", "compression"); fd.set("client_upload_id", "compression-stable-id");
+  fd.set("asset1", new File(["PDF"], "seal.pdf")); fd.set("asset2", new File(["JPG"], "photo.jpg"));
+  const files = [{ field: "asset1", name: "seal.pdf", bytes: 3, received: 0 }, { field: "asset2", name: "photo.jpg", bytes: 3, received: 0 }];
+  globalThis.fetch = (async (input, init) => {
+    const path = String(input);
+    calls.push({ path, ...(typeof init?.body === "string" ? { body: JSON.parse(init.body) } : {}) });
+    if (init?.method === "PUT") files.find(file => path.endsWith(file.field))!.received = 3;
+    return new Response(JSON.stringify({ upload: { id: "123456abcdef", files, bytes: 6, received: files.reduce((sum, file) => sum + file.received, 0), kind: "compression", phase: path.endsWith("/complete") ? "ready" : "paused", created_at: "2026-10-09T00:00:00Z" } }), { headers: { "content-type": "application/json" } });
+  }) as typeof fetch;
+  try {
+    assert.equal((await uploadResumable(fd)).receipt, "123456abcdef");
+    assert.equal((calls[0].body as { purpose: string }).purpose, "compression");
+    assert.ok(calls.some(call => call.path.endsWith("/files/asset1")));
+    assert.ok(calls.some(call => call.path.endsWith("/files/asset2")));
+  } finally { globalThis.fetch = original; }
+});

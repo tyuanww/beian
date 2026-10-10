@@ -857,7 +857,8 @@ function Invoke-RunRequest([object]$Request, [DateTime]$Deadline) {
   $configPath = Resolve-DataPath ([string](Get-JsonProperty $Request "config_path" $true))
   $config = Read-JsonFile $configPath
   $exporter = [string](Get-JsonProperty $Request "exporter" $true)
-  $expectedExporter = if (Get-JsonProperty $config "structure_json") { "structure" } else { "legacy" }
+  $unfolded = (Get-JsonProperty $config "request_kind") -in @("unfolded_print", "native_text")
+  $expectedExporter = if ($unfolded -or (Get-JsonProperty $config "structure_json")) { "structure" } else { "legacy" }
   if ($exporter -ne $expectedExporter) {
     Throw-AgentFailure "illustrator_agent_invalid_request" "exporter does not match the job config"
   }
@@ -879,6 +880,11 @@ function Invoke-RunRequest([object]$Request, [DateTime]$Deadline) {
   $progress = Read-JobSidecar $progressPath $attemptId
   $stage = if ($progress) { [string]$progress.stage } else { "" }
   $thisAttemptSucceeded = [bool]($jobResult -and $jobResult.success -eq $true)
+  # Never recover an uncertain unfolded request by killing/restarting the app.
+  # The caller keeps its durable fence until this exact bridge and host close.
+  if ($unfolded -and ($run.LeftRunning -or $run.TimedOut -or $run.ExitCode -ne 0)) {
+    Throw-AgentFailure "illustrator_timeout" "Unfolded export close is unconfirmed"
+  }
   if ($thisAttemptSucceeded) {
     if ($run.LeftRunning) {
       Throw-AgentFailure "illustrator_timeout" "Illustrator JSX is still running after writing this attempt's result"
@@ -931,6 +937,7 @@ function Invoke-RunRequest([object]$Request, [DateTime]$Deadline) {
   try {
     $after = Invoke-BridgeProbe $Deadline $CleanupReserveMs
   } catch {
+    if ($unfolded) { throw }
     $original = $_.Exception
     $originalCode = [string]$original.Data["AgentCode"]
     if ($originalCode -eq "illustrator_recovery_failed") {
@@ -940,6 +947,7 @@ function Invoke-RunRequest([object]$Request, [DateTime]$Deadline) {
     throw $original
   }
   if ([int]$after.document_count -ne 0) {
+    if ($unfolded) { Throw-AgentFailure "illustrator_documents_open" "Unfolded export document is still open" }
     try {
       $after = Restore-OwnedDocumentState $sourcePath $Deadline "illustrator_documents_open"
     } catch {
@@ -959,6 +967,14 @@ function Invoke-RunRequest([object]$Request, [DateTime]$Deadline) {
     illustrator_version = [string]$probe.illustrator_version
     warmup_elapsed_ms = [int]$probe.warmup_elapsed_ms
     document_count = [int]$after.document_count
+    bridge_exit_code = [int]$run.ExitCode
+    close_observation = $(if ($unfolded) { @{
+      attempt_id = $attemptId
+      source_sha256 = [string](Get-JsonProperty $config "source_sha256" $true)
+      bridge_exited = (-not $run.LeftRunning -and -not $run.TimedOut -and $run.ExitCode -eq 0)
+      document_count = [int]$after.document_count
+      documents = @($after.documents)
+    } } else { $null })
     documents = @($after.documents)
     session_id = $AgentSessionId
     window_title = [string](@($probe.processes | Where-Object { $_.window_handle -ne 0 })[0].window_title)

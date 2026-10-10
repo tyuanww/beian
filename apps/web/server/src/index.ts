@@ -41,6 +41,7 @@ import {
   launchNotification,
   notificationSnapshot,
   publicTask,
+  compressionDownloadActivity,
   queueSnapshot,
   reclaimOnBoot,
   relightMockupStudio,
@@ -48,6 +49,7 @@ import {
   openRenderGenerationFile,
   renderGenerationView,
   repairMockupPrintFaces,
+  requestUnfoldedPrint,
   retryMockup,
 } from "./jobs.js";
 import {
@@ -80,6 +82,7 @@ import {
   type Role,
   type Session,
 } from "./auth.js";
+import { compressionZipStream } from "./compressionZip.js";
 import {
   assertBlenderReady,
   acceptStructureConfirmation,
@@ -88,6 +91,7 @@ import {
   deleteMockup,
   fileOf,
   findMockupBySourceReceipt,
+  printFacesZipEntries,
   getJob,
   isMockupJobFile,
   isStructureProposalId,
@@ -114,7 +118,13 @@ import {
   readIllustratorAgentStatus,
 } from "./illustratorAgent.js";
 import { confirmPackagingStructure } from "./workers.js";
+import { UnfoldedPrintHttpError } from "./unfoldedPrint.js";
 import { skipPackSheetField } from "./sheetSkip.js";
+import { CompressionProblem } from "./compressionModel.js";
+import { HistoryProblem, queryHistory } from "./historyIndex.js";
+import { registerCompressionRoutes } from "./compressionApi.js";
+import { recoverCompressionBeforeReceipts } from "./compressionRuntime.js";
+import { compressionReceiptPersisted } from "./compressionStore.js";
 import {
   appendUploadChunk,
   claimReceipt,
@@ -165,7 +175,7 @@ type NodeBindings = HttpBindings | Http2Bindings;
 type Env = { Bindings: NodeBindings; Variables: { session: Session } };
 
 const app = new Hono<Env>();
-const VERSION = "0.30.3.3";
+const VERSION = "0.31.0.0";
 
 const STRUCTURE_INPUT_BODY_BYTES = 16 * 1024;
 
@@ -347,6 +357,19 @@ function fileEtag(path: string): string {
   return `W/"${st.size.toString(16)}-${Math.trunc(st.mtimeMs).toString(16)}"`;
 }
 
+function pdfHeaderAt(path: string): boolean {
+  let fd: number | undefined;
+  try {
+    fd = openSync(path, "r");
+    const buf = Buffer.alloc(5);
+    return readSync(fd, buf, 0, 5, 0) === 5 && buf.toString("ascii") === "%PDF-";
+  } catch {
+    return false;
+  } finally {
+    if (fd !== undefined) closeSync(fd);
+  }
+}
+
 function pngMagicAt(path: string): boolean {
   let fd: number | undefined;
   try {
@@ -373,6 +396,15 @@ function pngMagicAt(path: string): boolean {
 
 app.onError((err, c) => {
   if (err instanceof ApiProblem) {
+    return c.json({ detail: err.message, code: err.code }, err.status);
+  }
+  if (err instanceof CompressionProblem) {
+    return c.json(
+      { detail: err.message, code: err.code, ...(err.reason ? { reason: err.reason } : {}) },
+      err.status,
+    );
+  }
+  if (err instanceof HistoryProblem) {
     return c.json({ detail: err.message, code: err.code }, err.status);
   }
   if (err instanceof HTTPException) {
@@ -428,7 +460,7 @@ function releaseControlPayload(admission: ReturnType<typeof releaseCoordinator.s
   const reworkUploads = reworkUploadAdmission.snapshot();
   const readiness = releaseReadiness({
     admission,
-    jobs: [jobs.ocr, jobs.blender, jobs.illustrator],
+    jobs: [jobs.ocr, jobs.blender, jobs.illustrator, jobs.compression, compressionDownloadActivity()],
     jobsUnknown: jobs.unknown,
     uploads: {
       active: primaryUploads.active + reworkUploads.active,
@@ -615,6 +647,11 @@ app.get("/api/tasks", (c) => {
   const s = need(c, "read");
   const q = c.req.query("q") || "";
   return c.json(decorateQueueAhead(listTasks(q, viewerFromSession(s))));
+});
+
+app.get("/api/history", (c) => {
+  const session = need(c, "read");
+  return c.json(queryHistory(viewerFromSession(session), c.req.queries()));
 });
 
 app.get("/api/tasks/:tid", (c) => {
@@ -1469,6 +1506,20 @@ app.post("/api/mockups/:id/retry", (c) => {
   }
 });
 
+app.post("/api/mockups/:id/unfolded-print", async (c) => {
+  const s = need(c, "create");
+  try {
+    const job = await requestUnfoldedPrint(assertTid(c.req.param("id")), viewerFromSession(s));
+    const status = job.unfolded_print_request?.status;
+    return c.json(decorateQueueAhead([publishMockup(job, s)])[0], status === "queued" || status === "running" ? 202 : 200);
+  } catch (error) {
+    if (error instanceof UnfoldedPrintHttpError) {
+      return c.json({ message: error.message, reason: error.reason, unfolded_print: error.unfolded_print }, error.status as 409);
+    }
+    boom(error);
+  }
+});
+
 app.post("/api/mockups/:id/print-faces", async (c) => {
   const s = need(c, "create");
   try {
@@ -1501,6 +1552,18 @@ app.get("/api/mockups/:id/files/:key", (c) => {
   const job = getJob(assertTid(c.req.param("id")));
   if (!job) throw new HTTPException(404, { message: "没有这单打样" });
   const key = c.req.param("key");
+  if (key === "print_faces_zip") {
+    const entries = printFacesZipEntries(job.id);
+    if (!entries) throw new HTTPException(404, { message: "六面印刷图还不齐" });
+    return new Response(Readable.toWeb(compressionZipStream(entries)) as ReadableStream, {
+      headers: {
+        "Content-Type": "application/zip",
+        "X-Content-Type-Options": "nosniff",
+        "Cache-Control": "private, no-store",
+        "Content-Disposition": "attachment; filename=\"print-faces.zip\"",
+      },
+    });
+  }
   const f = fileOf(job, key);
   if (!f?.path || !existsSync(f.path)) throw new HTTPException(404, { message: "文件还没有" });
   if (!isWhiteFile(key, f.name)) {
@@ -1517,11 +1580,14 @@ app.get("/api/mockups/:id/files/:key", (c) => {
   if (type === "image/png" && !pngMagicAt(f.path)) {
     throw new HTTPException(415, { message: mockupFileBrokenMessage(key) });
   }
+  if (key === "unfolded_print" && !pdfHeaderAt(f.path)) {
+    throw new HTTPException(415, { message: "净版展开不是可印刷的 PDF。" });
+  }
   const ascii = f.name.replace(/[^\x20-\x7E]/g, "_").replace(/"/g, "");
   const encoded = encodeURIComponent(f.name);
   const forceAttach = c.req.query("download") === "1";
   const disposition =
-    forceAttach || !(type.startsWith("image/") || type.startsWith("model/")) ? "attachment" : "inline";
+    forceAttach || !(type.startsWith("image/") || type.startsWith("model/") || key === "unfolded_print") ? "attachment" : "inline";
   const etag = fileEtag(f.path);
   const cacheControl = forceAttach ? "private, no-store" : "private, no-cache";
   if (!forceAttach && c.req.header("if-none-match") === etag) {
@@ -1668,6 +1734,12 @@ app.get("/review/:id", spaHtml);
 app.get("/mockup", spaHtml);
 app.get("/mockup/new", spaHtml);
 app.get("/mockup/:id", spaHtml);
+app.get("/compress", spaHtml);
+app.get("/compress/:id", spaHtml);
+registerCompressionRoutes(app, {
+  need: (c, perm) => need(c, perm),
+  draining: () => releaseCoordinator.snapshot().state === "draining",
+});
 
 export { app };
 
@@ -1686,10 +1758,12 @@ if (process.env.VITEST !== "1") {
   }
   mkdirSync(join(DATA_DIR, "tasks"), { recursive: true });
   releaseCoordinator.controlFile(releaseControlPath, VERSION);
+  recoverCompressionBeforeReceipts();
   const recoveredReceipts = recoverReceiptClaims((receipt) =>
     Boolean(
       findTaskBySourceReceipt(receipt.id, receipt.owner) ||
-        findMockupBySourceReceipt(receipt.id, receipt.owner),
+        findMockupBySourceReceipt(receipt.id, receipt.owner) ||
+        compressionReceiptPersisted(receipt.id, receipt.owner),
     ),
   );
   if (Object.values(recoveredReceipts).some((count) => count > 0)) {

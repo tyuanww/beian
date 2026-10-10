@@ -4,7 +4,7 @@ import { mockupFailReason, mockupFailTag } from "./mockupError.js";
 
 describe("mockupFailTag", () => {
   it("stays a short board label", () => {
-    assert.equal(mockupFailTag(), "打样中断");
+    assert.equal(mockupFailTag(), "生成中断");
   });
 });
 
@@ -26,28 +26,27 @@ describe("mockupFailReason", () => {
 
   it("explains a knife layer that does not fold", () => {
     const text = mockupFailReason("刀线读不出结构（刀线没有连续的盒身面）。AI画板尺寸与模板不符");
-    assert.match(text, /折不成盒面/);
+    assert.match(text, /折成盒面/);
     assert.doesNotMatch(text, /只接/);
   });
 
   it("explains a missing Node binary without failing the 3D job", () => {
     const text = mockupFailReason("Node不存在：");
-    assert.match(text, /PPT/);
+    assert.match(text, /演示稿/);
     assert.match(text, /白底/);
-    assert.match(text, /PDF/);
-    assert.doesNotMatch(text, /刀线/);
+    assert.doesNotMatch(text, /刀线|PPT|Node/);
   });
 
   it("explains a missing presentation runtime the same way", () => {
     const text = mockupFailReason("本机没有演示文稿运行时");
-    assert.match(text, /PPT/);
-    assert.match(text, /PDF/);
-    assert.doesNotMatch(text, /刀线/);
+    assert.match(text, /演示稿/);
+    assert.match(text, /白底/);
+    assert.doesNotMatch(text, /刀线|PPT/);
   });
 
-  it("strips other Windows paths", () => {
+  it("strips other Windows paths and implementation names", () => {
     const text = mockupFailReason("Illustrator 超时，文件=C:\\supply\\data\\mockups\\a.ai");
-    assert.doesNotMatch(text, /C:\\/);
-    assert.match(text, /Illustrator/);
+    assert.doesNotMatch(text, /C:\\|Illustrator/);
+    assert.match(text, /超时/);
   });
 });

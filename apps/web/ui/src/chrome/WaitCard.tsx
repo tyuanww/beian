@@ -6,9 +6,9 @@ import { WaitLoader } from "./WaitLoader";
 type Job = "对照" | "对红" | "打样";
 
 const STEPS: Record<Job, string[]> = {
-  对照: ["读 Excel", "OCR 包装", "标疑点"],
-  对红: ["读 Excel", "OCR 包装", "标疑点"],
-  打样: ["读平面", "建盒", "渲染白底", "导出 GLB"],
+  对照: ["读取表格", "读取稿件", "找出差异"],
+  对红: ["读取表格", "读取稿件", "找出差异"],
+  打样: ["读取平面稿", "生成盒型", "生成预览", "导出模型"],
 };
 
 function waitKind(job: Job): WaitKind {

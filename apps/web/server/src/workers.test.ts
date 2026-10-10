@@ -130,3 +130,15 @@ it("spawn bookkeeping failure terminates the child before rejecting", async () =
   assert.ok(pid > 0);
   assert.equal(pidAlive(pid), false);
 });
+
+it("native deadline reports timeout while allowing its owned bridge to finish without a kill", async () => {
+  const { existsSync, rmSync } = await import("node:fs");
+  const { join } = await import("node:path");
+  const marker = join(process.env.WB_DATA_DIR!, "native-deadline-finished");
+  const result = await runPython({ args: ["-c", "import time,pathlib,sys; time.sleep(0.15); pathlib.Path(sys.argv[1]).write_text('finished')", marker], timeoutMs: 10, preserveOnTimeout: true });
+  assert.equal(result.timedOut, true);
+  assert.equal(result.code, 8);
+  for (let i = 0; i < 100 && !existsSync(marker); i++) await new Promise(r => setTimeout(r, 10));
+  assert.equal(existsSync(marker), true);
+  rmSync(marker);
+});

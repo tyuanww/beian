@@ -1,3 +1,5 @@
+import type { CompressionBatch, HistoryResult, UnfoldedPrint } from "./batchTypes";
+import type { NativeTextEvidence } from "./pages/nativeTextEvidence";
 import { API_DOWN_LOCAL } from "./apiHint";
 import { describeBrokenApi } from "./authGate";
 import { UPLOAD_TOO_LARGE } from "./uploadLimit";
@@ -136,6 +138,10 @@ async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
     return body;
   }
 
+  // A caller-owned AbortSignal must never share a cached promise: aborting one
+  // page's request would otherwise reject a later page that reused the path.
+  if (opts.signal) return fetchJson<T>(path, opts);
+
   const epoch = getEpoch;
   const failed = failedGets.get(path);
   if (failed && failed.retryAt > Date.now()) throw failed.error;
@@ -180,7 +186,7 @@ export type PendingUploadReceipt = {
   client_upload_id?: string;
   product_name?: string;
   pack_surface?: string;
-  kind: "compare" | "mockup";
+  kind: "compare" | "mockup" | "compression";
   phase: "ready" | "paused";
 };
 
@@ -347,12 +353,13 @@ async function retryUploadCall<T>(
   throw new UploadPausedError(message, uploadId);
 }
 
-type SelectedUploadFile = { field: "excel" | "pdf" | "ai"; file: File };
+type SelectedUploadFile = { field: "excel" | "pdf" | "ai" | `asset${number}`; file: File };
 
 function resumableForm(fd: FormData): {
   clientUploadId: string;
   productName: string;
   packSurface: string;
+  purpose?: "compression";
   files: SelectedUploadFile[];
 } {
   const clientUploadId = String(fd.get("client_upload_id") || "");
@@ -367,7 +374,15 @@ function resumableForm(fd: FormData): {
     const value = fd.get(formField);
     if (value instanceof File) files.push({ field: uploadField, file: value });
   }
-  return { clientUploadId, productName, packSurface, files };
+  const purpose = fd.get("purpose") === "compression" ? "compression" : undefined;
+  if (purpose) {
+    files.length = 0;
+    for (let index = 1; index <= 20; index += 1) {
+      const value = fd.get(`asset${index}`);
+      if (value instanceof File) files.push({ field: `asset${index}`, file: value });
+    }
+  }
+  return { clientUploadId, productName, packSurface, purpose, files };
 }
 
 function uploadReceipt(upload: PendingUploadReceipt): UploadReceipt {
@@ -397,6 +412,7 @@ export async function uploadResumable(
     onProgress?.({ ...latestProgress, phase: "retrying", retryAttempt: attempt, uploadId });
   const startBody = {
     client_upload_id: input.clientUploadId,
+    ...(input.purpose ? { purpose: input.purpose } : {}),
     product_name: input.productName,
     pack_surface: input.packSurface,
     files: input.files.map(({ field, file }) => ({
@@ -562,6 +578,7 @@ export type TaskSummary = {
 };
 
 export type FieldHit = {
+  native_text_evidence?: NativeTextEvidence;
   id?: string;
   field?: string;
   status?: string;
@@ -618,6 +635,24 @@ export type TaskPage = {
 };
 
 export type TaskDetail = TaskSummary & {
+  native_text?: { status: "queued" | "running" | "ready" | "fallback"; reason?: string; message?: string };
+  ocr_meta?: {
+    skipped?: boolean;
+    reason?: string;
+    engines?: string[];
+    pages_ran?: number;
+    words?: number;
+    native_coverage?: { matched?: number; total?: number };
+    surfaces?: Array<{
+      surface?: string;
+      skipped?: boolean;
+      reason?: string;
+      pages_ran?: number;
+      ocr_engine?: string;
+      words?: number;
+      native_coverage?: { matched?: number; total?: number };
+    }>;
+  };
   hits?: FieldHit[];
   hits_v2?: FieldHit[];
   disclaimer?: string;
@@ -647,6 +682,13 @@ export const api = {
   tasks: (q?: string) =>
     request<TaskSummary[]>(q ? `/api/tasks?q=${encodeURIComponent(q)}` : "/api/tasks"),
   task: (id: string) => request<TaskDetail>(`/api/tasks/${id}`),
+  history: (query: string, signal?: AbortSignal) => fetchJson<HistoryResult>(`/api/history?${query}`, { signal }),
+  compressions: () => request<{ items: CompressionBatch[]; unreadable_ids?: string[] }>("/api/compressions"),
+  compression: (id: string, signal?: AbortSignal) => request<CompressionBatch>(`/api/compressions/${id}`, { signal }),
+  startCompression: (receipt: string, title?: string) => request<CompressionBatch>("/api/compressions/start", { method: "POST", body: JSON.stringify({ receipt, title }) }),
+  retryCompression: (id: string, expected_revision: number, file_ids: string[]) => request<CompressionBatch>(`/api/compressions/${id}/retry`, { method: "POST", body: JSON.stringify({ expected_revision, file_ids }) }),
+  deleteCompression: (id: string) => request<{ ok: boolean }>(`/api/compressions/${id}`, { method: "DELETE" }),
+  requestUnfoldedPrint: (id: string) => request<MockupJob>(`/api/mockups/${id}/unfolded-print`, { method: "POST" }),
   uploads: () => request<PendingUploadReceipt[]>("/api/uploads"),
   discardUpload: (id: string) => request<{ ok: boolean }>(`/api/uploads/${id}`, { method: "DELETE" }),
   stageUpload: (fd: FormData, onProgress?: (progress: UploadProgress) => void, signal?: AbortSignal) =>
@@ -807,6 +849,8 @@ export type RenderGenerationRow = {generation_id:string;mode:"legacy_import" | "
 export type RenderGenerationHistory = {items:RenderGenerationRow[];next_cursor:string | null};
 
 export type MockupJob = {
+  unfolded_print?: UnfoldedPrint;
+  print_faces_zip?: { status: "unavailable" | "incomplete" | "ready"; reason?: "faces_incomplete"; file_key?: "print_faces_zip" };
   id: string;
   status: "queued" | "running" | "review_required" | "unsupported" | "done" | "failed";
   title?: string;

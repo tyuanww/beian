@@ -1,4 +1,4 @@
-/** 打样单下载提示。不挡点击。 */
+/** 出图记录下载提示。不挡点击。 */
 
 export const HUD_MS = 2200;
 
@@ -17,9 +17,10 @@ export function allowFullUpgradeNotice(
 }
 
 export function downloadHudLine(label: string): string {
-  return `正在下载${label}`;
+  const visible = label === "GLB" ? "模型" : label === "PPT" ? "演示稿" : label;
+  return `正在下载${visible}`;
 }
 
 export function missingPptHud(): string {
-  return "PPT 没写成，白底仍可下";
+  return "演示稿暂不可用，白底仍可下载";
 }

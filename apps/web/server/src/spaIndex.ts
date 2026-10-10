@@ -1,7 +1,7 @@
-/** 台地址出 HTML 还是去飞书。审稿台 `/reviewup` `/reviewup/new`，核对页 `/review/:id`，打样 `/mockup` `/mockup/new` `/mockup/:id`。旧 `/` `/new` `/review` 由 Hono 302。Vite :5173 仍走 SPA。 */
+/** 台地址出 HTML 还是去飞书。审稿台 `/reviewup` `/reviewup/new`，核对页 `/review/:id`，打样 `/mockup` `/mockup/new` `/mockup/:id`，压缩 `/compress` `/compress/:id`。旧 `/` `/new` `/review` 由 Hono 302。Vite :5173 仍走 SPA。 */
 
 const SPA =
-  /^(?:\/reviewup(?:\/new)?|\/new|\/history|\/settings|\/review(?:\/[0-9a-f]{12})?|\/mockup(?:\/(?:new|[0-9a-f]{12}))?)$/i;
+  /^(?:\/reviewup(?:\/new)?|\/new|\/history|\/settings|\/review(?:\/[0-9a-f]{12})?|\/mockup(?:\/(?:new|[0-9a-f]{12}))?|\/compress(?:\/[0-9a-f]{12})?)$/i;
 
 export function isSpaPath(pathname: string): boolean {
   const p = pathname.replace(/\/+$/, "") || "/";

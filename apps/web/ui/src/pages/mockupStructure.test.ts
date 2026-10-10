@@ -151,7 +151,7 @@ describe("mockup V2 structure UX", () => {
 
   it("distinguishes a human confirmation from a failed mockup", () => {
     assert.equal(structureStatusLabel({ structure_status: "analyzing" }), "正在出图");
-    assert.equal(structureStatusLabel({ structure_status: "review_required" }), "打样失败");
+    assert.equal(structureStatusLabel({ structure_status: "review_required" }), "生成失败");
     assert.equal(
       structureStatusLabel({
         structure_status: "review_required",
@@ -185,14 +185,14 @@ describe("mockup V2 structure UX", () => {
       structureIssueCopy({ structure_code: "structure_multiple_components" }, { desk: true }),
       /多套可成盒结构/,
     );
-    assert.equal(structureIssueCopy({}), "这张稿现在打不了样。");
+    assert.equal(structureIssueCopy({}), "这份稿现在无法生成。");
     assert.equal(
       structureIssueCopy({}, { desk: true }),
-      "包装结构需要人工确认后才能进入 Blender。",
+      "请确认包装结构后再生成。",
     );
     assert.match(
       structureIssueCopy({ structure_code: "structure_flattened_artwork" }),
-      /拼合稿/,
+      /合并成一层/,
     );
     assert.match(structureIssueCopy({ structure_code: "structure_limit_exceeded" }), /安全上限/);
   });

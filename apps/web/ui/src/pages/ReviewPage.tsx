@@ -1,5 +1,4 @@
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import { Alert, App, Button, Empty, Input } from "antd";
 import { ApiError, api, type Decision, type FieldHit, type TaskDetail, type TaskPage } from "../api";
 import { WaitCard } from "../chrome/WaitCard";
@@ -12,31 +11,15 @@ import {
   fullscreenFailureMessage,
   isElementFullscreen,
 } from "./mockupFullscreen";
-import {
-  clampDockBox,
-  clampDockPlace,
-  dockVisual,
-  readBoxesOn,
-  readDockBox,
-  readStoredDockPlace,
-  readPinsOn,
-  REVIEW_DOCK_LAYER,
-  resizeDockHandle,
-  sidebarDockPlace,
-  skipPackSheetField,
-  writeBoxesOn,
-  writeDockBox,
-  writeDockPlace,
-  writePinsOn,
-  type DockBox,
-  type DockHandle,
-  type DockPlace,
-} from "./reviewDock";
+import { readBoxesOn, readPinsOn, skipPackSheetField, writeBoxesOn, writePinsOn } from "./reviewDock";
+import { ReviewWorkspace } from "./ReviewWorkspace";
+import { useReviewSession } from "./useReviewSession";
 import { detailLoadState, shouldShowWaitCard } from "./waitCard";
 import { reviewHits, shouldUseReworkView } from "./reviewVersion";
 import { ReviewDockPanel } from "./ReviewDockPanel";
 import { firstPendingIssueIndex, issueOrdinal, pageIndexForHit } from "./reviewNav";
-import { buildRevisionList, withLocalNotes } from "./reviewEvidence";
+import { customerCopy } from "./customerCopy";
+import { buildRevisionList, partitionReviewHits, withLocalNotes } from "./reviewEvidence";
 import {
   prepareReviewMedia,
   prepareReviewMediaAfterFailure,
@@ -49,6 +32,7 @@ function browserStore(): Storage | null {
 
 type Props = {
   taskId: string | null;
+  userId: string | null;
   onBack: () => void;
 };
 
@@ -71,29 +55,29 @@ function pageList(task: TaskDetail | null): TaskPage[] {
 
 function statusLead(task: TaskDetail | null, pageIdx: number, pages: TaskPage[]) {
   const pageNo = pages[pageIdx]?.page || pageIdx + 1;
-  if (!task) return "核对页";
-  if (task.status === "completed") return `核对页 · 第 ${pageNo} 页 · 已签字`;
-  if (isReviewable(task.status)) return `核对页 · 点疑点，图上只亮这一条。第 ${pageNo} 页 · 待审核`;
-  if (task.status === "compare_failed") return `核对页 · 第 ${pageNo} 页 · 对照中断`;
-  return `核对页 · 第 ${pageNo} 页`;
+  if (!task) return "审核页";
+  if (task.status === "completed") return `审核页 · 第 ${pageNo} 页 · 已提交`;
+  if (isReviewable(task.status)) return `审核页 · 第 ${pageNo} 页 · 待确认`;
+  if (task.status === "compare_failed") return `审核页 · 第 ${pageNo} 页 · 检查中断`;
+  return `审核页 · 第 ${pageNo} 页`;
 }
 
-export function ReviewPage({ taskId, onBack }: Props) {
+export function ReviewPage({ taskId, userId, onBack }: Props) {
   const { message } = App.useApp();
   const [task, setTask] = useState<TaskDetail | null>(() => reviewHandoffFor(taskId));
   const [error, setError] = useState<string | null>(null);
   const [pageIdx, setPageIdx] = useState(0);
   const [active, setActive] = useState(0);
-  const [notes, setNotes] = useState<Record<string, string>>({});
   const [conclusion, setConclusion] = useState("");
   const [busy, setBusy] = useState(false);
   const [useV2, setUseV2] = useState(false);
+  const { notes, setNote, clearNote, savedHitId, rememberHit } = useReviewSession(userId, taskId, useV2);
+  const [decisionError, setDecisionError] = useState<string | null>(null);
   const [nat, setNat] = useState<{ width: number; height: number } | null>(null);
   const [reviewMedia, setReviewMedia] = useState<PreparedReviewMedia | null>(null);
   const [reviewMediaError, setReviewMediaError] = useState<string | null>(null);
   const [viewSize, setViewSize] = useState<{ width: number; height: number } | null>(null);
   const [zoom, setZoom] = useState(resetZoom);
-  const [dockOpen, setDockOpen] = useState(true);
   const [pinsOn, setPinsOn] = useState(() => readPinsOn(browserStore()));
   const [boxesOn, setBoxesOn] = useState(() => readBoxesOn(browserStore()));
   const [toolsOpen, setToolsOpen] = useState(true);
@@ -101,32 +85,13 @@ export function ReviewPage({ taskId, onBack }: Props) {
   const viewRef = useRef<HTMLDivElement>(null);
   const pageRef = useRef<HTMLElement>(null);
   const zoomElRef = useRef<HTMLDivElement>(null);
-  const dockRef = useRef<HTMLElement>(null);
   const zoomRef = useRef(zoom);
   const laidRef = useRef({ imgW: 0, imgH: 0, offsetX: 0, offsetY: 0 });
-  const dockOpenRef = useRef(true);
-  const dockPlaceModeRef = useRef<"default" | "user">(
-    readStoredDockPlace(browserStore()) ? "user" : "default",
-  );
-  const [dockFrame, setDockFrame] = useState<{ box: DockBox; place: DockPlace }>(() => {
-    const box = readDockBox(browserStore());
-    const room = typeof window === "undefined"
-      ? { w: 1200, h: 800 }
-      : { w: window.innerWidth, h: window.innerHeight };
-    return { box, place: sidebarDockPlace(room, box) };
-  });
-  const { box: dockBox, place: dockPlace } = dockFrame;
+  const activeRef = useRef(active);
+  activeRef.current = active;
   const panDrag = useRef<{ x: number; y: number } | null>(null);
   const panRaf = useRef<number | null>(null);
   const wheelEnd = useRef<number | null>(null);
-  const dockResize = useRef<{
-    x: number;
-    y: number;
-    box: DockBox;
-    place: DockPlace;
-    corner: DockHandle;
-  } | null>(null);
-  const dockDrag = useRef<{ x: number; y: number; place: DockPlace } | null>(null);
   const pendingFit = useRef<number | null>(null);
   const seededNav = useRef("");
   const fitHitRef = useRef<(i: number) => void>(() => undefined);
@@ -155,7 +120,10 @@ export function ReviewPage({ taskId, onBack }: Props) {
 
   function paintZoom(next: typeof zoom) {
     const el = zoomElRef.current;
-    if (el) el.style.transform = zoomCss(next);
+    if (el) {
+      el.style.transform = zoomCss(next);
+      el.style.setProperty("--review-pin-scale", String(1 / next.scale));
+    }
   }
 
   function commitZoom(next: typeof zoom) {
@@ -167,17 +135,6 @@ export function ReviewPage({ taskId, onBack }: Props) {
   useLayoutEffect(() => {
     paintZoom(zoomRef.current);
   });
-
-  function pageRoom() {
-    if (typeof window === "undefined") return { w: 800, h: 600 };
-    return { w: window.innerWidth, h: window.innerHeight };
-  }
-
-  function defaultDockPlace(room: { w: number; h: number }, box: DockBox) {
-    const side = document.querySelector(".sidebar");
-    const dockLeft = side instanceof HTMLElement ? Math.round(side.getBoundingClientRect().left) : 20;
-    return sidebarDockPlace(room, box, dockLeft);
-  }
 
   useEffect(() => {
     if (typeof document === "undefined") return;
@@ -192,15 +149,13 @@ export function ReviewPage({ taskId, onBack }: Props) {
     };
   }, []);
 
-  function commitDock(box: DockBox, place?: DockPlace, open = dockOpenRef.current) {
-    const room = pageRoom();
-    const nextBox = clampDockBox(box, room);
-    const nextPlace = dockVisual(open, nextBox, place || dockPlace, room).place;
-    dockPlaceModeRef.current = "user";
-    setDockFrame({ box: nextBox, place: nextPlace });
-    writeDockBox(browserStore(), nextBox);
-    writeDockPlace(browserStore(), nextPlace);
-  }
+  useEffect(() => {
+    const phone = window.matchMedia("(max-width: 720px)");
+    const compactTools = () => { if (phone.matches) setToolsOpen(false); };
+    compactTools();
+    phone.addEventListener("change", compactTools);
+    return () => phone.removeEventListener("change", compactTools);
+  }, []);
 
   function endPan(target?: EventTarget | null) {
     if (target instanceof HTMLElement) target.classList.remove("is-panning");
@@ -212,144 +167,6 @@ export function ReviewPage({ taskId, onBack }: Props) {
     paintZoom(zoomRef.current);
     setZoom(zoomRef.current);
     panDrag.current = null;
-  }
-
-  function paintDock(next: { box: DockBox; place: DockPlace }) {
-    const el = dockRef.current;
-    if (!el) return;
-    const shown = dockVisual(dockOpenRef.current, next.box, next.place, pageRoom());
-    el.style.width = `${shown.box.w}px`;
-    el.style.height = `${shown.box.h}px`;
-    el.style.top = `${shown.place.top}px`;
-    el.style.left = `${shown.place.left}px`;
-    el.style.right = "auto";
-  }
-
-  function markDockBusy(on: boolean) {
-    dockRef.current?.classList.toggle("is-busy", on);
-  }
-
-  function toggleDock() {
-    const next = !dockOpenRef.current;
-    const nextPlace = dockVisual(next, dockBox, dockPlace, pageRoom()).place;
-    dockOpenRef.current = next;
-    setDockOpen(next);
-    setDockFrame({ box: dockBox, place: nextPlace });
-    writeDockPlace(browserStore(), nextPlace);
-  }
-
-  function onDockResizeMove(e: React.PointerEvent) {
-    const start = dockResize.current;
-    if (!start) return;
-    const room = pageRoom();
-    const resized = resizeDockHandle(
-      start.box,
-      start.place,
-      { dx: e.clientX - start.x, dy: e.clientY - start.y },
-      room,
-      start.corner,
-    );
-    const next = {
-      box: resized.box,
-      place: clampDockPlace(resized.place, room, resized.box),
-    };
-    paintDock(next);
-  }
-
-  function onDockMove(e: React.PointerEvent) {
-    const start = dockDrag.current;
-    if (!start) return;
-    const room = pageRoom();
-    const shown = dockVisual(dockOpenRef.current, dockBox, start.place, room);
-    const next = clampDockPlace(
-      {
-        top: start.place.top + (e.clientY - start.y),
-        left: start.place.left + (e.clientX - start.x),
-      },
-      room,
-      shown.box,
-    );
-    paintDock({ box: dockBox, place: next });
-  }
-
-  function endDockMove() {
-    const start = dockDrag.current;
-    dockDrag.current = null;
-    markDockBusy(false);
-    if (!start) return;
-    const el = dockRef.current;
-    if (!el) return;
-    commitDock(dockBox, {
-      top: el.offsetTop,
-      left: el.offsetLeft,
-    });
-  }
-
-  function endDockResize() {
-    const start = dockResize.current;
-    dockResize.current = null;
-    markDockBusy(false);
-    if (!start) return;
-    const el = dockRef.current;
-    if (el) {
-      commitDock(
-        { w: el.offsetWidth, h: el.offsetHeight },
-        {
-          top: el.offsetTop,
-          left: el.offsetLeft,
-        },
-      );
-    } else commitDock(start.box, start.place);
-  }
-
-  useLayoutEffect(() => {
-    const room = pageRoom();
-    const box = clampDockBox(readDockBox(browserStore()), room);
-    const storedPlace = readStoredDockPlace(browserStore());
-    dockPlaceModeRef.current = storedPlace ? "user" : "default";
-    const place = storedPlace
-      ? clampDockPlace(storedPlace, room, box)
-      : defaultDockPlace(room, box);
-    dockOpenRef.current = true;
-    setDockOpen(true);
-    setDockFrame({ box, place });
-  }, []);
-
-  useEffect(() => {
-    function fit() {
-      const room = pageRoom();
-      setDockFrame((current) => {
-        const box = clampDockBox(current.box, room);
-        const place = dockPlaceModeRef.current === "default"
-          ? defaultDockPlace(room, box)
-          : dockVisual(dockOpenRef.current, box, current.place, room).place;
-        return { box, place };
-      });
-    }
-    window.addEventListener("resize", fit);
-    return () => window.removeEventListener("resize", fit);
-  }, []);
-
-  function dockHandle(corner: DockHandle) {
-    return (
-      <button
-        type="button"
-        className={`notes-resize notes-resize-${corner}`}
-        aria-label="缩放核对窗"
-        onPointerDown={(e) => {
-          if (e.button !== 0 || !dockOpenRef.current) return;
-          e.preventDefault();
-          e.stopPropagation();
-          markDockBusy(true);
-          dockResize.current = { x: e.clientX, y: e.clientY, box: dockBox, place: dockPlace, corner };
-          (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-        }}
-        onPointerMove={onDockResizeMove}
-        onPointerUp={endDockResize}
-        onPointerCancel={endDockResize}
-        onLostPointerCapture={endDockResize}
-      />
-    );
   }
 
   useEffect(() => {
@@ -368,11 +185,6 @@ export function ReviewPage({ taskId, onBack }: Props) {
         forgetReviewHandoff(taskId);
         setTask(t);
         setUseV2(shouldUseReworkView(t));
-        const seed: Record<string, string> = {};
-        for (const h of [...(t.hits || []), ...(t.hits_v2 || [])]) {
-          if (h.id && h.note) seed[h.id] = h.note;
-        }
-        setNotes(seed);
         if (t.conclusion) setConclusion(t.conclusion);
       })
       .catch((err: unknown) => {
@@ -397,15 +209,10 @@ export function ReviewPage({ taskId, onBack }: Props) {
           setError(null);
           setTask(next);
           if (shouldShowWaitCard(next)) return;
-          const seed: Record<string, string> = {};
-          for (const h of [...(next.hits || []), ...(next.hits_v2 || [])]) {
-            if (h.id && h.note) seed[h.id] = h.note;
-          }
-          if (Object.keys(seed).length) setNotes((prev) => ({ ...seed, ...prev }));
           if (next.conclusion) setConclusion((cur) => cur || next.conclusion || "");
           if (next.job_kind !== "rework" || next.job_status === "failed") return;
           if (shouldUseReworkView(next)) setUseV2(true);
-          message.success("已对照第二份 PDF。请核对上一轮有错的字段。");
+        message.success("新稿已上传，请复核上一轮的问题。");
         })
         .catch((err: unknown) => {
           if (err instanceof ApiError && err.status === 404) {
@@ -436,7 +243,8 @@ export function ReviewPage({ taskId, onBack }: Props) {
     const key = `${task.id}:${phase}:${useV2 ? "v2" : "v1"}:${hits.length}`;
     if (seededNav.current === key) return;
     seededNav.current = key;
-    const i = firstPendingIssueIndex(hits);
+    const restored = hits.findIndex((hit) => hit.id === savedHitId);
+    const i = restored >= 0 ? restored : firstPendingIssueIndex(hits) ?? partitionReviewHits(hits).issues[0]?.index ?? null;
     if (i == null) {
       pendingFit.current = null;
       setActive(0);
@@ -482,7 +290,7 @@ export function ReviewPage({ taskId, onBack }: Props) {
         })
         .catch((err: unknown) => {
           if (!cancelled && !controller.signal.aborted) {
-            setReviewMediaError(err instanceof Error ? err.message : "高清核对图加载失败");
+            setReviewMediaError(err instanceof Error ? err.message : "页面图片加载失败");
           }
         });
     }
@@ -498,7 +306,7 @@ export function ReviewPage({ taskId, onBack }: Props) {
     if (!page) return;
     if (failedMedia.source === "raster") {
       setReviewMedia(null);
-      setReviewMediaError("高清核对图显示失败，请刷新后重试");
+      setReviewMediaError("页面图片显示失败，请刷新后重试。");
       return;
     }
     reviewMediaLoad.current?.abort();
@@ -514,7 +322,7 @@ export function ReviewPage({ taskId, onBack }: Props) {
       })
       .catch((err: unknown) => {
         if (!controller.signal.aborted) {
-          setReviewMediaError(err instanceof Error ? err.message : "高清核对图显示失败，请刷新后重试");
+          setReviewMediaError(err instanceof Error ? err.message : "页面图片显示失败，请刷新后重试。");
         }
       });
   }
@@ -539,7 +347,11 @@ export function ReviewPage({ taskId, onBack }: Props) {
     const read = () => {
       const width = node.clientWidth;
       const height = node.clientHeight;
-      setViewSize((prev) => (prev && prev.width === width && prev.height === height ? prev : { width, height }));
+      setViewSize((prev) => {
+        if (prev && prev.width === width && prev.height === height) return prev;
+        if (prev && zoomRef.current.scale > 1) pendingFit.current = activeRef.current;
+        return { width, height };
+      });
     };
     read();
     const ro = new ResizeObserver(read);
@@ -579,8 +391,8 @@ export function ReviewPage({ taskId, onBack }: Props) {
 
   if (!taskId) {
     return (
-      <Empty description="还没有打开审核单">
-        <Button onClick={onBack}>回到任务</Button>
+      <Empty description="还没有打开审稿单">
+        <Button onClick={onBack}>回到审稿</Button>
       </Empty>
     );
   }
@@ -599,6 +411,8 @@ export function ReviewPage({ taskId, onBack }: Props) {
         });
         setTask((currentTask) => (currentTask?.id === targetTaskId ? next : currentTask));
         if (taskIdRef.current !== targetTaskId) return true;
+        clearNote(hitId, note);
+        setDecisionError(null);
         if (decision === "confirm" || decision === "ignore") {
           const nextUseV2 = useV2Ref.current;
           const nextHits = reviewHits(next, nextUseV2).filter((h) => !skipPackSheetField(h.field));
@@ -606,6 +420,7 @@ export function ReviewPage({ taskId, onBack }: Props) {
           const nextPending = firstPendingIssueIndex(nextHits);
           if (nextPending != null) {
             setActive(nextPending);
+            rememberHit(nextHits[nextPending]?.id);
             const pIdx = pageIndexForHit(nextPages, nextHits[nextPending]);
             if (pIdx != null && pIdx !== pageIdxRef.current) {
               pendingFit.current = nextPending;
@@ -618,7 +433,9 @@ export function ReviewPage({ taskId, onBack }: Props) {
         }
         return true;
       } catch (err) {
-        message.error(err instanceof Error ? err.message : "记录失败");
+        const detail = err instanceof Error ? err.message : "记录失败";
+        if (taskIdRef.current === targetTaskId) setDecisionError(detail);
+        message.error(detail);
         return false;
       } finally {
         endBusy();
@@ -650,10 +467,12 @@ export function ReviewPage({ taskId, onBack }: Props) {
     }
   }
 
+  const hasUnsavedNotes = hits.some((hit) => hit.id && notes[hit.id] != null && notes[hit.id] !== (hit.note ?? ""));
+
   async function uploadRework(file: File) {
-    if (!task || !reworkable) return;
+    if (!task || !reworkable || hasUnsavedNotes) return;
     if (!(await decisionQueueRef.current)) {
-      message.error("字段结论或备注还没保存，暂不能对红");
+      message.error("先保存备注，再继续。");
       return;
     }
     const fd = new FormData();
@@ -664,27 +483,27 @@ export function ReviewPage({ taskId, onBack }: Props) {
       setTask(next);
       if (shouldShowWaitCard(next)) return;
       setUseV2(true);
-      message.success("已对照第二份 PDF。请核对上一轮有错的字段。");
+      message.success("新稿已上传，请复核上一轮的问题。");
     } catch (err) {
-      message.error(err instanceof Error ? err.message : "对红失败");
+      message.error(err instanceof Error ? err.message : "复核失败");
     } finally {
       endBusy();
     }
   }
 
   async function signOff() {
-    if (!task || !reviewable) return;
+    if (!task || !reviewable || hasUnsavedNotes) return;
     if (!(await decisionQueueRef.current)) {
-      message.error("字段结论或备注还没保存，暂不能签字");
+      message.error("先保存备注，再提交结果。");
       return;
     }
     beginBusy();
     try {
       const next = await api.complete(task.id, { conclusion });
       setTask(next);
-      message.success("已记录你的结论，不是系统过审");
+      message.success("结果已提交。");
     } catch (err) {
-      message.error(err instanceof Error ? err.message : "还不能签字");
+      message.error(err instanceof Error ? err.message : "暂时不能提交结果");
     } finally {
       endBusy();
     }
@@ -715,6 +534,8 @@ export function ReviewPage({ taskId, onBack }: Props) {
   fitHitRef.current = fitHit;
 
   function pickHit(i: number) {
+    if (!hits[i]) return;
+    rememberHit(hits[i].id);
     setActive(i);
     const idx = pageIndexForHit(pages, hits[i]);
     if (idx != null && idx !== pageIdx) {
@@ -729,19 +550,19 @@ export function ReviewPage({ taskId, onBack }: Props) {
     return (
       <section className="review-page">
         <header className="page-head">
-          <h1 className="page-title">审核单</h1>
+          <h1 className="page-title">审稿单</h1>
           <button type="button" className="btn-ghost" onClick={onBack}>
             返回列表
           </button>
         </header>
-        <Alert type="error" showIcon title={error || "审核单加载失败"} />
+        <Alert type="error" showIcon title={error || "审稿单加载失败"} />
       </section>
     );
   }
   if (loadState === "loading") {
     return (
       <div className="desk-empty">
-        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="打开核对页…" />
+        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="打开审核页…" />
       </div>
     );
   }
@@ -758,13 +579,6 @@ export function ReviewPage({ taskId, onBack }: Props) {
     );
   }
 
-  const dockPortalTarget =
-    typeof document === "undefined"
-      ? null
-      : reviewFullscreen && pageRef.current
-        ? pageRef.current
-        : document.body;
-
   return (
     <section
       className={reviewFullscreen ? "review-page is-fullscreen" : "review-page"}
@@ -773,7 +587,7 @@ export function ReviewPage({ taskId, onBack }: Props) {
     >
       <header className="page-head">
         <div>
-          <h1 className="page-title">{task?.product_name || task?.title || "核对页"}</h1>
+          <h1 className="page-title">{task?.product_name || task?.title || "审核页"}</h1>
           <p className="page-lead">{statusLead(task, pageIdx, pages)}</p>
         </div>
         <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
@@ -786,7 +600,7 @@ export function ReviewPage({ taskId, onBack }: Props) {
             aria-pressed={reviewFullscreen}
             onClick={() => void toggleReviewFullscreen()}
           >
-            {reviewFullscreen ? "退出全屏" : "全屏核对"}
+            {reviewFullscreen ? "退出" : "全屏"}
           </button>
           {Array.isArray(task?.pages_v2) && task.pages_v2.length > 0 ? (
             <button
@@ -806,7 +620,7 @@ export function ReviewPage({ taskId, onBack }: Props) {
             <button
               type="button"
               className="btn-ghost"
-              disabled={!reworkable || busy}
+              disabled={!reworkable || busy || hasUnsavedNotes}
               onClick={() => {
                 const input = document.createElement("input");
                 input.type = "file";
@@ -818,9 +632,10 @@ export function ReviewPage({ taskId, onBack }: Props) {
                 input.click();
               }}
             >
-              上传改稿 PDF
+              上传新稿
             </button>
           )}
+          {hasUnsavedNotes ? <span className="review-draft-status" role="status">先保存备注，再继续。</span> : null}
           {pages.length > 1
             ? pages.map((p, i) => (
                 <button
@@ -838,7 +653,7 @@ export function ReviewPage({ taskId, onBack }: Props) {
             <label className="review-conclusion review-sign-layer">
               <Input
                 aria-label="结论"
-                placeholder="结论，签字要用"
+                placeholder="写下审核结果"
                 value={conclusion}
                 disabled={busy}
                 onChange={(e) => setConclusion(e.target.value)}
@@ -850,26 +665,42 @@ export function ReviewPage({ taskId, onBack }: Props) {
           <button
             type="button"
             className="btn-primary review-sign-layer"
-            disabled={!reviewable || busy || !conclusion.trim()}
+            disabled={!reviewable || busy || hasUnsavedNotes || !conclusion.trim()}
             onClick={() => void signOff()}
           >
-            {hits.some((h) => h.decision === "issue") ? "签字并待设计改稿" : "签字"}
+            {hits.some((h) => h.decision === "issue") ? "提交并等新稿" : "提交结果"}
           </button>
         </div>
       </header>
 
       {error ? <Alert type="error" title={error} style={{ marginBottom: 16 }} /> : null}
       {task?.error || task?.job_error ? (
-        <Alert type="error" showIcon style={{ marginBottom: 16 }} title={task.error || task.job_error} />
+        <Alert type="error" showIcon style={{ marginBottom: 16 }} title={customerCopy(task.error || task.job_error || "") || "检查失败。"} />
       ) : null}
       {task && reviewable && hits.length === 0 ? (
-        <Alert type="info" showIcon style={{ marginBottom: 16 }} title="机审没标出疑点，仍要你过一遍" />
+        <Alert type="info" showIcon style={{ marginBottom: 16 }} title="没有发现疑点，请快速看一遍。" />
       ) : null}
       {signed ? (
-        <Alert type="success" showIcon style={{ marginBottom: 16 }} title="已签字，不是系统过审" />
+        <Alert type="success" showIcon style={{ marginBottom: 16 }} title="结果已提交。" />
       ) : null}
 
-      <div className="review-desk">
+      <ReviewWorkspace key={userId || "session-only"} userId={userId} panel={
+        <>
+          {decisionError ? <Alert type="error" showIcon title={`未保存：${decisionError}`} /> : null}
+          <ReviewDockPanel
+            key={`${taskId}:${useV2 ? "v2" : "v1"}`}
+            hits={hits} active={active} current={current} fullscreen={reviewFullscreen}
+            currentHasBox={currentHasBox} pageNo={pageNo} reviewable={reviewable} busy={busy}
+            note={current?.id ? notes[current.id] ?? current.note ?? "" : ""}
+            emptyMessage={task?.status === "compare_failed" || task?.job_status === "failed" ? "检查未完成，暂时没有结果。" : "暂时没有检查结果，请翻页查看。"}
+            nativeTaskEvidence={task?.native_text} ocrMeta={task?.ocr_meta} reworkCheck={task?.rework_check} onPick={pickHit}
+            onDecide={(hit, decision, note) => void decide(hit, decision, note)}
+            onNoteCommit={(hit, decision, note) => void decide(hit, decision, note)}
+            onCopy={() => void copyList()}
+            onNoteChange={(value) => { if (current?.id) setNote(current.id, value); }}
+          />
+        </>
+      }>
         <div className="canvas glass-pane">
           {page?.url ? (
             <div
@@ -925,7 +756,7 @@ export function ReviewPage({ taskId, onBack }: Props) {
                   />
                 ) : (
                   <div className={reviewMediaError ? "review-media-status is-error" : "review-media-status"}>
-                    {reviewMediaError || "正在载入高清核对面…"}
+                    {reviewMediaError || "正在载入页面…"}
                   </div>
                 )}
                 {(reviewMedia ? pinHits : []).map(({ h, i, indices }) => {
@@ -1014,7 +845,7 @@ export function ReviewPage({ taskId, onBack }: Props) {
                         writePinsOn(browserStore(), next);
                       }}
                     >
-                      {pinsOn ? "隐藏本字段钉" : "显示本字段钉"}
+                      {pinsOn ? "隐藏本项目钉" : "显示本项目钉"}
                     </button>
                     <button
                       type="button"
@@ -1025,7 +856,7 @@ export function ReviewPage({ taskId, onBack }: Props) {
                         writeBoxesOn(browserStore(), next);
                       }}
                     >
-                      {boxesOn ? "隐藏本字段框" : "显示本字段框"}
+                      {boxesOn ? "隐藏本项目框" : "显示本项目框"}
                     </button>
                     <button type="button" className="btn-ghost" onClick={() => setToolsOpen(false)}>
                       收缩
@@ -1042,7 +873,7 @@ export function ReviewPage({ taskId, onBack }: Props) {
             <Empty
               description={
                 task?.status === "compare_failed" || task?.job_status === "failed"
-                  ? "对照中断，这一页没有图。看上面的原因，或回看板重传一对。"
+                  ? "检查中断，这一页没有图。请返回看板重新上传。"
                   : "这一页还没有图"
               }
               image={Empty.PRESENTED_IMAGE_SIMPLE}
@@ -1050,91 +881,11 @@ export function ReviewPage({ taskId, onBack }: Props) {
             />
           )}
           <p className="page-lead" style={{ padding: "0 16px 12px" }}>
-            只亮当前疑点 · 紫框已命中 · 黄框待核对 · 钉和框只作用于本字段 · 拖动画布会暂时藏框 · 滚轮缩放
+只标当前项目。拖动时暂时隐藏。
           </p>
         </div>
 
-        </div>
-        {dockPortalTarget
-          ? createPortal(
-          <aside
-            ref={dockRef}
-            data-testid="review-dock"
-            className={dockOpen ? "notes glass-pane is-float" : "notes glass-pane is-float is-shut"}
-            style={(() => {
-              const shown = dockVisual(dockOpen, dockBox, dockPlace, pageRoom());
-              return {
-                width: shown.box.w,
-                height: shown.box.h,
-                top: shown.place.top,
-                left: shown.place.left,
-                zIndex: REVIEW_DOCK_LAYER,
-              };
-            })()}
-            onPointerDown={(e) => e.stopPropagation()}
-          >
-            <div
-              className="notes-toolbar"
-              onPointerDown={(e) => {
-                if (e.button !== 0) return;
-                if (e.target instanceof HTMLElement && e.target.closest("button")) return;
-                e.preventDefault();
-                markDockBusy(true);
-                dockDrag.current = { x: e.clientX, y: e.clientY, place: dockPlace };
-                (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-              }}
-              onPointerMove={onDockMove}
-              onPointerUp={endDockMove}
-              onPointerCancel={endDockMove}
-              onLostPointerCapture={endDockMove}
-            >
-              <p className="field-label" style={{ color: "var(--muted)", margin: 0 }}>
-                当前字段
-              </p>
-              <button type="button" className="notes-toggle" onClick={toggleDock}>
-                <span className="notes-toggle-mark" aria-hidden />
-                {dockOpen ? "收起" : hits.length ? `展开 ${hits.length}` : "展开"}
-              </button>
-            </div>
-            <div className="notes-body" aria-hidden={!dockOpen}>
-              <ReviewDockPanel
-                hits={hits}
-                active={active}
-                current={current}
-                fullscreen={reviewFullscreen}
-                currentHasBox={currentHasBox}
-                pageNo={pageNo}
-                reviewable={reviewable}
-                busy={busy}
-                note={current?.id ? notes[current.id] || "" : ""}
-                emptyMessage={
-                  task?.status === "compare_failed" || task?.job_status === "failed"
-                    ? "对照没跑完，没有机审条目。"
-                    : "没有机审条目。仍请翻页看一遍。"
-                }
-                reworkCheck={task?.rework_check}
-                onPick={pickHit}
-                onDecide={(hit, decision, note) => void decide(hit, decision, note)}
-                onNoteCommit={(hit, decision, note) => void decide(hit, decision, note)}
-                onCopy={() => void copyList()}
-                onNoteChange={(value) => {
-                  if (!current?.id) return;
-                  setNotes((prev) => ({ ...prev, [current.id as string]: value }));
-                }}
-              />
-            </div>
-            {dockHandle("n")}
-            {dockHandle("s")}
-            {dockHandle("e")}
-            {dockHandle("w")}
-            {dockHandle("nw")}
-            {dockHandle("ne")}
-            {dockHandle("sw")}
-            {dockHandle("se")}
-          </aside>,
-              dockPortalTarget,
-            )
-          : null}
+      </ReviewWorkspace>
     </section>
   );
 }

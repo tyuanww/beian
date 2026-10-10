@@ -83,7 +83,7 @@ describe("prepareReviewMedia", () => {
           },
         },
       ),
-      /高清核对图加载失败/,
+      /页面图片加载失败/,
     );
     assert.equal(created, 1);
   });
@@ -105,7 +105,7 @@ describe("prepareReviewMedia", () => {
         { raster_url: "/page.png", width: 5600, height: 3200 },
         { createProbe: () => probe("ok", { width: 1, height: 1 }) },
       ),
-      /高清核对图加载失败/,
+      /页面图片加载失败/,
     );
   });
 
@@ -180,7 +180,7 @@ describe("prepareReviewMedia", () => {
         { url: "/review.svg", raster_url: "/page.png" },
         { createProbe: () => probe("fail") },
       ),
-      /高清核对图加载失败/,
+      /页面图片加载失败/,
     );
   });
 
@@ -225,7 +225,7 @@ describe("prepareReviewMedia", () => {
         { url: "/stalled.svg" },
         { createProbe: () => stalled, timeoutMs: 0 },
       ),
-      /高清核对图加载失败/,
+      /页面图片加载失败/,
     );
     assert.equal(stalled.src, "");
   });

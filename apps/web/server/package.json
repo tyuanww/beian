@@ -15,7 +15,8 @@
   "dependencies": {
     "@hono/node-server": "^1.19.0",
     "busboy": "^1.6.0",
-    "hono": "^4.9.6"
+    "hono": "^4.9.6",
+    "sharp": "0.34.4"
   },
   "devDependencies": {
     "@types/busboy": "^1.5.4",

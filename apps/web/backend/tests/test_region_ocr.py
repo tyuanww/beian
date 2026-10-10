@@ -22,6 +22,29 @@ def test_live_text_skips_ocr():
     assert "baidu" not in "".join(meta.get("engines") or [])
 
 
+# Value: protects=partial native evidence cannot fall back to a stale PDF text layer; fails_when=force_ocr is ignored for live_text pages and hidden layer text becomes the source; why_new=live_text routing normally skips OCR and existing tests cover only the intentional skip; seam=none
+def test_force_ocr_overrides_live_text_shortcut(tmp_path):
+    img = tmp_path / "p.png"
+    img.write_bytes(b"x")
+    calls = {"n": 0}
+
+    def fake(_data: bytes):
+        calls["n"] += 1
+        return "visible OCR", [{"text": "visible OCR", "location": {"left": 1, "top": 1, "width": 10, "height": 8}}], {"api": "accurate"}
+
+    text, words, tag, meta = recognize_pages(
+        [{"path": str(img), "page": 1, "width": 20, "height": 20}],
+        {"mode": "live_text", "pages": [{"page": 1, "mode": "live_text"}]},
+        ocr_fn=fake,
+        force_ocr=True,
+    )
+    assert calls["n"] == 1
+    assert text == "visible OCR"
+    assert words[0]["text"] == "visible OCR"
+    assert tag == "baidu:accurate"
+    assert meta["skipped"] is False
+
+
 def test_outlined_runs_single_engine_once_per_page(tmp_path):
     img = tmp_path / "p.png"
     img.write_bytes(b"x")
@@ -86,11 +109,13 @@ def test_no_engine_union_in_source():
 
 
 def test_engine_contract_matches_single_engine_pipeline():
-    assert ENGINE_VERSION == "tvt-lite-2.0"
+    assert ENGINE_VERSION == "tvt-lite-2.1"
     assert {
         "pdf_ingest_classification",
         "page_source_routing",
         "live_text_no_ocr",
+        "native_text_first",
+        "native_coverage_gate",
         "single_ocr_engine",
     } <= set(ENGINE_FEATURES)
     assert {

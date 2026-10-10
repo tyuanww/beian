@@ -10,6 +10,7 @@ import {
 } from "@playwright/test";
 
 type SyntheticHit = {
+  native_text_evidence?: unknown;
   id: string;
   field: string;
   status: string;
@@ -26,6 +27,13 @@ type SyntheticHit = {
 };
 
 export type SyntheticTask = {
+  native_text?: { status: string; reason?: string; message?: string };
+  ocr_meta?: {
+    skipped?: boolean;
+    reason?: string;
+    pages_ran?: number;
+    engines?: string[];
+  };
   id: string;
   title: string;
   product_name?: string;
@@ -147,7 +155,7 @@ type SyntheticReceipt = {
   client_upload_id?: string;
   product_name?: string;
   pack_surface?: string;
-  kind: "compare" | "mockup";
+  kind: "compare" | "mockup" | "compression";
 };
 
 type SyntheticUploadSession = {
@@ -158,7 +166,7 @@ type SyntheticUploadSession = {
   client_upload_id: string;
   product_name?: string;
   pack_surface?: string;
-  kind: "compare" | "mockup";
+  kind: "compare" | "mockup" | "compression";
 };
 
 type ApiCall = {
@@ -330,20 +338,41 @@ async function installSyntheticApi(page: Page, state: SyntheticApi) {
           avatar_url: null,
           open_id: "ou_e2e_synthetic",
           role: "admin",
-          perms: ["read", "create", "delete", "confirm_structure"],
+          perms: ["read", "create", "delete", "export", "confirm_structure"],
         });
       }
       if (method === "GET" && (path === "/api/status" || path === "/api/health")) {
         return json(route, { ok: true, version: "0.0.0.0", jobs: {} });
       }
+      if (method === "GET" && path === "/api/compressions") {
+        return json(route, { items: [], unreadable_ids: [] });
+      }
       if (method === "POST" && path === "/api/auth/logout") return json(route, { ok: true });
 
+      if (method === "GET" && path === "/api/history") {
+        let rows = [
+          ...state.tasks.map(row => ({ id: row.id, type: "review", title: row.title, product_name: row.product_name || "", status: row.job_status === "running" ? "running" : row.status, created_at: row.created_at || FIXED_TIME, creator_id: "ou_e2e_synthetic", creator_name: row.owner || "合成用户", names: [], matched_names: [], visibility: "team" })),
+          ...state.mockups.map(row => ({ id: row.id, type: "mockup", title: row.title, product_name: "", status: row.status, created_at: row.created_at || FIXED_TIME, creator_id: "ou_e2e_synthetic", creator_name: row.owner || "合成用户", names: row.files.map(file => file.name), matched_names: [], visibility: "team" })),
+          ...state.receipts.map(row => ({ id: row.id, type: "upload", title: row.product_name || row.files[0]?.name || "上传", product_name: row.product_name || "", status: "ready", created_at: row.created_at, creator_id: "ou_e2e_synthetic", creator_name: "合成用户", names: row.files.map(file => file.name), matched_names: [], visibility: "upload_owner" })),
+          ...state.uploads.map(row => ({ id: row.id, type: "upload", title: row.product_name || row.files[0]?.name || "上传", product_name: row.product_name || "", status: "uploading", created_at: row.created_at, creator_id: "ou_e2e_synthetic", creator_name: "合成用户", names: row.files.map(file => file.name), matched_names: [], visibility: "upload_owner" })),
+        ];
+        const query = url.searchParams;
+        if (query.get("type")) rows = rows.filter(row => row.type === query.get("type"));
+        if (query.get("status")) rows = rows.filter(row => row.status === query.get("status"));
+        if (query.get("q")) rows = rows.filter(row => (row.title + row.names.join(" ")).includes(query.get("q")!));
+        const offset = Number(query.get("cursor") || 0);
+        const limit = Number(query.get("limit") || 10);
+        return json(route, { items: rows.slice(offset, offset + limit), total: rows.length,
+          next_cursor: offset + limit < rows.length ? String(offset + limit) : null,
+          facets: { type: { review: rows.filter(row => row.type === "review").length, mockup: rows.filter(row => row.type === "mockup").length, compression: 0, upload: rows.filter(row => row.type === "upload").length }, status: Object.fromEntries(rows.map(row => [row.status, 1])) } });
+      }
       if (method === "GET" && path === "/api/uploads") {
         return json(route, [...state.receipts.map(readyUpload), ...state.uploads.map(pausedUpload)]);
       }
       if (method === "POST" && path === "/api/uploads/sessions") {
         const data = (body || {}) as {
           client_upload_id?: string;
+          purpose?: string;
           product_name?: string;
           pack_surface?: string;
           files?: Array<{ field: string; name: string; bytes: number; last_modified?: number }>;
@@ -354,7 +383,7 @@ async function installSyntheticApi(page: Page, state: SyntheticApi) {
         if (existing) return json(route, { upload: pausedUpload(existing) });
         const files = (data.files || []).map((file) => ({ ...file, received: 0 }));
         if (!data.client_upload_id || !files.length) return json(route, { detail: "合成上传格式错误" }, 400);
-        const kind = files.some((file) => file.field === "excel" || file.field === "pdf") ? "compare" : "mockup";
+        const kind = data.purpose === "compression" ? "compression" : files.some((file) => file.field === "excel" || file.field === "pdf") ? "compare" : "mockup";
         const id = `${kind === "compare" ? "a" : "b"}${(++receiptSequence).toString(16).padStart(11, "0")}`;
         const upload: SyntheticUploadSession = {
           id,
@@ -369,7 +398,7 @@ async function installSyntheticApi(page: Page, state: SyntheticApi) {
         state.uploads.push(upload);
         return json(route, { upload: pausedUpload(upload) });
       }
-      const chunkPath = path.match(/^\/api\/uploads\/sessions\/([0-9a-f]{12})\/files\/(excel|pdf|ai)$/);
+      const chunkPath = path.match(/^\/api\/uploads\/sessions\/([0-9a-f]{12})\/files\/(excel|pdf|ai|asset[0-9]+)$/);
       if (method === "PUT" && chunkPath) {
         const upload = state.uploads.find((item) => item.id === chunkPath[1]);
         const file = upload?.files.find((item) => item.field === chunkPath[2]);
@@ -584,7 +613,7 @@ async function installSyntheticApi(page: Page, state: SyntheticApi) {
       if (printFacesPath && method === "POST") {
         const mockup = state.mockups.find((item) => item.id === printFacesPath[1]);
         if (!mockup) return json(route, { detail: "合成打样不存在" }, 404);
-        if (mockup.status !== "done") return json(route, { detail: "只有已出图的纸盒才能补印刷面。" }, 409);
+        if (mockup.status !== "done") return json(route, { detail: "只有完成后才能生成印刷面。" }, 409);
         if (!mockup.can_repair_print_faces) {
           return json(route, { detail: "这单没有可用底稿，无法补生成。请重新打样。" }, 409);
         }
@@ -603,7 +632,7 @@ async function installSyntheticApi(page: Page, state: SyntheticApi) {
       if (relightPath && method === "POST") {
         const mockup = state.mockups.find((item) => item.id === relightPath[1]);
         if (!mockup) return json(route, { detail: "合成打样不存在" }, 404);
-        if (mockup.status !== "done") return json(route, { detail: "只有已出图的纸盒才能重渲棚。" }, 409);
+        if (mockup.status !== "done") return json(route, { detail: "只有完成后才能更换背景。" }, 409);
         if (!mockup.can_relight_studio) {
           return json(route, { detail: "这单没有可用棚底稿，无法重渲。请重新打样。" }, 409);
         }

@@ -7,6 +7,7 @@ import pytest
 from PIL import Image, ImageChops, ImageDraw
 
 from app.pdf_ingest import (
+    FULL_PAGE_IMAGE_MIN_COVERAGE,
     WARNING_IMAGE,
     WARNING_OUTLINED,
     classify_document,
@@ -384,6 +385,25 @@ def test_mixed_page_sources_keep_live_and_ocr_evidence():
     assert source == "pdf_text+ocr"
 
 
+def test_native_fallback_does_not_reuse_layer_when_ocr_is_empty():
+    layer_words = [{
+        "text": "陈旧隐藏文字",
+        "page": 1,
+        "location": {"left": 1, "top": 1, "width": 40, "height": 10},
+    }]
+    text, words, source = merge_text_sources(
+        "陈旧隐藏文字",
+        "",
+        layer_words,
+        [],
+        prefer_layer=False,
+        allow_layer_fallback=False,
+    )
+    assert text == ""
+    assert words == []
+    assert source == "ocr"
+
+
 def test_public_ingest_drops_spans_and_layer_text(tmp_path: Path):
     pdf = _live_text_pdf(tmp_path / "live.pdf")
     full = ingest_pdf(pdf, max_pages=1)
@@ -418,7 +438,11 @@ def test_surface_job_emits_ingest_without_spans(tmp_path: Path, monkeypatch, cap
         "_qrcode_pages",
         lambda _metas: ([], {"status": "empty"}),
     )
-    monkeypatch.setattr(compare_core, "verify_fields", lambda *_a, **_k: [])
+    monkeypatch.setattr(
+        compare_core,
+        "verify_fields",
+        lambda *_a, **_k: [],
+    )
     result = compare_core._surface_job(
         tid="0123456789ab",
         pdf=pdf,
@@ -440,3 +464,392 @@ def test_surface_job_emits_ingest_without_spans(tmp_path: Path, monkeypatch, cap
     assert "spans" not in ingest
     assert ingest["warning"] is None
     assert result["pack_layout"]["regions"]
+
+
+def _native_surface_ingest() -> dict:
+    return {
+        "mode": "live_text",
+        "pages": [
+            {
+                "page": 1,
+                "mode": "live_text",
+                "live_chars": 0,
+                "words": 0,
+                "text_blocks": 0,
+                "image_blocks": 0,
+                "image_coverage": 0.0,
+                "drawings": 0,
+                "drawing_items": 0,
+                "warning": None,
+            }
+        ],
+        "live_chars": 0,
+        "drawings": 0,
+        "drawing_items": 0,
+        "images": 0,
+        "warning": None,
+        "spans": [],
+        "layer_text": "",
+        "layer_blocks": [],
+        "has_layer": False,
+    }
+
+
+def _native_candidate(text: str = "Native Product") -> dict:
+    return {
+        "text": text,
+        "page": 1,
+        "bbox": [10, 10, 180, 34],
+        "object_id": "native-1",
+    }
+
+
+def test_native_coverage_skips_baidu_ocr(monkeypatch, tmp_path: Path):
+    """闭合且覆盖确认单的原生文字可以独立完成审稿。"""
+    from app import compare_core
+
+    compare_core.init_paths(tmp_path / "data")
+    page_path = tmp_path / "page.png"
+    page_path.write_bytes(b"synthetic-page")
+    metas = [{"page": 1, "path": str(page_path), "name": "page.png", "width": 400, "height": 300}]
+    monkeypatch.setattr(compare_core, "render_pdf_pages", lambda *_a, **_k: metas)
+    ingested = _native_surface_ingest()
+    ingested["has_layer"] = True
+    ingested["layer_text"] = "过期隐藏文字，不应替代已证明可见的原生文字。"
+    monkeypatch.setattr(compare_core, "ingest_pdf", lambda *_a, **_k: ingested)
+
+    def fail_ocr(*_args, **_kwargs):
+        raise AssertionError("原生覆盖完整时不应调用百度 OCR")
+
+    monkeypatch.setattr(compare_core, "_ocr_pages", fail_ocr)
+    monkeypatch.setattr(
+        compare_core.native_text,
+        "load_candidates",
+        lambda *_a, **_k: ([_native_candidate()], None),
+    )
+    monkeypatch.setattr(compare_core, "_qrcode_pages", lambda *_a: ([], {"status": "empty"}))
+    monkeypatch.setattr(
+        compare_core,
+        "verify_fields",
+        lambda *_a, **_k: [{
+            "id": "native-hit",
+            "field": "中文品名",
+            "status": "疑点",
+            "bboxes": [{"page": 1, "left": 10, "top": 10, "width": 170, "height": 24}],
+        }],
+    )
+
+    result = compare_core._surface_job(
+        tid="0123456789ab",
+        pdf=tmp_path / "artwork.pdf",
+        pages_subdir="",
+        max_pages=1,
+        surface_label="花盒",
+        fields=[{"field": "中文品名", "excel_value": "Native Product", "field_group": "中文品名"}],
+        title="Native Product",
+        filename="artwork.pdf",
+    )
+
+    assert result["ocr_engine"] == "illustrator_native"
+    assert result["ocr_meta"]["skipped"] is True
+    assert result["ocr_meta"]["reason"] == "native_coverage"
+    assert result["text_source"] == "illustrator_native"
+    assert result["pack_text"] == "Native Product"
+    assert "过期隐藏文字" not in result["pack_text"]
+    assert result["hits"][0]["native_text_evidence"]["status"] == "used"
+    assert result["hits"][0]["native_text_evidence"]["ocr_text"] is None
+
+
+def test_native_partial_coverage_falls_back_to_ocr(monkeypatch, tmp_path: Path):
+    """原生文字未覆盖确认单时仍必须调用 OCR。"""
+    from app import compare_core
+
+    compare_core.init_paths(tmp_path / "data")
+    page_path = tmp_path / "page.png"
+    page_path.write_bytes(b"synthetic-page")
+    metas = [{"page": 1, "path": str(page_path), "name": "page.png", "width": 400, "height": 300}]
+    monkeypatch.setattr(compare_core, "render_pdf_pages", lambda *_a, **_k: metas)
+    ingested = _native_surface_ingest()
+    ingested["has_layer"] = True
+    ingested["layer_text"] = "Native Product"
+    monkeypatch.setattr(compare_core, "ingest_pdf", lambda *_a, **_k: ingested)
+    calls = {"n": 0}
+
+    def fake_ocr(*_args, **_kwargs):
+        calls["n"] += 1
+        return "OCR fallback", [{"text": "OCR fallback", "page": 1, "location": {"left": 10, "top": 40, "width": 120, "height": 20}}], "mock", {"skipped": False}
+
+    monkeypatch.setattr(compare_core, "_ocr_pages", fake_ocr)
+    monkeypatch.setattr(
+        compare_core.native_text,
+        "load_candidates",
+        lambda *_a, **_k: ([_native_candidate("Unrelated")], None),
+    )
+    monkeypatch.setattr(compare_core, "_qrcode_pages", lambda *_a: ([], {"status": "empty"}))
+    monkeypatch.setattr(compare_core, "verify_fields", lambda *_a, **_k: [])
+
+    result = compare_core._surface_job(
+        tid="0123456789ab",
+        pdf=tmp_path / "artwork.pdf",
+        pages_subdir="",
+        max_pages=1,
+        surface_label="花盒",
+        fields=[{"field": "中文品名", "excel_value": "Native Product", "field_group": "中文品名"}],
+        title="Native Product",
+        filename="artwork.pdf",
+    )
+
+    assert calls["n"] == 1
+    assert result["ocr_engine"] == "mock"
+    assert result["ocr_meta"]["skipped"] is False
+
+
+def test_rejected_native_attempt_forces_ocr_on_live_text(monkeypatch, tmp_path: Path):
+    """原生尝试因预算/映射失败时，不能回用陈旧 PDF 文字层。"""
+    from app import compare_core
+
+    compare_core.init_paths(tmp_path / "data")
+    page_path = tmp_path / "page.png"
+    page_path.write_bytes(b"synthetic-page")
+    metas = [{"page": 1, "path": str(page_path), "name": "page.png", "width": 400, "height": 300}]
+    ingested = _native_surface_ingest()
+    ingested["has_layer"] = True
+    ingested["layer_text"] = "过期隐藏文字"
+    monkeypatch.setattr(compare_core, "render_pdf_pages", lambda *_a, **_k: metas)
+    monkeypatch.setattr(compare_core, "ingest_pdf", lambda *_a, **_k: ingested)
+    calls = []
+
+    def fake_ocr(*_args, **kwargs):
+        calls.append(kwargs.get("force_ocr"))
+        return "OCR fallback", [{"text": "OCR fallback", "page": 1, "location": {"left": 10, "top": 40, "width": 120, "height": 20}}], "mock", {"skipped": False}
+
+    monkeypatch.setattr(compare_core, "_ocr_pages", fake_ocr)
+    monkeypatch.setattr(
+        compare_core.native_text,
+        "load_candidates",
+        lambda *_a, **_k: ([], "native_mapping_unconfirmed"),
+    )
+    monkeypatch.setattr(compare_core, "_qrcode_pages", lambda *_a: ([], {"status": "empty"}))
+    monkeypatch.setattr(compare_core, "verify_fields", lambda *_a, **_k: [])
+    monkeypatch.setattr(compare_core, "NATIVE_DIR", tmp_path / ".native-rejected")
+
+    result = compare_core._surface_job(
+        tid="0123456789ab",
+        pdf=tmp_path / "artwork.pdf",
+        pages_subdir="",
+        max_pages=1,
+        surface_label="花盒",
+        fields=[],
+        title="Native Product",
+        filename="artwork.pdf",
+    )
+
+    assert calls == [True]
+    assert result["text_source"] == "ocr"
+    assert "过期隐藏文字" not in result["pack_text"]
+
+
+def test_native_candidate_does_not_skip_ocr_on_mixed_page(monkeypatch, tmp_path: Path):
+    """mixed 页可能还有转曲文案，单个原生文字框不能证明整页覆盖。"""
+    from app import compare_core
+
+    compare_core.init_paths(tmp_path / "data")
+    page_path = tmp_path / "page.png"
+    page_path.write_bytes(b"synthetic-page")
+    metas = [{"page": 1, "path": str(page_path), "name": "page.png", "width": 400, "height": 300}]
+    ingested = _native_surface_ingest()
+    ingested["mode"] = "mixed"
+    ingested["pages"][0]["mode"] = "mixed"
+    ingested["pages"][0]["drawings"] = 500
+    monkeypatch.setattr(compare_core, "render_pdf_pages", lambda *_a, **_k: metas)
+    monkeypatch.setattr(compare_core, "ingest_pdf", lambda *_a, **_k: ingested)
+    calls = {"n": 0}
+
+    def fake_ocr(*_args, **_kwargs):
+        calls["n"] += 1
+        return "OCR fallback", [{"text": "OCR fallback", "page": 1, "location": {"left": 10, "top": 40, "width": 120, "height": 20}}], "mock", {"skipped": False}
+
+    monkeypatch.setattr(compare_core, "_ocr_pages", fake_ocr)
+    monkeypatch.setattr(compare_core.native_text, "load_candidates", lambda *_a, **_k: ([_native_candidate()], None))
+    monkeypatch.setattr(compare_core, "_qrcode_pages", lambda *_a: ([], {"status": "empty"}))
+    monkeypatch.setattr(compare_core, "verify_fields", lambda *_a, **_k: [])
+
+    result = compare_core._surface_job(
+        tid="0123456789ab",
+        pdf=tmp_path / "artwork.pdf",
+        pages_subdir="",
+        max_pages=1,
+        surface_label="花盒",
+        fields=[{"field": "中文品名", "excel_value": "Native Product", "field_group": "中文品名"}],
+        title="Native Product",
+        filename="artwork.pdf",
+    )
+
+    assert calls["n"] == 1
+    assert result["ocr_engine"] == "mock"
+    assert result["ocr_meta"]["skipped"] is False
+
+
+def test_native_candidate_budget_falls_back_before_native_only(monkeypatch):
+    """候选过多时回退 OCR，避免原生证据扫描失控。"""
+    from app import compare_core
+
+    candidates = [_native_candidate("Native Product")] * (compare_core.NATIVE_ONLY_MAX_CANDIDATES + 1)
+    only_native, gate = compare_core._native_only_gate(
+        _native_surface_ingest(),
+        candidates,
+        [{"field": "中文品名", "excel_value": "Native Product", "field_group": "中文品名"}],
+    )
+
+    assert only_native is False
+    assert gate["reason"] == "candidate_limit"
+
+
+def test_native_gate_does_not_use_ocr_fuzzy_phrase_matching():
+    """跳过 OCR 的门不能把缺字的前缀/锚点命中当作完整覆盖。"""
+    from app import compare_core
+
+    only_native, gate = compare_core._native_only_gate(
+        _native_surface_ingest(),
+        [_native_candidate("Native Product")],
+        [{"field": "中文品名", "excel_value": "Native Product Deluxe"}],
+    )
+
+    assert only_native is False
+    assert gate["reason"] == "coverage_incomplete"
+    assert gate["matched"] < gate["total"]
+
+
+# Value: protects=native and barcode gates reject numeric substring matches; fails_when=expected code 12345678 is accepted inside 012345678; why_new=phrase coverage tests cover text prefixes but not numeric token boundaries; seam=none
+def test_native_gate_requires_complete_barcode_token():
+    from app import compare_core
+
+    only_native, gate = compare_core._native_only_gate(
+        _native_surface_ingest(),
+        [_native_candidate("012345678")],
+        [{"field": "条码", "excel_value": "12345678", "field_group": "条形码"}],
+    )
+
+    assert only_native is False
+    assert gate["reason"] == "coverage_incomplete"
+
+
+# Value: protects=native gate rejects image-heavy pages even when the PDF mode says live_text; fails_when=image_coverage guard is removed and native text suppresses OCR over artwork; why_new=existing gate tests cover mode and phrase coverage but not the image threshold branch; seam=none
+def test_native_gate_falls_back_for_image_heavy_live_page():
+    from app import compare_core
+
+    ingested = _native_surface_ingest()
+    ingested["pages"][0]["image_coverage"] = FULL_PAGE_IMAGE_MIN_COVERAGE
+    only_native, gate = compare_core._native_only_gate(
+        ingested,
+        [_native_candidate()],
+        [{"field": "中文品名", "excel_value": "Native Product", "field_group": "中文品名"}],
+    )
+
+    assert only_native is False
+    assert gate["reason"] == "image_content"
+
+
+# Value: protects=native gate counts only reviewable fields and normalizes unit spellings; fails_when=skip-field filtering or unit normalization is removed and valid native-only jobs fall back or skip required checks; why_new=no existing gate case combines metadata filtering with a milliliter unit variant; seam=none
+def test_native_gate_ignores_pack_metadata_and_matches_unit_variant():
+    from app import compare_core
+
+    ingested = _native_surface_ingest()
+    only_native, gate = compare_core._native_only_gate(
+        ingested,
+        [_native_candidate("30 mL")],
+        [
+            {"field": "工艺说明", "excel_value": "局部烫金"},
+            {"field": "净含量", "excel_value": "30毫升", "field_group": "净含量"},
+        ],
+    )
+
+    assert only_native is True
+    assert gate["reason"] == "native_coverage"
+    assert gate["matched"] == gate["total"] == 1
+
+
+def test_native_coverage_requires_every_rendered_page():
+    """缺少任一页的原生证明时不能把整单误判为 native-only。"""
+    from app import compare_core
+
+    ingested = _native_surface_ingest()
+    ingested["pages"].append({**ingested["pages"][0], "page": 2})
+    only_native, gate = compare_core._native_only_gate(
+        ingested,
+        [_native_candidate()],
+        [{"field": "中文品名", "excel_value": "Native Product", "field_group": "中文品名"}],
+    )
+
+    assert only_native is False
+    assert gate["reason"] == "page_coverage_incomplete"
+
+
+def test_multi_surface_ocr_meta_does_not_hide_secondary_ocr(monkeypatch, tmp_path: Path):
+    """双面稿只在每一面都 native-only 时才展示整单跳过 OCR。"""
+    from app import compare_core
+
+    compare_core.init_paths(tmp_path / "data")
+    excel = tmp_path / "source.xlsx"
+    primary_pdf = tmp_path / "carton.pdf"
+    pouch_pdf = tmp_path / "pouch.pdf"
+    for path in (excel, primary_pdf, pouch_pdf):
+        path.write_bytes(b"source")
+    monkeypatch.setattr(compare_core, "parse_excel_fields", lambda *_a: [{"field": "中文品名", "excel_value": "Native Product"}])
+
+    def face(label: str, *, skipped: bool, reason: str | None, engine: str):
+        return {
+            "surface": label,
+            "pages": [],
+            "page_metas": [],
+            "hits": [],
+            "pack_text": "Native Product",
+            "pack_profile": {},
+            "text_source": "illustrator_native" if skipped else "ocr",
+            "has_layer": False,
+            "ocr_engine": engine,
+            "ocr_meta": {
+                "skipped": skipped,
+                **({"reason": reason} if reason else {}),
+                "pages_ran": 0 if skipped else 1,
+                "words": 2 if skipped else 3,
+                "native_coverage": {"matched": 4 if skipped else 1, "total": 4},
+                "api": None if skipped else "accurate",
+                "probability": False if skipped else True,
+            },
+            "layout_zones": {},
+            "pack_layout": {"regions": []},
+            "qrcodes": [],
+            "qrcode_meta": {},
+            "reverse_extras": [],
+            "ingest": {},
+        }
+
+    monkeypatch.setattr(
+        compare_core,
+        "_surface_job",
+        lambda **kwargs: face(
+            kwargs["surface_label"],
+            skipped=kwargs["surface_label"] == "花盒",
+            reason="native_coverage" if kwargs["surface_label"] == "花盒" else None,
+            engine="illustrator_native" if kwargs["surface_label"] == "花盒" else "baidu:accurate",
+        ),
+    )
+
+    result = compare_core.run_excel_pdf_job(
+        "0123456789ab",
+        excel,
+        primary_pdf,
+        1,
+        "Native Product",
+        pdf_pouch=pouch_pdf,
+    )
+
+    assert result["ocr_meta"]["skipped"] is False
+    assert [item["surface"] for item in result["ocr_meta"]["surfaces"]] == ["花盒", "膜袋"]
+    assert result["ocr_meta"]["surfaces"][1]["ocr_engine"] == "baidu:accurate"
+    assert result["ocr_meta"]["engines"] == ["illustrator_native", "baidu:accurate"]
+    assert result["ocr_meta"]["words"] == 5
+    assert result["ocr_meta"]["native_coverage"] == {"matched": 5, "total": 8}
+    assert "api" not in result["ocr_meta"]
+    assert "probability" not in result["ocr_meta"]

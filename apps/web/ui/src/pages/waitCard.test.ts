@@ -123,16 +123,16 @@ describe("detailLoadState", () => {
 
 describe("waitLoaderLetters", () => {
   it("splits job title into per-character spans", () => {
-    assert.deepEqual(waitLoaderLetters("compare"), ["对", "照", "中"]);
-    assert.deepEqual(waitLoaderLetters("rework"), ["对", "红", "中"]);
-    assert.deepEqual(waitLoaderLetters("mockup"), ["打", "样", "中"]);
+    assert.deepEqual(waitLoaderLetters("compare"), ["检", "查", "中"]);
+    assert.deepEqual(waitLoaderLetters("rework"), ["复", "核", "中"]);
+    assert.deepEqual(waitLoaderLetters("mockup"), ["生", "成", "中"]);
   });
 });
 
 describe("waitCardCopy", () => {
   it("queued compare shows queue_ahead, never a 40s eta", () => {
     const copy = waitCardCopy({ kind: "compare", job_status: "queued", queue_ahead: 2 });
-    assert.equal(copy.title, "对照中");
+    assert.equal(copy.title, "检查中");
     assert.equal(copy.eta, "前面还有 2 单");
     assert.match(copy.hint, /前面还有 2 单/);
     assert.doesNotMatch(copy.eta, /大约还要/);
@@ -145,9 +145,9 @@ describe("waitCardCopy", () => {
     assert.match(copy.hint, /就快轮到/);
   });
 
-  it("rework title is 对红中", () => {
+  it("rework title is 复核中", () => {
     const copy = waitCardCopy({ kind: "rework", job_status: "running" });
-    assert.equal(copy.title, "对红中");
+    assert.equal(copy.title, "复核中");
     assert.equal(copy.eta, "大约还要 40 秒");
   });
 
@@ -159,12 +159,12 @@ describe("waitCardCopy", () => {
       job_eta_s: 40,
     });
     assert.equal(copy.eta, "大约还要 40 秒");
-    assert.match(copy.hint, /认字/);
+    assert.match(copy.hint, /读取文字/);
   });
 
   it("mockup running defaults eta to 4 minutes", () => {
     const copy = waitCardCopy({ kind: "mockup", job_status: "running" });
-    assert.equal(copy.title, "打样中");
+    assert.equal(copy.title, "生成中");
     assert.equal(copy.eta, "大约还要 4 分钟");
   });
 
@@ -192,9 +192,9 @@ describe("waitCardCopy", () => {
     const compare = waitCardCopy({ kind: "compare", job_status: "running", feishuReady: false });
     const rework = waitCardCopy({ kind: "rework", job_status: "queued", queue_ahead: 1, feishuReady: false });
     const mockup = waitCardCopy({ kind: "mockup", job_status: "running", feishuReady: false });
-    assert.match(compare.hint, /机审只标疑点/);
-    assert.match(rework.hint, /对照完回看板/);
-    assert.match(mockup.hint, /本机 Blender/);
+    assert.match(compare.hint, /正在读取文件并检查内容/);
+    assert.match(rework.hint, /完成后回到审稿台/);
+    assert.match(mockup.hint, /正在生成立体图/);
     assert.doesNotMatch(compare.hint, /可以离开/);
     assert.doesNotMatch(`${compare.hint}${mockup.hint}`, /取消/);
   });
@@ -239,7 +239,7 @@ describe("liveJobLine", () => {
       job_stage_label: "认字",
       job_eta_s: 40,
     });
-    assert.equal(line, "认字 · 大约还要 40 秒");
+    assert.equal(line, "读取文字 · 大约还要 40 秒");
     assert.doesNotMatch(line || "", /%/);
     assert.equal(liveJobLine({ job_status: "running", kind: "mockup" }), "大约还要 4 分钟");
   });

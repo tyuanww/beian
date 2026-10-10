@@ -22,3 +22,7 @@
 - 注释写约束、原因和失败语义，不复述代码；名称必须体现产品边界，如 worker、snapshot、human decision。
 - 沿用已有术语、路径和错误格式；已删除旧 `frontend/` 和 FastAPI HTTP 壳，产品路径只有 React UI + Hono，对照只走 `python -m app.cli`。
 - 人工终审不可抽象成机器过审；账单 `charge_status` 必须保持 `unknown`，除非已有可核验的供应商扣费事实。
+
+## 压缩与历史的模块边界
+
+文件压缩仍由 Hono 接入现有分片上传/回执和持久 dispatcher，工具子进程只由 server 的 compression 模块管理；不另起 Stirling 网站或 Python HTTP。历史统一使用 `/api/history` 的有权限记录索引、组合过滤和游标分页，UI 不拼接多个旧全量列表。公共详情只投影用户所需状态、大小、原因和文件键，不泄露宿主路径、PID 或源稿哈希。

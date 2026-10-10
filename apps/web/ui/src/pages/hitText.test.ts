@@ -34,7 +34,7 @@ describe("doubtLines", () => {
   it("treats pending human confirmation as an issue when evidence explains it", () => {
     assert.deepEqual(
       doubtLines({ status: "待人工确认", evidence: "OCR 没读全，需要人眼确认" }),
-      ["OCR 没读全，需要人眼确认"],
+      ["没读全，需要人眼确认"],
     );
   });
 });
@@ -52,9 +52,9 @@ describe("excelText", () => {
 describe("pdfText", () => {
   it("uses pdf or found first", () => {
     assert.equal(pdfText({ pdf: "稿上" }), "稿上");
-    assert.equal(pdfText({ found: "OCR" }), "OCR");
+    assert.equal(pdfText({ found: "图中字" }), "图中字");
     assert.equal(pdfText({ pdf: "稿上", coverage: { hit: ["别的"] } }), "稿上");
-    assert.equal(pdfText({ pdf: "  ", found: "OCR" }), "OCR");
+    assert.equal(pdfText({ pdf: "  ", found: "图中字" }), "图中字");
   });
 
   it("falls back to coverage hits then evidence", () => {

@@ -14,6 +14,7 @@ ROOT = Path(__file__).resolve().parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from export_close import confirm_export_close, validate_request_kind
 from illustrator_agent import IllustratorAgentError, request_agent
 from unattended_wait import parse_job_sidecar, progress_stage
 
@@ -33,8 +34,13 @@ def load_json(path: Path) -> dict:
 
 
 def select_jsx(config: dict) -> Path:
-    """V2 is opt-in until pipeline cutover; legacy configs are unchanged."""
-    return STRUCTURE_JSX if config.get("structure_json") else LEGACY_JSX
+    """V2 is opt-in until pipeline cutover; legacy configs are unchanged.
+
+    Unfolded reprint uses the same structure exporter. It does not add a host.
+    """
+    if config.get("request_kind") in {"unfolded_print", "native_text"} or config.get("structure_json"):
+        return STRUCTURE_JSX
+    return LEGACY_JSX
 
 
 def bind_runtime_jsx(config_path: Path, config: dict) -> Path:
@@ -195,8 +201,13 @@ def main() -> int:
 
     config_path = args.config.expanduser().resolve()
     config = load_json(config_path)
-    output_keys = ["full_pdf", "print_pdf", "result_json"]
-    if config.get("structure_json"):
+    request_error = validate_request_kind(config)
+    if request_error:
+        print(f"Illustrator export config rejected: {request_error}", file=sys.stderr)
+        return 2
+    unfolded = config.get("request_kind") in {"unfolded_print", "native_text"}
+    output_keys = ["print_pdf", "result_json", "close_json"] if unfolded else ["full_pdf", "print_pdf", "result_json"]
+    if not unfolded and config.get("structure_json"):
         output_keys.append("structure_json")
     for key in output_keys:
         Path(config[key]).parent.mkdir(parents=True, exist_ok=True)
@@ -233,7 +244,7 @@ def main() -> int:
             agent_result = request_agent(
                 "run",
                 config_path=str(config_path),
-                exporter="structure" if config.get("structure_json") else "legacy",
+                exporter="structure" if select_jsx(config) == STRUCTURE_JSX else "legacy",
                 # The Session 1 agent is outside this worker's process tree. Keep
                 # its deadline inside Hono's budget so cleanup finishes first.
                 timeout_seconds=max(30, args.timeout - 30),
@@ -286,12 +297,14 @@ def main() -> int:
                 str(runtime_jsx),
                 str(config_path),
             ]
-            process = subprocess.run(
-                command,
-                capture_output=True,
-                text=True,
-                timeout=remaining_timeout,
-            )
+            if config.get("request_kind") == "native_text":
+                # communicate timeout deliberately leaves this owned bridge alive;
+                # Hono keeps the durable fence and source copy, never a kill/reset.
+                child = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                out, err = child.communicate(timeout=remaining_timeout)
+                process = subprocess.CompletedProcess(command, child.returncode, out, err)
+            else:
+                process = subprocess.run(command, capture_output=True, text=True, timeout=remaining_timeout)
         except subprocess.TimeoutExpired as error:
             print(
                 f"Illustrator export timed out after {remaining_timeout}s: {error}",
@@ -324,6 +337,51 @@ def main() -> int:
         json.dumps(result, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
     )
+    if unfolded:
+        # Result JSON is written before close. Exit 8 keeps the slot fenced
+        # until a separate close record exists. stdout has no paths.
+        observation = None
+        bridge_code = process.returncode if sys.platform != "win32" else agent_result.get("bridge_exit_code", -1)
+        if sys.platform == "win32":
+            observation = agent_result.get("close_observation")
+        elif bridge_code == 0:
+            try:
+                count = document_count()
+                observation = {
+                    "attempt_id": expected_attempt,
+                    "source_sha256": config["source_sha256"],
+                    "bridge_exited": True,
+                    "document_count": count,
+                    "documents": [] if count == 0 else None,
+                }
+            except (OSError, ValueError, RuntimeError, subprocess.TimeoutExpired):
+                pass
+        close_record = confirm_export_close(result, bridge_code, observation)
+        public = {
+            "ok": bool(result.get("success")) and close_record is not None,
+            "reason": None if result.get("success") else str(result.get("reason") or "export_failed"),
+            "attempt_id": str(result.get("attempt_id") or ""),
+            "close_confirmed": close_record is not None,
+            "request_kind": config["request_kind"],
+        }
+        if close_record is None:
+            print(json.dumps(public, ensure_ascii=False))
+            return 8
+        Path(config["close_json"]).write_text(
+            json.dumps(close_record, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        if not result.get("success") or not Path(config["print_pdf"]).is_file():
+            public["ok"] = False
+            public["reason"] = str(result.get("reason") or "export_failed")
+            print(json.dumps(public, ensure_ascii=False))
+            return 4
+        page = result.get("page_size_mm")
+        if isinstance(page, list) and len(page) == 2:
+            public["width_mm"] = page[0]
+            public["height_mm"] = page[1]
+        print(json.dumps(public, ensure_ascii=False))
+        return 0
     if not result.get("success"):
         print(json.dumps(result, ensure_ascii=False), file=sys.stderr)
         return 4

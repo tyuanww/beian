@@ -36,3 +36,17 @@ UI 等待：`shouldShowWaitCard`（`queued` | `running` | `comparing`；`done`/`
 执行时冻结源文件身份并复制到本次私有目录；Python 只写本次暂存 assets，正常退出并复核源稿/任务身份后才发布 PNG。中断恢复使用新尝试身份，防止旧回调和旧暂存覆盖新工作；只在核实旧 PID 不存在或已确认终止后恢复。PID 归属不明或处在 spawn/持久化间隙时保留 running 与执行围栏，不自动重跑或宣称排干。逐张 PNG 原子替换并非整套文件的断电事务；未确认完成的请求从同一冻结源重做，Windows/断电实证另验。
 
 普通发布异常可能发生在部分 PNG 已替换之后；请求保存为 failed，错误和重试入口不因必需四面已存在而隐藏。重试重新排队切面，排队/执行提示保持到成功；不把部分文件存在当成补面已完成。
+
+## 净版展开与文件压缩
+
+`POST /api/mockups/:id/unfolded-print` 无请求体，沿 create 与管理该单权限；200 复用完成结果，202 返回持久 queued/running，409 使用顶层 message/reason（busy 仅顶层），不创建失败忙请求。发布已有可信 PDF 与原生补导出都计入排队快照/drain；原生任务与打样共用 Illustrator 槽。源稿或代际变化不能发布旧结果。running + close_unconfirmed 保持围栏，重试不得再开第二个 native。启动恢复沿既有归属与关稿证据，不把结果 JSON 当作退出证明。
+
+压缩上传使用 purpose=compression、asset1–asset20，现有分片/回执通道；总量 100MiB。任务创建复用 owner+receipt 幂等，逐文件持久状态，重试使用 expected_revision 和 file_ids，已成功文件不重压。queueSnapshot 独立计入 compression；离页不取消已受理任务。未知 output_bytes 保持 null。
+
+压缩工具须先证明可用的进程容器再领任务：Windows 复用有归属的 Job Object（聚合 commit 上限并采样 RSS），Linux 使用获授权的 cgroup v2；不能用 macOS RLIMIT 或一个 probe 标签冒充整树内存限制。所有取消等待归属子树退出，stdout/stderr、时间、候选/尝试磁盘都有边界。初值、具体执行器及许可记录随 compression 模块维护；Windows RSS/磁盘监控的现场行为仍须单独取证，不由 Mac 单测证明。
+
+## 审稿原生前置
+
+新审稿/对红输入含 Illustrator 私有数据提示时，由 jobs 在 OCR 前准备原生请求；提示仅用于分流，不能作文字可信证明。关闭证据和稿面覆盖检查通过后，原生文字可以成为本次审稿主来源并跳过百度 OCR；覆盖不足或页面含大面积图片时继续既有 OCR 回退。queued 前置不占 OCR 执行槽，与结构/净版按 FIFO 共享 Illustrator 槽。120 秒仅限制未派发的排队，过期用 native_busy 继续 OCR；派发后按原有 1260 秒生命周期，超时保留桥接和围栏，不把杀进程当关闭。
+
+持久 native_text_request 绑定源 hash、source_name、提取器版本及 attempt。私有物理副本独立目录留存；已知执行者结束和同代关闭记录都确认后才可恢复围栏，晚到证据不能替换已经选择的 OCR 回退。running + close_unconfirmed 即使审稿已完成也计入 drain，并阻止删除其被引用副本、再次原生请求；单次 idle 心跳不清围栏。损坏持久记录计 unknown 且阻止新 Illustrator 领单。缓存只在新的审核运行、同源/同提取器版本使用。

@@ -1,6 +1,8 @@
+import type { NativeRequest } from "./nativeTextJobs.js";
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { DATA_DIR } from "./config.js";
+import { forgetHistory, noteHistoryReview } from "./historyIndex.js";
 import { skipPackSheetField } from "./sheetSkip.js";
 
 export type Hit = {
@@ -47,6 +49,9 @@ export function canAccessOwner(owner: string, viewer: Viewer): boolean {
 }
 
 export type Task = {
+  native_text_request?: NativeRequest;
+  /** 仅服务端用于把已失败的 Illustrator 尝试传给 OCR worker，不返回前端。 */
+  native_text_attempted?: boolean;
   id: string;
   title: string;
   product_name?: string;
@@ -143,11 +148,13 @@ export function saveTask(task: Task): void {
   const tid = assertTid(task.id);
   const p = join(tasksDir(), `${tid}.json`);
   replaceFile(p, JSON.stringify(task, null, 2));
+  try { noteHistoryReview(task); } catch { /* 摘要失败不回滚审稿记录 */ }
 }
 
 const TASK_STATUSES = new Set(["comparing", "compare_failed", "pending_review", "in_review", "completed"]);
 const TASK_JOB_KINDS = new Set(["compare", "rework"]);
 const TASK_JOB_STATUSES = new Set(["queued", "running", "succeeded", "failed"]);
+const NATIVE_REASONS = new Set(["native_busy", "native_offline", "source_changed", "close_unconfirmed", "native_failed"]);
 
 /**
  * Durable job state is a release-safety contract, not just a TypeScript hint.
@@ -155,6 +162,15 @@ const TASK_JOB_STATUSES = new Set(["queued", "running", "succeeded", "failed"]);
  * from the running/queued counters.
  */
 function hasValidTaskJobState(task: Task): boolean {
+  const native = task.native_text_request;
+  if (task.native_text_attempted !== undefined && typeof task.native_text_attempted !== "boolean") return false;
+  if (native !== undefined && (!native || native.version !== "native-text/1"
+      || !/^[0-9a-f]{32}$/.test(native.id) || !/^[0-9a-f]{64}$/.test(native.source_sha256)
+      || !["artwork.pdf", "artwork_v2.pdf"].includes(native.source_name)
+      || !["queued", "running", "ready", "fallback"].includes(native.status)
+      || !Number.isFinite(Date.parse(native.created_at))
+      || (native.reason !== undefined && (typeof native.reason !== "string" || !NATIVE_REASONS.has(native.reason)))
+      || (native.pid !== undefined && (!Number.isSafeInteger(native.pid) || native.pid <= 0)))) return false;
   if (!TASK_STATUSES.has(task.status)) return false;
   const hasKind = task.job_kind !== undefined;
   const hasJobStatus = task.job_status !== undefined;
@@ -329,13 +345,14 @@ export function boardColumn(status: string, jobStatus?: string): BoardColumn {
 
 export function deleteTask(tid: string): void {
   const task = loadTask(tid);
-  if (task.job_status === "queued" || task.job_status === "running") {
+  if (task.native_text_request?.status === "running" || task.job_status === "queued" || task.job_status === "running") {
     throw Object.assign(new Error("对照还在跑，不能删。等结束或失败后再删。"), { status: 409 });
   }
   const p = join(tasksDir(), `${task.id}.json`);
   const uploads = join(DATA_DIR, "uploads", task.id);
   if (existsSync(uploads)) rmSync(uploads, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
   unlinkSync(p);
+  try { forgetHistory("review", task.id); } catch { /* 摘要失败不恢复已删除审稿 */ }
 }
 
 export function nowIso(): string {

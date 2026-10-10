@@ -1,7 +1,7 @@
 import { MockupGlbViewer } from "./MockupGlbViewer";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { Alert, App, Button, ConfigProvider, Empty, Input, Segmented, Space, Table, Tag, theme as antdTheme } from "antd";
+import { Alert, App, Button, ConfigProvider, Empty, Input, Segmented, Space, Table, Tabs, Tag, theme as antdTheme } from "antd";
 import { api, ApiError, isUploadReceiptExpired, UPLOAD_TIMEOUT_MS, type MockupJob, type PendingUploadReceipt } from "../api";
 import {
   forgetMockupHandoff,
@@ -98,15 +98,15 @@ type JobProps = { jobId: string; onBack: () => void };
 type Layout = "board" | "table";
 
 function mockLabel(row: MockupJob) {
-  if (row.status === "done") return { text: "已出图", color: "success" as const };
+  if (row.status === "done") return { text: "已完成", color: "success" as const };
   if (row.structure_status === "review_required") {
     return row.structure_code === "structure_face_mapping_incomplete"
       ? { text: "待选正面", color: "warning" as const }
-      : { text: "打样失败", color: "error" as const };
+      : { text: "生成失败", color: "error" as const };
   }
-  if (row.structure_status === "unsupported") return { text: "结构暂不支持", color: "error" as const };
+  if (row.structure_status === "unsupported") return { text: "暂不支持", color: "error" as const };
   if (row.status === "failed") return { text: mockupFailTag(), color: "error" as const };
-  if (row.status === "queued" || row.status === "running") return { text: "打样中", color: "processing" as const };
+  if (row.status === "queued" || row.status === "running") return { text: "生成中", color: "processing" as const };
   return { text: row.status, color: "default" as const };
 }
 
@@ -312,7 +312,7 @@ export function MockupPage({
     [localUpload, receipts, submitted],
   );
   const pendingCards = useMemo(
-    () => pendingItems.map((item) => pendingUploadCard(item, "待打样")),
+    () => pendingItems.map((item) => pendingUploadCard(item, "待生成")),
     [pendingItems],
   );
   const pendingByKey = useMemo(() => new Map(pendingItems.map((item) => [item.key, item])), [pendingItems]);
@@ -348,10 +348,10 @@ export function MockupPage({
     const receipt = item.receipt;
     const productName = item.productName;
     modal.confirm({
-      title: "开始打样这单？",
-      content: `品名：${productName}。上传文件已由服务器确认，开始后会进入打样队列。`,
-      okText: "开始打样",
-      cancelText: "先不开始",
+      title: "开始生成这份文件？",
+      content: `品名：${productName}。上传完成后会进入生成队列。`,
+      okText: "开始生成",
+      cancelText: "稍后开始",
       onOk: async () => {
         if (pendingStarts.current.has(receipt)) return;
         pendingStarts.current.add(receipt);
@@ -359,7 +359,7 @@ export function MockupPage({
           const next = await api.startMockup({ receipt, title: productName, product_name: productName });
           uploadStore.clear("mockup", receipt);
           setReceipts((current) => current.filter((saved) => saved.id !== receipt));
-          message.success("已开始打样。");
+          message.success("生成已开始。");
           rememberMockupHandoff(next);
           onOpenJob(next.id);
         } catch (err) {
@@ -367,9 +367,9 @@ export function MockupPage({
             uploadStore.clear("mockup", receipt);
             setReceipts((current) => current.filter((saved) => saved.id !== receipt));
             void refreshList();
-            message.warning("这份上传已开工或过期，列表已刷新。");
+            message.warning("上传已失效，请重新选择文件。");
           } else {
-            message.error(err instanceof Error ? err.message : "无法开始打样");
+            message.error(err instanceof Error ? err.message : "无法开始生成");
           }
         } finally {
           pendingStarts.current.delete(receipt);
@@ -389,13 +389,13 @@ export function MockupPage({
       <div className="desk-head">
         <div>
           <h1 className="page-title">打样台</h1>
-          <p className="page-lead">交差「盒子长什么样」。点进度或已出图进打样单。</p>
+          <p className="page-lead">查看包装的立体效果和印刷面。</p>
         </div>
         <Space wrap>
           {showSearch ? (
             <Input.Search
               allowClear
-              placeholder="搜品名或文件名"
+              placeholder="搜索品名或文件名"
               value={q}
               onChange={(event) => setQ(event.target.value)}
               onClear={() => {
@@ -418,7 +418,7 @@ export function MockupPage({
           ) : null}
           {canCreate ? (
             <Button type="primary" onClick={onCompose}>
-              进入工作台
+              新建打样
             </Button>
           ) : null}
         </Space>
@@ -442,13 +442,13 @@ export function MockupPage({
             image={Empty.PRESENTED_IMAGE_SIMPLE}
             description={
               loading ? (
-                <div>读取打样单…</div>
+                <div>正在加载…</div>
               ) : submitted ? (
-                <div>没有找到这个品名或文件名</div>
+                <div>没有找到相关记录</div>
               ) : (
                 <div>
-                  <div>还没有打样单</div>
-                  <div className="desk-empty-hint">右上角进入工作台，交一份 .ai 平面稿</div>
+                  <div>还没有打样记录</div>
+                  <div className="desk-empty-hint">上传平面稿开始。</div>
                 </div>
               )
             }
@@ -464,7 +464,7 @@ export function MockupPage({
               </Button>
             ) : canCreate ? (
               <Button type="primary" onClick={onCompose}>
-                进入工作台
+                新建打样
               </Button>
             ) : null}
           </Empty>
@@ -472,13 +472,13 @@ export function MockupPage({
       ) : layout === "board" ? (
         <div className="review-board">
           <DeskCol
-            title="打样中"
-            hint="上传中、待打样或机器运行"
+            title="生成中"
+            hint="正在上传或生成。"
             rows={[...pendingCards, ...board.running.map(toMockCard)]}
             onOpen={openCard}
           />
-          <DeskCol title="打样失败" hint="点进去看原因" rows={board.failed.map(toMockCard)} onOpen={onOpenJob} />
-          <DeskCol title="已出图" hint="点进去打开打样单" rows={board.done.map(toMockCard)} onOpen={onOpenJob} />
+          <DeskCol title="生成失败" hint="打开查看原因。" rows={board.failed.map(toMockCard)} onOpen={onOpenJob} />
+          <DeskCol title="已完成" hint="打开查看结果。" rows={board.done.map(toMockCard)} onOpen={onOpenJob} />
         </div>
       ) : (
         <Table<DeskCardRow>
@@ -500,8 +500,8 @@ export function MockupPage({
                 </div>
               ),
             },
-            { title: "工作时间", dataIndex: "at", width: 180, render: (value: string) => deskClock(value) },
-            { title: "使用人", dataIndex: "actor", width: 100, render: (value: string) => value || "—" },
+            { title: "更新时间", dataIndex: "at", width: 180, render: (value: string) => deskClock(value) },
+            { title: "操作人", dataIndex: "actor", width: 100, render: (value: string) => value || "—" },
             { title: "", key: "open", width: 100, render: () => <Button type="link">打开</Button> },
           ]}
         />
@@ -587,7 +587,7 @@ export function MockupNewPage({
         if (found) {
           setProductName(found.product_name || "");
         } else {
-          setResumeError("这份上传回执已过期或已经开工，请返回打样台刷新。");
+          setResumeError("上传已失效，请返回打样台重新选择。");
         }
       })
       .catch((err: unknown) => {
@@ -649,10 +649,10 @@ export function MockupNewPage({
         uploadStore.clear("mockup", receipt);
         setRestoredReceipt(null);
         setResumeSource("local");
-        setResumeError("这份上传已开工或过期，请重新选择文件上传。");
-        message.warning("上传回执已失效，请重新上传。");
+        setResumeError("上传已失效，请重新选择文件。");
+        message.warning("上传已失效，请重新选择文件。");
       } else {
-        message.error(err instanceof Error ? err.message : "打样失败");
+        message.error(err instanceof Error ? err.message : "生成失败");
       }
     } finally {
       startLock.current = false;
@@ -690,10 +690,10 @@ export function MockupNewPage({
     return (
       <section className="new-form mockup-desk">
         <header className="page-head">
-          <h1 className="page-title">打样工作台</h1>
+          <h1 className="page-title">新建打样</h1>
           <button type="button" className="btn-ghost" onClick={onBack}>返回</button>
         </header>
-        <Alert type="warning" showIcon title="当前账号只有查看权限，不能上传或新建打样单。" />
+        <Alert type="warning" showIcon title="当前账号只有查看权限，不能上传或新建打样。" />
       </section>
     );
   }
@@ -702,8 +702,8 @@ export function MockupNewPage({
     <section className="new-form mockup-desk">
       <header className="page-head">
         <div>
-          <h1 className="page-title">打样工作台</h1>
-          <p className="page-lead">先交平面稿。本机要有 Blender。</p>
+          <h1 className="page-title">新建打样</h1>
+          <p className="page-lead">上传平面稿，生成立体图。</p>
         </div>
         <div style={{ display: "flex", gap: 12 }}>
           <button type="button" className="btn-ghost" disabled={submitting} onClick={onBack}>
@@ -715,7 +715,7 @@ export function MockupNewPage({
             disabled={!receipt || busy || submitting}
             onClick={() => void run()}
           >
-            {submitting ? "正在开工" : busy ? "上传中" : "开始打样"}
+            {submitting ? "正在提交" : busy ? "上传中" : "开始生成"}
           </button>
         </div>
       </header>
@@ -724,7 +724,7 @@ export function MockupNewPage({
           品名
           <input
             maxLength={80}
-            placeholder="选平面稿后自动填，可改"
+            placeholder="选稿后自动填写，可修改。"
             value={productName}
             onChange={(event) => updateName(event.target.value)}
           />
@@ -734,7 +734,7 @@ export function MockupNewPage({
       <UploadProgressSlot
         snapshot={resumeSource === "local" ? upload : null}
         receipt={resumeSource === "remote" ? restoredReceipt : null}
-        readyText="上传成功，可以开始打样"
+        readyText="上传完成，可以开始生成。"
         onRetry={resumeSource === "local" ? () => uploadStore.retry("mockup") : undefined}
         onDiscard={files.length ? confirmAbandon : undefined}
       />
@@ -742,15 +742,15 @@ export function MockupNewPage({
         <UploadWell
           icon="/brand/ui/well-pdf.svg"
           title="平面稿"
-          hint="把 .ai 拖到这里"
+          hint="拖入或选择文件。"
           accept=".ai"
           fileName={ai?.name}
           fileBytes={ai?.bytes}
           disabled={resumeSource === "remote"}
           onFile={takeFile}
-          onReject={() => message.warning("只收 .ai 稿件。")}
+          onReject={() => message.warning("请选择 AI 文件。")}
         >
-          <span className="upload-well-btn">{ai ? "更换平面稿" : "选取平面稿"}</span>
+          <span className="upload-well-btn">{ai ? "更换平面稿" : "选择平面稿"}</span>
         </UploadWell>
       </div>
     </section>
@@ -776,7 +776,9 @@ export function MockupJobPage({
   const [versionsOpen, setVersionsOpen] = useState(false);
   const [lightsOpen, setLightsOpen] = useState(false);
   const [backdrop, setBackdrop] = useState<BackdropPreset>(readBackdropPreset);
-  const [highlightedReadFace, setHighlightedReadFace] = useState<string | null>(null);
+  const [activePlane, setActivePlane] = useState("unfolded");
+  const [unfoldedSubmitting, setUnfoldedSubmitting] = useState(false);
+  const [unfoldedError, setUnfoldedError] = useState<string | null>(null);
   const glbBox = useRef<HTMLDivElement>(null);
   const hudTimer = useRef<number | null>(null);
   const announced = useRef("");
@@ -785,6 +787,7 @@ export function MockupJobPage({
   const seededJobId = useRef(jobId);
   const waiting = Boolean(job) && shouldShowWaitCard(job);
   const repairPending = job?.print_faces_repair?.status === "queued" || job?.print_faces_repair?.status === "running";
+  const unfoldedPending = job?.unfolded_print?.status === "queued" || job?.unfolded_print?.status === "running";
   const generation=job?.current_render_generation_id || job?.studio_relit_at || job?.job_finished_at || "";
   const visibleGeneration=useRef(generation);
   visibleGeneration.current=generation;
@@ -819,7 +822,7 @@ export function MockupJobPage({
       const next = await api.retryMockup(job.id);
       setError(null);
       setJob(next);
-      message.success("已用机上的稿重新排队。");
+      message.success("已重新排队。");
     } catch (err: unknown) {
       message.error(err instanceof Error ? err.message : "重试失败");
     } finally {
@@ -830,13 +833,13 @@ export function MockupJobPage({
   async function repairPrintFaces() {
     if (!job || repairing || repairPending) return;
     setRepairing(true);
-    notice("正在补印刷面");
+    notice("正在生成印刷面");
     try {
       const next = await api.repairMockupPrintFaces(job.id);
       setError(null);
       setJob(next);
       notice(next.print_faces_repair?.status === "queued" || next.print_faces_repair?.status === "running"
-        ? "补印刷面已排队，可以离开此页" : "印刷面已补上");
+        ? "印刷面已排队，可以离开此页" : "印刷面已生成");
     } catch (err: unknown) {
       const status = err instanceof ApiError ? err.status : 0;
       notice("");
@@ -845,7 +848,7 @@ export function MockupJobPage({
           ? "这版还不能补切面"
           : err instanceof Error
             ? err.message
-            : "补印刷面失败",
+            : "印刷面生成失败",
       );
     } finally {
       setRepairing(false);
@@ -906,7 +909,7 @@ export function MockupJobPage({
   }, [jobId]);
 
   useEffect(() => {
-    if (!job?.id || (!waiting && !repairPending)) return;
+    if (!job?.id || (!waiting && !repairPending && !unfoldedPending)) return;
     let cancelled = false;
     const id = window.setInterval(() => {
       void api
@@ -916,8 +919,8 @@ export function MockupJobPage({
           setError(null);
           setJob(next);
           if (repairPending) {
-            if (next.print_faces_repair?.status === "failed") notice(next.print_faces_repair.error || "补印刷面失败，请重试");
-            else if (next.print_faces_repair?.status === "succeeded") notice("印刷面已补上");
+            if (next.print_faces_repair?.status === "failed") notice(next.print_faces_repair.error || "印刷面生成失败，请重试");
+            else if (next.print_faces_repair?.status === "succeeded") notice("印刷面已生成");
             return;
           }
           if (shouldShowWaitCard(next)) return;
@@ -925,7 +928,7 @@ export function MockupJobPage({
           if (announced.current === key) return;
           announced.current = key;
           if (next.status === "failed") message.error(mockupFailReason(next.error || next.job_error));
-          else if (next.status === "done") message.success("打样完成。白底给备案，GLB 看形，下面印刷面读字。");
+          else if (next.status === "done") message.success("生成完成。请查看立体效果和印刷面。");
         })
         .catch((err: unknown) => {
           if (cancelled) return;
@@ -933,20 +936,20 @@ export function MockupJobPage({
             forgetMockupHandoff(job.id);
             setJob(null);
           }
-          setError(err instanceof Error ? err.message : "打样单读不到");
+          setError(err instanceof Error ? err.message : "出图记录加载失败");
         });
     }, 2500);
     return () => {
       cancelled = true;
       window.clearInterval(id);
     };
-  }, [job?.id, waiting, repairPending, message]);
+  }, [job?.id, waiting, repairPending, unfoldedPending, message]);
 
   if (error && !job) {
     return (
       <section>
         <header className="page-head">
-          <h1 className="page-title">打样单</h1>
+          <h1 className="page-title">出图记录</h1>
           <button type="button" className="btn-ghost" onClick={onBack}>
             返回打样台
           </button>
@@ -960,13 +963,13 @@ export function MockupJobPage({
     return (
       <section>
         <header className="page-head">
-          <h1 className="page-title">打样单</h1>
+          <h1 className="page-title">出图记录</h1>
           <button type="button" className="btn-ghost" onClick={onBack}>
             返回打样台
           </button>
         </header>
         <div className="desk-empty">
-          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="打开打样单…" />
+          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="打开出图记录…" />
         </div>
       </section>
     );
@@ -978,7 +981,7 @@ export function MockupJobPage({
         <header className="page-head">
           <div>
             <h1 className="page-title">{mockTitle(job)}</h1>
-            <p className="page-lead">打样还在跑。可以回打样台，进度仍在历史记录里。</p>
+            <p className="page-lead">正在生成，可离开页面。</p>
           </div>
           <div className="mockup-sheet-head-actions">
             {canCreate ? (
@@ -1012,10 +1015,10 @@ export function MockupJobPage({
             <p className="page-lead">
               {canAdmin && job.structure_input?.proposal_layers.length
                 && !(job.structure_preview?.net_proposals || []).length
-                ? `${structureStatusLabel(job)}。先选择真实结构线所在图层，再识别完整盒型。`
+                ? "请选择刀线所在图层。"
                 : job.structure_status === "review_required" && (job.structure_preview?.net_proposals || []).length
-                  ? "看一下包装展开图，点印有品名的那一面。"
-                  : `${structureStatusLabel(job) || "这张稿现在打不了样"}。`}
+                  ? "点选印有品名的一面。"
+                  : `${structureStatusLabel(job) || "这份稿现在无法生成"}。`}
             </p>
           </div>
           <button type="button" className="btn-ghost" onClick={onBack}>
@@ -1046,18 +1049,18 @@ export function MockupJobPage({
   const canRepairPrint = Boolean(job.can_repair_print_faces);
   const repairFailed = job.print_faces_repair?.status === "failed";
   const showPrintAlert = job.status === "done" && (missingRequired.length > 0 || repairPending || repairFailed);
-  const printAlertCopy = repairFailed ? "补印刷面失败，请重试。" : canRepairPrint && canCreate
-    ? "缺少印刷面图。可从已保存底稿补生成，不会重新打样。"
+  const printAlertCopy = repairFailed ? "印刷面生成失败，请重试。" : canRepairPrint && canCreate
+    ? "缺少印刷面图，可重新生成。"
     : canCreate
-      ? "这单没有可用底稿，无法补生成。请重新打样。"
-      : "这单没有印刷面图。请联系能打样的人补或重打。";
+      ? "没有可用底稿，请重新生成。"
+      : "没有印刷面图，请重新生成。";
 
   return (
     <section className="mockup-sheet">
       <header className="page-head">
         <div>
           <h1 className="page-title">{mockTitle(job)}</h1>
-          <p className="page-lead">打样单。上面三张看形；下面印刷面读字。不要用 GLB 读小字。</p>
+          <p className="page-lead">上面看立体效果，下面看印刷文字。</p>
         </div>
         <div className="mockup-sheet-head-actions">
           <button
@@ -1089,16 +1092,16 @@ export function MockupJobPage({
               download
               onClick={() => notice(downloadHudLine("PPT"))}
             >
-              下载 PPT
+              下载演示稿
             </a>
           ) : grounded ? null : (
             <button type="button" className="btn-ghost" onClick={() => notice(missingPptHud())}>
-              下载 PPT
+              下载演示稿
             </button>
           )}
         </div>
       </header>
-      {error ? <p className="page-lead" role="status">{error}，当前图片仍保留。</p> : null}
+      {error ? <p className="page-lead" role="status">{error}</p> : null}
       {job.render_generation_capabilities ? <RenderVersions key={job.id} job={job} open={versionsOpen}
         productLight={productLight} backgroundLight={backgroundLight} onJob={setJob} /> : null}
       <div className="mockup-backdrop-switch">
@@ -1141,8 +1144,8 @@ export function MockupJobPage({
       {showPrintAlert ? (
         <div className="mockup-print-alert" role="status" aria-live="polite">
           <p className="mockup-print-alert-copy">
-            {repairPending ? (job.print_faces_repair?.status === "queued" ? "补印刷面已排队，可以离开此页" : "正在补印刷面，可以离开此页")
-              : repairing ? "正在提交补面请求" : job.print_faces_repair?.error || printAlertCopy}
+            {repairPending ? (job.print_faces_repair?.status === "queued" ? "印刷面已排队，可以离开此页" : "正在生成印刷面，可以离开此页")
+              : repairing ? "正在提交生成请求" : job.print_faces_repair?.error || printAlertCopy}
           </p>
           {canRepairPrint && canCreate ? (
             <button
@@ -1152,13 +1155,13 @@ export function MockupJobPage({
               aria-busy={repairing || repairPending || undefined}
               onClick={() => void repairPrintFaces()}
             >
-              {repairing || repairPending ? "正在补印刷面" : "补印刷面"}
+              {repairing || repairPending ? "正在生成印刷面" : "生成印刷面"}
             </button>
           ) : null}
         </div>
       ) : null}
 
-      {!boundAssetsReady ? <p className="page-lead" role="status">当前版本资源尚未确认，未混用其他版本的图片。</p> : <div key={`${job.id}:${generation}`} data-render-generation={generation} className={grounded ? "mockup-sheet-photos is-grounded" : "mockup-sheet-photos"}>
+      {!boundAssetsReady ? <p className="page-lead" role="status">正在确认当前版本资源。</p> : <div key={`${job.id}:${generation}`} data-render-generation={generation} className={grounded ? "mockup-sheet-photos is-grounded" : "mockup-sheet-photos"}>
         {groundA && whiteA ? (
           <GroundedShot
             generation={generation}
@@ -1270,55 +1273,37 @@ export function MockupJobPage({
         ) : (
           <figure className="mockup-sheet-photo">
             <div className="mockup-sheet-frame">
-              <Empty description={job.status === "done" ? "没有立体模型" : "GLB 还没出"} />
+              <Empty description={job.status === "done" ? "暂无 3D 模型" : "3D 模型还未生成"} />
             </div>
-            <figcaption className="mockup-sheet-cap">GLB</figcaption>
+            <figcaption className="mockup-sheet-cap">3D 模型</figcaption>
           </figure>
         )}
       </div>}
-      {readFaces.length ? (
-        <div className="mockup-read-chips" role="navigation" aria-label="跳到印刷面">
-          <span className="mockup-backdrop-label">读字</span>
-          {readFaces.map((role) => (
-            <button
-              key={role}
-              type="button"
-              className={highlightedReadFace === role ? "mockup-read-chip is-current" : "mockup-read-chip"}
-              onClick={() => {
-                setHighlightedReadFace(role);
-                document.getElementById(`read-face-${role}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
-              }}
-            >
-              {READ_FACE_LABEL[role]}
-            </button>
-          ))}
-        </div>
-      ) : null}
-      <section className="mockup-read-faces" aria-label="印刷面读字">
-        <h2 className="mockup-read-title">读字</h2>
-        <p className="page-lead">印刷面来自打样时已生成的各面图，不是 3D 截屏。滚轮或按钮可放到 6 倍。</p>
-        {readFaces.length ? (
-          <div className="mockup-read-grid">
-            {readFaces.map((role) => {
-              const fileKey = readFaceKey(role);
-              const file = (job.files || []).find((item) => item.key === fileKey);
-              return (
-                <ReadFaceShot
-                  key={fileKey}
-                  jobId={job.id}
-                  fileKey={fileKey}
-                  label={READ_FACE_LABEL[role]}
-                  highlighted={highlightedReadFace === role}
-                  faceId={`read-face-${role}`}
-                  downloadName={file?.name}
-                  onDownload={() => notice(downloadHudLine("印刷面"))}
-                />
-              );
-            })}
+      <section className="mockup-read-faces" aria-label="印刷面">
+        <div className="batch-section-head">
+          <div>
+            <div className="asset-title-row"><h2 className="mockup-read-title">印刷面</h2><span className="format-tag">PNG</span></div>
+            <p className="page-lead">各面图片可放大查看。</p>
           </div>
-        ) : showPrintAlert ? null : (
-          <p className="page-lead">这单没有印刷面图。要读字请重新打样。</p>
-        )}
+          <Button href={job.print_faces_zip?.status === "ready" ? fileHref(job.id, "print_faces_zip", true) : undefined}
+            disabled={job.print_faces_zip?.status !== "ready"}>下载六面</Button>
+        </div>
+        <Tabs activeKey={activePlane} onChange={setActivePlane} items={[
+          { key: "unfolded", label: "2D 展开图", children: <UnfoldedPanel job={job} canCreate={canCreate}
+            submitting={unfoldedSubmitting} error={unfoldedError} onRequest={async () => {
+              setUnfoldedSubmitting(true); setUnfoldedError(null);
+              try { const next = await api.requestUnfoldedPrint(job.id); if (alive.current) setJob(next); }
+              catch (err) { if (alive.current) { setUnfoldedError(err instanceof Error ? err.message : "展开图生成失败，请重试。"); void api.mockup(job.id).then(next => { if (alive.current) setJob(next); }).catch(() => undefined); } }
+              finally { if (alive.current) setUnfoldedSubmitting(false); }
+            }} /> },
+          ...(["front", "back", "left", "right", "top", "bottom"] as const).map(role => ({
+            key: role, label: READ_FACE_LABEL[role], children: readFaces.includes(role)
+              ? <ReadFaceShot jobId={job.id} fileKey={readFaceKey(role)} label={READ_FACE_LABEL[role]}
+                  highlighted={false} faceId={`read-face-${role}`} downloadName={job.files.find(item => item.key === readFaceKey(role))?.name}
+                  onDownload={() => notice(downloadHudLine("印刷面"))} />
+              : <Empty description={`${READ_FACE_LABEL[role]}还没有印刷面图，可重新生成。`} />,
+          })),
+        ]} />
       </section>
       {hud && typeof document !== "undefined"
         ? createPortal(
@@ -1449,7 +1434,7 @@ function ReadFaceShot({
         onLostPointerCapture={(event) => endPan(event.currentTarget)}
       >
         {bad ? (
-          <p className="page-lead">这张印刷面图坏了，重新打样后才能读字。</p>
+          <p className="page-lead">这张图无法显示，请重新生成。</p>
         ) : (
           <div className="mockup-read-zoom" ref={zoomElRef} style={{ transform: zoomCss(zoom) }}>
             <img
@@ -1555,7 +1540,7 @@ function GlbShot({
         <button
           type="button"
           className="mockup-dl mockup-dl-fs"
-          aria-label={glbFs ? "退出全屏" : "全屏截图"}
+          aria-label={glbFs ? "退出全屏" : "全屏"}
           onClick={() => {
             const el = boxRef.current;
             if (!el) return;
@@ -1572,13 +1557,13 @@ function GlbShot({
           className="mockup-dl mockup-dl-corner"
           href={fileHref(jobId, "glb", true,generation)}
           download
-          aria-label="下载 GLB"
+          aria-label="下载模型"
           onClick={() => onNotice(downloadHudLine("GLB"))}
         >
           下载
         </a>
       </div>
-      <figcaption className="mockup-sheet-cap">GLB</figcaption>
+      <figcaption className="mockup-sheet-cap">3D 模型</figcaption>
     </figure>
   );
 }
@@ -1805,7 +1790,7 @@ function GroundedShot({
         style={{ background: studioBackdrop(backgroundLight, backdrop) }}
       >
         {bad ? (
-          <p className="page-lead">这张白底图坏了，回到打样台重新打。</p>
+          <p className="page-lead">这张预览图无法显示，请重新生成。</p>
         ) : (
           <canvas ref={setCanvasRef} className="mockup-studio-canvas" aria-label={alt} />
         )}
@@ -2097,7 +2082,7 @@ function WhiteShot({
     <figure className="mockup-sheet-photo">
       <div className={`mockup-sheet-frame ${backdropFrameClass(backdrop)}`} style={{ background: fill }}>
         {bad ? (
-          <p className="page-lead">这张白底图坏了，回到打样台重新打。</p>
+          <p className="page-lead">这张预览图无法显示，请重新生成。</p>
         ) : (
           <>
           <img
@@ -2199,4 +2184,36 @@ function LegacyLitCanvas({ image, alt, productLight, backgroundLight, backdrop, 
     } catch { ctx.clearRect(0, 0, canvas.width, canvas.height); setError(true); }
   }, [image, size, full, productLight, backgroundLight, backdrop]);
   return <>{error ? <p className="page-lead">调灯失败，请重新加载图片。</p> : null}<canvas ref={setCanvasRef} className={full ? "mockup-studio-lightbox-canvas" : "mockup-studio-canvas"} aria-label={alt} /></>;
+}
+
+const UNFOLDED_COPY: Record<string, string> = {
+  source_missing: "找不到源稿，无法生成展开图。",
+  geometry_incomplete: "展开结构不完整，无法确认封口。",
+  separation_unreliable: "无法区分结构线和印刷内容，请先整理源稿。",
+  host_unavailable: "当前无法生成展开图，请稍后再试。",
+  source_changed: "源稿已变化，请重新生成展开图。",
+  close_unconfirmed: "展开图还在生成，请稍后查看。",
+  export_failed: "展开图生成失败，请重试。",
+};
+function UnfoldedPanel({ job, canCreate, submitting, error, onRequest }: {
+  job: MockupJob; canCreate: boolean; submitting: boolean; error: string | null; onRequest: () => void;
+}) {
+  const result = job.unfolded_print;
+  const pending = result?.status === "queued" || result?.status === "running";
+  const ready = result?.status === "ready" && result.file_key === "unfolded_print";
+  return <section className="unfolded-panel" aria-label="展开图">
+    <div className="batch-section-head"><div>
+      <div className="asset-title-row"><h3>展开图</h3><span className="format-tag">2D</span></div>
+      <p className="page-lead">只保留印刷内容，支持原尺寸打印。</p>
+      {ready ? <p className="physical-size">{result.width_mm} × {result.height_mm} mm · 1:1</p> : null}
+    </div><div className="asset-actions">
+      {ready ? <><Button href={fileHref(job.id, "unfolded_print")} target="_blank">预览</Button><Button type="primary" href={fileHref(job.id, "unfolded_print", true)}>下载 PDF</Button><span className="format-tag">PDF</span></>
+        : <Button type="primary" disabled={!canCreate || pending} loading={submitting || pending} onClick={onRequest}>
+          {pending ? "正在生成" : result?.status === "failed" ? "重试" : "生成展开图"}
+        </Button>}
+    </div></div>
+    {error || result?.reason ? <Alert type={pending ? "info" : "warning"} showIcon title={error || UNFOLDED_COPY[result?.reason || ""] || "展开图暂不可用，请重试。"} /> : null}
+    {ready ? <iframe key={job.current_render_generation_id || "current"} title="展开图预览" className="unfolded-preview" src={fileHref(job.id, "unfolded_print")} />
+      : <Empty description={pending ? "已进入队列，可以离开页面。" : "生成后可预览和下载。"} />}
+  </section>;
 }

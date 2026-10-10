@@ -156,7 +156,7 @@ test("无显式语义时已登录账号可多选本稿候选层并重跑同一�
   await expect(submit).toBeInViewport({ ratio: 1 });
   await submit.click();
 
-  await expect(page.getByText("打样中", { exact: true }).first()).toBeVisible();
+  await expect(page.getByText("生成中", { exact: true }).first()).toBeVisible();
   const selection = syntheticApi.calls.find(
     (call) => call.method === "POST" && call.path === `/api/mockups/${mockup.id}/structure/input`,
   );
@@ -189,7 +189,7 @@ test("唯一上刀线时黑盒提交默认结构层，不展示选层", async ({
   syntheticApi.mockups.push(mockup);
 
   await page.goto(`/mockup/${mockup.id}`);
-  await expect(page.getByText("打样中", { exact: true }).first()).toBeVisible();
+  await expect(page.getByText("生成中", { exact: true }).first()).toBeVisible();
   await expect(page.getByRole("checkbox")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "重新识别完整盒型" })).toHaveCount(0);
   const selection = syntheticApi.calls.find(
@@ -326,7 +326,7 @@ test("没有结构确认权限时唯一上刀线也不自动提交", async ({ pa
   await page.goto(`/mockup/${mockup.id}`);
   await expect(page.getByRole("checkbox")).toHaveCount(0);
   await expect(page.getByText("重新识别完整盒型")).toHaveCount(0);
-  await expect(page.getByText("打样失败。稿件里没有可自动识别的刀版。")).toBeVisible();
+  await expect(page.getByText("生成失败。稿件里没有可自动识别的刀版。")).toBeVisible();
   const selection = syntheticApi.calls.find(
     (call) => call.method === "POST" && call.path === `/api/mockups/${mockup.id}/structure/input`,
   );
@@ -361,7 +361,7 @@ test("旧单无分层预览仍可多选图层重跑", async ({ page, syntheticAp
   await page.goto(`/mockup/${mockup.id}`);
   await page.getByRole("button", { name: "开始选择" }).click();
   await expect(page.getByText(/这份稿没有分层路径快照/)).toBeVisible();
-  await expect(page.getByRole("img", { name: "当前 Illustrator 稿件预览" })).toBeVisible();
+  await expect(page.getByRole("img", { name: "当前稿件预览" })).toBeVisible();
   await expect(page.getByRole("checkbox", { name: /刀线/ })).toBeChecked();
   await page.getByRole("button", { name: "重新识别完整盒型" }).click();
   const selection = syntheticApi.calls.find(
@@ -456,7 +456,7 @@ test("已登录账号只需看展开图、选择正面并生成，朝向由系�
   await expect(page.locator(".structure-map g")).toHaveCount(6);
   await expect(page.locator(".structure-front-choices button")).toHaveCount(4);
 
-  const startButton = page.locator(".structure-confirm-actions").getByRole("button", { name: "生成打样图" });
+  const startButton = page.locator(".structure-confirm-actions").getByRole("button", { name: "生成立体图" });
   await page.locator(".structure-front-choices").getByRole("button", { name: "B 面" }).click();
   await expect(page.locator(".structure-front-choices").getByRole("button", { name: "B 面" })).toHaveAttribute("aria-pressed", "true");
   await expect(page.locator('.structure-map g[aria-label="选择 B 面作为产品正面"]')).toHaveAttribute("aria-pressed", "true");
@@ -467,7 +467,7 @@ test("已登录账号只需看展开图、选择正面并生成，朝向由系�
   await startButton.click({ trial: true });
   await startButton.click();
 
-  await expect(page.getByText("打样中", { exact: true }).first()).toBeVisible();
+  await expect(page.getByText("生成中", { exact: true }).first()).toBeVisible();
   const confirmation = syntheticApi.calls.find(
     (call) => call.method === "POST" && call.path === `/api/mockups/${mockup.id}/structure`,
   );
@@ -526,7 +526,7 @@ test("结构确认失败留在原位给出可重试原因，不产生未处理 P
   });
   await page.goto(`/mockup/${mockup.id}`);
   await page.locator(".structure-front-choices").getByRole("button", { name: "A 面" }).click();
-  await page.getByRole("button", { name: "生成打样图" }).evaluate((button) => {
+  await page.getByRole("button", { name: "生成立体图" }).evaluate((button) => {
     (button as HTMLButtonElement).click();
     (button as HTMLButtonElement).click();
   });
@@ -534,8 +534,8 @@ test("结构确认失败留在原位给出可重试原因，不产生未处理 P
   releaseFirst();
 
   await expect(page.getByText("盒盖尺寸与盒身宽深不一致，不能形成闭合盒。")).toBeVisible();
-  await expect(page.getByRole("button", { name: "生成打样图" })).toBeEnabled();
-  await page.getByRole("button", { name: "生成打样图" }).click();
+  await expect(page.getByRole("button", { name: "生成立体图" })).toBeEnabled();
+  await page.getByRole("button", { name: "生成立体图" }).click();
   await expect.poll(() => attempts).toBe(2);
   expect(pageErrors).toEqual([]);
 });
@@ -592,7 +592,7 @@ test("多张展开图只显示视觉翻页，切换后清空上一张的正面",
   syntheticApi.mockups.push(mockup);
   await page.goto(`/mockup/${mockup.id}`);
 
-  const startButton = page.getByRole("button", { name: "生成打样图" });
+  const startButton = page.getByRole("button", { name: "生成立体图" });
   await page.locator(".structure-front-choices").getByRole("button", { name: "B 面" }).click();
   await expect(startButton).toBeEnabled();
 
@@ -683,8 +683,8 @@ test("旧版零散候选不会退回逐面猜测", async ({ page, syntheticApi }
 
   await page.goto(`/mockup/${mockup.id}`);
 
-  await expect(page.getByText("这单需要重新识别结构")).toBeVisible();
-  await expect(page.getByRole("button", { name: "生成打样图" })).toHaveCount(0);
+  await expect(page.getByText("需要重新识别结构")).toBeVisible();
+  await expect(page.getByRole("button", { name: "生成立体图" })).toHaveCount(0);
 });
 
 test("没有原稿预览时完整盒型也不能盲选正面", async ({ page, syntheticApi }) => {
@@ -722,10 +722,10 @@ test("没有原稿预览时完整盒型也不能盲选正面", async ({ page, sy
   await expect(page.getByText(/原稿预览.*不可用，不能可靠判断正面/)).toBeVisible();
   await expect(page.locator(".structure-front-choices button")).toHaveCount(4);
   await expect(page.locator(".structure-front-choices button").first()).toBeDisabled();
-  await expect(page.getByRole("button", { name: "生成打样图" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "生成立体图" })).toBeDisabled();
 });
 
-test("审稿员可以选择正面并生成打样图", async ({ page, syntheticApi }) => {
+test("审稿员可以选择正面并生成立体图", async ({ page, syntheticApi }) => {
   const mockup: SyntheticMockup = {
     id: "abcdef123462",
     title: "团队可见待确认单",
@@ -772,7 +772,7 @@ test("审稿员可以选择正面并生成打样图", async ({ page, syntheticAp
   const frontA = page.locator(".structure-front-choices").getByRole("button", { name: "A 面" });
   await expect(frontA).toBeEnabled();
   await frontA.click();
-  await expect(page.getByRole("button", { name: "生成打样图" })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "生成立体图" })).toBeEnabled();
 });
 
 test("没有结构确认权限时不能选择正面或生成", async ({ page, syntheticApi }) => {
@@ -817,11 +817,11 @@ test("没有结构确认权限时不能选择正面或生成", async ({ page, sy
 
   await page.goto(`/mockup/${mockup.id}`);
 
-  await expect(page.getByRole("alert").getByText("当前账号不能选择产品正面或生成打样图。")).toBeVisible();
+  await expect(page.getByRole("alert").getByText("当前账号不能选择正面。")).toBeVisible();
   await expect(page.locator(".structure-map")).toBeVisible();
   await expect(page.locator(".structure-front-choices button")).toHaveCount(4);
   await expect(page.locator(".structure-front-choices button").first()).toBeDisabled();
-  await expect(page.getByRole("button", { name: "生成打样图" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "生成立体图" })).toBeDisabled();
 });
 
 test("页面重新可见时刷新身份并立即撤销结构确认权限", async ({ page, syntheticApi }) => {
@@ -867,7 +867,7 @@ test("页面重新可见时刷新身份并立即撤销结构确认权限", async
 
   await page.goto(`/mockup/${mockup.id}`);
   const frontA = page.locator(".structure-front-choices").getByRole("button", { name: "A 面" });
-  const generate = page.getByRole("button", { name: "生成打样图" });
+  const generate = page.getByRole("button", { name: "生成立体图" });
   await frontA.click();
   await expect(generate).toBeEnabled();
 
@@ -876,7 +876,7 @@ test("页面重新可见时刷新身份并立即撤销结构确认权限", async
   await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
   await refreshed;
 
-  await expect(page.getByRole("alert").getByText("当前账号不能选择产品正面或生成打样图。")).toBeVisible();
+  await expect(page.getByRole("alert").getByText("当前账号不能选择正面。")).toBeVisible();
   await expect(frontA).toBeDisabled();
   await expect(generate).toBeDisabled();
 });

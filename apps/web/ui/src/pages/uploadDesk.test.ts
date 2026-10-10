@@ -82,7 +82,7 @@ describe("uploadDesk", () => {
     const confirming: UploadSnapshot = { ...local, phase: "confirming", receipt: undefined };
     const [item] = pendingUploadItems("compare", confirming, []);
     assert.ok(item);
-    const card = pendingUploadCard(item, "待对照");
+    const card = pendingUploadCard(item, "待检查");
     assert.equal(card.live, "服务器确认中");
     assert.equal(card.progress, 100);
   });
@@ -98,7 +98,7 @@ describe("uploadDesk", () => {
     };
     const [item] = pendingUploadItems("mockup", failed, []);
     assert.ok(item);
-    const card = pendingUploadCard(item, "待打样");
+    const card = pendingUploadCard(item, "待生成");
     assert.equal(card.statusText, "上传失败");
     assert.equal(card.statusColor, "error");
     assert.match(card.error || "", /上传超时/);

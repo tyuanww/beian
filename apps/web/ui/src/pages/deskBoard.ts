@@ -1,6 +1,6 @@
-/** 两台看板共用：短 ID、工作时间、待审核文案。列布局在 DeskCol。 */
+/** 两台看板共用：短 ID、工作时间、待确认文案。列布局在 DeskCol。 */
 
-export const PENDING_REVIEW = "待审核";
+export const PENDING_REVIEW = "待确认";
 
 export function deskShortId(id: string): string {
   const t = (id || "").trim();

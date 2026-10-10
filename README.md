@@ -8,9 +8,9 @@
 
 | 路径 | 内容 |
 |---|---|
-| `apps/web/ui` | React + Ant Design 6 审稿台 / 打样台 / 历史 / 设置 |
+| `apps/web/ui` | React + Ant Design 6 审稿台 / 打样台 / 文件压缩 / 历史 / 设置 |
 | `apps/web/server` | Hono + TypeScript，对外 HTTP `:8787` |
-| `apps/web/backend` | Python 对照 worker（TS 用 `python -m app.cli` 调用）。PDF 按页分为活字 / 转曲 / 图片：活字直接读文字层，其他页只跑一次 OCR，再进入既有字段规则与单钉证据收敛；成分表按完整原料原子核对，并只在可靠正文锚点或高密度成分块内定位，模糊命中保留为人工疑点 |
+| `apps/web/backend` | Python 对照 worker（TS 用 `python -m app.cli` 调用）。PDF 按页分为活字 / 转曲 / 图片：有通过可见性、渲染和覆盖证明的 Illustrator 原生文字时优先使用；原生尝试失败、覆盖不足或页面含图片/转曲时强制按页 OCR，不能复用陈旧 PDF 文字层，再进入既有字段规则与单钉证据收敛；成分表按完整原料原子核对，并只在可靠正文锚点或高密度成分块内定位，模糊命中保留为人工疑点 |
 | `workers/packaging/` | 2D→3D CLI，打样台调用。V2 以显式 `cut/crease/...` 语义为结构事实；确定性曲线适配、统一毫米坐标、连通分量隔离和有界拓扑只消费已确认的结构语义。无对象语义的旧稿先盘点与源稿绑定的纯描边候选层；只有管理员可在同一打样单选择 1–16 个候选图层，并在 5600px 原稿上看真实刀线/折线涂亮；籽烨看不到选层。烫雅银等工艺板与刀线分预算，坏层跳过不关整份刀线预览（旧单无快照则降级高清底图），由服务端复核源稿与候选成员后重跑识别，所选线稿仍须形成完整盒身环和上下封口才可进入 Blender。唯一可确认正面时服务端自动出图；多面时已登录账号在真实展开图上只点品名面。管理员可在已出图且只有一套公开盒型的单上换正面，只重跑 Blender。候选身份和几何推导的默认朝向仍作为内部锚点交给同一确认引擎，其余五面自动推导。不按颜色、零散矩形或 bbox 静默套盒。macOS 用 AppleScript，Windows 由登录桌面的 Illustrator Agent 经命名管道执行现有 VBS/JSX，服务进程不在 Session 0 拉起 Illustrator。平面出图用 pymupdf（对照同一 Python）；杭州不需要 macOS qlmanage。静帧磁盘保留 RGBA 产品层，并另出可选地面 pass（`front_right_ground` / `back_left_ground`，失败不挡产品图）；PPT 用两张白底写 OOXML；两张白底再合成一页 PDF。缺 PPT/PDF 仍算出图 |
 | `docs/` | 章程、ADR、设计 |
 
@@ -47,7 +47,7 @@
 | [本地监控设计说明](docs/explanation-local-monitoring.md) | 采样、判断、pending 交接与投递分层的原因和取舍 |
 | [R04 资源采证操作指南](docs/howto-resource-stress.md) | 合成资源采证、预检、退出码与正式预算边界 |
 | `docs/pouch-v1-acceptance.md` | 膜袋 v1 判定标准；L0 已接线为 3 mm 薄盒预览，杭州金标前不得宣称真实膜袋能力 |
-| `docs/designs/compare-pdf-ingest-v2.md` | PDF 按页选源、单 OCR、版面区域与单钉证据合同 |
+| `docs/designs/compare-pdf-ingest-v2.md` | PDF 按页选源、原生文字优先与 OCR 回退、版面区域与单钉证据合同 |
 | `docs/designs/review-job-module.md` | 当前对照、对红、打样入队与失败语义合同 |
 | `docs/designs/illustrator-unattended-control.md` | Illustrator 无人值守控制面：本代结果文件完工、禁杀存盘、busy 排队与外层 1260 秒 |
 | `docs/designs/review-rework-loop.md` | 部分被替代；保留对红循环与金标语义的历史依据 |
@@ -59,6 +59,7 @@
 | [AGENTS.md](AGENTS.md) | 授权、任务路由和完成条件；详细工程合同按主题链接读取 |
 | `scripts/windows/README.md` | 杭州 Windows 生产备忘；单张结构导出的刀版层与独立 OutDir |
 | `workers/packaging/README.md` | 打样 CLI、杭州单张结构导出（SHA-256 选稿；刀版层、独立 OutDir、Mac `--dry-run`）、`PackagingStructure` 语义合同、完整盒型与正面锚点确认、pymupdf 平面出图、白底/印刷面/PPT/GLB 产物合同，以及 RF-00/RF-10 测量尺与三层质量结果、RF-11 Blender 合同冒烟、RF-02 同步回滚、RF-03 本地候选验证/资源生命周期，以及 RF-06/RF-07/RF-08 诊断 registry 边界 |
+| `apps/web/server/tools/compression/NOTICE.md` | 压缩运行时的 sharp、qpdf 12.4.2、PDFBox、JDK 版本、许可与来源 |
 
 ## 本机启动
 

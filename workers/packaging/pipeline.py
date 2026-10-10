@@ -1397,6 +1397,11 @@ def preflight_product_v2(
             },
         )
     structure_job = resolution.resolved
+    # Preserve the complete accepted net before sampling individual faces.
+    from structure_v2.unfolded_print import produce_unfolded_source
+    unfolded_source = project_dir / "unfolded-source.json"
+    unfolded_source.unlink(missing_ok=True)
+    produce_unfolded_source(resolution_payload, source, unfolded_source, template.get("print_layers"))
     result_path = project_dir / "pipeline_result.json"
     previous = load_json(result_path) if (not force and result_path.is_file()) else None
     try:

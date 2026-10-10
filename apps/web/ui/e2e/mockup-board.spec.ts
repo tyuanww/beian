@@ -57,9 +57,9 @@ test("打样台与审稿台共用一行品名状态和底部日期", async ({ pa
   await page.goto("/mockup");
 
   const cases = [
-    ["打样中", running.title, "70% · 打样"],
-    ["打样失败", failed.title, "打样中断"],
-    ["已出图", done.title, "已出图"],
+    ["生成中", running.title, "70% · 生成盒型"],
+    ["生成失败", failed.title, "生成中断"],
+    ["已完成", done.title, "已完成"],
   ] as const;
   for (const [columnTitle, product, state] of cases) {
     const column = page.locator(".review-col").filter({
@@ -91,18 +91,18 @@ test("打样台轮询真实阶段百分比并可点进打样单", async ({ page,
   await page.goto("/mockup");
 
   const card = page.locator(".review-card").filter({ hasText: running.title });
-  await expect(card.locator(".review-card-summary-state")).toHaveText("35% · 出图");
+  await expect(card.locator(".review-card-summary-state")).toHaveText("35% · 生成预览");
 
   running.job_stage = "export";
   running.job_stage_label = "导出";
-  await expect(card.locator(".review-card-summary-state")).toHaveText("90% · 导出", { timeout: 5_000 });
+  await expect(card.locator(".review-card-summary-state")).toHaveText("90% · 整理文件", { timeout: 5_000 });
 
   await card.click();
   await expect(page).toHaveURL(`/mockup/${running.id}`);
-  await expect(page.getByText("打样中", { exact: true }).first()).toBeVisible();
+  await expect(page.getByText("生成中", { exact: true }).first()).toBeVisible();
   await expect(page.getByRole("button", { name: "重试" })).toBeVisible();
   await page.getByRole("button", { name: "重试" }).click();
-  await expect(page.getByText("已用机上的稿重新排队。")).toBeVisible();
+  await expect(page.getByText("已重新排队。")).toBeVisible();
   expect(
     syntheticApi.calls.some((call) => call.method === "POST" && call.path === `/api/mockups/${running.id}/retry`),
   ).toBeTruthy();
@@ -114,7 +114,7 @@ test("打样失败可重试同一份机上稿", async ({ page, syntheticApi }) =
     title: "失败可重试",
     status: "failed",
     job_status: "failed",
-    error: "打样中断",
+    error: "生成中断",
     created_at: "2026-08-27T01:25:00.000Z",
     owner: "魏炜",
     files: [],
@@ -123,7 +123,7 @@ test("打样失败可重试同一份机上稿", async ({ page, syntheticApi }) =
   await page.goto(`/mockup/${failed.id}`);
   await expect(page.getByRole("button", { name: "重试" })).toBeVisible();
   await page.getByRole("button", { name: "重试" }).click();
-  await expect(page.getByText("打样中", { exact: true }).first()).toBeVisible();
+  await expect(page.getByText("生成中", { exact: true }).first()).toBeVisible();
   expect(
     syntheticApi.calls.some((call) => call.method === "POST" && call.path === `/api/mockups/${failed.id}/retry`),
   ).toBeTruthy();
@@ -160,7 +160,7 @@ test("结构待确认和不支持均显示可执行状态，不伪装成打样�
   ).toHaveText("待选正面");
   await expect(
     page.locator(".review-card").filter({ hasText: unsupported.title }).locator(".review-card-summary-state"),
-  ).toHaveText("结构暂不支持");
+  ).toHaveText("暂不支持");
 });
 
 test("完成态打样单可分开调产品和背景灯光，原图灯箱也能调", async ({ page, syntheticApi }) => {
@@ -229,7 +229,7 @@ test("白底图损坏时隐藏原图和下载操作", async ({ page, syntheticAp
   const shot = page.locator(".mockup-sheet-photo").filter({
     has: page.getByText("正面 + 侧面", { exact: true }),
   });
-  await expect(shot.getByText("这张白底图坏了，回到打样台重新打。")).toBeVisible();
+  await expect(shot.getByText("这张预览图无法显示，请重新生成。")).toBeVisible();
   await expect(shot.getByRole("link")).toHaveCount(0);
   await expect(shot.getByRole("button")).toHaveCount(0);
 });
@@ -261,12 +261,15 @@ test("完成态打样单在三图下用印刷面读字并可放大", async ({ pa
 
   await page.goto(`/mockup/${mockup.id}`);
 
-  const read = page.getByRole("region", { name: "印刷面读字" });
-  await expect(page.getByText("不要用 GLB 读小字。")).toBeVisible();
-  await expect(read.getByRole("heading", { name: "读字" })).toBeVisible();
+  const read = page.getByRole("region", { name: "印刷面" });
+  await expect(page.getByText("上面看立体效果，下面看印刷文字。")).toBeVisible();
+  await expect(read.getByRole("heading", { name: "印刷面" })).toBeVisible();
   await expect(read.getByText("这单没有印刷面图。")).toHaveCount(0);
+  await page.getByRole("tab", { name: "正面", exact: true }).click();
   await expect(read.getByRole("img", { name: "正面印刷面" })).toBeVisible();
+  await page.getByRole("tab", { name: "反面", exact: true }).click();
   await expect(read.getByRole("img", { name: "反面印刷面" })).toBeVisible();
+  await page.getByRole("tab", { name: "正面", exact: true }).click();
   await expect(page.locator("canvas[aria-label='正面与侧面白底']")).toBeVisible();
   await expect(page.locator(".mockup-sheet-photos").getByRole("img", { name: /印刷面/ })).toHaveCount(0);
   await expect(read.getByRole("link", { name: "打开正面印刷面" })).toHaveAttribute(
@@ -300,19 +303,19 @@ test("完成态打样单没有印刷面时提示重新打样，不用 GLB 读字
   });
   await page.goto(`/mockup/${mockup.id}`);
 
-  const read = page.getByRole("region", { name: "印刷面读字" });
+  const read = page.getByRole("region", { name: "印刷面" });
   const alert = page.locator(".mockup-print-alert");
-  await expect(alert).toContainText("这单没有可用底稿，无法补生成。请重新打样。");
+  await expect(alert).toContainText("没有可用底稿，请重新生成。");
   const alertBox = await alert.boundingBox();
   const photosBox = await page.locator(".mockup-sheet-photos").boundingBox();
   expect(alertBox && photosBox && alertBox.y < photosBox.y).toBeTruthy();
-  await expect(page.getByRole("button", { name: "补印刷面" })).toHaveCount(0);
-  await expect(read.getByRole("img")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "生成印刷面" })).toHaveCount(0);
+  await expect(read.getByRole("img", { name: /印刷面/ })).toHaveCount(0);
   await expect(read.getByRole("link")).toHaveCount(0);
   await expect(page.locator("canvas[aria-label='正面与侧面白底']")).toBeVisible();
 });
 
-test("缺印刷面且可补时点补印刷面后读字出现，看板仍已出图", async ({ page, syntheticApi }) => {
+test("缺印刷面且可补时点生成印刷面后读字出现，看板仍已出图", async ({ page, syntheticApi }) => {
   const mockup = completedMockup("cc11dd22ee33", "可补印刷盒");
   mockup.files = [
     { key: "white_a", name: "正面与侧面.png" },
@@ -333,15 +336,16 @@ test("缺印刷面且可补时点补印刷面后读字出现，看板仍已出�
   await page.goto(`/mockup/${mockup.id}`);
 
   const alert = page.locator(".mockup-print-alert");
-  await expect(alert).toContainText("缺少印刷面图。可从已保存底稿补生成，不会重新打样。");
+  await expect(alert).toContainText("缺少印刷面图，可重新生成。");
   const photos = page.locator(".mockup-sheet-photos");
   const alertBox = await alert.boundingBox();
   const photosBox = await photos.boundingBox();
   expect(alertBox && photosBox && alertBox.y < photosBox.y).toBeTruthy();
-  await expect(page.getByRole("button", { name: "补印刷面" })).toBeEnabled();
-  await expect(page.getByText("打样中", { exact: true })).toHaveCount(0);
-  await page.getByRole("button", { name: "补印刷面" }).click();
+  await expect(page.getByRole("button", { name: "生成印刷面" })).toBeEnabled();
+  await expect(page.getByText("生成中", { exact: true })).toHaveCount(0);
+  await page.getByRole("button", { name: "生成印刷面" }).click();
   await expect(page.locator(".mockup-print-alert")).toHaveCount(0);
+  await page.getByRole("tab", { name: "正面", exact: true }).click();
   await expect(page.getByRole("img", { name: "正面印刷面" })).toBeVisible();
   expect(
     syntheticApi.calls.some((call) => call.method === "POST" && call.path === `/api/mockups/${mockup.id}/print-faces`),
@@ -377,7 +381,7 @@ test("旧单未取得逐动作授权时不能退回原位重渲棚", async ({ pa
   await expect(page.getByRole("heading", { name: mockup.title })).toBeVisible();
 });
 
-test("点反面芯片滚到读字并高亮", async ({ page, syntheticApi }) => {
+test("切换反面标签显示对应印刷面", async ({ page, syntheticApi }) => {
   const mockup = completedMockup("ee77ff001122", "读字芯片盒");
   mockup.files = [
     { key: "white_a", name: "正面与侧面.png" },
@@ -392,8 +396,8 @@ test("点反面芯片滚到读字并高亮", async ({ page, syntheticApi }) => {
     });
   }
   await page.goto(`/mockup/${mockup.id}`);
-  await page.getByRole("navigation", { name: "跳到印刷面" }).getByRole("button", { name: "反面" }).click();
-  await expect(page.locator("#read-face-back")).toHaveClass(/is-highlight/);
+  await page.getByRole("tab", { name: "反面", exact: true }).click();
+  await expect(page.locator("#read-face-back")).toBeVisible();
 });
 
 test("印刷面图损坏时隐藏原图和下载操作", async ({ page, syntheticApi }) => {
@@ -410,8 +414,9 @@ test("印刷面图损坏时隐藏原图和下载操作", async ({ page, syntheti
 
   await page.goto(`/mockup/${mockup.id}`);
 
-  const read = page.getByRole("region", { name: "印刷面读字" });
-  await expect(read.getByText("这张印刷面图坏了，重新打样后才能读字。")).toBeVisible();
+  const read = page.getByRole("region", { name: "印刷面" });
+  await page.getByRole("tab", { name: "正面", exact: true }).click();
+  await expect(read.getByText("这张图无法显示，请重新生成。")).toBeVisible();
   await expect(read.getByRole("link")).toHaveCount(0);
   await expect(read.getByRole("button", { name: /印刷面/ })).toHaveCount(0);
 });
@@ -449,8 +454,8 @@ test("有 ground 的已出图单走 canvas 成片，不显示 PPT，调灯默认
   await expect(page.locator(".mockup-sheet-photos [role='slider']")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "调灯" })).toBeVisible();
   await expect(page.getByRole("slider", { name: "产品灯光" })).toHaveCount(0);
-  await expect(page.getByRole("link", { name: "下载 PPT" })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "下载 PPT" })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "下载演示稿" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "下载演示稿" })).toHaveCount(0);
   await expect(page.locator(".mockup-sheet-photos.is-grounded .mockup-sheet-frame").first()).toHaveCSS("aspect-ratio", /5\s*\/\s*6/);
   const switcher = page.locator(".mockup-backdrop-switch");
   await expect(switcher.getByText("白底", { exact: true })).toBeVisible();
@@ -497,7 +502,7 @@ test("成片 set 损坏时仍走 canvas，不报白底图坏了", async ({ page,
   });
   await page.goto(`/mockup/${mockup.id}`);
   await expect(page.locator(".mockup-sheet-photos.is-grounded canvas").first()).toBeVisible();
-  await expect(page.getByText("这张白底图坏了，回到打样台重新打。")).toHaveCount(0);
+  await expect(page.getByText("这张预览图无法显示，请重新生成。")).toHaveCount(0);
 });
 
 test("成片 ground 损坏时隐藏原图和下载", async ({ page, syntheticApi }) => {
@@ -519,7 +524,7 @@ test("成片 ground 损坏时隐藏原图和下载", async ({ page, syntheticApi
   });
   await page.goto(`/mockup/${mockup.id}`);
   const shot = page.locator(".mockup-sheet-photos.is-grounded .mockup-sheet-photo").first();
-  await expect(shot.getByText("这张白底图坏了，回到打样台重新打。")).toBeVisible();
+  await expect(shot.getByText("这张预览图无法显示，请重新生成。")).toBeVisible();
   await expect(shot.getByRole("button", { name: /原图|下载/ })).toHaveCount(0);
 });
 
@@ -540,7 +545,7 @@ test("无 ground 的已出图单保持 canvas 合成、三栏和 PPT", async ({ 
   await page.goto(`/mockup/${mockup.id}`);
   await expect(page.locator("canvas[aria-label='正面与侧面白底']")).toBeVisible();
   await expect(page.locator(".mockup-sheet-photos > figure")).toHaveCount(3);
-  await expect(page.getByRole("link", { name: "下载 PPT" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "下载演示稿" })).toBeVisible();
   await expect(page.getByRole("button", { name: "调灯" })).toBeVisible();
   await expect(page.getByRole("slider", { name: "产品灯光" })).toHaveCount(0);
   await expect(page.locator(".mockup-sheet-hero")).toHaveCount(0);
@@ -556,25 +561,25 @@ test("补面排队刷新后继续轮询，失败可重试且成片保持可见",
   await page.route(`**/api/mockups/${mockup.id}/files/*`, route => route.fulfill({ status: 200, contentType: "image/svg+xml",
     body: `<svg xmlns="http://www.w3.org/2000/svg" width="800" height="1200"><rect width="800" height="1200" fill="white"/></svg>` }));
   await page.goto(`/mockup/${mockup.id}`);
-  await expect(page.locator(".mockup-print-alert")).toContainText("补印刷面已排队");
-  await expect(page.getByRole("button", { name: "正在补印刷面" })).toBeDisabled();
+  await expect(page.locator(".mockup-print-alert")).toContainText("印刷面已排队");
+  await expect(page.getByRole("button", { name: "正在生成印刷面" })).toBeDisabled();
   await expect(page.locator(".mockup-sheet-photos")).toBeVisible();
   await expect(page.locator(".wait-card")).toHaveCount(0);
   await page.reload();
-  await expect(page.locator(".mockup-print-alert")).toContainText("补印刷面已排队");
+  await expect(page.locator(".mockup-print-alert")).toContainText("印刷面已排队");
   mockup.files.push(...["front", "back", "left", "right"].map(face => ({ key: `read_${face}`, name: `${face}.png` })));
   mockup.print_faces_repair = { status: "failed", error: "切面超时，请稍后再试。" };
   await expect(page.locator(".mockup-print-alert")).toContainText("切面超时");
   await page.reload();
   await expect(page.locator(".mockup-print-alert")).toContainText("切面超时");
-  await expect(page.getByRole("button", { name: "补印刷面", exact: true })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "生成印刷面", exact: true })).toBeEnabled();
   await page.route(`**/api/mockups/${mockup.id}/print-faces`, async route => {
     mockup.print_faces_repair = { status: "queued" };
     await route.fulfill({ status: 202, contentType: "application/json", body: JSON.stringify(mockup) });
   });
-  await page.getByRole("button", { name: "补印刷面", exact: true }).click();
+  await page.getByRole("button", { name: "生成印刷面", exact: true }).click();
   await expect(page.locator(".mockup-print-alert")).toContainText("已排队");
-  await expect(page.getByRole("button", { name: "正在补印刷面" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "正在生成印刷面" })).toBeDisabled();
   await page.reload();
   await expect(page.locator(".mockup-print-alert")).toContainText("已排队");
   mockup.print_faces_repair = { status: "succeeded" };

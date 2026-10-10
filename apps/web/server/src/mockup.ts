@@ -3,6 +3,7 @@ import {
   copyFileSync,
   existsSync,
   fstatSync,
+  lstatSync,
   mkdirSync,
   openSync,
   readdirSync,
@@ -18,9 +19,25 @@ import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { DATA_DIR, PACKAGING } from "./config.js";
 import { blenderBin } from "./settings.js";
+import { forgetHistory, noteHistoryMockup } from "./historyIndex.js";
 import { canAccessOwner, isTid, replaceFile, type Viewer } from "./tasks.js";
 import { atomicReplaceJobJson } from "./mockupAtomicWrite.js";
 import { isRenderGenerationOutputKey, type RenderActivationFact } from "./renderGenerations.js";
+import {
+  PRINT_FACE_NAMES,
+  UNFOLDED_PRINT_NAME,
+  UNFOLDED_SOURCE_NAME,
+  pdfHeaderRegularFile,
+  projectPrintFacesZip,
+  projectUnfoldedPrint,
+  sha256RegularFile,
+  unfoldedAssetRecordValid,
+  unfoldedRequestRecordValid,
+  UNFOLDED_BINARY_MAX_BYTES,
+  UNFOLDED_SOURCE_MAX_BYTES,
+  type UnfoldedPrintAsset,
+  type UnfoldedPrintRequest,
+} from "./unfoldedPrint.js";
 
 type PrintFaceRepairRequest = {
   id: string;
@@ -80,6 +97,10 @@ export type MockupJob = {
   print_faces_request?: PrintFaceRepairRequest;
   print_faces_repaired_by?: string;
   print_faces_repaired_at?: string;
+  /** 净版展开子请求。公开响应只投影 status/reason，不带路径、PID 或哈希。 */
+  unfolded_print_request?: UnfoldedPrintRequest;
+  /** 已核对的 1:1 PDF。失败重试不得覆盖仍匹配的成功资产。 */
+  unfolded_print_asset?: UnfoldedPrintAsset;
   /** 重渲棚审计。不参与权限。 */
   studio_relit_by?: string;
   studio_relit_at?: string;
@@ -274,6 +295,7 @@ export function beginStructureConfirmation(job: MockupJob): void {
   const current = readMockupFromDisk(job.id) ?? job;
   if (isGenerationManagedMockup(current)) throw generationManagedReject("structure");
   if (printFaceRepairActive(current)) throw Object.assign(new Error("正在补印刷面，暂时不能换正面。"), { status: 409 });
+  if (unfoldedPrintActive(current)) throw Object.assign(new Error("正在做净版展开，暂时不能换正面。"), { status: 409 });
   if (current.render_mutation?.status === "queued" || current.render_mutation?.status === "running"
     || current.render_generation_request?.worker_pid !== undefined) {
     throw Object.assign(new Error("这单渲染版本尚未结束，暂时不能换正面。"), { status: 409, code: "render_generation_busy" });
@@ -351,6 +373,7 @@ export function saveMockup(job: MockupJob, checkpoint?: () => void): void {
     replaceFile(jobPath(job.id), payload);
   }
   rememberMockup(job);
+  try { noteHistoryMockup(job); } catch { /* 摘要失败不回滚打样记录 */ }
 }
 
 /** 提交代际指针时必须绕过 loadMockup 缓存；失败路径不要先改缓存对象。 */
@@ -427,6 +450,8 @@ function hasValidMockupJobState(job: MockupJob): boolean {
     || typeof repair.created_at !== "string" || typeof repair.actor_id !== "string"
     || !/^[a-f0-9]{64}$/.test(repair.source_sha256) || (printFaceRepairActive(job) && job.status !== "done")
     || (repair.worker_pid !== undefined && (repair.status !== "running" || !Number.isSafeInteger(repair.worker_pid) || repair.worker_pid <= 0)))) return false;
+  if (job.unfolded_print_request && !unfoldedRequestRecordValid(job.unfolded_print_request, job.status)) return false;
+  if (job.unfolded_print_asset && !unfoldedAssetRecordValid(job.unfolded_print_asset)) return false;
   const hasKind = job.job_kind !== undefined;
   const hasJobStatus = job.job_status !== undefined;
   const hasPid = job.job_pid !== undefined;
@@ -569,6 +594,14 @@ export function publicMockup(job: MockupJob, view: PublicMockupView = {}) {
     print_faces_repair: job.print_faces_request ? { status: job.print_faces_request.status, error: job.print_faces_request.error } : undefined,
     print_faces_repaired_by: job.print_faces_repaired_by,
     print_faces_repaired_at: job.print_faces_repaired_at,
+    unfolded_print: projectUnfoldedPrint({
+      request: job.unfolded_print_request,
+      asset: job.unfolded_print_asset,
+      generationId: job.current_render_generation_id || "",
+      sourceSha256: sha256RegularFile(join(mockupRoot(false), job.id, UNFOLDED_SOURCE_NAME), join(mockupRoot(false), job.id), UNFOLDED_SOURCE_MAX_BYTES),
+      pdfReady: pdfHeaderRegularFile(join(mockupRoot(false), job.id, "assets", UNFOLDED_PRINT_NAME), join(mockupRoot(false), job.id)),
+    }),
+    print_faces_zip: projectPrintFacesZip(readyPrintFaceCount(job.id)),
     can_relight_studio: canRelightStudio(job),
     studio_relit_by: job.studio_relit_by,
     studio_relit_at: job.studio_relit_at,
@@ -1472,6 +1505,44 @@ export function printFaceRepairActive(job: MockupJob): boolean {
   return job.print_faces_request?.status === "queued" || job.print_faces_request?.status === "running";
 }
 
+export function unfoldedPrintActive(job: MockupJob): boolean {
+  return job.unfolded_print_request?.status === "queued" || job.unfolded_print_request?.status === "running";
+}
+
+function readyPrintFaceCount(jobId: string): number {
+  if (!isTid(jobId)) return 0;
+  let ready = 0;
+  for (const face of PRINT_FACE_NAMES) {
+    const path = join(mockupRoot(false), jobId, "assets", `panel_${face}.png`);
+    if (existsSync(path) && underJobDir(jobId, path) && pngMagicAtPath(path)) ready += 1;
+  }
+  return ready;
+}
+
+/**
+ * Validate the six fixed panel paths without reading their payloads. The
+ * total cap is the same 256 MiB envelope used by print assets, so a
+ * download cannot first allocate six independent 256 MiB buffers.
+ */
+export function printFacesZipEntries(jobId: string): Array<{ name: string; path: string }> | null {
+  if (readyPrintFaceCount(jobId) !== PRINT_FACE_NAMES.length) return null;
+  const entries: Array<{ name: string; path: string }> = [];
+  let total = 0;
+  for (const face of PRINT_FACE_NAMES) {
+    const path = join(mockupRoot(false), jobId, "assets", `panel_${face}.png`);
+    try {
+      const stat = lstatSync(path);
+      if (!stat.isFile() || stat.isSymbolicLink() || stat.size <= 0 || stat.size > UNFOLDED_BINARY_MAX_BYTES || !pngMagicAtPath(path)) return null;
+      total += stat.size;
+      if (total > UNFOLDED_BINARY_MAX_BYTES) return null;
+      entries.push({ name: `panel_${face}.png`, path });
+    } catch {
+      return null;
+    }
+  }
+  return entries;
+}
+
 function canRepairPrintFaces(job: MockupJob): boolean {
   if (isGenerationManagedMockup(job)) return false;
   return job.status === "done" && printFaceRepairSource(job) !== null
@@ -1621,6 +1692,7 @@ export function isWhiteFile(key: string, name: string): boolean {
     return stillKeyFromName(lower) === key;
   }
   if (key.startsWith("read_")) return readKeyForPanelName(name) === key;
+  if (key === "unfolded_print") return name.toLowerCase() === UNFOLDED_PRINT_NAME;
   return true;
 }
 
@@ -1703,6 +1775,19 @@ export function isMockupJobFile(jobId: string, path: string | null | undefined):
 }
 
 export function fileOf(job: MockupJob, key: string) {
+  if (key === "unfolded_print") {
+    const projected = projectUnfoldedPrint({
+      request: job.unfolded_print_request,
+      asset: job.unfolded_print_asset,
+      generationId: job.current_render_generation_id || "",
+      sourceSha256: sha256RegularFile(join(mockupRoot(false), job.id, UNFOLDED_SOURCE_NAME), join(mockupRoot(false), job.id), UNFOLDED_SOURCE_MAX_BYTES),
+      pdfReady: pdfHeaderRegularFile(join(mockupRoot(false), job.id, "assets", UNFOLDED_PRINT_NAME), join(mockupRoot(false), job.id)),
+    });
+    if (projected.status !== "ready") return undefined;
+    const path = join(mockupRoot(false), job.id, "assets", UNFOLDED_PRINT_NAME);
+    if (!pdfHeaderRegularFile(path, join(mockupRoot(false), job.id)) || !underJobDir(job.id, path)) return undefined;
+    return { key, path, name: UNFOLDED_PRINT_NAME };
+  }
   if (key.startsWith("read_")) {
     const live = liveReadPanelFiles(job.id).find((item) => item.key === key);
     if (live?.path && existsSync(live.path) && underJobDir(job.id, live.path)) return live;
@@ -1794,6 +1879,9 @@ export function resetMockupForRetry(job: MockupJob): MockupJob {
   if (activeStructureConfirmations.has(job.id)) {
     throw Object.assign(new Error("结构正在确认，暂时不能重试"), { status: 409 });
   }
+  if (unfoldedPrintActive(job)) {
+    throw Object.assign(new Error("正在做净版展开，暂时不能重试"), { status: 409 });
+  }
   if (job.status === "done") {
     throw Object.assign(new Error("已经出图，不用重试"), { status: 409 });
   }
@@ -1843,6 +1931,7 @@ export function deleteMockup(id: string): void {
   const job = loadMockup(id);
   if (!job) throw Object.assign(new Error("没有这单打样"), { status: 404 });
   if (printFaceRepairActive(job)) throw Object.assign(new Error("正在补印刷面，暂时不能删除。"), { status: 409 });
+  if (unfoldedPrintActive(job)) throw Object.assign(new Error("正在做净版展开，暂时不能删除。"), { status: 409 });
   if (activeStructureConfirmations.has(id)) {
     throw Object.assign(new Error("结构正在确认，暂时不能删除"), { status: 409 });
   }
@@ -1859,6 +1948,7 @@ export function deleteMockup(id: string): void {
   }
   rmSync(join(mockupRoot(false), job.id), { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
   cache.delete(job.id);
+  try { forgetHistory("mockup", job.id); } catch { /* 摘要失败不恢复已删除打样 */ }
 }
 
 export function queueMockup(opts: {

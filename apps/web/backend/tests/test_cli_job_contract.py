@@ -106,6 +106,7 @@ def test_cmd_rework_prints_hits_v2_without_save(monkeypatch, capsys, tmp_path):
         lambda **_k: {
             "pages": [{"name": "page_01.png"}],
             "hits": [{"field": "净含量", "status": "一致", "page": 1}],
+            "ocr_meta": {"skipped": True, "reason": "native_coverage"},
         },
     )
     data = tmp_path / "data"
@@ -157,6 +158,7 @@ def test_cmd_rework_prints_hits_v2_without_save(monkeypatch, capsys, tmp_path):
     assert payload["artwork_v2"] == "artwork_v2.pdf"
     assert "rework_check" in payload
     assert "pages_v2" in payload
+    assert payload["ocr_meta"]["reason"] == "native_coverage"
     assert "ocr_text" not in payload
 
 

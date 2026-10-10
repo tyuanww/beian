@@ -15,6 +15,7 @@ export type RunPythonOpts = {
   args: string[];
   cwd?: string;
   timeoutMs?: number;
+  preserveOnTimeout?: boolean;
   onStderrLine?: (line: string) => void;
   onSpawn?: (pid: number) => void;
 };
@@ -22,7 +23,10 @@ export type RunPythonOpts = {
 export type WorkerProcessIdentity = {
   kind: "compare" | "rework" | "mockup";
   id: string;
-} | { kind: "print_faces"; id: string; executionId: string } | { kind: "render_generation"; id: string; mutationId: string; executionId: string;
+} | { kind: "print_faces"; id: string; executionId: string }
+  | { kind: "unfolded_print"; id: string; executionId: string; mode: "publish_existing" | "native_export" }
+  | { kind: "native_text"; id: string; executionId: string }
+  | { kind: "render_generation"; id: string; mutationId: string; executionId: string;
   container?: "windows-job-object/1" };
 
 export type WorkerProcessState = "owned" | "missing" | "other" | "unknown";
@@ -112,6 +116,23 @@ export function workerCommandMatches(commandLine: string, expected: WorkerProces
     const job = tokens.indexOf("--job-dir", script + 1);
     return script >= 0 && execution > script && tokens[execution + 1] === expected.executionId
       && job > script && String(tokens[job + 1] || "").replace(/\\/g, "/").split("/").pop() === expected.id;
+  }
+  if (expected.kind === "unfolded_print") {
+    if (expected.mode === "publish_existing") {
+      const script = tokens.findIndex(token => /(^|[\\/])export_unfolded_print\.py$/i.test(token));
+      const execution = tokens.indexOf("--execution-id", script + 1);
+      const job = tokens.indexOf("--job-dir", script + 1);
+      return script >= 0 && execution > script && tokens[execution + 1] === expected.executionId
+        && job > script && String(tokens[job + 1] || "").replace(/\\/g, "/").split("/").pop() === expected.id;
+    }
+    const script = tokens.findIndex(token => /(^|[\\/])illustrator_worker\.py$/i.test(token));
+    const config = String(tokens[script + 1] || "").replace(/\\/g, "/");
+    return script >= 0 && config.includes(`/${expected.id}/`) && config.includes(expected.executionId);
+  }
+  if (expected.kind === "native_text") {
+    const script = tokens.findIndex(token => /(^|[\\/])illustrator_worker\.py$/i.test(token));
+    const config = String(tokens[script + 1] || "").replace(/\\/g, "/");
+    return script >= 0 && config.includes(`/${expected.id}/`) && config.includes(expected.executionId);
   }
   if (expected.kind === "mockup") {
     const pipeline = tokens.findIndex((token) => /(^|[\\/])pipeline\.py$/i.test(token));
@@ -228,6 +249,7 @@ export function runPython(opts: RunPythonOpts): Promise<RunPythonResult> {
     };
     const timer = setTimeout(() => {
       timedOut = true;
+      if (opts.preserveOnTimeout) { finish(8); return; }
       if (pid) killTree(pid, false);
       setTimeout(() => {
         if (settled) return;
@@ -257,12 +279,15 @@ export function runPython(opts: RunPythonOpts): Promise<RunPythonResult> {
     try { if (pid) opts.onSpawn?.(pid); }
     catch (error) {
       spawnError = error;
-      if (pid) killTree(pid, true);
+      if (opts.preserveOnTimeout) finish(8);
+      else if (pid) killTree(pid, true);
     }
   });
 }
 
 export async function compareTask(opts: {
+  nativeDir?: string;
+  nativeAttempted?: boolean;
   tid: string;
   excel: string;
   pdf: string;
@@ -294,6 +319,8 @@ export async function compareTask(opts: {
       opts.actor,
       "--data-dir",
       DATA_DIR,
+      ...(opts.nativeDir ? ["--native-dir", opts.nativeDir] : []),
+      ...(opts.nativeAttempted ? ["--native-attempted"] : []),
     ],
     timeoutMs: 180_000,
     onStderrLine: opts.onStderrLine,
@@ -302,6 +329,8 @@ export async function compareTask(opts: {
 }
 
 export async function reworkTask(opts: {
+  nativeDir?: string;
+  nativeAttempted?: boolean;
   tid: string;
   pdf: string;
   actor: string;
@@ -321,6 +350,8 @@ export async function reworkTask(opts: {
       opts.actor,
       "--data-dir",
       DATA_DIR,
+      ...(opts.nativeDir ? ["--native-dir", opts.nativeDir] : []),
+      ...(opts.nativeAttempted ? ["--native-attempted"] : []),
     ],
     timeoutMs: 180_000,
     onStderrLine: opts.onStderrLine,
@@ -419,6 +450,54 @@ export type PrintFaceRepairOpts = {
   assets: string;
 };
 
+export type UnfoldedPublishOpts = {
+  executionId: string;
+  jobDir: string;
+  source: string;
+  output: string;
+  artwork?: string;
+  expectSha256: string;
+  artworkSha256?: string;
+  onSpawn?: (pid: number) => void;
+};
+
+export async function runUnfoldedPublish(opts: UnfoldedPublishOpts): Promise<RunPythonResult> {
+  const args = [
+    "export_unfolded_print.py",
+    "--source", opts.source,
+    "--output", opts.output,
+    "--expect-sha256", opts.expectSha256,
+    "--execution-id", opts.executionId,
+    "--job-dir", opts.jobDir,
+  ];
+  if (opts.artwork) args.push("--artwork", opts.artwork, "--artwork-sha256", opts.artworkSha256 || "");
+  return runPython({
+    args,
+    cwd: PACKAGING,
+    timeoutMs: 60_000,
+    onSpawn: opts.onSpawn,
+  });
+}
+
+export type UnfoldedNativeOpts = {
+  executionId: string;
+  configPath: string;
+  onSpawn?: (pid: number) => void;
+};
+
+/** Same Illustrator worker and single slot. Tests substitute this; production does not invent a host. */
+export async function runUnfoldedNative(opts: UnfoldedNativeOpts): Promise<RunPythonResult> {
+  return runPython({
+    args: ["illustrator/illustrator_worker.py", opts.configPath, "--timeout", "1260"],
+    cwd: PACKAGING,
+    timeoutMs: 1_260_000,
+    // Illustrator is a shared host. A deadline only establishes the close
+    // fence; it must not kill the bridge or the host process tree.
+    preserveOnTimeout: true,
+    onSpawn: opts.onSpawn,
+  });
+}
+
 export async function runPrintFaceRepair(opts: PrintFaceRepairOpts): Promise<RunPythonResult> {
   return runPython({
     args: [
@@ -437,4 +516,10 @@ export async function runPrintFaceRepair(opts: PrintFaceRepairOpts): Promise<Run
     timeoutMs: 60_000,
     onSpawn: opts.onSpawn,
   });
+}
+
+/** Native review uses the existing host; deadline expiry fences rather than kills it. */
+export async function runNativeText(opts: UnfoldedNativeOpts): Promise<RunPythonResult> {
+  return runPython({ args: ["illustrator/illustrator_worker.py", opts.configPath, "--timeout", "1260"],
+    cwd: PACKAGING, timeoutMs: 1_260_000, preserveOnTimeout: true, onSpawn: opts.onSpawn });
 }

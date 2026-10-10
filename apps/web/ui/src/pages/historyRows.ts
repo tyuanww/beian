@@ -1,5 +1,4 @@
 import type { MockupJob, TaskSummary } from "../api";
-import type { PendingUploadItem } from "./uploadDesk";
 import { liveJobLine } from "./waitCard";
 
 export type HistoryRow = {
@@ -16,8 +15,8 @@ export type HistoryRow = {
   live: string | null;
 };
 
-export type HistoryKindFilter = "全部" | HistoryRow["kind"];
-export type HistoryTimeFilter = "全部" | "今天" | "近 7 天" | "近 30 天";
+type HistoryKindFilter = "全部" | HistoryRow["kind"];
+type HistoryTimeFilter = "全部" | "今天" | "近 7 天" | "近 30 天";
 
 export type HistoryFilters = {
   kind: HistoryKindFilter;
@@ -27,7 +26,7 @@ export type HistoryFilters = {
 };
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-export const HISTORY_PAGE_SIZE = 10;
+const HISTORY_PAGE_SIZE = 10;
 
 export function paginateHistoryRows(
   rows: HistoryRow[],
@@ -69,16 +68,16 @@ export function historyTaskRow(row: TaskSummary): HistoryRow {
   let status = row.status;
   let color: HistoryRow["color"] = "default";
   if (row.job_status === "queued" || row.job_status === "running" || row.status === "comparing") {
-    status = row.job_kind === "rework" ? "对红中" : "对照中";
+    status = row.job_kind === "rework" ? "复核中" : "检查中";
     color = "processing";
   } else if (row.status === "completed") {
-    status = "已签字";
+    status = "已提交";
     color = "success";
   } else if (row.status === "in_review" || row.status === "pending_review") {
-    status = "待审核";
+    status = "待确认";
     color = "warning";
   } else if (row.status === "compare_failed" || row.job_status === "failed") {
-    status = row.job_error || row.error || "对照失败";
+    status = row.job_error || row.error || "检查失败";
     color = "error";
   }
   return {
@@ -105,19 +104,19 @@ export function historyMockRow(row: MockupJob): HistoryRow {
     row.job_status === "running" ||
     row.job_status === "queued"
   ) {
-    status = "打样中";
+    status = "生成中";
     color = "processing";
   } else if (row.status === "done") {
-    status = "已出图";
+    status = "已完成";
     color = "success";
   } else if (row.structure_status === "review_required") {
-    status = row.structure_code === "structure_face_mapping_incomplete" ? "待选正面" : "打样失败";
+    status = row.structure_code === "structure_face_mapping_incomplete" ? "待选正面" : "生成失败";
     color = row.structure_code === "structure_face_mapping_incomplete" ? "warning" : "error";
   } else if (row.structure_status === "unsupported") {
     status = "结构暂不支持";
     color = "error";
   } else if (row.status === "failed") {
-    status = "打样中断";
+    status = "生成中断";
     color = "error";
   } else {
     status = row.status;
@@ -135,49 +134,6 @@ export function historyMockRow(row: MockupJob): HistoryRow {
   };
 }
 
-export function historyUploadRow(item: PendingUploadItem): HistoryRow {
-  const isReview = item.kind === "compare";
-  const status =
-    item.phase === "ready"
-      ? "已上传，待开工"
-      : item.phase === "paused"
-        ? "上传已暂停"
-        : item.phase === "failed"
-          ? "上传失败"
-          : item.phase === "confirming"
-            ? "服务器确认中"
-            : item.phase === "retrying"
-              ? "网络重连中"
-              : "上传中";
-  const color: HistoryRow["color"] =
-    item.phase === "failed"
-      ? "error"
-      : item.phase === "ready" || item.phase === "paused"
-        ? "warning"
-        : "processing";
-  return {
-    resource: "upload",
-    kind: isReview ? "审稿台" : "打样台",
-    id: item.key,
-    uploadId: item.receipt,
-    uploadKind: item.kind,
-    title: item.title,
-    status,
-    color,
-    at: item.at,
-    actor: "",
-    live:
-      item.phase === "paused"
-        ? `服务器已保存 ${item.pct}%`
-        : item.phase === "uploading"
-          ? `已上传 ${item.pct}%`
-          : item.phase === "retrying"
-            ? "网络波动，正在自动重连"
-            : item.phase === "confirming"
-              ? "文件已传完，等待服务器回执"
-              : null,
-  };
-}
 
 export function historyHasLive(rows: HistoryRow[]): boolean {
   return rows.some((r) => r.color === "processing");

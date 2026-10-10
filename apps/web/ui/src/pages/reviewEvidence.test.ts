@@ -94,7 +94,7 @@ describe("reviewEvidence", () => {
     ]);
 
     assert.equal(result.count, 1);
-    assert.match(result.text, /稿上：保湿/);
+    assert.match(result.text, /稿件：保湿/);
     assert.match(result.text, /没读到：亮泽/);
     assert.doesNotMatch(result.text, /score=|0\/5|覆盖偏低/);
   });

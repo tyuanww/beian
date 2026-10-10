@@ -48,7 +48,7 @@ export function buildRevisionList(
 ) {
   const issues = hits.filter((hit) => hit.decision === "issue");
   const lines = [
-    "待设计改稿",
+    "修改清单",
     `品名：${productName || "—"}`,
     ...issues.map((hit, index) => {
       const note = hit.note ? `（${hit.note}）` : "";
@@ -57,7 +57,7 @@ export function buildRevisionList(
       const miss = humanMissLines(hit);
       const missText = miss.length ? ` / 没读到：${miss.join("；")}` : "";
       const doubtText = doubts.length ? ` / 疑点：${doubts.join("；")}` : "";
-      return `${index + 1}. ${hit.field || "字段"} / 第${hit.page ?? "?"}页 / Excel：${excelText(hit)} / 稿上：${pdfText(hit, hit.field)}${doubtText}${missText}${note}`;
+      return `${index + 1}. ${hit.field || "项目"} / 第${hit.page ?? "?"}页 / 表格：${excelText(hit)} / 稿件：${pdfText(hit, hit.field)}${doubtText}${missText}${note}`;
     }),
   ];
   return { text: lines.join("\n"), count: issues.length };

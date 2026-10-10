@@ -158,6 +158,7 @@ V2 任务在产品项中写 `"structure_engine": "v2"`。显式 sidecar 可写 `
 - 可选白墙白台 set pass：`front_right_set.png` / `back_left_set.png`（产品 holdout，白台+白墙）。网页映射 `white_a_set` / `white_b_set`。`white_set` 有 set 时画 set+产品，不再 CSS 墙、不再乘旧 ground；缺则回退 CSS。`*_set` 不能当产品静帧。set pass 失败不挡 `done`；
 - 可选核对卡：`*_card.png`（Blender 后最长边 1440，网页第一屏；坏了回退全图。不能当产品静帧，也不能当 `*_ground`）；
 - `assets/panel_{front,back,right,left,top,bottom}.png`：各面印刷图。网页打样单读字区用这些图，不是 GLB 截屏，也不是 3/4 白底静帧。已出图缺面时由 Hono 持久入队，`repair_print_faces.py` 只在本次私有暂存 assets 下走 V2 `render_face_assets`（内部使用 `.print-faces-tmp`）。worker 正常退出后，由 jobs 复核源身份、尝试身份及必需 PNG，再逐张原子替换公开印刷面；不跑 `pipeline.py` / Blender。重启恢复及不明进程围栏见 [作业合同](../../docs/contracts/jobs.md#补印刷面持久队列)；
+- `assets/unfolded-print.pdf`：同一源稿的 1:1 净版展开图，由 `export_unfolded_print.py` 发布。它不是六面 PNG/ZIP，也不从 GLB 截图。只认 `unfolded-print-source/1` 里的语义角色；颜色和线宽不参与删除。缺几何、分离不可靠时不写文件。需要补导出时仍走 `illustrator/export_structure.jsx` 的 `request_kind=unfolded_print`（协议 `beian.illustrator.export/2`）。结果 JSON 不是关闭确认；`illustrator/export_close.py` 的 `confirm_export_close` 才归还单槽。后续原生文字复用这一请求种类和关闭函数，不另建宿主。真实 Illustrator 未在本机跑过。
 - 打样单 PDF（两张白底一页，页底先铺白，槽按源图比例 contain。pymupdf 写不出且还没落盘再用已装的 Pillow，不另装包、不盖掉已写成的文件；跳过时没有，也不当失败）；
 - 独立 .pptx（一页两张白底：正面+侧面、反面+侧面；先写 OOXML，不依赖 Node。跳过 PPT 时没有这一项，也不当失败）；
 - qa/：仅演示文稿运行时兜底才会有 PPT 质检图；OOXML 直写没有 qa/；

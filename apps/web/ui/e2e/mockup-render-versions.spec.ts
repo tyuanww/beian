@@ -130,7 +130,7 @@ test("首次生成、运行中旧代下载、晚到 full/ground/GLB 不回写、
     expect(pixel[0]).toBeGreaterThan(pixel[2]);
     await expect.poll(async()=>{const c=await centerColor(page);return c[2]>c[0];}).toBe(true);
     await expect(page.locator("model-viewer")).toHaveAttribute("src",new RegExp(`generation_id=${G1}`));
-    await expect(page.getByRole("link",{name:"下载 GLB",exact:true})).toHaveAttribute("href",new RegExp(`generation_id=${G1}`));
+    await expect(page.getByRole("link",{name:"下载模型",exact:true})).toHaveAttribute("href",new RegExp(`generation_id=${G1}`));
     state.lose(); // Lost activation response: GET confirms target, no second activation POST.
     await page.locator(`[data-generation-id="${G0}"]`).getByRole("button",{name:"使用此版本"}).click();
     await expect(page.locator(".mockup-sheet-photos")).toHaveAttribute("data-render-generation",G0);
@@ -316,17 +316,17 @@ test("GLB 显示桌墙与原始下载分离，切背景和全屏不发起作业"
   await expect(viewer).toHaveAttribute("src", /^blob:/);
   await expect(viewer).toHaveAttribute("camera-orbit", /^35deg 72deg .*m$/);
   await expect(frame).toHaveCSS("background-image", "none");
-  const download = await page.getByRole("link", {name:"下载 GLB", exact:true}).getAttribute("href");
+  const download = await page.getByRole("link", {name:"下载模型", exact:true}).getAttribute("href");
   await page.locator(".mockup-backdrop-switch").getByText("银底", {exact:true}).click();
   await expect(viewer).toHaveAttribute("src", new RegExp(`generation_id=${LEGACY}`));
   await expect(frame).toHaveCSS("background-color", "rgb(196, 201, 208)");
   await page.locator(".mockup-backdrop-switch").getByText("白桌白墙", {exact:true}).click();
   await expect(frame.getByRole("button", {name:"复位模型视角"})).toBeEnabled();
-  await frame.getByRole("button", {name:"全屏截图", exact:true}).click();
+  await frame.getByRole("button", {name:"全屏", exact:true}).click();
   await expect.poll(() => frame.evaluate(el => document.fullscreenElement === el)).toBe(true);
   await expect(viewer).toHaveAttribute("src", /^blob:/);
   await page.evaluate(() => document.exitFullscreen());
-  await expect(page.getByRole("link", {name:"下载 GLB",exact:true})).toHaveAttribute("href", download!);
+  await expect(page.getByRole("link", {name:"下载模型",exact:true})).toHaveAttribute("href", download!);
   expect(state.calls.filter(call => call.method !== "GET")).toEqual([]);
   expect(state.unknown).toEqual([]);
 });
