@@ -83,8 +83,8 @@ export function MockupGlbViewer({ source, poster, backdrop, backgroundLight, pro
           raw.current = { source, bytes };
         }
         setProgress({ kind: "preparing" });
-        // 让「正在准备场景…」先绘制出来，再在主线程同步组装场景。
-        await new Promise<void>(resolve => requestAnimationFrame(() => setTimeout(resolve, 0)));
+        // 双 rAF：第二帧回调时上一帧（含「正在准备场景…」）已提交绘制，再在主线程同步组装场景。
+        await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
         if (!active) return;
         const display = composeGlbDisplaySet(bytes);
         if (!active) return;
