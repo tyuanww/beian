@@ -58,7 +58,7 @@
 .history-files-matched { flex: none; color: var(--ink); font-weight: 500; }
 .history-files-toggle.ant-btn { flex: none; height: auto; min-height: 40px; margin-block: -12px; padding: 0; font-size: 13px; }
 .history-files-list { display: grid; gap: 8px; padding: 8px 0 2px; cursor: default; }
-.history-files-group { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 8px; }
+.history-files-group { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 8px; }
 .history-files-group-label { color: var(--ink); font-weight: 500; white-space: nowrap; }
 .history-files-group ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 2px; }
 .history-files-group li { color: var(--muted); overflow-wrap: anywhere; }
