@@ -8,7 +8,7 @@ test("上传区可用 Tab 聚焦，并用 Enter 和空格选择两份文件", as
   await page.goto("/reviewup/new");
 
   const excelWell = page.locator("label.upload-well").filter({ hasText: "确认表" });
-  const pdfWell = page.locator("label.upload-well").filter({ hasText: "包装稿" });
+  const pdfWell = page.locator("label.upload-well").filter({ hasText: "设计稿" });
 
   await page.getByRole("button", { name: "膜袋", exact: true }).focus();
   await page.keyboard.press("Tab");
@@ -34,12 +34,12 @@ test("上传区可用 Tab 聚焦，并用 Enter 和空格选择两份文件", as
 test("审稿上传拿到回执后，换台再回来仍显示待检查", async ({ page }) => {
   await page.goto("/reviewup/new");
   await page.getByLabel("确认表文件").setInputFiles(excelFile);
-  await page.getByLabel("包装稿文件").setInputFiles(pdfFile);
+  await page.getByLabel("设计稿文件").setInputFiles(pdfFile);
   await expect(page.getByText("上传完成，可以开始检查。")).toBeVisible();
 
-  await page.getByRole("button", { name: "打样台" }).click();
-  await expect(page.getByRole("heading", { name: "打样台" })).toBeVisible();
-  await page.getByRole("button", { name: "审稿台" }).click();
+  await page.getByRole("button", { name: "3D 打样" }).click();
+  await expect(page.getByRole("heading", { name: "3D 打样" })).toBeVisible();
+  await page.getByRole("button", { name: "审稿" }).click();
 
   const pending = page.getByRole("button", { name: /review\s+e2e.*待检查/ });
   await expect(pending).toBeVisible();
@@ -48,12 +48,12 @@ test("审稿上传拿到回执后，换台再回来仍显示待检查", async ({
 
 test("打样上传拿到回执后，换台再回来仍显示待生成", async ({ page }) => {
   await page.goto("/mockup/new");
-  await page.getByLabel("平面稿文件").setInputFiles(aiFile);
+  await page.getByLabel("设计稿文件").setInputFiles(aiFile);
   await expect(page.getByText("上传完成，可以开始生成。")).toBeVisible();
 
-  await page.getByRole("button", { name: "审稿台" }).click();
-  await expect(page.getByRole("heading", { name: "审稿单" })).toBeVisible();
-  await page.getByRole("button", { name: "打样台" }).click();
+  await page.getByRole("button", { name: "审稿" }).click();
+  await expect(page.getByRole("heading", { name: "审稿" })).toBeVisible();
+  await page.getByRole("button", { name: "3D 打样" }).click();
 
   const pending = page.getByRole("button", { name: /mockup\s+e2e.*待生成/ });
   await expect(pending).toBeVisible();
@@ -63,7 +63,7 @@ test("打样上传拿到回执后，换台再回来仍显示待生成", async ({
 test("审稿回执开工时失效，会清空旧状态并允许重新上传", async ({ page, syntheticApi }) => {
   await page.goto("/reviewup/new");
   await page.getByLabel("确认表文件").setInputFiles(excelFile);
-  await page.getByLabel("包装稿文件").setInputFiles(pdfFile);
+  await page.getByLabel("设计稿文件").setInputFiles(pdfFile);
   await expect(page.getByText("上传完成，可以开始检查。")).toBeVisible();
 
   syntheticApi.expireNextTaskStart = true;
@@ -73,7 +73,7 @@ test("审稿回执开工时失效，会清空旧状态并允许重新上传", as
   await expect(page.getByRole("button", { name: "开始检查" })).toBeDisabled();
 
   await page.getByLabel("确认表文件").setInputFiles({ ...excelFile, name: "retry-review-e2e.xlsx" });
-  await page.getByLabel("包装稿文件").setInputFiles({ ...pdfFile, name: "retry-review-e2e.pdf" });
+  await page.getByLabel("设计稿文件").setInputFiles({ ...pdfFile, name: "retry-review-e2e.pdf" });
   await expect(page.getByText("上传完成，可以开始检查。")).toBeVisible();
   await page.getByRole("button", { name: "开始检查" }).click();
   await expect(page).toHaveURL(/\/review\/c[0-9a-f]{11}$/);
@@ -81,7 +81,7 @@ test("审稿回执开工时失效，会清空旧状态并允许重新上传", as
 
 test("打样回执开工时失效，会清空旧状态并允许重新上传", async ({ page, syntheticApi }) => {
   await page.goto("/mockup/new");
-  await page.getByLabel("平面稿文件").setInputFiles(aiFile);
+  await page.getByLabel("设计稿文件").setInputFiles(aiFile);
   await expect(page.getByText("上传完成，可以开始生成。")).toBeVisible();
 
   syntheticApi.expireNextMockupStart = true;
@@ -90,7 +90,7 @@ test("打样回执开工时失效，会清空旧状态并允许重新上传", as
   await expect(page.locator(".ant-alert").getByText("上传已失效，请重新选择文件。", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "开始生成" })).toBeDisabled();
 
-  await page.getByLabel("平面稿文件").setInputFiles({ ...aiFile, name: "retry-mockup-e2e.ai" });
+  await page.getByLabel("设计稿文件").setInputFiles({ ...aiFile, name: "retry-mockup-e2e.ai" });
   await expect(page.getByText("上传完成，可以开始生成。")).toBeVisible();
   await page.getByRole("button", { name: "开始生成" }).click();
   await expect(page).toHaveURL(/\/mockup\/d[0-9a-f]{11}$/);
@@ -100,7 +100,7 @@ test("上传到 100% 后等待服务器回执，确认后才能开始检查", as
   const releaseUpload = await installHeldUploadTransport(page, syntheticApi);
   await page.goto("/reviewup/new");
   await page.getByLabel("确认表文件").setInputFiles({ ...excelFile, name: "confirming-e2e.xlsx" });
-  await page.getByLabel("包装稿文件").setInputFiles({ ...pdfFile, name: "confirming-e2e.pdf" });
+  await page.getByLabel("设计稿文件").setInputFiles({ ...pdfFile, name: "confirming-e2e.pdf" });
 
   const progress = page.getByRole("progressbar", { name: "文件已传完，服务器正在确认" });
   await expect(progress).toBeVisible();
@@ -125,7 +125,7 @@ test("服务端已落盘但完成响应丢失时，按同一上传身份恢复�
   syntheticApi.loseNextUploadResponse = true;
   await page.goto("/reviewup/new");
   await page.getByLabel("确认表文件").setInputFiles({ ...excelFile, name: "recover-e2e.xlsx" });
-  await page.getByLabel("包装稿文件").setInputFiles({ ...pdfFile, name: "recover-e2e.pdf" });
+  await page.getByLabel("设计稿文件").setInputFiles({ ...pdfFile, name: "recover-e2e.pdf" });
 
   await expect(page.getByText("上传完成，可以开始检查。")).toBeVisible();
   const receipt = syntheticApi.receipts.find((item) => item.kind === "compare");
@@ -149,13 +149,13 @@ test("回执生成后整页刷新，仍可开工且恢复页保留品名与包�
   await page.goto("/reviewup/new");
   await page.getByRole("button", { name: "膜袋", exact: true }).click();
   await page.getByLabel("确认表文件").setInputFiles({ ...excelFile, name: "reload-e2e.xlsx" });
-  await page.getByLabel("包装稿文件").setInputFiles({ ...pdfFile, name: "reload-e2e.pdf" });
+  await page.getByLabel("设计稿文件").setInputFiles({ ...pdfFile, name: "reload-e2e.pdf" });
   await expect(page.getByText("上传完成，可以开始检查。")).toBeVisible();
 
   const receipt = syntheticApi.receipts.find((item) => item.kind === "compare");
   expect(receipt?.id).toMatch(/^[0-9a-f]{12}$/);
 
-  await page.getByRole("button", { name: "审稿台" }).click();
+  await page.getByRole("button", { name: "审稿" }).click();
   await expect(page.getByRole("button", { name: /reload\s+e2e.*待检查/i })).toBeVisible();
 
   syntheticApi.calls.length = 0;
@@ -165,8 +165,8 @@ test("回执生成后整页刷新，仍可开工且恢复页保留品名与包�
   expect(syntheticApi.calls.some((item) => item.method === "GET" && item.path === "/api/uploads")).toBe(true);
 
   await pending.click();
-  await expect(page.getByRole("dialog", { name: "开始检查这份文件？" })).toBeVisible();
-  await page.getByRole("dialog").getByRole("button", { name: "稍后开始" }).click();
+  await expect(page.getByRole("dialog", { name: "现在开始检查？" })).toBeVisible();
+  await page.getByRole("dialog").getByRole("button", { name: "等会儿" }).click();
   await page.goto(`/reviewup/new?receipt=${receipt?.id}`);
   await expect(page).toHaveURL(new RegExp(`/reviewup/new\\?receipt=${receipt?.id}$`));
   await expect(page.getByText("上传完成，可以开始检查。")).toBeVisible();
@@ -175,8 +175,8 @@ test("回执生成后整页刷新，仍可开工且恢复页保留品名与包�
   await expect(page.locator(".upload-filechip-name").filter({ hasText: "reload-e2e.xlsx" })).toBeVisible();
   await expect(page.locator(".upload-filechip-name").filter({ hasText: "reload-e2e.pdf" })).toBeVisible();
 
-  await page.getByRole("button", { name: "删除暂存" }).click();
-  await page.getByRole("dialog").getByRole("button", { name: "放弃上传" }).click();
+  await page.getByRole("button", { name: "删除文件" }).click();
+  await page.getByRole("dialog").getByRole("button", { name: /^删\s*除$/ }).click();
 
   await expect(page).toHaveURL(/\/reviewup$/);
   await expect(page.getByText("已放弃这次上传，文件资源已释放。")).toBeVisible();
@@ -206,7 +206,7 @@ test("审稿看板点暂停上传只进入续传页，不会误发开工请求",
   });
 
   await page.goto("/reviewup");
-  const paused = page.getByRole("button", { name: /看板续传花盒.*待继续上传/ });
+  const paused = page.getByRole("button", { name: /看板续传花盒.*上传暂停/ });
   await expect(paused).toBeVisible();
   await paused.click();
 
@@ -248,7 +248,7 @@ test("历史页显示暂停上传，重选同一对文件从服务器偏移续�
   await expect(page.getByText(/请重新选择同一文件继续/)).toBeVisible();
 
   await page.getByLabel("确认表文件").setInputFiles(excelFile);
-  await page.getByLabel("包装稿文件").setInputFiles(pdfFile);
+  await page.getByLabel("设计稿文件").setInputFiles(pdfFile);
   await expect(page.getByText("上传完成，可以开始检查。")).toBeVisible();
   await expect(page.getByRole("button", { name: "开始检查" })).toBeEnabled();
   expect(syntheticApi.receipts.some((item) => item.id === "d00000000001")).toBe(true);

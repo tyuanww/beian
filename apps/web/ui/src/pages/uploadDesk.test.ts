@@ -78,12 +78,12 @@ describe("uploadDesk", () => {
     assert.equal(matchesDeskQuery("确认", "远端确认单.xlsx"), true);
   });
 
-  it("100% 等响应时卡片明确显示服务器确认中", () => {
+  it("100% 等响应时卡片明确显示正在核对", () => {
     const confirming: UploadSnapshot = { ...local, phase: "confirming", receipt: undefined };
     const [item] = pendingUploadItems("compare", confirming, []);
     assert.ok(item);
     const card = pendingUploadCard(item, "待检查");
-    assert.equal(card.live, "服务器确认中");
+    assert.equal(card.live, "正在核对");
     assert.equal(card.progress, 100);
   });
 

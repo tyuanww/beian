@@ -454,7 +454,7 @@ export function ReviewPage({ taskId, userId, onBack }: Props) {
     );
     try {
       await navigator.clipboard.writeText(text);
-      message.success(`已复制 ${count} 条给设计`);
+      message.success(`已复制 ${count} 条，可发给设计`);
     } catch {
       message.error("复制失败，请手动选中文字");
     }
@@ -465,7 +465,7 @@ export function ReviewPage({ taskId, userId, onBack }: Props) {
   async function uploadRework(file: File) {
     if (!task || !reworkable || hasUnsavedNotes) return;
     if (!(await decisionQueueRef.current)) {
-      message.error("先保存备注，再继续。");
+      message.error("先保存备注");
       return;
     }
     const fd = new FormData();
@@ -545,7 +545,7 @@ export function ReviewPage({ taskId, userId, onBack }: Props) {
         <header className="page-head">
           <h1 className="page-title">审稿单</h1>
           <button type="button" className="btn-ghost" onClick={onBack}>
-            返回列表
+            返回
           </button>
         </header>
         <Alert type="error" showIcon title={error || "审稿单加载失败"} />
@@ -585,7 +585,7 @@ export function ReviewPage({ taskId, userId, onBack }: Props) {
         </div>
         <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
           <button type="button" className="btn-ghost" onClick={onBack}>
-            返回列表
+            返回
           </button>
           <button
             type="button"
@@ -593,7 +593,7 @@ export function ReviewPage({ taskId, userId, onBack }: Props) {
             aria-pressed={reviewFullscreen}
             onClick={() => void toggleReviewFullscreen()}
           >
-            {reviewFullscreen ? "退出" : "全屏"}
+            {reviewFullscreen ? "退出全屏" : "全屏"}
           </button>
           {Array.isArray(task?.pages_v2) && task.pages_v2.length > 0 ? (
             <button
@@ -607,7 +607,7 @@ export function ReviewPage({ taskId, userId, onBack }: Props) {
                 commitZoom(resetZoom());
               }}
             >
-              {useV2 ? "看这一版" : "看上一版"}
+              {useV2 ? "看新稿" : "看旧稿"}
             </button>
           ) : (
             <button
@@ -628,7 +628,7 @@ export function ReviewPage({ taskId, userId, onBack }: Props) {
               上传新稿
             </button>
           )}
-          {hasUnsavedNotes ? <span className="review-draft-status" role="status">先保存备注，再继续。</span> : null}
+          {hasUnsavedNotes ? <span className="review-draft-status" role="status">先保存备注</span> : null}
           {pages.length > 1
             ? pages.map((p, i) => (
                 <button
@@ -646,7 +646,7 @@ export function ReviewPage({ taskId, userId, onBack }: Props) {
             <label className="review-conclusion review-sign-layer">
               <Input
                 aria-label="结论"
-                placeholder="写下审核结果"
+                placeholder="选择结论"
                 value={conclusion}
                 disabled={busy}
                 onChange={(e) => setConclusion(e.target.value)}
@@ -661,7 +661,7 @@ export function ReviewPage({ taskId, userId, onBack }: Props) {
             disabled={!reviewable || busy || hasUnsavedNotes || !conclusion.trim()}
             onClick={() => void signOff()}
           >
-            {hits.some((h) => h.decision === "issue") ? "提交并等新稿" : "提交结果"}
+            {hits.some((h) => h.decision === "issue") ? "提交，等改稿" : "提交"}
           </button>
         </div>
       </header>
@@ -671,7 +671,7 @@ export function ReviewPage({ taskId, userId, onBack }: Props) {
         <Alert type="error" showIcon style={{ marginBottom: 16 }} title={customerCopy(task.error || task.job_error || "") || "检查失败。"} />
       ) : null}
       {task && reviewable && hits.length === 0 ? (
-        <Alert type="info" showIcon style={{ marginBottom: 16 }} title="没有发现疑点，请快速看一遍。" />
+        <Alert type="info" showIcon style={{ marginBottom: 16 }} title="没发现问题，扫一眼就行" />
       ) : null}
       {signed ? (
         <Alert type="success" showIcon style={{ marginBottom: 16 }} title="结果已提交。" />
@@ -827,7 +827,7 @@ export function ReviewPage({ taskId, userId, onBack }: Props) {
                       缩小
                     </button>
                     <button type="button" className="btn-ghost" onClick={() => commitZoom(resetZoom())}>
-                      复位
+                      还原
                     </button>
                     <button
                       type="button"
@@ -838,7 +838,7 @@ export function ReviewPage({ taskId, userId, onBack }: Props) {
                         writePinsOn(browserStore(), next);
                       }}
                     >
-                      {pinsOn ? "隐藏本项目钉" : "显示本项目钉"}
+                      {pinsOn ? "隐藏标记点" : "显示标记点"}
                     </button>
                     <button
                       type="button"
@@ -849,10 +849,10 @@ export function ReviewPage({ taskId, userId, onBack }: Props) {
                         writeBoxesOn(browserStore(), next);
                       }}
                     >
-                      {boxesOn ? "隐藏本项目框" : "显示本项目框"}
+                      {boxesOn ? "隐藏框线" : "显示框线"}
                     </button>
                     <button type="button" className="btn-ghost" onClick={() => setToolsOpen(false)}>
-                      收缩
+                      收起
                     </button>
                   </>
                 ) : (
@@ -874,7 +874,7 @@ export function ReviewPage({ taskId, userId, onBack }: Props) {
             />
           )}
           <p className="page-lead" style={{ padding: "0 16px 12px" }}>
-只标当前项目。拖动时暂时隐藏。
+只标当前项，拖动时隐藏
           </p>
         </div>
 

@@ -44,7 +44,7 @@ test("旧单加载中打开原图，图片就绪后灯箱自动绘制", async ({
   });
   try {
     await page.goto("/mockup/aaaaaaaaaaaa", { waitUntil: "domcontentloaded" });
-    await page.getByRole("button", { name: "打开正面 + 侧面原图", exact: true }).click();
+    await page.getByRole("button", { name: "打开正面图原图", exact: true }).click();
     await expect(page.getByRole("dialog")).toBeVisible();
     release();
     const canvas = page.getByRole("dialog").locator("canvas");

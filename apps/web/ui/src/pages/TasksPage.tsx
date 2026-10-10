@@ -7,7 +7,7 @@ import { compareBoardProgress, liveJobLine } from "./waitCard";
 import { shouldShowTaskBoard } from "./tasksBoard";
 import { PENDING_REVIEW, deskClock, type DeskCardRow } from "./deskBoard";
 import { DeskCol } from "./DeskCol";
-import { reviewCompletedLabel } from "../copy/labels";
+import { NAV_LABEL, REVIEW_STATUS_LABEL, reviewCompletedLabel } from "../copy/labels";
 import {
   pendingUploadCard,
   pendingUploadOpenAction,
@@ -188,10 +188,10 @@ export function TasksPage({ canCreate, onCreate, onOpen, onResumeReceipt }: Prop
     const receipt = item.receipt;
     const productName = item.productName;
     modal.confirm({
-      title: "开始检查这份文件？",
+      title: "现在开始检查？",
       content: `品名：${productName}。上传完成后会进入检查队列。`,
       okText: "开始检查",
-      cancelText: "稍后开始",
+      cancelText: "等会儿",
       onOk: async () => {
         if (pendingStarts.current.has(receipt)) return;
         pendingStarts.current.add(receipt);
@@ -233,14 +233,14 @@ export function TasksPage({ canCreate, onCreate, onOpen, onResumeReceipt }: Prop
     <section>
       <div className="desk-head">
         <div>
-          <h1 className="page-title">审稿单</h1>
-          <p className="page-lead">先看待确认项，再提交结果。</p>
+          <h1 className="page-title">{NAV_LABEL.review}</h1>
+          <p className="page-lead">核对表格和稿件是否一致</p>
         </div>
         <Space wrap>
           {showSearch ? (
             <Input.Search
               allowClear
-              placeholder="搜索品名或文件名"
+              placeholder="搜品名或文件名"
               value={q}
               onChange={(event) => setQ(event.target.value)}
               onClear={() => {
@@ -256,8 +256,8 @@ export function TasksPage({ canCreate, onCreate, onOpen, onResumeReceipt }: Prop
               value={layout}
               onChange={(value) => setLayout(value as Layout)}
               options={[
-                { label: "看板", value: "board" },
-                { label: "表格", value: "table" },
+                { label: "卡片", value: "board" },
+                { label: "列表", value: "table" },
               ]}
             />
           ) : null}
@@ -276,7 +276,7 @@ export function TasksPage({ canCreate, onCreate, onOpen, onResumeReceipt }: Prop
           title={error}
           action={
             <Button size="small" onClick={() => setReload((count) => count + 1)}>
-              再试一次
+              重试
             </Button>
           }
         />
@@ -292,8 +292,8 @@ export function TasksPage({ canCreate, onCreate, onOpen, onResumeReceipt }: Prop
                 <div>没有找到相关记录</div>
               ) : (
                 <div>
-                  <div>还没有审稿单</div>
-                  <div className="desk-empty-hint">上传 Excel 和包装 PDF 开始。</div>
+                  <div>还没有审稿</div>
+                  <div className="desk-empty-hint">传一份表格和稿件就能开始</div>
                 </div>
               )
             }
@@ -305,7 +305,7 @@ export function TasksPage({ canCreate, onCreate, onOpen, onResumeReceipt }: Prop
                   setSubmitted("");
                 }}
               >
-                清空
+                清除搜索
               </Button>
             ) : canCreate ? (
               <Button type="primary" onClick={onCreate}>
@@ -318,13 +318,13 @@ export function TasksPage({ canCreate, onCreate, onOpen, onResumeReceipt }: Prop
         <div className="review-board is-four">
           <DeskCol
             title="检查中"
-            hint="正在上传或检查。"
+            hint="机器正在核对"
             rows={[...pendingCards, ...board.comparing.map(toDeskCard)]}
             onOpen={openCard}
           />
-          <DeskCol title="检查失败" hint="打开查看原因。" rows={board.failed.map(toDeskCard)} onOpen={onOpen} />
-          <DeskCol title="待确认" hint="等待你确认。" rows={board.review.map(toDeskCard)} onOpen={onOpen} />
-          <DeskCol title="已提交" hint="结果已保存。" rows={board.done.map(toDeskCard)} onOpen={onOpen} />
+          <DeskCol title="没查完" hint="点开看原因" rows={board.failed.map(toDeskCard)} onOpen={onOpen} />
+          <DeskCol title="待你确认" hint="有几处要你看一眼" rows={board.review.map(toDeskCard)} onOpen={onOpen} />
+          <DeskCol title={REVIEW_STATUS_LABEL.completed} hint="结果已保存" rows={board.done.map(toDeskCard)} onOpen={onOpen} />
         </div>
       ) : (
         <Table<DeskCardRow>
@@ -335,7 +335,7 @@ export function TasksPage({ canCreate, onCreate, onOpen, onResumeReceipt }: Prop
           scroll={{ x: 760 }}
           onRow={(row) => ({ onClick: () => openCard(row.id), style: { cursor: "pointer" } })}
           columns={[
-            { title: "品名 / 文件", dataIndex: "title" },
+            { title: "品名", dataIndex: "title" },
             {
               title: "状态",
               width: 180,
@@ -346,9 +346,9 @@ export function TasksPage({ canCreate, onCreate, onOpen, onResumeReceipt }: Prop
                 </div>
               ),
             },
-            { title: "工作时间", dataIndex: "at", width: 180, render: (value: string) => deskClock(value) },
-            { title: "使用人", dataIndex: "actor", width: 100, render: (value: string) => value || "—" },
-            { title: "", key: "open", width: 100, render: () => <Button type="link">打开</Button> },
+            { title: "更新时间", dataIndex: "at", width: 180, render: (value: string) => deskClock(value) },
+            { title: "负责人", dataIndex: "actor", width: 100, render: (value: string) => value || "—" },
+            { title: "", key: "open", width: 100, render: () => <Button type="link">查看</Button> },
           ]}
         />
       )}

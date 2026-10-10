@@ -28,7 +28,7 @@ export function matchesDeskQuery(query: string, ...values: Array<string | undefi
 
 export function receiptDisplayTitle(files: { name: string }[]): string {
   const first = files[0]?.name || "";
-  return stemFromFilename(first) || first || "待开工文件";
+  return stemFromFilename(first) || first || "未命名文件";
 }
 
 export function shouldReconcileUpload(
@@ -141,18 +141,18 @@ export function pendingUploadCard(item: PendingUploadItem, readyLabel: string): 
     id: item.key,
     shortId: item.receipt ? item.receipt.slice(0, 8) : "上传中",
     title: item.title,
-    statusText: busy ? "上传中" : failed ? "上传失败" : paused ? "待继续上传" : readyLabel,
+    statusText: busy ? "上传中" : failed ? "上传失败" : paused ? "上传暂停" : readyLabel,
     statusColor: busy ? "processing" : failed ? "error" : "warning",
     at: item.at,
     live:
       item.phase === "confirming"
-        ? "服务器确认中"
+        ? "正在核对"
         : item.phase === "retrying"
-          ? "网络波动，正在重连"
+          ? "网络不稳，重连中"
           : item.phase === "uploading"
             ? `已上传 ${item.pct}%`
             : paused
-              ? `已保存 ${item.pct}%，点开继续`
+              ? `已传 ${item.pct}%，点开继续`
               : null,
     progress: busy ? item.pct : undefined,
     error: failed ? item.error || "上传失败，请重新上传。" : null,

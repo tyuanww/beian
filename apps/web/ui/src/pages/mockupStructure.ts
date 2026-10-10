@@ -88,11 +88,11 @@ export function sameStructureLayerSelection(input: StructureInput, selectedIds: 
 }
 
 export function structureStatusLabel(job: Pick<MockupJob, "structure_status" | "structure_code">): string | null {
-  if (job.structure_status === "analyzing") return "正在出图";
+  if (job.structure_status === "analyzing") return "生成中";
   if (job.structure_status === "review_required") {
-    return job.structure_code === "structure_face_mapping_incomplete" ? "待选正面" : "生成失败";
+    return job.structure_code === "structure_face_mapping_incomplete" ? "选个正面" : "生成失败";
   }
-  if (job.structure_status === "unsupported") return "结构暂不支持";
+  if (job.structure_status === "unsupported") return "暂不支持此盒型";
   return null;
 }
 
@@ -111,7 +111,7 @@ export function structureIssueCopy(
     return "这份稿已合并成一层。请上传保留刀线的源稿。";
   }
   if (job.structure_code === "structure_category_unsupported") {
-    return message || "当前不支持这类包装。内包和标贴不要送进打样台；膜袋只有两块相近刀线才走袋片。";
+    return message || "当前不支持这类包装。内包和标贴不要送进 3D 打样；膜袋只有两块相近刀线才走袋片。";
   }
   if (job.structure_code === "structure_open_boundary") {
     return "刀线或折线存在断口，闭合后重新识别；系统不会自动补线。";

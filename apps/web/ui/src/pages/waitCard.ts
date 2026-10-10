@@ -30,25 +30,25 @@ function queueLine(queue_ahead?: number): string {
   return ahead > 0 ? `前面还有 ${ahead} 单` : "就快轮到";
 }
 
-function leaveHint(kind: WaitKind, feishuReady?: boolean): string {
-  if (feishuReady) return "可以离开，完了飞书叫你";
-  return kind === "mockup" ? "完成后回到打样台" : "完成后回到审稿台";
+function leaveHint(feishuReady?: boolean): string {
+  if (feishuReady) return "可以先离开，好了飞书通知你";
+  return "好了再回来看";
 }
 
 /** Figma 等待卡 68:1218 正文。不要假取消。 */
 function figmaWaitBody(kind: WaitKind): string {
-  if (kind === "mockup") return "正在生成立体图。";
-  return "正在读取文件并检查内容。";
+  if (kind === "mockup") return "正在生成 3D 效果图";
+  return "正在逐项核对稿件";
 }
 
 function visibleStage(stage: string): string {
   if (/(ocr|认字|文字识别)/i.test(stage)) return "读取文字";
   if (/(match|对照|对红)/i.test(stage)) return "检查内容";
-  if (/(layout|分区)/i.test(stage)) return "整理版面";
+  if (/(layout|分区)/i.test(stage)) return "识别排版";
   if (/(ingest|识稿)/i.test(stage)) return "读取文件";
   if (/(render|出图)/i.test(stage)) return "生成预览";
-  if (/(blender|结构|建盒|打样)/i.test(stage)) return "生成盒型";
-  if (/(export|导出)/i.test(stage)) return "整理文件";
+  if (/(blender|结构|建盒|打样)/i.test(stage)) return "搭出盒子";
+  if (/(export|导出)/i.test(stage)) return "打包文件";
   return stage;
 }
 
@@ -206,7 +206,7 @@ export function liveNavPulse(body: { jobs?: unknown } | null | undefined): {
 
 export function waitCardCopy(opts: WaitCardCopyOpts): { title: string; eta: string; hint: string } {
   const title = TITLE[opts.kind];
-  const leave = leaveHint(opts.kind, opts.feishuReady);
+  const leave = leaveHint(opts.feishuReady);
   if (opts.job_status === "queued") {
     const q = queueLine(opts.queue_ahead);
     return { title, eta: q, hint: `${q}。${leave}` };

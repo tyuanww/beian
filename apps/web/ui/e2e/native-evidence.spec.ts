@@ -7,7 +7,7 @@ test("原稿文字和 OCR 分开展示，冲突不会自动提交人工结论", 
   await page.goto(`/review/${task.id}`);
   const evidence = page.getByLabel("文字来源证据");
   await expect(evidence.getByRole("heading")).toHaveText("请确认文字来源");
-  await evidence.getByText("查看文字来源").click();
+  await evidence.getByText("文字从哪来").click();
   await expect(evidence.getByText("净含量 30ml", { exact: true })).toBeVisible();
   await expect(evidence.getByText("净含量 80ml", { exact: true })).toBeVisible();
   expect(syntheticApi.calls.filter(call => call.path.endsWith("/decision"))).toHaveLength(0);
@@ -42,7 +42,7 @@ test("窄屏深色长文字来源可展开阅读，未知版本不会显示成�
   task.hits![0].native_text_evidence = { version: 1, status: "used", native_text: "生产地址与完整配方".repeat(60), ocr_text: "生产地址与配方".repeat(60), message: "已核对可见稿面及文字位置，原稿文字已参与现有核对规则。" };
   syntheticApi.tasks.push(task); await page.goto(`/review/${task.id}`);
   const evidence = page.getByLabel("文字来源证据");
-  await evidence.getByText("查看文字来源").click();
+  await evidence.getByText("文字从哪来").click();
   await evidence.scrollIntoViewIfNeeded();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
   await page.screenshot({ path: info.outputPath("native-evidence-mobile.png") });

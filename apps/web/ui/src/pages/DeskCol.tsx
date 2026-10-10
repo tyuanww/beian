@@ -18,13 +18,13 @@ export function DeskCol({ title, hint, rows, onOpen }: Props) {
         <div className="review-col-head-right">
           <span>{rows.length}</span>
           <Button type="text" size="small" className="review-col-all" onClick={() => setOpen(true)}>
-            全部
+            查看全部
           </Button>
         </div>
       </div>
       <p className="review-col-hint">{hint}</p>
       <div className="review-col-list">
-        {rows.length === 0 ? <div className="review-col-empty">没有单</div> : null}
+        {rows.length === 0 ? <div className="review-col-empty">暂无</div> : null}
         {rows.map((row) => (
           <button
             key={row.id}
@@ -57,7 +57,7 @@ export function DeskCol({ title, hint, rows, onOpen }: Props) {
           size="small"
           pagination={false}
           dataSource={rows}
-          locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="没有单" /> }}
+          locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无" /> }}
           onRow={(row) => ({
             onClick: () => {
               setOpen(false);
@@ -73,9 +73,9 @@ export function DeskCol({ title, hint, rows, onOpen }: Props) {
               width: 120,
               render: (_, row) => <Tag color={row.statusColor}>{row.statusText}</Tag>,
             },
-            { title: "使用人", dataIndex: "actor", width: 100, render: (v: string) => v || "—" },
+            { title: "负责人", dataIndex: "actor", width: 100, render: (v: string) => v || "—" },
             {
-              title: "工作时间",
+              title: "更新时间",
               dataIndex: "at",
               width: 160,
               render: (v: string) => deskClock(v),

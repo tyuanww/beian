@@ -114,9 +114,9 @@ test("首次生成、运行中旧代下载、晚到 full/ground/GLB 不回写、
     await page.locator(".mockup-backdrop-switch").getByText("白底",{exact:true}).click();
     await expect.poll(async()=>{const c=await centerColor(page);return c[0]>c[2];}).toBe(true);
     const download=page.waitForEvent("download");
-    await page.getByRole("button",{name:"下载正面 + 侧面",exact:true}).click();
-    await page.getByRole("button",{name:"出图版本",exact:true}).click();
-    await page.getByRole("button",{name:"按旧版重新出图",exact:true}).click();
+    await page.getByRole("button",{name:"下载正面图",exact:true}).click();
+    await page.getByRole("button",{name:"历史版本",exact:true}).click();
+    await page.getByRole("button",{name:"重新出图",exact:true}).click();
     await expect.poll(()=>state.facts.size).toBe(1);
     await expect(page.locator(".mockup-version-status")).toContainText("当前图片仍可用");
     await expect(page.locator(".wait-card")).toHaveCount(0);
@@ -132,11 +132,11 @@ test("首次生成、运行中旧代下载、晚到 full/ground/GLB 不回写、
     await expect(page.locator("model-viewer")).toHaveAttribute("src",new RegExp(`generation_id=${G1}`));
     await expect(page.getByRole("link",{name:"下载模型",exact:true})).toHaveAttribute("href",new RegExp(`generation_id=${G1}`));
     state.lose(); // Lost activation response: GET confirms target, no second activation POST.
-    await page.locator(`[data-generation-id="${G0}"]`).getByRole("button",{name:"使用此版本"}).click();
+    await page.locator(`[data-generation-id="${G0}"]`).getByRole("button",{name:"用这一版"}).click();
     await expect(page.locator(".mockup-sheet-photos")).toHaveAttribute("data-render-generation",G0);
     expect(state.facts.size).toBe(1);
     expect(state.calls.filter(call=>call.path.endsWith("/activate"))).toHaveLength(1);
-    await page.locator(".mockup-version-actions").getByRole("button",{name:"按旧版重新出图"}).click();await expect.poll(()=>state.facts.size).toBe(2);
+    await page.locator(".mockup-version-actions").getByRole("button",{name:"重新出图"}).click();await expect.poll(()=>state.facts.size).toBe(2);
     state.complete(false);
     await expect(page.locator(".mockup-version-status")).toContainText("当前图片未变");
     await expect(page.locator(".mockup-sheet-photos")).toHaveAttribute("data-render-generation",G0);
@@ -148,16 +148,16 @@ test("首次生成、运行中旧代下载、晚到 full/ground/GLB 不回写、
 
 test("响应丢失后刷新仅恢复请求，显式确认复用同号同内容",async({page})=>{
   const state=model();state.lose();await serve(page,state);
-  await page.goto(`/mockup/${ID}`);await page.getByRole("button",{name:"出图版本",exact:true}).click();
-  await page.getByRole("button",{name:"按旧版重新出图",exact:true}).click();
+  await page.goto(`/mockup/${ID}`);await page.getByRole("button",{name:"历史版本",exact:true}).click();
+  await page.getByRole("button",{name:"重新出图",exact:true}).click();
   await expect(page.locator(".mockup-version-status")).toContainText("未确认这次请求");
   const original=[...state.facts.values()][0].body;state.complete(true);
   const count=state.calls.filter(call=>call.method === "POST").length;
-  await page.reload();await page.getByRole("button",{name:"出图版本",exact:true}).click();
+  await page.reload();await page.getByRole("button",{name:"历史版本",exact:true}).click();
   expect(state.calls.filter(call=>call.method === "POST")).toHaveLength(count);
-  await page.getByRole("button",{name:"确认上次请求",exact:true}).click();
+  await page.getByRole("button",{name:"确认上次操作",exact:true}).click();
   // The loading icon may remain during its exit animation; assert the action is usable.
-  await expect(page.getByRole("button",{name:/按旧版重新出图$/})).toBeEnabled();
+  await expect(page.getByRole("button",{name:/重新出图$/})).toBeEnabled();
   const posts=state.calls.filter(call=>call.method === "POST");expect(posts).toHaveLength(2);
   expect(posts[1].body).toEqual(original);expect(state.facts.size).toBe(1);
   expect(await page.evaluate(()=>sessionStorage.getItem("wb_render_request:af0400000001"))).toBeNull();
@@ -169,12 +169,12 @@ test("第二 tab 的旧 CAS 得 409；保留灯光，只刷新不自动重投",a
   const second=await context.newPage();const snapshot=structuredClone(state.job);let stale=true;
   await serve(second,state,{detail:()=>stale ? snapshot : state.job});
   await page.goto(`/mockup/${ID}`);await second.goto(`/mockup/${ID}`);
-  await second.getByRole("button",{name:"调灯",exact:true}).click();
+  await second.getByRole("button",{name:"调光",exact:true}).click();
   const light=second.locator('#mockup-studio-lights input[type="range"]').first();await light.fill("1.2");
-  await second.getByRole("button",{name:"出图版本",exact:true}).click();
-  await page.getByRole("button",{name:"出图版本",exact:true}).click();await page.getByRole("button",{name:"按旧版重新出图",exact:true}).click();
+  await second.getByRole("button",{name:"历史版本",exact:true}).click();
+  await page.getByRole("button",{name:"历史版本",exact:true}).click();await page.getByRole("button",{name:"重新出图",exact:true}).click();
   await expect.poll(()=>state.facts.size).toBe(1);state.complete(true);
-  stale=false;await second.getByRole("button",{name:"按旧版重新出图",exact:true}).click();
+  stale=false;await second.getByRole("button",{name:"重新出图",exact:true}).click();
   await expect(second.locator(".mockup-version-status")).toContainText("当前版本已变化");
   await expect(second.locator(".mockup-sheet-photos")).toHaveAttribute("data-render-generation",G1);
   await expect(light).toHaveValue("1.2");
@@ -187,10 +187,10 @@ test("viewer 只读与生产关闭态仍能看历史；窄屏入口可用键盘�
   state.history.push({generation_id:G0,mode:"legacy_import",profile:"synthetic",quality_status:"unwired",current:true,created_at:"2026-09-06T10:00:00Z"});
   for(const action of ["activate","legacy_relight","upgrade"] as const)state.job.render_generation_capabilities![action]={allowed:false,reason:"permission_denied"};
   await page.setViewportSize({width:390,height:844});await serve(page,state,{reader:true});await page.goto(`/mockup/${ID}`);
-  const toggle=page.getByRole("button",{name:"出图版本",exact:true});await toggle.focus();await page.keyboard.press("Enter");
+  const toggle=page.getByRole("button",{name:"历史版本",exact:true});await toggle.focus();await page.keyboard.press("Enter");
   await expect(page.getByText("原图存档 · 未补验",{exact:true})).toBeVisible();
-  await expect(page.getByRole("button",{name:"使用此版本"})).toHaveCount(0);
-  await expect(page.getByRole("button",{name:"按旧版重新出图"})).toHaveCount(0);
+  await expect(page.getByRole("button",{name:"用这一版"})).toHaveCount(0);
+  await expect(page.getByRole("button",{name:"重新出图"})).toHaveCount(0);
   const box=await page.locator('button[aria-controls="mockup-render-versions"]').boundingBox();expect(box!.height).toBeGreaterThanOrEqual(40);
   expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);
   expect(await page.locator(".mockup-versions").evaluate(node=>node.getBoundingClientRect().right<=document.querySelector(".stage")!.getBoundingClientRect().right)).toBe(true);
@@ -204,13 +204,13 @@ test("生产执行门关闭只禁新建，历史与原图下载仍可用",async(
   state.job.render_generation_capabilities!.legacy_relight={allowed:false,reason:"production_registration_disabled"};
   state.job.render_generation_capabilities!.activate={allowed:true};
   state.history.push({generation_id:G0,mode:"legacy_import",profile:"synthetic",quality_status:"unwired",current:true,created_at:"2026-09-06T10:00:00Z"});
-  await serve(page,state);await page.goto(`/mockup/${ID}`);await page.getByRole("button",{name:"出图版本",exact:true}).click();
-  await expect(page.getByRole("button",{name:"按旧版重新出图",exact:true})).toBeDisabled();
+  await serve(page,state);await page.goto(`/mockup/${ID}`);await page.getByRole("button",{name:"历史版本",exact:true}).click();
+  await expect(page.getByRole("button",{name:"重新出图",exact:true})).toBeDisabled();
   await expect(page.getByRole("button",{name:"升级新版",exact:true})).toBeDisabled();
   await expect(page.locator(".mockup-version-actions")).toContainText("重新出图尚未开放，历史仍可查看");
   await expect(page.getByText("原图存档 · 未补验",{exact:true})).toBeVisible();
   await expect.poll(async()=>{const c=await centerColor(page);return c[0]>c[2];}).toBe(true);
-  const download=page.waitForEvent("download");await page.getByRole("button",{name:"下载正面 + 侧面",exact:true}).click();await download;
+  const download=page.waitForEvent("download");await page.getByRole("button",{name:"下载正面图",exact:true}).click();await download;
   await page.screenshot({path:test.info().outputPath("rf04-versions-desktop.png"),fullPage:true});
   expect(state.calls.filter(call=>call.method === "POST")).toHaveLength(0);expect(state.unknown).toEqual([]);
 });
@@ -227,8 +227,8 @@ test("会话存储失败时重复点击都不提交；恢复后才创建可追�
       return original.call(this,key,value);
     };
   });
-  await page.goto(`/mockup/${ID}`);await page.getByRole("button",{name:"出图版本",exact:true}).click();
-  const create=page.getByRole("button",{name:"按旧版重新出图",exact:true});
+  await page.goto(`/mockup/${ID}`);await page.getByRole("button",{name:"历史版本",exact:true}).click();
+  const create=page.getByRole("button",{name:"重新出图",exact:true});
   await create.click();
   await expect(page.locator(".mockup-version-status")).toContainText("本页无法保存请求号，尚未提交");
   await create.click();
@@ -258,19 +258,19 @@ test("历史分页失败保留原图与已读记录，重新读取后可加载�
     if(cursor && failNext){failNext=false;return route.fulfill({status:400,contentType:"application/json",body:JSON.stringify({code:"render_generation_invalid",reason:"cursor_invalid",message:"合成过期分页"})});}
     return route.fulfill({contentType:"application/json",body:JSON.stringify({items:cursor ? [second] : [first],next_cursor:cursor ? null : "synthetic-page-two"})});
   });
-  await page.goto(`/mockup/${ID}`);await page.getByRole("button",{name:"出图版本",exact:true}).click();
+  await page.goto(`/mockup/${ID}`);await page.getByRole("button",{name:"历史版本",exact:true}).click();
   await expect(page.locator(".mockup-version-list > li")).toHaveCount(1);
-  await page.getByRole("button",{name:"更多版本",exact:true}).click();
+  await page.getByRole("button",{name:/^更\s*多$/}).click();
   await expect(page.locator(".mockup-versions [role=alert]")).toContainText("版本列表已变化，请重新打开");
   await expect(page.locator(`[data-generation-id="${G1}"]`)).toBeVisible();
   await expect(page.locator(".mockup-sheet-photos")).toHaveAttribute("data-render-generation",G1);
   await expect.poll(async()=>{const c=await centerColor(page);return c[2]>c[0];}).toBe(true);
   await page.getByRole("button",{name:"重新读取",exact:true}).click();
   await expect(page.locator(".mockup-versions [role=alert]")).toHaveCount(0);
-  await page.getByRole("button",{name:"更多版本",exact:true}).click();
+  await page.getByRole("button",{name:/^更\s*多$/}).click();
   await expect(page.locator(".mockup-version-list > li")).toHaveCount(2);
   await expect(page.locator(`[data-generation-id="${G0}"]`)).toContainText("原图存档 · 未补验");
-  await expect(page.getByRole("button",{name:"更多版本",exact:true})).toHaveCount(0);
+  await expect(page.getByRole("button",{name:/^更\s*多$/})).toHaveCount(0);
   expect(cursors).toEqual([null,"synthetic-page-two",null,"synthetic-page-two"]);
   expect(state.calls.filter(call=>call.method === "POST")).toHaveLength(0);expect(state.unknown).toEqual([]);
 });
@@ -294,7 +294,7 @@ test("旧代图片报错仅刷新一次，新代已显示后迟到的旧详情�
     await expect.poll(()=>detailReads).toBe(2);
     await expect(page.locator(".mockup-sheet-photos")).toHaveAttribute("data-render-generation",LEGACY);
     state.job.current_render_generation_id=G1;state.job.has_render_generations=true;
-    await page.getByRole("button",{name:"出图版本",exact:true}).click();
+    await page.getByRole("button",{name:"历史版本",exact:true}).click();
     await expect(page.locator(".mockup-sheet-photos")).toHaveAttribute("data-render-generation",G1);
     await expect.poll(async()=>{const c=await centerColor(page);return c[2]>c[0];}).toBe(true);
     oldDetail.release();await expect.poll(()=>lateDelivered).toBe(true);
@@ -312,7 +312,7 @@ test("GLB 显示桌墙与原始下载分离，切背景和全屏不发起作业"
   await page.goto(`/mockup/${ID}`);
   const viewer = page.locator("model-viewer");
   const frame = page.locator(".mockup-sheet-glb");
-  await expect(frame.getByRole("button", {name:"复位模型视角"})).toBeEnabled();
+  await expect(frame.getByRole("button", {name:"回到初始角度"})).toBeEnabled();
   await expect(viewer).toHaveAttribute("src", /^blob:/);
   await expect(viewer).toHaveAttribute("camera-orbit", /^35deg 72deg .*m$/);
   await expect(frame).toHaveCSS("background-image", "none");
@@ -320,8 +320,8 @@ test("GLB 显示桌墙与原始下载分离，切背景和全屏不发起作业"
   await page.locator(".mockup-backdrop-switch").getByText("银底", {exact:true}).click();
   await expect(viewer).toHaveAttribute("src", new RegExp(`generation_id=${LEGACY}`));
   await expect(frame).toHaveCSS("background-color", "rgb(196, 201, 208)");
-  await page.locator(".mockup-backdrop-switch").getByText("白桌白墙", {exact:true}).click();
-  await expect(frame.getByRole("button", {name:"复位模型视角"})).toBeEnabled();
+  await page.locator(".mockup-backdrop-switch").getByText("桌面场景", {exact:true}).click();
+  await expect(frame.getByRole("button", {name:"回到初始角度"})).toBeEnabled();
   await frame.getByRole("button", {name:"全屏", exact:true}).click();
   await expect.poll(() => frame.evaluate(el => document.fullscreenElement === el)).toBe(true);
   await expect(viewer).toHaveAttribute("src", /^blob:/);

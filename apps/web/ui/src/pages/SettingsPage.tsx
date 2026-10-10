@@ -343,7 +343,7 @@ export function SettingsPage({
       <header className="settings-head">
         <h1 className="settings-title">设置</h1>
         <p className="settings-lead">
-          {group === "开工板" ? setupHeadline(probes) : "调整页面和服务。"}
+          {group === "开工板" ? setupHeadline(probes) : "外观、连接和费用"}
         </p>
       </header>
 
@@ -389,20 +389,20 @@ export function SettingsPage({
             <h2 className="settings-group-title">{shortGroupLabel(group)}</h2>
             {group === "费用账单" ? (
               <Button type="primary" loading={billBusy} onClick={() => void refreshBills()}>
-                刷新费用
+                刷新
               </Button>
             ) : group === "开工板" ? (
               <div className="setup-actions">
                 <Button onClick={() => void scanPc()} loading={scanBusy} disabled={!canAdmin}>
-                  {canAdmin ? "扫描环境" : "需管理员"}
+                  {canAdmin ? "自动查找" : "需管理员"}
                 </Button>
                 <Button type="primary" onClick={() => void probeGroup()} loading={Boolean(probeBusy)}>
-                  {probeBusy || "检查全部"}
+                  {probeBusy || "全部检查"}
                 </Button>
               </div>
             ) : groupProbes.length ? (
               <Button onClick={() => void probeGroup()} loading={Boolean(probeBusy)}>
-                {probeBusy || "检查连接"}
+                {probeBusy || "测试连接"}
               </Button>
             ) : null}
           </div>
@@ -447,17 +447,17 @@ export function SettingsPage({
 
           {group === "飞书登录" ? (
             <Button className="wizard-cta" onClick={() => window.location.assign(feishuLoginHref("开工板"))}>
-              飞书登录
+              去飞书授权
             </Button>
           ) : null}
           {group === "飞书推送" ? (
             <Button type="primary" className="wizard-cta" loading={sendingPush} onClick={() => void sendPushTest()}>
-              {openId ? "发送测试" : feishuAppReady(view?.groups) ? "先登录飞书" : "先完成登录设置"}
+              {openId ? "发条测试" : feishuAppReady(view?.groups) ? "先登录飞书" : "先设好登录"}
             </Button>
           ) : null}
           {showBack ? (
             <Button className="wizard-back" onClick={() => setGroup("开工板")}>
-              回到状态
+              返回
             </Button>
           ) : null}
 
@@ -479,7 +479,7 @@ export function SettingsPage({
 
       {group === "外观" || group === "开工板" ? null : (
         <footer className="settings-footer">
-          <Typography.Text type="secondary">保存后部分设置需重启。</Typography.Text>
+          <Typography.Text type="secondary">部分改动需重启生效</Typography.Text>
           <Button type="primary" onClick={() => void save()} loading={saving} disabled={!canWrite}>
             保存
           </Button>
@@ -549,11 +549,11 @@ function SetupBoard({
   const sending = isPending(probes.lark_send);
   return (
     <div className="setup-board">
-      <p className="setup-hint">测的是杭州这台 Windows，不是你眼前这台 Mac。</p>
+      <p className="setup-hint">检查的是公司服务器，不是你的电脑</p>
       <div className="setup-progress" role="status" aria-live="polite">
         <span className="sr-only">{progressSpoken(probes, probeBusy)}</span>
         <div className="setup-progress-meta" aria-hidden="true">
-          <strong>{done.length ? `${ok} / ${BOARD_ROWS.length} 可用` : `0 / ${BOARD_ROWS.length} 未测`}</strong>
+          <strong>{done.length ? `${ok}/${BOARD_ROWS.length} 正常` : "还没检查"}</strong>
           <span>
             {probeBusy ||
               (firstBad
@@ -593,11 +593,11 @@ function SetupBoard({
                     "检查中…"
                   ) : st.cls === "is-ok" ? (
                     <>
-                      <span className="setup-btn-full">再测一次</span>
-                      <span className="setup-btn-short">再测</span>
+                      <span className="setup-btn-full">再查一次</span>
+                      <span className="setup-btn-short">再查</span>
                     </>
                   ) : (
-                    "打开向导"
+                    "去设置"
                   )}
                 </button>
               ) : null}
@@ -618,11 +618,11 @@ function SetupBoard({
                     scanBusy && !pending ? "扫描中…" : "检查中…"
                   ) : st.cls === "is-ok" ? (
                     <>
-                      <span className="setup-btn-full">再测一次</span>
-                      <span className="setup-btn-short">再测</span>
+                      <span className="setup-btn-full">再查一次</span>
+                      <span className="setup-btn-short">再查</span>
                     </>
                   ) : canAdmin ? (
-                    "扫描环境"
+                    "自动查找"
                   ) : (
                     "需管理员"
                   )}
@@ -634,8 +634,8 @@ function SetupBoard({
                     "检查中…"
                   ) : (
                     <>
-                      <span className="setup-btn-full">再测一次</span>
-                      <span className="setup-btn-short">再测</span>
+                      <span className="setup-btn-full">再查一次</span>
+                      <span className="setup-btn-short">再查</span>
                     </>
                   )}
                 </button>
@@ -650,8 +650,8 @@ function SetupBoard({
       </p>
       {scanHits.length || scanMsg ? (
         <div className="setup-cands">
-          <h3>扫描结果</h3>
-          <p>{scanMsg || "选择后点采用。"}</p>
+          <h3>找到这些</h3>
+          <p>{scanMsg || "选一个点“使用”"}</p>
           {scanHits.map((h) => (
             <label key={h.path} className="setup-cand">
               <input
@@ -665,7 +665,7 @@ function SetupBoard({
                 <code>{h.path}</code>
               </span>
               <button type="button" className="setup-btn" onClick={() => onAdopt(h.kind, h.path)}>
-                采用
+                使用
               </button>
             </label>
           ))}
@@ -703,7 +703,7 @@ function CatalogFields({
       {reason ? (
         <div className="secrets-fold">
           <p>{reason}</p>
-          <Button onClick={onToggle}>{folded ? (group === "飞书推送" ? "修改接收人" : "修改密钥") : "收起"}</Button>
+          <Button onClick={onToggle}>{folded ? (group === "飞书推送" ? "改接收人" : "改密钥") : "收起"}</Button>
         </div>
       ) : null}
       {folded ? null : (
@@ -751,7 +751,7 @@ function FieldItem({
           value={value}
           onChange={(e) => onChange(e.target.value)}
           autoComplete="new-password"
-          placeholder={field.set ? `已填 ${field.last4}，留空不改` : "未填"}
+          placeholder={field.set ? `已填 ${field.last4}，留空不变` : "未填写"}
           disabled={locked}
         />
       ) : (

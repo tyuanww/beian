@@ -42,7 +42,7 @@ describe("setupBoard copy", () => {
     assert.match(WIZARD["百度 OCR"].intro, /文字识别/);
     assert.doesNotMatch(`${WIZARD["百度 OCR"].intro} ${WIZARD["百度 OCR"].steps.join(" ")}`, /对照|静默授权|OCR/);
     const mini = `${WIZARD["MiniMax（可选）"].intro} ${WIZARD["MiniMax（可选）"].steps.join(" ")}`;
-    assert.match(mini, /智能复核|服务密钥|可用模型/);
+    assert.match(mini, /AI 复核|服务密钥|可用模型/);
     assert.doesNotMatch(mini, /GET \/v1\/models|MiniMax/);
   });
 
@@ -51,8 +51,8 @@ describe("setupBoard copy", () => {
     assert.deepEqual(statusWord({ pending: true }), { cls: "is-wait", text: "检查中" });
     assert.deepEqual(statusWord({ pending: true }, "send"), { cls: "is-wait", text: "发送中" });
     assert.equal(statusWord({ id: "x", ok: true, message: "模型列表已返回" }).text, "正常");
-    assert.equal(statusWord({ id: "minimax", ok: true, message: "未启用（不影响主流程）" }).text, "未启用");
-    assert.equal(statusWord({ id: "x", ok: false, message: "Key 无效" }).text, "待处理");
+    assert.equal(statusWord({ id: "minimax", ok: true, message: "未启用（不影响主流程）" }).text, "未开启");
+    assert.equal(statusWord({ id: "x", ok: false, message: "Key 无效" }).text, "需处理");
     assert.equal(statusWord({ id: "x", ok: false, message: "12 秒超时" }).text, "超时");
     assert.notEqual(statusWord({ id: "x", ok: false, message: "不通" }).text, "不通");
   });
@@ -85,13 +85,13 @@ describe("setupBoard copy", () => {
 
   it("narrow pills keep internal keys and shorten labels", () => {
     assert.equal(shortGroupLabel("外观"), "外观");
-    assert.equal(shortGroupLabel("开工板"), "运行状态");
+    assert.equal(shortGroupLabel("开工板"), "系统状态");
     assert.equal(shortGroupLabel("费用账单"), "费用");
-    assert.equal(shortGroupLabel("飞书登录"), "登录设置");
-    assert.equal(shortGroupLabel("飞书推送"), "消息通知");
+    assert.equal(shortGroupLabel("飞书登录"), "飞书登录");
+    assert.equal(shortGroupLabel("飞书推送"), "飞书通知");
     assert.equal(shortGroupLabel("百度 OCR"), "文字识别");
-    assert.equal(shortGroupLabel("MiniMax（可选）"), "智能复核");
-    assert.equal(shortGroupLabel("本机依赖"), "运行环境");
+    assert.equal(shortGroupLabel("MiniMax（可选）"), "AI 复核");
+    assert.equal(shortGroupLabel("本机依赖"), "本机软件");
   });
 
   it("folds filled secret groups without exposing keys", () => {
@@ -107,7 +107,7 @@ describe("setupBoard copy", () => {
       [{ key: "MINIMAX_ENABLED", set: true, last4: "", value: "false" }],
       { id: "minimax", ok: true, message: "未启用" },
     );
-    assert.match(String(mini), /未启用/);
+    assert.match(String(mini), /未开启/);
     const push = foldCatalogReason("飞书推送", [], undefined);
     assert.match(String(push), /测试消息/);
     assert.equal(

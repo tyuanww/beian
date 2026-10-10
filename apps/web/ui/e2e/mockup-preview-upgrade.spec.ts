@@ -337,7 +337,7 @@ test("同代 card 真正绘制后再升级 full，像素与来源属性一起变
   };
   const { urls } = await serve(page, { gates });
   await page.goto(`/mockup/${ID}`, { waitUntil: "domcontentloaded" });
-  await page.locator(".mockup-backdrop-switch").getByText("白桌白墙", { exact: true }).click();
+  await page.locator(".mockup-backdrop-switch").getByText("桌面场景", { exact: true }).click();
   const shot = canvas(page);
   await expect(shot).toHaveAttribute("data-preview-source", "card");
   await expect(shot).toHaveAttribute("data-preview-product", "card");
@@ -371,7 +371,7 @@ test("ground 先到与 set pending/失败不挡住产品升级", async ({ page }
   };
   await serve(page, { gates });
   await page.goto(`/mockup/${ID}`, { waitUntil: "domcontentloaded" });
-  await page.locator(".mockup-backdrop-switch").getByText("白桌白墙", { exact: true }).click();
+  await page.locator(".mockup-backdrop-switch").getByText("桌面场景", { exact: true }).click();
   const shot = canvas(page);
   await expect(shot).toHaveAttribute("data-preview-product", "card");
   await expect(shot).toHaveAttribute("data-preview-set-fetch", "pending");
@@ -426,7 +426,7 @@ test("card 失败回退 full；白底导出不等待 set", async ({ page }) => {
   await expect(shot).toHaveAttribute("data-preview-product", "full");
   await expect.poll(async () => isBlue(await sample(page, 0.5, 0.5))).toBe(true);
   const download = page.waitForEvent("download");
-  await page.getByRole("button", { name: "下载正面 + 侧面", exact: true }).click();
+  await page.getByRole("button", { name: "下载正面图", exact: true }).click();
   const saved = await download;
   const bytes = readFileSync((await saved.path())!);
   const png = await inspectDownload(page, bytes, 40, 48);
@@ -439,15 +439,15 @@ test("ground 先失败时导出立即失败且无未处理拒绝", async ({ page
   const unhandled = await trackUnhandled(page);
   await serve(page, { gates: { white_a: product, white_b: product, white_a_ground: "fail", white_b_ground: "fail" } });
   await page.goto(`/mockup/${ID}`, { waitUntil: "domcontentloaded" });
-  await page.locator(".mockup-backdrop-switch").getByText("白桌白墙", { exact: true }).click();
+  await page.locator(".mockup-backdrop-switch").getByText("桌面场景", { exact: true }).click();
   const shot = canvas(page);
   await expect(shot).toHaveAttribute("data-preview-product", "card");
   await expect(shot).toHaveAttribute("data-preview-set", "full");
   const before = await unhandled.snapshot();
-  await page.getByRole("button", { name: "下载正面 + 侧面", exact: true }).click();
+  await page.getByRole("button", { name: "下载正面图", exact: true }).click();
   await expect(page.locator(".mockup-hud")).toHaveText("导出失败");
   expect((await unhandled.snapshot()).slice(before.length)).toEqual([]);
-  await page.getByRole("button", { name: "下载正面 + 侧面", exact: true }).click();
+  await page.getByRole("button", { name: "下载正面图", exact: true }).click();
   await expect(page.locator(".mockup-hud")).toHaveText("导出失败");
   expect((await unhandled.snapshot()).slice(before.length)).toEqual([]);
   product.release();
@@ -458,12 +458,12 @@ test("product 先失败时导出不等待悬挂的 ground", async ({ page }) => 
   const unhandled = await trackUnhandled(page);
   await serve(page, { gates: { white_a: "fail", white_b: "fail", white_a_ground: ground, white_b_ground: ground } });
   await page.goto(`/mockup/${ID}`, { waitUntil: "domcontentloaded" });
-  await page.locator(".mockup-backdrop-switch").getByText("白桌白墙", { exact: true }).click();
+  await page.locator(".mockup-backdrop-switch").getByText("桌面场景", { exact: true }).click();
   const shot = canvas(page);
   await expect(shot).toHaveAttribute("data-preview-product", "card");
   await expect(shot).toHaveAttribute("data-preview-set", "full");
   const before = await unhandled.snapshot();
-  await page.getByRole("button", { name: "下载正面 + 侧面", exact: true }).click();
+  await page.getByRole("button", { name: "下载正面图", exact: true }).click();
   await expect(page.locator(".mockup-hud")).toHaveText("导出失败");
   expect((await unhandled.snapshot()).slice(before.length)).toEqual([]);
   ground.release();
@@ -479,10 +479,10 @@ test("白桌白墙下载不因可选 set pending 挂起", async ({ page }) => {
     },
   });
   await page.goto(`/mockup/${ID}`, { waitUntil: "domcontentloaded" });
-  await page.locator(".mockup-backdrop-switch").getByText("白桌白墙", { exact: true }).click();
+  await page.locator(".mockup-backdrop-switch").getByText("桌面场景", { exact: true }).click();
   await expect(canvas(page)).toHaveAttribute("data-preview-set-fallback", "1");
   const download = page.waitForEvent("download");
-  await page.getByRole("button", { name: "下载正面 + 侧面", exact: true }).click();
+  await page.getByRole("button", { name: "下载正面图", exact: true }).click();
   const saved = await download;
   const bytes = readFileSync((await saved.path())!);
   const corner = await inspectDownload(page, bytes, 4, 4);
@@ -499,12 +499,12 @@ test("预览已用 set card 时下载不静默换成 ground，full 就绪后可�
   const setFull = deferred();
   await serve(page, { gates: { white_a_set: setFull, white_b_set: setFull } });
   await page.goto(`/mockup/${ID}`, { waitUntil: "domcontentloaded" });
-  await page.locator(".mockup-backdrop-switch").getByText("白桌白墙", { exact: true }).click();
+  await page.locator(".mockup-backdrop-switch").getByText("桌面场景", { exact: true }).click();
   const shot = canvas(page);
   await expect(shot).toHaveAttribute("data-preview-set", "card");
   await expect.poll(async () => isMagenta(await sample(page, 0.08, 0.08))).toBe(true);
   const stolen = page.waitForEvent("download", { timeout: 1500 }).then(() => "got").catch(() => "none");
-  await page.getByRole("button", { name: "下载正面 + 侧面", exact: true }).click();
+  await page.getByRole("button", { name: "下载正面图", exact: true }).click();
   expect(await stolen).toBe("none");
   await expect(page.locator(".mockup-hud")).toHaveText(FULL_UPGRADE_NOTICE);
   const ghost = page.waitForEvent("download", { timeout: 1500 }).then(() => "got").catch(() => "none");
@@ -513,7 +513,7 @@ test("预览已用 set card 时下载不静默换成 ground，full 就绪后可�
   await expect.poll(async () => isCyan(await sample(page, 0.08, 0.08))).toBe(true);
   expect(await ghost).toBe("none");
   const download = page.waitForEvent("download");
-  await page.getByRole("button", { name: "下载正面 + 侧面", exact: true }).click();
+  await page.getByRole("button", { name: "下载正面图", exact: true }).click();
   const saved = await download;
   const bytes = readFileSync((await saved.path())!);
   const corner = await inspectDownload(page, bytes, 4, 4);
@@ -529,16 +529,16 @@ test("set full 持续 pending 时解锁，切白底可下，迟到 set 不产生
   const setFull = deferred();
   await serve(page, { gates: { white_a_set: setFull, white_b_set: setFull } });
   await page.goto(`/mockup/${ID}`, { waitUntil: "domcontentloaded" });
-  await page.locator(".mockup-backdrop-switch").getByText("白桌白墙", { exact: true }).click();
+  await page.locator(".mockup-backdrop-switch").getByText("桌面场景", { exact: true }).click();
   await expect(canvas(page)).toHaveAttribute("data-preview-set", "card");
   await expect.poll(async () => isMagenta(await sample(page, 0.08, 0.08))).toBe(true);
   const stolen = page.waitForEvent("download", { timeout: 1500 }).then(() => "got").catch(() => "none");
-  await page.getByRole("button", { name: "下载正面 + 侧面", exact: true }).click();
+  await page.getByRole("button", { name: "下载正面图", exact: true }).click();
   expect(await stolen).toBe("none");
   await expect(page.locator(".mockup-hud")).toHaveText(FULL_UPGRADE_NOTICE);
   await page.locator(".mockup-backdrop-switch").getByText("白底", { exact: true }).click();
   const download = page.waitForEvent("download");
-  await page.getByRole("button", { name: "下载正面 + 侧面", exact: true }).click();
+  await page.getByRole("button", { name: "下载正面图", exact: true }).click();
   const saved = await download;
   const white = await inspectDownload(page, readFileSync((await saved.path())!), 40, 48);
   expect(white.size).toEqual([80, 96]);
@@ -547,10 +547,10 @@ test("set full 持续 pending 时解锁，切白底可下，迟到 set 不产生
   setFull.release();
   await expect(canvas(page)).toHaveAttribute("data-preview-set", "full");
   expect(await ghost).toBe("none");
-  await page.locator(".mockup-backdrop-switch").getByText("白桌白墙", { exact: true }).click();
+  await page.locator(".mockup-backdrop-switch").getByText("桌面场景", { exact: true }).click();
   await expect.poll(async () => isCyan(await sample(page, 0.08, 0.08))).toBe(true);
   const again = page.waitForEvent("download");
-  await page.getByRole("button", { name: "下载正面 + 侧面", exact: true }).click();
+  await page.getByRole("button", { name: "下载正面图", exact: true }).click();
   const recovered = await again;
   const setPng = await inspectDownload(page, readFileSync((await recovered.path())!), 4, 4);
   expect(setPng.size).toEqual([80, 96]);
@@ -561,10 +561,10 @@ test("set full 持续 pending 时解锁，切白底可下，迟到 set 不产生
 test("set full 失败且预览仍是 card 时不导出错误背景", async ({ page }) => {
   await serve(page, { gates: { white_a_set: "fail", white_b_set: "fail" } });
   await page.goto(`/mockup/${ID}`, { waitUntil: "domcontentloaded" });
-  await page.locator(".mockup-backdrop-switch").getByText("白桌白墙", { exact: true }).click();
+  await page.locator(".mockup-backdrop-switch").getByText("桌面场景", { exact: true }).click();
   await expect(canvas(page)).toHaveAttribute("data-preview-set", "card");
   const stolen = page.waitForEvent("download", { timeout: 1500 }).then(() => "got").catch(() => "none");
-  await page.getByRole("button", { name: "下载正面 + 侧面", exact: true }).click();
+  await page.getByRole("button", { name: "下载正面图", exact: true }).click();
   expect(await stolen).toBe("none");
   await expect(page.locator(".mockup-hud")).toHaveText(FULL_UPGRADE_NOTICE);
 });
@@ -572,12 +572,12 @@ test("set full 失败且预览仍是 card 时不导出错误背景", async ({ pa
 test("自动 HUD 消失后主动下载失败仍再提示", async ({ page }) => {
   await serve(page, { gates: { white_a_set: "fail", white_b_set: "fail" } });
   await page.goto(`/mockup/${ID}`, { waitUntil: "domcontentloaded" });
-  await page.locator(".mockup-backdrop-switch").getByText("白桌白墙", { exact: true }).click();
+  await page.locator(".mockup-backdrop-switch").getByText("桌面场景", { exact: true }).click();
   await expect(canvas(page)).toHaveAttribute("data-preview-set", "card");
   await expect(page.locator(".mockup-hud")).toHaveText(FULL_UPGRADE_NOTICE);
   await expect(page.locator(".mockup-hud")).toHaveCount(0, { timeout: 4000 });
   const stolen = page.waitForEvent("download", { timeout: 1500 }).then(() => "got").catch(() => "none");
-  await page.getByRole("button", { name: "下载正面 + 侧面", exact: true }).click();
+  await page.getByRole("button", { name: "下载正面图", exact: true }).click();
   expect(await stolen).toBe("none");
   await expect(page.locator(".mockup-hud")).toHaveText(FULL_UPGRADE_NOTICE);
 });
@@ -586,9 +586,9 @@ test("灯箱已显示 set full 时下载不跟小预览 fallback 走 ground", as
   const setCard = deferred();
   await serve(page, { gates: { white_a_set_card: setCard, white_b_set_card: setCard } });
   await page.goto(`/mockup/${ID}`, { waitUntil: "domcontentloaded" });
-  await page.locator(".mockup-backdrop-switch").getByText("白桌白墙", { exact: true }).click();
+  await page.locator(".mockup-backdrop-switch").getByText("桌面场景", { exact: true }).click();
   await expect(canvas(page)).toHaveAttribute("data-preview-set-fallback", "1");
-  await page.getByRole("button", { name: "打开正面 + 侧面原图", exact: true }).click();
+  await page.getByRole("button", { name: "打开正面图原图", exact: true }).click();
   const dialog = page.getByRole("dialog");
   const box = dialog.locator("canvas");
   await expect.poll(async () => {
@@ -620,10 +620,10 @@ test("灯箱正在显示 ground fallback 时，隐藏预览迟到的 set card �
   } });
   try {
     await page.goto(`/mockup/${ID}`, { waitUntil: "domcontentloaded" });
-    await page.locator(".mockup-backdrop-switch").getByText("白桌白墙", { exact: true }).click();
+    await page.locator(".mockup-backdrop-switch").getByText("桌面场景", { exact: true }).click();
     await expect(canvas(page)).toHaveAttribute("data-preview-set-fallback", "1");
     await expect(canvas(page)).toHaveAttribute("data-preview-ground", "full");
-    await page.getByRole("button", { name: "打开正面 + 侧面原图", exact: true }).click();
+    await page.getByRole("button", { name: "打开正面图原图", exact: true }).click();
     const dialog = page.getByRole("dialog");
     const box = dialog.locator("canvas");
     const shownCorner = () => box.evaluate((node: HTMLCanvasElement) => Array.from(node.getContext("2d")!.getImageData(4, 4, 1, 1).data));
@@ -652,17 +652,17 @@ test("下载中重复点击、切背景或调灯仍只导出点击时的成片�
   await serve(page, { gates: { white_a: product, white_b: product } });
   await page.goto(`/mockup/${ID}`, { waitUntil: "domcontentloaded" });
   await page.locator(".mockup-backdrop-switch").getByText("白底", { exact: true }).click();
-  await page.getByRole("button", { name: "调灯", exact: true }).click();
+  await page.getByRole("button", { name: "调光", exact: true }).click();
   await expect(canvas(page)).toHaveAttribute("data-preview-product", "card");
   const download = page.waitForEvent("download");
-  await page.getByRole("button", { name: "下载正面 + 侧面", exact: true }).click();
-  await page.getByRole("button", { name: "下载正面 + 侧面", exact: true }).click();
+  await page.getByRole("button", { name: "下载正面图", exact: true }).click();
+  await page.getByRole("button", { name: "下载正面图", exact: true }).click();
   await page.locator(".mockup-backdrop-switch").getByText("银底", { exact: true }).click();
-  await page.getByRole("slider", { name: "产品灯光", exact: true }).press("Home");
-  await page.getByRole("slider", { name: "背景灯光", exact: true }).press("Home");
-  await expect(page.getByRole("slider", { name: "产品灯光", exact: true })).toHaveValue("0.6");
-  await expect(page.getByRole("slider", { name: "背景灯光", exact: true })).toHaveValue("0.6");
-  await page.getByRole("button", { name: "打样台", exact: true }).click();
+  await page.getByRole("slider", { name: "产品亮度", exact: true }).press("Home");
+  await page.getByRole("slider", { name: "背景亮度", exact: true }).press("Home");
+  await expect(page.getByRole("slider", { name: "产品亮度", exact: true })).toHaveValue("0.6");
+  await expect(page.getByRole("slider", { name: "背景亮度", exact: true })).toHaveValue("0.6");
+  await page.getByRole("button", { name: "3D 打样", exact: true }).click();
   product.release();
   const saved = await download;
   const bytes = readFileSync((await saved.path())!);
@@ -685,12 +685,12 @@ test("已启动下载在预览卸载后仍完成", async ({ page }) => {
   await page.locator(".mockup-backdrop-switch").getByText("白底", { exact: true }).click();
   await expect(canvas(page)).toHaveAttribute("data-preview-product", "card");
   const download = page.waitForEvent("download");
-  await page.getByRole("button", { name: "下载正面 + 侧面", exact: true }).click();
+  await page.getByRole("button", { name: "下载正面图", exact: true }).click();
   await expect.poll(() => urls.some((href) => {
     try { return new URL(href, "http://synthetic.invalid").pathname.endsWith("/white_a"); }
     catch { return false; }
   })).toBe(true);
-  await page.getByRole("button", { name: "打样台", exact: true }).click();
+  await page.getByRole("button", { name: "3D 打样", exact: true }).click();
   full.release();
   const saved = await download;
   const bytes = readFileSync((await saved.path())!);
@@ -702,7 +702,7 @@ test("已启动下载在预览卸载后仍完成", async ({ page }) => {
 test("原图灯箱用 full 像素，不截预览 canvas", async ({ page }) => {
   await serve(page, {});
   await page.goto(`/mockup/${ID}`, { waitUntil: "domcontentloaded" });
-  await page.getByRole("button", { name: "打开正面 + 侧面原图", exact: true }).click();
+  await page.getByRole("button", { name: "打开正面图原图", exact: true }).click();
   const dialog = page.getByRole("dialog");
   await expect(dialog).toBeVisible();
   const box = dialog.locator("canvas");
@@ -754,7 +754,7 @@ test("代表尺寸 PNG：记录 card 可见、full decode 与绘制", async ({ b
       await serve(page, { gates, pngs });
       const t0 = Date.now();
       await page.goto(`/mockup/${ID}`, { waitUntil: "domcontentloaded" });
-      await page.locator(".mockup-backdrop-switch").getByText("白桌白墙", { exact: true }).click();
+      await page.locator(".mockup-backdrop-switch").getByText("桌面场景", { exact: true }).click();
       const shot = canvas(page);
       await expect(shot).toHaveAttribute("data-preview-product", "card");
       const tCard = Date.now() - t0;
@@ -850,7 +850,7 @@ test("Q05 切代/resize/离页：记录 heap 与 rAF 间隔，不把 rAF 当成�
   await serve(page, { pngs, job, history, gates });
   const t0 = Date.now();
   await page.goto(`/mockup/${ID}`, { waitUntil: "domcontentloaded" });
-  await page.locator(".mockup-backdrop-switch").getByText("白桌白墙", { exact: true }).click();
+  await page.locator(".mockup-backdrop-switch").getByText("桌面场景", { exact: true }).click();
   const shot = canvas(page);
   await expect(shot).toHaveAttribute("data-preview-product", "card");
   const tCard = Date.now() - t0;
@@ -892,9 +892,9 @@ test("Q05 切代/resize/离页：记录 heap 与 rAF 间隔，不把 rAF 当成�
     note: "像素已替换。heapAfterGc 仍不是 GPU 纹理证明",
   });
 
-  await page.getByRole("button", { name: "出图版本", exact: true }).click();
+  await page.getByRole("button", { name: "历史版本", exact: true }).click();
   for (const [from, to] of [[GEN, GEN2], [GEN2, GEN], [GEN, GEN2]] as const) {
-    await page.locator(`[data-generation-id="${to}"]`).getByRole("button", { name: "使用此版本" }).click();
+    await page.locator(`[data-generation-id="${to}"]`).getByRole("button", { name: "用这一版" }).click();
     await expect(page.locator(".mockup-sheet-photos")).toHaveAttribute("data-render-generation", to);
     await expect(shot).toHaveAttribute("data-preview-product", /card|full/);
     await expect.poll(async () => isBlue(await sample(page, 0.5, 0.5))).toBe(true);
@@ -940,7 +940,7 @@ test("Q05 切代/resize/离页：记录 heap 与 rAF 间隔，不把 rAF 当成�
     note: "rAF 间隔在 resize 期间采集；是脚本调度，不是 GPU 上屏时刻",
   });
 
-  await page.getByRole("button", { name: "打开正面 + 侧面原图", exact: true }).click();
+  await page.getByRole("button", { name: "打开正面图原图", exact: true }).click();
   const dialog = page.getByRole("dialog");
   await expect(dialog).toBeVisible();
   const box = dialog.locator("canvas");
@@ -960,7 +960,7 @@ test("Q05 切代/resize/离页：记录 heap 与 rAF 间隔，不把 rAF 当成�
 
   const beforeDownload = await heap.sample(true);
   const download = page.waitForEvent("download");
-  await page.getByRole("button", { name: "下载正面 + 侧面", exact: true }).click();
+  await page.getByRole("button", { name: "下载正面图", exact: true }).click();
   const saved = await download;
   const bytes = readFileSync((await saved.path())!);
   const size: [number, number] = [bytes.readUInt32BE(16), bytes.readUInt32BE(20)];

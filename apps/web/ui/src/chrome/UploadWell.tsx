@@ -88,7 +88,7 @@ export function UploadWell({
         <span className="upload-filechip">
           <span className="upload-filechip-name">{fileName}</span>
           {fileBytes != null ? <span className="upload-filechip-size">{formatBytes(fileBytes)}</span> : null}
-          <span className="upload-filechip-ok">已选 · 点此更换</span>
+          <span className="upload-filechip-ok">已选好 · 点击更换</span>
         </span>
       ) : (
         <span className="upload-well-hint">{hint}</span>
