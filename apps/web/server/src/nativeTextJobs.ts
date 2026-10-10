@@ -3,7 +3,7 @@ import { copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, writeFile
 import { join } from "node:path";
 import { DATA_DIR } from "./config.js";
 import { illustratorBin } from "./settings.js";
-import { loadAllTasks, loadTask, saveTask, type Task } from "./tasks.js";
+import { loadAllTasks, loadTask, loadTaskWithRevision, saveTask, type Task } from "./tasks.js";
 import { inspectWorkerProcess, runNativeText } from "./workers.js";
 
 export type NativeRequest = {
@@ -124,7 +124,7 @@ export function recoverNativeRequests(mode: "boot" | "late" = "boot") {
     else if (req.reason !== "close_unconfirmed") { req.reason = "close_unconfirmed"; saveTask(task); }
   }
 }
-export type AdminNativeRecovery = "recovered" | "not_stuck" | "attempt_mismatch" | "worker_not_proven_gone";
+export type AdminNativeRecovery = "recovered" | "not_stuck" | "attempt_mismatch" | "worker_not_proven_gone" | "changed_during_check";
 /** Administrator-confirmed exit for running + close_unconfirmed. When the
  * host was restarted mid-attempt, close evidence can never arrive, so normal
  * recovery keeps the fence forever. The administrator confirms Illustrator has
@@ -135,18 +135,20 @@ export function adminRecoverNativeRequest(
   taskId: string, attemptId: string, inspect: typeof inspectWorkerProcess = inspectWorkerProcess,
 ): AdminNativeRecovery {
   const stuck = (req: NativeRequest | undefined) => !!req && req.status === "running" && req.reason === "close_unconfirmed";
-  const before = loadTask(taskId);
-  const req = nativeRequest(before);
+  const before = loadTaskWithRevision(taskId);
+  const req = nativeRequest(before.task);
   if (!stuck(req)) return "not_stuck";
   if (req!.id !== attemptId) return "attempt_mismatch";
   // Process inspection can take seconds (ps / PowerShell). Never write back the
   // snapshot read before it: reviews, completion or rework may land meanwhile.
-  if (!workerGone(before, req!, inspect)) return "worker_not_proven_gone";
-  const fresh = loadTask(taskId);
-  const current = nativeRequest(fresh);
-  if (!stuck(current)) return "not_stuck";
-  if (current!.id !== attemptId || current!.pid !== req!.pid) return "attempt_mismatch";
-  fallback(fresh, "native_failed");
+  if (!workerGone(before.task, req!, inspect)) return "worker_not_proven_gone";
+  // Re-read, compare and write in one synchronous run (no await). Any change to
+  // the file during the check aborts without writing; the admin retries.
+  const fresh = loadTaskWithRevision(taskId);
+  if (fresh.revision !== before.revision) return "changed_during_check";
+  const current = nativeRequest(fresh.task);
+  if (!stuck(current) || current!.id !== attemptId) return "attempt_mismatch";
+  fallback(fresh.task, "native_failed");
   return "recovered";
 }
 export function nativeDirectory(task: Task): string | undefined {

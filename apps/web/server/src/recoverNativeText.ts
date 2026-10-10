@@ -32,12 +32,15 @@ try {
   console.error(`refused: ${err instanceof Error ? err.message : String(err)}`);
   process.exit(1);
 }
-// Task JSON has no file lock. Recovery re-reads after the slow worker check
-// and writes synchronously, leaving only a same-instant cross-process write;
-// re-read once more to prove the recovery actually landed.
+// Task JSON has no file lock. Recovery aborts if the file changed during the
+// worker check and then compares and writes synchronously; re-read once more
+// to prove the recovery actually landed.
 if (outcome === "recovered") {
   const after = nativeRequest(loadTask(task));
   if (after?.id !== attempt || after.status !== "fallback") outcome = "overwritten_concurrently";
 }
 console.log(JSON.stringify({ task, attempt, outcome }));
+if (outcome === "changed_during_check" || outcome === "overwritten_concurrently") {
+  console.error("refused: the task changed while checking; nothing was overwritten. Confirm no one is reviewing (or stop 8787) and retry.");
+}
 process.exit(outcome === "recovered" ? 0 : 1);

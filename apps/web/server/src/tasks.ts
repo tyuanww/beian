@@ -1,5 +1,6 @@
 import type { NativeRequest } from "./nativeTextJobs.js";
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { DATA_DIR } from "./config.js";
 import { forgetHistory, noteHistoryReview } from "./historyIndex.js";
@@ -113,6 +114,14 @@ export function loadTask(tid: string): Task {
   const p = join(tasksDir(), `${assertTid(tid)}.json`);
   if (!existsSync(p)) throw Object.assign(new Error("任务不存在"), { status: 404 });
   return JSON.parse(readFileSync(p, "utf8")) as Task;
+}
+
+/** Task plus a content revision of the exact bytes parsed, for compare-before-write. */
+export function loadTaskWithRevision(tid: string): { task: Task; revision: string } {
+  const p = join(tasksDir(), `${assertTid(tid)}.json`);
+  if (!existsSync(p)) throw Object.assign(new Error("任务不存在"), { status: 404 });
+  const raw = readFileSync(p);
+  return { task: JSON.parse(raw.toString("utf8")) as Task, revision: createHash("sha256").update(raw).digest("hex") };
 }
 
 /** POSIX rename is atomic replace. Windows rename cannot overwrite; copyFile overwrites without deleting dest first. */

@@ -196,18 +196,21 @@ it("admin recovery leaves an active native extraction alone", () => {
   assert.equal(loadTask(id).native_text_request?.status, "running");
 });
 
-it("admin recovery re-reads after the slow worker check and keeps concurrent task edits", () => {
+it("admin recovery aborts when a review submission lands during the worker check", () => {
   const attempt = stuck(4242);
   const outcome = adminRecoverNativeRequest(id, attempt, () => {
     const t = loadTask(id); t.status = "completed"; (t as Record<string, unknown>).review_conclusion = "concurrent"; saveTask(t);
     return "missing";
   });
-  assert.equal(outcome, "recovered");
+  assert.equal(outcome, "changed_during_check");
   const after = loadTask(id) as Record<string, unknown> & ReturnType<typeof loadTask>;
   assert.equal(after.status, "completed");
   assert.equal(after.review_conclusion, "concurrent");
-  assert.equal(after.native_text_request?.status, "fallback");
-  assert.equal(after.native_text_request?.reason, "native_failed");
+  assert.equal(after.native_text_request?.status, "running");
+  assert.equal(adminRecoverNativeRequest(id, attempt, () => "missing"), "recovered");
+  const retried = loadTask(id) as Record<string, unknown> & ReturnType<typeof loadTask>;
+  assert.equal(retried.review_conclusion, "concurrent");
+  assert.equal(retried.native_text_request?.status, "fallback");
 });
 
 it("admin recovery does not overwrite a request that changed during the worker check", () => {
@@ -215,6 +218,6 @@ it("admin recovery does not overwrite a request that changed during the worker c
   const outcome = adminRecoverNativeRequest(id, attempt, () => {
     const t = loadTask(id); delete t.native_text_request; saveTask(t); return "missing";
   });
-  assert.equal(outcome, "not_stuck");
+  assert.equal(outcome, "changed_during_check");
   assert.equal(loadTask(id).native_text_request, undefined);
 });
