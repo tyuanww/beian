@@ -3,7 +3,7 @@ import type { ModelViewerElement } from "@google/model-viewer";
 import { Progress, Spin } from "antd";
 import { composeGlbDisplaySet, DISPLAY_TABLE_MATERIAL, DISPLAY_WALL_MATERIAL } from "./glbDisplayAsset";
 import { DEFAULT_GLB_VIEW, glbCameraDistances } from "./mockupGlbCamera";
-import { GLB_LOADING_TEXT, GLB_PREPARING_TEXT, type GlbProgress, glbProgressFromFraction, glbStatusText, readGlbWithProgress } from "./mockupGlbProgress";
+import { GLB_LOADING_TEXT, GLB_PREPARING_TEXT, type GlbProgress, glbInteractive, glbProgressFromFraction, glbStatusText, readGlbWithProgress } from "./mockupGlbProgress";
 import { GLB_ENVIRONMENT, glbViewerExposure, glbRoomEmission } from "./mockupGlbLighting";
 import { type BackdropPreset, studioBackdrop } from "./mockupStudio";
 
@@ -196,6 +196,7 @@ export function MockupGlbViewer({ source, poster, backdrop, backgroundLight, pro
 
   const showPoster = Boolean(poster && posterFailed !== poster);
   const loading = !error && !ready;
+  const interactive = glbInteractive(ready, error);
   return <>
     {loading && (showPoster
       ? <img className="mockup-glb-poster" src={poster} alt="" aria-hidden="true" onError={() => setPosterFailed(poster ?? null)} />
@@ -204,7 +205,8 @@ export function MockupGlbViewer({ source, poster, backdrop, backgroundLight, pro
       key={current.url}
       ref={setViewer}
       src={current.url}
-      camera-controls
+      // React 18 对自定义元素会把 false 写成字符串属性，必须用 undefined 才能真正移除。
+      camera-controls={interactive || undefined}
       camera-orbit="35deg 72deg 145%"
       max-camera-orbit="auto auto 155%"
       environment-image={GLB_ENVIRONMENT}
@@ -213,7 +215,7 @@ export function MockupGlbViewer({ source, poster, backdrop, backgroundLight, pro
       shadow-softness="0.5"
       tone-mapping="commerce"
       interaction-prompt="none"
-      style={{ background: studioBackdrop(backgroundLight, backdrop), opacity: ready ? 1 : 0 }}
+      style={{ background: studioBackdrop(backgroundLight, backdrop), opacity: ready ? 1 : 0, pointerEvents: interactive ? "auto" : "none" }}
     />}
     {error && <p role="alert" className="mockup-glb-message">3D 预览加载失败，请重新打开此单。下载仍为原始模型。</p>}
     {loading && <div className="mockup-glb-message mockup-glb-progress">

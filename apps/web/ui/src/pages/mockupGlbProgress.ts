@@ -79,3 +79,8 @@ export function glbPosterKey(files: Array<{ key: string }> | undefined, backdrop
     : ["white_a_card", "white_a"];
   return order.find((key) => keys.has(key)) ?? null;
 }
+
+/** 模型加载完成且已取景后才允许拖拽：加载中透明的 model-viewer 不应被转动，否则出现时机位已偏。 */
+export function glbInteractive(ready: boolean, error: boolean): boolean {
+  return ready && !error;
+}

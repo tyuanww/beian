@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
-  glbPosterKey, glbProgressFromBytes, glbStatusText, glbProgressFromFraction, parseContentLength, readGlbWithProgress,
+  glbInteractive, glbPosterKey, glbProgressFromBytes, glbStatusText, glbProgressFromFraction, parseContentLength, readGlbWithProgress,
   type GlbProgress,
 } from "./mockupGlbProgress.js";
 
@@ -92,5 +92,14 @@ describe("GLB poster 选择", () => {
     assert.equal(glbPosterKey([{ key: "front_right" }, { key: "front_right_set_card" }], "white_set"), null);
     assert.equal(glbPosterKey(without(...FRONT_RIGHT_JOB_KEYS), "white"), null);
     assert.equal(glbPosterKey(undefined, "white_set"), null);
+  });
+});
+
+describe("GLB 交互开关", () => {
+  it("加载中或出错时禁止拖拽，模型显示后才开放", () => {
+    assert.equal(glbInteractive(false, false), false);
+    assert.equal(glbInteractive(false, true), false);
+    assert.equal(glbInteractive(true, true), false);
+    assert.equal(glbInteractive(true, false), true);
   });
 });
