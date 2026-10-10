@@ -1466,6 +1466,10 @@ describe("mockup file bytes", () => {
     assert.equal(glb.headers.get("content-length"), String(glbBytes.length));
     assert.match(glb.headers.get("etag") || "", /^W\/"/);
     assert.deepEqual(Buffer.from(await glb.arrayBuffer()), glbBytes);
+    const head = await app.request("/api/mockups/ee55ee55ee55/files/glb", { method: "HEAD", headers });
+    assert.equal(head.status, 200);
+    assert.equal(head.headers.get("content-length"), String(glbBytes.length));
+    assert.equal(await head.text(), "");
     const pdf = await app.request("/api/mockups/ee55ee55ee56/files/sheet", { headers });
     assert.equal(pdf.headers.get("content-encoding"), null);
     assert.equal(pdf.headers.get("content-length"), String(pdfBytes.length));

@@ -1613,8 +1613,9 @@ app.get("/api/mockups/:id/files/:key", (c) => {
   const fd = openSync(f.path, "r");
   let size: number;
   try { size = fstatSync(fd).size; } catch (error) { closeSync(fd); throw error; }
-  const body = size === 0
-    ? (closeSync(fd), new Uint8Array(0))
+  // Hono runs HEAD through GET and drops the body; never leave the descriptor open.
+  const body = size === 0 || c.req.raw.method === "HEAD"
+    ? (closeSync(fd), null)
     : (Readable.toWeb(createReadStream("", { fd, autoClose: true, start: 0, end: size - 1 })) as ReadableStream);
   return new Response(body, {
     headers: {
