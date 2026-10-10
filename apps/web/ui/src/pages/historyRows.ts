@@ -1,9 +1,11 @@
 import type { MockupJob, TaskSummary } from "../api";
+import { MOCKUP_STATUS_LABEL, NAV_LABEL, REVIEW_STATUS_LABEL } from "../copy/labels";
 import { liveJobLine } from "./waitCard";
 
 export type HistoryRow = {
   resource: "task" | "mockup" | "upload";
-  kind: "审稿台" | "打样台";
+  /** 逻辑 key；显示名用 historyKindLabel()。 */
+  kind: "compare" | "mockup";
   id: string;
   uploadId?: string | null;
   uploadKind?: "compare" | "mockup";
@@ -15,8 +17,24 @@ export type HistoryRow = {
   live: string | null;
 };
 
-type HistoryKindFilter = "全部" | HistoryRow["kind"];
-type HistoryTimeFilter = "全部" | "今天" | "近 7 天" | "近 30 天";
+export type HistoryKindFilter = "all" | HistoryRow["kind"];
+export type HistoryTimeFilter = "all" | "today" | "7d" | "30d";
+
+const KIND_FILTERS: readonly HistoryKindFilter[] = ["all", "compare", "mockup"];
+const TIME_FILTERS: readonly HistoryTimeFilter[] = ["all", "today", "7d", "30d"];
+
+export function historyKindLabel(kind: HistoryRow["kind"]): string {
+  return kind === "compare" ? NAV_LABEL.review : NAV_LABEL.mockup;
+}
+
+/** 旧版本存下的中文筛选值（如 "审稿台"、"近 7 天"）或任何未知值一律回退到 all（全部），不抛错。 */
+export function normalizeHistoryKindFilter(value: unknown): HistoryKindFilter {
+  return KIND_FILTERS.includes(value as HistoryKindFilter) ? (value as HistoryKindFilter) : "all";
+}
+
+export function normalizeHistoryTimeFilter(value: unknown): HistoryTimeFilter {
+  return TIME_FILTERS.includes(value as HistoryTimeFilter) ? (value as HistoryTimeFilter) : "all";
+}
 
 export type HistoryFilters = {
   kind: HistoryKindFilter;
@@ -68,21 +86,21 @@ export function historyTaskRow(row: TaskSummary): HistoryRow {
   let status = row.status;
   let color: HistoryRow["color"] = "default";
   if (row.job_status === "queued" || row.job_status === "running" || row.status === "comparing") {
-    status = row.job_kind === "rework" ? "复核中" : "检查中";
+    status = row.job_kind === "rework" ? REVIEW_STATUS_LABEL.reworking : REVIEW_STATUS_LABEL.comparing;
     color = "processing";
   } else if (row.status === "completed") {
-    status = "已提交";
+    status = REVIEW_STATUS_LABEL.completed;
     color = "success";
   } else if (row.status === "in_review" || row.status === "pending_review") {
-    status = "待确认";
+    status = REVIEW_STATUS_LABEL.pending;
     color = "warning";
   } else if (row.status === "compare_failed" || row.job_status === "failed") {
-    status = row.job_error || row.error || "检查失败";
+    status = row.job_error || row.error || REVIEW_STATUS_LABEL.compare_failed;
     color = "error";
   }
   return {
     resource: "task",
-    kind: "审稿台",
+    kind: "compare",
     id: row.id,
     title: row.product_name || row.title,
     status,
@@ -104,26 +122,26 @@ export function historyMockRow(row: MockupJob): HistoryRow {
     row.job_status === "running" ||
     row.job_status === "queued"
   ) {
-    status = "生成中";
+    status = MOCKUP_STATUS_LABEL.running;
     color = "processing";
   } else if (row.status === "done") {
-    status = "已完成";
+    status = MOCKUP_STATUS_LABEL.done;
     color = "success";
   } else if (row.structure_status === "review_required") {
-    status = row.structure_code === "structure_face_mapping_incomplete" ? "待选正面" : "生成失败";
+    status = row.structure_code === "structure_face_mapping_incomplete" ? MOCKUP_STATUS_LABEL.needFront : MOCKUP_STATUS_LABEL.failed;
     color = row.structure_code === "structure_face_mapping_incomplete" ? "warning" : "error";
   } else if (row.structure_status === "unsupported") {
-    status = "结构暂不支持";
+    status = MOCKUP_STATUS_LABEL.unsupported;
     color = "error";
   } else if (row.status === "failed") {
-    status = "生成中断";
+    status = MOCKUP_STATUS_LABEL.interrupted;
     color = "error";
   } else {
     status = row.status;
   }
   return {
     resource: "mockup",
-    kind: "打样台",
+    kind: "mockup",
     id: row.id,
     title: row.title || row.files[0]?.name || row.id.slice(0, 8),
     status,
@@ -169,11 +187,11 @@ export function historyActors(rows: HistoryRow[]): string[] {
 }
 
 function timeFloor(filter: HistoryTimeFilter, now: Date): number | null {
-  if (filter === "全部") return null;
-  if (filter === "今天") {
+  if (filter === "all") return null;
+  if (filter === "today") {
     return new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
   }
-  return now.getTime() - (filter === "近 7 天" ? 7 : 30) * DAY_MS;
+  return now.getTime() - (filter === "7d" ? 7 : 30) * DAY_MS;
 }
 
 export function filterHistoryRows(
@@ -183,10 +201,11 @@ export function filterHistoryRows(
 ): HistoryRow[] {
   const customFrom = filters.range?.from.getTime();
   const customTo = filters.range?.to.getTime();
-  const floor = Number.isFinite(customFrom) ? customFrom! : timeFloor(filters.time, now);
+  const kind = normalizeHistoryKindFilter(filters.kind);
+  const floor = Number.isFinite(customFrom) ? customFrom! : timeFloor(normalizeHistoryTimeFilter(filters.time), now);
   const ceiling = Number.isFinite(customTo) ? customTo! : now.getTime();
   return rows.filter((row) => {
-    if (filters.kind !== "全部" && row.kind !== filters.kind) return false;
+    if (kind !== "all" && row.kind !== kind) return false;
     if (filters.actor && row.actor !== filters.actor) return false;
     if (floor !== null) {
       const at = new Date(row.at).getTime();

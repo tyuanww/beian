@@ -1,5 +1,8 @@
 import { customerCopy } from "./customerCopy";
 
+/** pdfText() 什么都没读到时的返回值；reviewEvidence 用它做判断，改字只改这里。 */
+export const NOT_READ = "没读到";
+
 /** 审核页项目文案。后端 hits 用 excel_value + coverage，不一定有 pdf/found。 */
 
 export type HitText = {
@@ -183,5 +186,5 @@ export function pdfText(h: HitText, field?: string): string {
   const ev = (h.evidence || "").trim();
   const spokenEvidence = customerCopy(ev);
   if (spokenEvidence && !isAccountingCopy(spokenEvidence)) return spokenEvidence;
-  return "没读到";
+  return NOT_READ;
 }

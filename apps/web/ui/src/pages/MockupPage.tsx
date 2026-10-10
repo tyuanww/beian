@@ -996,7 +996,7 @@ export function MockupJobPage({
           </div>
         </header>
         <WaitCard
-          job="打样"
+          kind="mockup"
           jobStatus={job.job_status || (job.status === "queued" || job.status === "running" ? job.status : "queued")}
           queueAhead={job.queue_ahead}
           stage={job.job_stage}

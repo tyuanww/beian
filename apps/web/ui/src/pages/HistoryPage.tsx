@@ -4,7 +4,7 @@ import { api, ApiError, type PendingUploadReceipt } from "../api";
 import { uploadStore } from "../uploadStore";
 import type { HistoryItem, HistoryResult } from "../batchTypes";
 import { customerCopy } from "./customerCopy";
-import { emptyHistoryFilters, historyDeletable, historyKey, historyLive, historyQuery, historyStatusColor, historyTimeFilters, historyTypeLabels, type HistoryFilters, type HistoryTimeMode } from "./historyQuery";
+import { emptyHistoryFilters, historyDeletable, historyKey, historyLive, historyQuery, historyStatusColor, historyTimeFilters, historyTypeLabels, normalizeHistoryFilters, type HistoryFilters, type HistoryTimeMode } from "./historyQuery";
 
 // Kept for callers of the existing row action helper during the data transition.
 import { historyCanDelete, type HistoryRow } from "./historyRows";
@@ -18,12 +18,21 @@ type Props = { owner: string; canCreate: boolean; canDelete: boolean;
   onOpenTask: (id: string) => void; onOpenMockup: (id: string) => void; onOpenCompression: (id: string) => void;
   onOpenUpload: (kind: PendingUploadReceipt["kind"], receipt?: string | null) => void };
 type Saved = { filters: HistoryFilters; cursors: string[]; page: number; scroll: number };
-function restore(key: string): Saved {
+/**
+ * v3：筛选只存英文 key（类型 review/mockup…、状态是后端值）。v2 及更早可能存过中文显示值，
+ * 一律不读；即使 v3 里混进中文或未知值，也回退到「全部」（空字符串），不抛错。
+ */
+export const HISTORY_STORAGE_VERSION = "v3";
+export function historyStorageKey(owner: string) { return `beian:history:${HISTORY_STORAGE_VERSION}:${owner}`; }
+type StorageLike = Pick<Storage, "getItem">;
+function defaultStorage(): StorageLike | null {
+  try { return typeof sessionStorage === "undefined" ? null : sessionStorage; } catch { return null; }
+}
+export function restore(key: string, storage: StorageLike | null = defaultStorage()): Saved {
   try {
-    const value = JSON.parse(sessionStorage.getItem(key) || "null") as Saved | null;
+    const value = JSON.parse(storage?.getItem(key) || "null") as Saved | null;
     if (value && value.filters && Array.isArray(value.cursors) && value.cursors.length <= 5000 && Number.isInteger(value.page) && value.page >= 0 && value.page < value.cursors.length) {
-      const filters = Object.fromEntries(Object.keys(emptyHistoryFilters).map(field => [field, typeof value.filters[field as keyof HistoryFilters] === "string" ? value.filters[field as keyof HistoryFilters] : ""])) as HistoryFilters;
-      if (!["all", "recent", "custom"].includes(filters.time_mode)) filters.time_mode = filters.date_from || filters.date_to ? "custom" : "all";
+      const filters = normalizeHistoryFilters(value.filters);
       if (filters.time_mode === "recent") {
         const recent = historyTimeFilters("recent");
         if (filters.date_from !== recent.date_from || filters.date_to !== recent.date_to) {
@@ -39,7 +48,7 @@ const stateLabels: Record<string, string> = { in_review: "待确认", pending_re
 
 export function HistoryPage({ owner, canCreate, canDelete, onOpenTask, onOpenMockup, onOpenCompression, onOpenUpload }: Props) {
   const { message, modal } = App.useApp();
-  const storageKey = `beian:history:v2:${owner}`;
+  const storageKey = historyStorageKey(owner);
   const [state, setState] = useState<Saved>(() => restore(storageKey));
   const [search, setSearch] = useState(state.filters.q);
   const [creator, setCreator] = useState(state.filters.creator);

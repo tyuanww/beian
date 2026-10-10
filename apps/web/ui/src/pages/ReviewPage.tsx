@@ -569,7 +569,7 @@ export function ReviewPage({ taskId, userId, onBack }: Props) {
   if (loadState === "waiting" && task) {
     return (
       <WaitCard
-        job={task.job_kind === "rework" ? "对红" : "对照"}
+        kind={task.job_kind === "rework" ? "rework" : "compare"}
         jobStatus={task.job_status}
         queueAhead={task.queue_ahead}
         stage={task.job_stage}
