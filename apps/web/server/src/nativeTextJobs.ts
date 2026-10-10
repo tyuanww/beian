@@ -100,10 +100,10 @@ function closed(task: Task, req: NativeRequest): boolean {
       && value.document_closed === true && value.bridge_exited === true && value.inflight === false && value.lock_returnable === true;
   } catch { return false; }
 }
-function workerGone(task: Task, req: NativeRequest): boolean {
+function workerGone(task: Task, req: NativeRequest, inspect: typeof inspectWorkerProcess = inspectWorkerProcess): boolean {
   if (!req.pid) return false;
   try {
-    return inspectWorkerProcess(req.pid, { kind: "native_text", id: task.id, executionId: req.id }) === "missing";
+    return inspect(req.pid, { kind: "native_text", id: task.id, executionId: req.id }) === "missing";
   } catch {
     return false;
   }
@@ -131,13 +131,22 @@ export type AdminNativeRecovery = "recovered" | "not_stuck" | "attempt_mismatch"
  * no customer documents open; this still requires the exact attempt id and the
  * recorded executor to be proven gone, and writes the same state as a proven
  * close (fallback/native_failed). It never touches OCR results or the copy. */
-export function adminRecoverNativeRequest(taskId: string, attemptId: string): AdminNativeRecovery {
-  const task = loadTask(taskId);
-  const req = nativeRequest(task);
-  if (!req || req.status !== "running" || req.reason !== "close_unconfirmed") return "not_stuck";
-  if (req.id !== attemptId) return "attempt_mismatch";
-  if (!workerGone(task, req)) return "worker_not_proven_gone";
-  fallback(task, "native_failed");
+export function adminRecoverNativeRequest(
+  taskId: string, attemptId: string, inspect: typeof inspectWorkerProcess = inspectWorkerProcess,
+): AdminNativeRecovery {
+  const stuck = (req: NativeRequest | undefined) => !!req && req.status === "running" && req.reason === "close_unconfirmed";
+  const before = loadTask(taskId);
+  const req = nativeRequest(before);
+  if (!stuck(req)) return "not_stuck";
+  if (req!.id !== attemptId) return "attempt_mismatch";
+  // Process inspection can take seconds (ps / PowerShell). Never write back the
+  // snapshot read before it: reviews, completion or rework may land meanwhile.
+  if (!workerGone(before, req!, inspect)) return "worker_not_proven_gone";
+  const fresh = loadTask(taskId);
+  const current = nativeRequest(fresh);
+  if (!stuck(current)) return "not_stuck";
+  if (current!.id !== attemptId || current!.pid !== req!.pid) return "attempt_mismatch";
+  fallback(fresh, "native_failed");
   return "recovered";
 }
 export function nativeDirectory(task: Task): string | undefined {

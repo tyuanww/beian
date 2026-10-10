@@ -32,9 +32,9 @@ try {
   console.error(`refused: ${err instanceof Error ? err.message : String(err)}`);
   process.exit(1);
 }
-// 8787 may keep running: every in-server writer re-reads the task after its
-// last await and saves synchronously, so only a same-instant cross-process
-// write can interleave. Re-read once to prove the recovery actually landed.
+// Task JSON has no file lock. Recovery re-reads after the slow worker check
+// and writes synchronously, leaving only a same-instant cross-process write;
+// re-read once more to prove the recovery actually landed.
 if (outcome === "recovered") {
   const after = nativeRequest(loadTask(task));
   if (after?.id !== attempt || after.status !== "fallback") outcome = "overwritten_concurrently";
