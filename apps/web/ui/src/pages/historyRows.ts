@@ -1,5 +1,5 @@
 import type { MockupJob, TaskSummary } from "../api";
-import { MOCKUP_STATUS_LABEL, NAV_LABEL, REVIEW_STATUS_LABEL } from "../copy/labels";
+import { MOCKUP_STATUS_LABEL, NAV_LABEL, REVIEW_STATUS_LABEL, reviewCompletedLabel } from "../copy/labels";
 import { liveJobLine } from "./waitCard";
 
 export type HistoryRow = {
@@ -89,7 +89,7 @@ export function historyTaskRow(row: TaskSummary): HistoryRow {
     status = row.job_kind === "rework" ? REVIEW_STATUS_LABEL.reworking : REVIEW_STATUS_LABEL.comparing;
     color = "processing";
   } else if (row.status === "completed") {
-    status = REVIEW_STATUS_LABEL.completed;
+    status = reviewCompletedLabel(row.complete_kind);
     color = "success";
   } else if (row.status === "in_review" || row.status === "pending_review") {
     status = REVIEW_STATUS_LABEL.pending;

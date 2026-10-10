@@ -7,6 +7,7 @@ import { compareBoardProgress, liveJobLine } from "./waitCard";
 import { shouldShowTaskBoard } from "./tasksBoard";
 import { PENDING_REVIEW, deskClock, type DeskCardRow } from "./deskBoard";
 import { DeskCol } from "./DeskCol";
+import { reviewCompletedLabel } from "../copy/labels";
 import {
   pendingUploadCard,
   pendingUploadOpenAction,
@@ -26,8 +27,8 @@ type Props = {
 type Layout = "board" | "table";
 type Col = "comparing" | "failed" | "review" | "done";
 
-function statusLabel(row: TaskSummary) {
-  if (row.status === "completed") return { text: "已提交", color: "default" as const };
+export function statusLabel(row: TaskSummary) {
+  if (row.status === "completed") return { text: reviewCompletedLabel(row.complete_kind), color: "default" as const };
   if (row.status === "in_review" || row.status === "pending_review") {
     return { text: PENDING_REVIEW, color: "warning" as const };
   }

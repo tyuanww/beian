@@ -19,6 +19,7 @@ import { reviewHits, shouldUseReworkView } from "./reviewVersion";
 import { ReviewDockPanel } from "./ReviewDockPanel";
 import { firstPendingIssueIndex, issueOrdinal, pageIndexForHit } from "./reviewNav";
 import { customerCopy } from "./customerCopy";
+import { statusLead } from "./reviewStatus";
 import { buildRevisionList, partitionReviewHits, withLocalNotes } from "./reviewEvidence";
 import {
   prepareReviewMedia,
@@ -53,14 +54,6 @@ function pageList(task: TaskDetail | null): TaskPage[] {
   return raw.filter((p) => p && (p.url || p.name));
 }
 
-function statusLead(task: TaskDetail | null, pageIdx: number, pages: TaskPage[]) {
-  const pageNo = pages[pageIdx]?.page || pageIdx + 1;
-  if (!task) return "审核页";
-  if (task.status === "completed") return `审核页 · 第 ${pageNo} 页 · 已提交`;
-  if (isReviewable(task.status)) return `审核页 · 第 ${pageNo} 页 · 待确认`;
-  if (task.status === "compare_failed") return `审核页 · 第 ${pageNo} 页 · 检查中断`;
-  return `审核页 · 第 ${pageNo} 页`;
-}
 
 export function ReviewPage({ taskId, userId, onBack }: Props) {
   const { message } = App.useApp();
