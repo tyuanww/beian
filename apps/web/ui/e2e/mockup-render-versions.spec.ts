@@ -327,6 +327,8 @@ test("GLB 显示桌墙与原始下载分离，切背景和全屏不发起作业"
   await expect(viewer).toHaveAttribute("src", /^blob:/);
   await page.evaluate(() => document.exitFullscreen());
   await expect(page.getByRole("link", {name:"下载模型",exact:true})).toHaveAttribute("href", download!);
-  expect(state.calls.filter(call => call.method !== "GET")).toEqual([]);
+  // MockupGlbViewer 会对 GLB 文件地址发 HEAD 只读响应头；仅放行这一个地址，其他接口仍只允许 GET（即不发起作业）。
+  const glbFile = `/api/mockups/${ID}/files/glb`;
+  expect(state.calls.filter(call => call.method !== "GET" && !(call.method === "HEAD" && call.path === glbFile))).toEqual([]);
   expect(state.unknown).toEqual([]);
 });
