@@ -1,4 +1,6 @@
-/** 核对页字段文案。后端 hits 用 excel_value + coverage，不一定有 pdf/found。 */
+import { customerCopy } from "./customerCopy";
+
+/** 审核页项目文案。后端 hits 用 excel_value + coverage，不一定有 pdf/found。 */
 
 export type HitText = {
   excel?: string;
@@ -122,12 +124,12 @@ export function spokenAsk(h: HitText, field?: string, located?: boolean): Spoken
   if (!flagged) return null;
   const ev = (h.evidence || "").trim();
   if (ev && !isAccountingCopy(ev)) {
-    return { lead: ev.slice(0, 80), because: "我在这一面没读全。", ask: "请对着这一面核对。" };
+    return { lead: customerCopy(ev).slice(0, 80), because: "我在这一面没读全。", ask: "请对着这一面核对。" };
   }
   return { lead: "这条需要你看一眼。", because: "我没读全。", ask: "请对着这一面核对。" };
 }
 
-/** 当前字段顶栏：机审 miss / 她标有错。一致且无 miss 返回空。 */
+/** 当前项目顶栏。一致且没有未读内容时返回空。 */
 export function doubtLines(h: HitText): string[] {
   const spoken = spokenLines(h, h.field);
   if (spoken.length) return spoken;
@@ -145,7 +147,8 @@ export function doubtLines(h: HitText): string[] {
   }
   if (!out.length && flagged) {
     const ev = (h.evidence || "").trim();
-    if (ev && !isAccountingCopy(ev)) out.push(ev.slice(0, 120));
+    const spokenEvidence = customerCopy(ev);
+    if (spokenEvidence && !isAccountingCopy(spokenEvidence)) out.push(spokenEvidence.slice(0, 120));
   }
   return out;
 }
@@ -172,12 +175,13 @@ export function pdfText(h: HitText, field?: string): string {
   const direct = (h.pdf || "").trim() || (h.found || "").trim();
   const hits = (h.coverage?.hit || []).map((s) => String(s).trim()).filter(Boolean);
   const found = direct || (hits.length ? hits.join(" ") : "");
-  const imageNote = isImageOnlyField(field) && !found ? "稿上这一块多半是图，OCR 读不到字。" : "";
+  const imageNote = isImageOnlyField(field) && !found ? "这一块是图片，读不到字。" : "";
   const parts: string[] = [];
   if (imageNote) parts.push(imageNote);
   if (found) parts.push(found);
   if (parts.length) return parts.join("\n");
   const ev = (h.evidence || "").trim();
-  if (ev && !isAccountingCopy(ev)) return ev;
+  const spokenEvidence = customerCopy(ev);
+  if (spokenEvidence && !isAccountingCopy(spokenEvidence)) return spokenEvidence;
   return "没读到";
 }

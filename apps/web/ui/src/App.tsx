@@ -421,14 +421,14 @@ export function App() {
             />
           </Suspense>
         ) : null}
-        {view === "compression" ? <Suspense fallback={<PaneFallback label="打开文件压缩…" />}>
+        {view === "compression" ? <Suspense fallback={<PaneFallback label="打开压缩文件…" />}>
           <CompressionPage id={compressionId} receiptId={receiptId} owner={me.open_id || me.display_name || ""}
             canCreate={me.perms.includes("create")} canExport={me.perms.includes("export")} canAdmin={me.role === "admin"}
             onOpen={id => goRoute({ view: "compression", compressionId: id })}
             onBack={() => goRoute({ view: "compression" })} onHistory={() => goRoute({ view: "history" })} />
         </Suspense> : null}
         {view === "history" ? (
-          <Suspense fallback={<PaneFallback label="打开历史记录…" />}>
+          <Suspense fallback={<PaneFallback label="打开历史…" />}>
             <HistoryPage key={me.open_id || me.display_name || ""} owner={me.open_id || me.display_name || ""}
               onOpenCompression={id => goRoute({ view: "compression", compressionId: id })}
               canCreate={me.perms.includes("create")}

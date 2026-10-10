@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Button, Input, Select, Tag } from "antd";
 import type { Decision, FieldHit, TaskDetail } from "../api";
 import { spokenAsk } from "./hitText";
-import { nativeEvidenceView } from "./nativeTextEvidence";
+import { nativeEvidenceView, nativeTaskNote } from "./nativeTextEvidence";
 import { REVIEW_DOCK_POPUP_LAYER } from "./reviewDock";
 import { issueOrdinal, reviewProgress } from "./reviewNav";
 import { issueNavigation } from "./reviewWorkspaceState";
@@ -88,12 +88,13 @@ export function ReviewDockPanel({
   const spoken = current ? spokenAsk(current, current.field, currentHasBox) : null;
   const progress = reviewProgress(hits, pageNo, active);
   const noteDirty = note !== (current?.note ?? "");
+  const taskNote = nativeTaskNote(nativeTaskEvidence);
 
   return (
     <div className="review-dock-panel">
-      {nativeTaskEvidence?.message ? <p className="review-native-evidence" role="status">{nativeTaskEvidence.message}</p> : null}
+      {taskNote ? <p className="review-native-evidence" role="status">{taskNote}</p> : null}
       {ocrMeta?.skipped && ocrMeta.reason === "native_coverage" ? (
-        <p className="review-native-evidence" role="status">本单已用 Illustrator 原生文字完成文字识别，未调用百度文字 OCR。</p>
+        <p className="review-native-evidence" role="status">已直接读取原稿文字。</p>
       ) : null}
       <section className="review-dock-issues" aria-label="疑点列表">
         <div className="review-issue-controls">
@@ -101,9 +102,9 @@ export function ReviewDockPanel({
           <Button disabled={busy || navigation.next == null} onClick={() => { if (navigation.next != null) onPick(navigation.next); }}>下一项</Button>
           <Button disabled={busy || navigation.nextPending == null} onClick={() => { if (navigation.nextPending != null) onPick(navigation.nextPending); }}>下一待确认</Button>
         </div>
-        <label className="review-issue-filter"><input type="checkbox" checked={pendingOnly} onChange={(event) => setPendingOnly(event.target.checked)} />仅看待确认</label>
+        <label className="review-issue-filter"><input type="checkbox" checked={pendingOnly} onChange={(event) => setPendingOnly(event.target.checked)} />只看待确认</label>
         <details className="review-issue-directory" open>
-          <summary>疑点目录 · {navigation.visible.length} 项</summary>
+          <summary>待确认项 · {navigation.visible.length} 项</summary>
           <div className="review-dock-issue-row">
           {navigation.visible.length ? navigation.visible.map(({ hit, index }) => (
             <button
@@ -115,7 +116,7 @@ export function ReviewDockPanel({
               onClick={() => onPick(index)}
             >
               <span className="hit-no">{issueOrdinal(hits, index)}</span>
-              <strong>{hit.field || "字段"}</strong>
+              <strong>{hit.field || "项目"}</strong>
               {statusTag(hit.status)}
             </button>
           )) : <span className="review-dock-none">{pendingOnly ? "没有待确认的疑点" : "暂无疑点"}</span>}
@@ -135,7 +136,7 @@ export function ReviewDockPanel({
                   onClick={() => onPick(index)}
                 >
                   <span className="hit-no">{index + 1}</span>
-                  <strong>{hit.field || "字段"}</strong>
+                  <strong>{hit.field || "项目"}</strong>
                   {statusTag(hit.status)}
                 </button>
               ))}
@@ -146,7 +147,7 @@ export function ReviewDockPanel({
 
       {current && evidence ? (
         <>
-          <h2 className="review-current-title">{current.field || "当前字段"}</h2>
+          <h2 className="review-current-title">{current.field || "当前项目"}</h2>
           {spoken ? (
             <section className="review-spoken" aria-label="嘱咐">
               <p>{spoken.lead}</p>
@@ -157,7 +158,7 @@ export function ReviewDockPanel({
           <div className="review-evidence-actions">
             <Select<Decision>
               key={current.id || "review-decision"}
-              aria-label="核对结论"
+              aria-label="审核结果"
               className="review-decision-select"
               placeholder="选择结论"
               value={selected}
@@ -179,44 +180,44 @@ export function ReviewDockPanel({
                 { value: "ignore", label: "忽略" },
               ]}
             />
-            <Button onClick={onCopy}>复制改稿清单</Button>
+            <Button onClick={onCopy}>复制修改清单</Button>
           </div>
           <div className="review-evidence-grid">
-            <EvidenceBlock title="Excel 应印" value={evidence.expected} />
-            <EvidenceBlock title="稿上读到" value={evidence.observed} />
+            <EvidenceBlock title="表格要求" value={evidence.expected} />
+            <EvidenceBlock title="稿件内容" value={evidence.observed} />
           </div>
           {nativeEvidence ? (
             <section className="review-native-evidence" aria-label="文字来源证据">
               <h3>{nativeEvidence.title}</h3>
               <p>{nativeEvidence.message}</p>
-              <p className="review-native-hint">文字来源只作核对依据，结论仍需你确认。</p>
+              <p className="review-native-hint">请确认结果。</p>
               {nativeEvidence.nativeText || nativeEvidence.ocrText ? (
                 <details key={current.id || active}>
-                  <summary>查看两种文字来源</summary>
+                  <summary>查看文字来源</summary>
                   <div className="review-native-readings">
-                    <section><strong>原稿可编辑文字</strong><p className="mono">{nativeEvidence.nativeText || "没有可展示的可信文字"}</p></section>
-                    <section><strong>图像识别文字（OCR）</strong><p className="mono">{nativeEvidence.ocrText || "没有可展示的识别文字"}</p></section>
+                    <section><strong>原稿文字</strong><p className="mono">{nativeEvidence.nativeText || "暂时读不到文字"}</p></section>
+                    <section><strong>图片文字</strong><p className="mono">{nativeEvidence.ocrText || "暂时读不到文字"}</p></section>
                   </div>
                 </details>
               ) : null}
             </section>
           ) : null}
           <div className="review-evidence-location">
-            <span>包装定位</span>
+            <span>位置</span>
             <strong>
               {currentHasBox
-                ? `第 ${current.page ?? "?"} 页 · 点序号看这里`
-                : "这条我钉不住，请整面看"}
+                ? `第 ${current.page ?? "?"} 页 · 点击定位`
+                : "请查看整页"}
             </strong>
           </div>
           <p className="review-progress" aria-live="polite">
-            当前：{current.field || "字段"} · 这单还剩 {progress.jobPending} 条 · 本页还有 {progress.pageLeft} 条
+            当前：{current.field || "项目"} · 剩余 {progress.jobPending} 项 · 本页 {progress.pageLeft} 项
           </p>
           <Input.TextArea
             autoSize={{ minRows: 2, maxRows: 6 }}
             aria-label="人工备注"
             className="review-evidence-note"
-            placeholder="补充说明，会进改稿清单"
+            placeholder="补充说明"
             value={note}
             disabled={!reviewable || !current.id || busy}
             onChange={(event) => onNoteChange(event.target.value)}
@@ -226,8 +227,8 @@ export function ReviewDockPanel({
             onPressEnter={(event) => { if (!event.shiftKey) { event.preventDefault(); event.currentTarget.blur(); } }}
           />
           <div className="review-issue-controls">
-            <Button disabled={!reviewable || busy || !selected || !noteDirty} onClick={() => { if (selected) onNoteCommit(current, selected, note); }}>保存备注</Button>
-            <p className="review-draft-status" role="status">{busy ? "正在保存…" : noteDirty ? "备注尚未保存到服务器" : "备注已与服务器同步"}</p>
+            <Button disabled={!reviewable || busy || !selected || !noteDirty} onClick={() => { if (selected) onNoteCommit(current, selected, note); }}>保存说明</Button>
+            <p className="review-draft-status" role="status">{busy ? "保存中…" : noteDirty ? "未保存" : "已保存"}</p>
           </div>
         </>
       ) : (
@@ -236,12 +237,12 @@ export function ReviewDockPanel({
 
       {reworkCheck?.length ? (
         <section className="notes-foot">
-          <p className="field-label">对红</p>
+          <p className="field-label">复核</p>
           {reworkCheck.map((row) => (
             <div key={row.field} className="hit-card">
               <strong>{row.field}</strong>
-              <div>上一版：{row.v1_status}</div>
-              <div>这一版：{row.v2_status}</div>
+              <div>旧稿：{row.v1_status}</div>
+              <div>新稿：{row.v2_status}</div>
             </div>
           ))}
         </section>

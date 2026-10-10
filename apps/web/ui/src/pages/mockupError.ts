@@ -1,28 +1,25 @@
-/** 打样失败给人看。不要把 Windows 路径和模板坐标塞进看板标签。 */
+import { customerCopy } from "./customerCopy";
+
+/** 生成失败给人看。不要把路径和实现名塞进看板。 */
 
 export function mockupFailTag(): string {
-  return "打样中断";
+  return "生成中断";
 }
 
 export function mockupFailReason(raw?: string | null): string {
   const t = String(raw || "").replace(/\s+/g, " ").trim();
-  if (!t) return "打样中断，点开看原因。";
+  if (!t) return "生成中断，请打开查看。";
   if (/没有刀线或刀版/.test(t)) {
-    return "这张稿没有刀线/刀版层，自动打样读不到展开图。转曲时请保留刀线或刀版。";
+    return "没有刀线，无法生成展开图。请保留刀线后重新上传。";
   }
   if (/刀线读不出结构/.test(t)) {
-    return "刀线在，但折不成盒面。看展开图是不是花盒或膜袋，或刀线画在印刷层里了。";
+    return "刀线无法折成盒面。请检查展开图。";
   }
   if (/画板尺寸与模板不符/.test(t)) {
-    return "刀线没读成结构，画板也和已登记刀模对不上。不要硬套方盒。";
+    return "刀线没有对上结构。请整理刀线后再上传。";
   }
   if (/Node不存在|演示文稿运行时/.test(t)) {
-    return "本机没有 Node 或演示文稿运行时，PPT 出不了。白底图和立体模型仍应能出。PDF 另外合成。";
+    return "演示稿暂不可用，白底和模型仍可下载。";
   }
-  const stripped = t
-    .replace(/文件\s*=\s*[A-Za-z]:\\[^\s，,]*/g, "")
-    .replace(/[A-Za-z]:\\[^\s，,]+/g, "")
-    .replace(/[，,\s]+$/g, "")
-    .trim();
-  return (stripped || "打样中断").slice(0, 180);
+  return (customerCopy(t) || "生成中断").slice(0, 80);
 }

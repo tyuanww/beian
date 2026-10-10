@@ -344,12 +344,17 @@ async function installSyntheticApi(page: Page, state: SyntheticApi) {
       if (method === "GET" && (path === "/api/status" || path === "/api/health")) {
         return json(route, { ok: true, version: "0.0.0.0", jobs: {} });
       }
+      if (method === "GET" && path === "/api/compressions") {
+        return json(route, { items: [], unreadable_ids: [] });
+      }
       if (method === "POST" && path === "/api/auth/logout") return json(route, { ok: true });
 
       if (method === "GET" && path === "/api/history") {
         let rows = [
           ...state.tasks.map(row => ({ id: row.id, type: "review", title: row.title, product_name: row.product_name || "", status: row.job_status === "running" ? "running" : row.status, created_at: row.created_at || FIXED_TIME, creator_id: "ou_e2e_synthetic", creator_name: row.owner || "合成用户", names: [], matched_names: [], visibility: "team" })),
           ...state.mockups.map(row => ({ id: row.id, type: "mockup", title: row.title, product_name: "", status: row.status, created_at: row.created_at || FIXED_TIME, creator_id: "ou_e2e_synthetic", creator_name: row.owner || "合成用户", names: row.files.map(file => file.name), matched_names: [], visibility: "team" })),
+          ...state.receipts.map(row => ({ id: row.id, type: "upload", title: row.product_name || row.files[0]?.name || "上传", product_name: row.product_name || "", status: "ready", created_at: row.created_at, creator_id: "ou_e2e_synthetic", creator_name: "合成用户", names: row.files.map(file => file.name), matched_names: [], visibility: "upload_owner" })),
+          ...state.uploads.map(row => ({ id: row.id, type: "upload", title: row.product_name || row.files[0]?.name || "上传", product_name: row.product_name || "", status: "uploading", created_at: row.created_at, creator_id: "ou_e2e_synthetic", creator_name: "合成用户", names: row.files.map(file => file.name), matched_names: [], visibility: "upload_owner" })),
         ];
         const query = url.searchParams;
         if (query.get("type")) rows = rows.filter(row => row.type === query.get("type"));
@@ -359,7 +364,7 @@ async function installSyntheticApi(page: Page, state: SyntheticApi) {
         const limit = Number(query.get("limit") || 10);
         return json(route, { items: rows.slice(offset, offset + limit), total: rows.length,
           next_cursor: offset + limit < rows.length ? String(offset + limit) : null,
-          facets: { type: { review: rows.filter(row => row.type === "review").length, mockup: rows.filter(row => row.type === "mockup").length, compression: 0, upload: 0 }, status: Object.fromEntries(rows.map(row => [row.status, 1])) } });
+          facets: { type: { review: rows.filter(row => row.type === "review").length, mockup: rows.filter(row => row.type === "mockup").length, compression: 0, upload: rows.filter(row => row.type === "upload").length }, status: Object.fromEntries(rows.map(row => [row.status, 1])) } });
       }
       if (method === "GET" && path === "/api/uploads") {
         return json(route, [...state.receipts.map(readyUpload), ...state.uploads.map(pausedUpload)]);
@@ -608,7 +613,7 @@ async function installSyntheticApi(page: Page, state: SyntheticApi) {
       if (printFacesPath && method === "POST") {
         const mockup = state.mockups.find((item) => item.id === printFacesPath[1]);
         if (!mockup) return json(route, { detail: "合成打样不存在" }, 404);
-        if (mockup.status !== "done") return json(route, { detail: "只有已出图的纸盒才能补印刷面。" }, 409);
+        if (mockup.status !== "done") return json(route, { detail: "只有完成后才能生成印刷面。" }, 409);
         if (!mockup.can_repair_print_faces) {
           return json(route, { detail: "这单没有可用底稿，无法补生成。请重新打样。" }, 409);
         }
@@ -627,7 +632,7 @@ async function installSyntheticApi(page: Page, state: SyntheticApi) {
       if (relightPath && method === "POST") {
         const mockup = state.mockups.find((item) => item.id === relightPath[1]);
         if (!mockup) return json(route, { detail: "合成打样不存在" }, 404);
-        if (mockup.status !== "done") return json(route, { detail: "只有已出图的纸盒才能重渲棚。" }, 409);
+        if (mockup.status !== "done") return json(route, { detail: "只有完成后才能更换背景。" }, 409);
         if (!mockup.can_relight_studio) {
           return json(route, { detail: "这单没有可用棚底稿，无法重渲。请重新打样。" }, 409);
         }

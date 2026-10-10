@@ -13,7 +13,7 @@ describe("native text evidence display", () => {
     const view = nativeEvidenceView(input)!;
     assert.equal(view.nativeText, input.native_text);
     assert.equal(view.ocrText, input.ocr_text);
-    assert.match(view.title, /人工核对/);
+    assert.match(view.title, /请确认文字来源/);
     assert.deepEqual(input, before);
     assert.equal("decision" in view, false);
   });

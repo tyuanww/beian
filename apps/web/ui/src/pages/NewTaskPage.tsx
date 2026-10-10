@@ -91,7 +91,7 @@ export function NewTaskPage({ canCreate, receiptId, onCreated, onBack }: Props) 
           setProductName(found.product_name || "");
           setPack(found.pack_surface || "carton");
         } else {
-          setResumeError("这份上传回执已过期或已经开工，请返回审稿台刷新。");
+          setResumeError("上传已失效，请返回审稿台重新选择文件。");
         }
       })
       .catch((err: unknown) => {
@@ -153,7 +153,7 @@ export function NewTaskPage({ canCreate, receiptId, onCreated, onBack }: Props) 
       uploadStore.clear("compare", receipt);
       rememberReviewHandoff(task);
       if (!mounted.current) return;
-      message.success("已开始对照。结论还要你来定。");
+      message.success("检查已开始。");
       onCreated(task.id);
     } catch (err) {
       if (!mounted.current) return;
@@ -161,10 +161,10 @@ export function NewTaskPage({ canCreate, receiptId, onCreated, onBack }: Props) 
         uploadStore.clear("compare", receipt);
         setRestoredReceipt(null);
         setResumeSource("local");
-        setResumeError("这份上传已开工或过期，请重新选择文件上传。");
-        message.warning("上传回执已失效，请重新上传。");
+        setResumeError("上传已失效，请重新选择文件。");
+        message.warning("上传已失效，请重新选择文件。");
       } else {
-        message.error(err instanceof Error ? err.message : "无法开始对照");
+        message.error(err instanceof Error ? err.message : "无法开始检查");
       }
     } finally {
       startLock.current = false;
@@ -202,10 +202,10 @@ export function NewTaskPage({ canCreate, receiptId, onCreated, onBack }: Props) 
     return (
       <section className="new-form">
         <header className="page-head">
-          <h1 className="page-title">新建 Excel↔PDF</h1>
+          <h1 className="page-title">新建审稿</h1>
           <button type="button" className="btn-ghost" onClick={onBack}>返回</button>
         </header>
-        <Alert type="warning" showIcon title="当前账号只有查看权限，不能上传或新建审核单。" />
+        <Alert type="warning" showIcon title="当前账号只有查看权限，不能上传或新建审稿。" />
       </section>
     );
   }
@@ -214,8 +214,8 @@ export function NewTaskPage({ canCreate, receiptId, onCreated, onBack }: Props) 
     <section className="new-form">
       <header className="page-head">
         <div>
-          <h1 className="page-title">新建 Excel↔PDF</h1>
-          <p className="page-lead">一次只传一对。机审只标疑点。</p>
+          <h1 className="page-title">新建审稿</h1>
+          <p className="page-lead">上传一份表和一份 PDF。</p>
         </div>
         <div style={{ display: "flex", gap: 12 }}>
           <button type="button" className="btn-ghost" disabled={submitting} onClick={onBack}>
@@ -227,7 +227,7 @@ export function NewTaskPage({ canCreate, receiptId, onCreated, onBack }: Props) 
             disabled={!receipt || busy || submitting}
             onClick={() => void submit()}
           >
-            {submitting ? "正在开工" : busy ? "上传中" : "开始对照"}
+            {submitting ? "正在提交" : busy ? "上传中" : "开始检查"}
           </button>
         </div>
       </header>
@@ -243,7 +243,7 @@ export function NewTaskPage({ canCreate, receiptId, onCreated, onBack }: Props) 
           />
         </label>
         <div className="new-meta-pack">
-          <span>包装面</span>
+          <span>包装类型</span>
           <div className="pack-pills">
             <button
               type="button"
@@ -267,7 +267,7 @@ export function NewTaskPage({ canCreate, receiptId, onCreated, onBack }: Props) 
       <UploadProgressSlot
         snapshot={resumeSource === "local" ? upload : null}
         receipt={resumeSource === "remote" ? restoredReceipt : null}
-        readyText="上传成功，可以开始对照"
+        readyText="上传完成，可以开始检查。"
         onRetry={resumeSource === "local" ? () => uploadStore.retry("compare") : undefined}
         onDiscard={files.length ? confirmAbandon : undefined}
       />
@@ -275,8 +275,8 @@ export function NewTaskPage({ canCreate, receiptId, onCreated, onBack }: Props) 
       <div className="upload-row">
         <UploadWell
           icon="/brand/ui/well-excel.svg"
-          title="Excel 确认单"
-          hint="把 .xlsx 拖进来，或点选取"
+          title="确认表"
+          hint="拖入或选择 Excel 文件。"
           accept=".xlsx"
           fileName={excel?.name}
           fileBytes={excel?.bytes}
@@ -284,12 +284,12 @@ export function NewTaskPage({ canCreate, receiptId, onCreated, onBack }: Props) 
           onFile={(file) => takeFile("excel", file)}
           onReject={() => message.warning("Excel 只要 .xlsx。")}
         >
-          <span className="upload-well-btn">选取 Excel</span>
+          <span className="upload-well-btn">选择 Excel</span>
         </UploadWell>
         <UploadWell
           icon="/brand/ui/well-pdf.svg"
-          title="包装 PDF"
-          hint="花盒或膜袋展开图"
+          title="包装稿"
+          hint="花盒或膜袋展开图。"
           accept=".pdf"
           fileName={pdf?.name}
           fileBytes={pdf?.bytes}
@@ -297,27 +297,27 @@ export function NewTaskPage({ canCreate, receiptId, onCreated, onBack }: Props) 
           onFile={(file) => takeFile("pdf", file)}
           onReject={() => message.warning("包装稿只要 PDF。")}
         >
-          <span className="upload-well-btn">选取 PDF</span>
+          <span className="upload-well-btn">选择 PDF</span>
         </UploadWell>
       </div>
 
-      <p className="new-ocr-hint">优先读取 PDF / Illustrator 原生文字；图片或未覆盖区域才走 OCR，认不清会写成「待人工确认」。一次只传一对。</p>
+      <p className="new-ocr-hint">优先读取原稿文字，图片区域再识别。</p>
 
       <div className="step-row">
         <article className="step-card">
           <b>1</b>
-          <strong>传一对</strong>
-          <p>Excel 确认单和包装展开图一次只传一对。</p>
+          <strong>上传文件</strong>
+          <p>一份 Excel 和一份包装稿。</p>
         </article>
         <article className="step-card">
           <b>2</b>
-          <strong>机审标疑点</strong>
-          <p>认不清就写成待人工确认，不会自动过审。</p>
+          <strong>自动检查</strong>
+          <p>不确定的内容会请你确认。</p>
         </article>
         <article className="step-card">
           <b>3</b>
-          <strong>她来签字</strong>
-          <p>人话结论。待签在上，点开核对页一对一对。</p>
+          <strong>你来确认</strong>
+          <p>看完疑点后提交结果。</p>
         </article>
       </div>
     </section>

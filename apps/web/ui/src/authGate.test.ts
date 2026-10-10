@@ -110,7 +110,7 @@ describe("authFailureAction", () => {
         apiBroken: "本机开发页没有把 /api 转到审稿服务",
         host: "127.0.0.1:5173",
       }),
-      { href: "http://127.0.0.1:8787/", label: "打开本机审稿服务" },
+      { href: "http://127.0.0.1:8787/", label: "打开审稿" },
     );
   });
 

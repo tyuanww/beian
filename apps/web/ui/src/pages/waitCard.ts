@@ -17,12 +17,12 @@ export type WaitCardCopyOpts = {
 };
 
 const TITLE: Record<WaitKind, string> = {
-  compare: "对照中",
-  rework: "对红中",
-  mockup: "打样中",
+  compare: "检查中",
+  rework: "复核中",
+  mockup: "生成中",
 };
 
-/** 等待圆盘逐字，和 WaitCard 标题同一套：对照中 / 对红中 / 打样中。 */
+/** 等待圆盘逐字，和 WaitCard 标题同一套：检查中 / 复核中 / 生成中。 */
 export function waitLoaderLetters(kind: WaitKind): string[] {
   return Array.from(TITLE[kind]);
 }
@@ -35,13 +35,24 @@ function queueLine(queue_ahead?: number): string {
 
 function leaveHint(kind: WaitKind, feishuReady?: boolean): string {
   if (feishuReady) return "可以离开，完了飞书叫你";
-  return kind === "mockup" ? "打样完回本页" : "对照完回看板";
+  return kind === "mockup" ? "完成后回到打样台" : "完成后回到审稿台";
 }
 
 /** Figma 等待卡 68:1218 正文。不要假取消。 */
 function figmaWaitBody(kind: WaitKind): string {
-  if (kind === "mockup") return "本机 Blender。白底不要带尺寸标注再交备案。";
-  return "读表 + 原生文字优先，OCR 兜底。机审只标疑点，不会自动过审。";
+  if (kind === "mockup") return "正在生成立体图。";
+  return "正在读取文件并检查内容。";
+}
+
+function visibleStage(stage: string): string {
+  if (/(ocr|认字|文字识别)/i.test(stage)) return "读取文字";
+  if (/(match|对照|对红)/i.test(stage)) return "检查内容";
+  if (/(layout|分区)/i.test(stage)) return "整理版面";
+  if (/(ingest|识稿)/i.test(stage)) return "读取文件";
+  if (/(render|出图)/i.test(stage)) return "生成预览";
+  if (/(blender|结构|建盒|打样)/i.test(stage)) return "生成盒型";
+  if (/(export|导出)/i.test(stage)) return "整理文件";
+  return stage;
 }
 
 function formatEta(etaS: number): string {
@@ -88,7 +99,7 @@ export function liveJobLine(opts: {
 }): string | null {
   if (opts.job_status === "queued") return queueLine(opts.queue_ahead);
   if (opts.job_status !== "running") return null;
-  const stage = (opts.job_stage_label || "").trim();
+  const stage = visibleStage((opts.job_stage_label || "").trim());
   if (typeof opts.job_eta_s === "number" && opts.job_eta_s > 0) {
     const eta = formatEta(opts.job_eta_s);
     return stage ? `${stage} · ${eta}` : eta;
@@ -101,7 +112,7 @@ export function liveJobLine(opts: {
 /**
  * 审稿台紧凑明细只显示一个阶段百分比。它表示机器流程走到哪一段，不伪装成
  * 字节级精确进度：排队 0%，出图 20%，认字 55%，对照 85%，完成后 100%。
- * 运行中但没有真实 STAGE 时不猜数字，回退“正在对照”。
+ * 运行中但没有真实阶段时不猜数字，回退大约剩余时间。
  */
 export function compareBoardProgress(opts: {
   status?: string;
@@ -204,7 +215,7 @@ export function waitCardCopy(opts: WaitCardCopyOpts): { title: string; eta: stri
     return { title, eta: q, hint: `${q}。${leave}` };
   }
   const fallback = opts.kind === "mockup" ? 240 : 40;
-  const stage = (opts.job_stage_label || "").trim();
+  const stage = visibleStage((opts.job_stage_label || "").trim());
   const eta =
     typeof opts.job_eta_s === "number" && opts.job_eta_s > 0
       ? formatEta(opts.job_eta_s)

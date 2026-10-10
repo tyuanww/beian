@@ -26,9 +26,9 @@ describe("historyTaskRow", () => {
       job_eta_s: 40,
     });
     assert.equal(row.kind, "审稿台");
-    assert.equal(row.status, "对照中");
+    assert.equal(row.status, "检查中");
     assert.equal(row.color, "processing");
-    assert.equal(row.live, "认字 · 大约还要 40 秒");
+    assert.equal(row.live, "读取文字 · 大约还要 40 秒");
     assert.doesNotMatch(row.live || "", /%/);
   });
 
@@ -42,7 +42,7 @@ describe("historyTaskRow", () => {
       queue_ahead: 1,
     });
     assert.equal(row.kind, "打样台");
-    assert.equal(row.status, "打样中");
+    assert.equal(row.status, "生成中");
     assert.equal(row.color, "processing");
     assert.equal(row.live, "前面还有 1 单");
   });
@@ -56,8 +56,8 @@ describe("historyTaskRow", () => {
       job_stage_label: "打样",
       job_eta_s: 240,
     });
-    assert.equal(row.status, "打样中");
-    assert.equal(row.live, "打样 · 大约还要 4 分钟");
+    assert.equal(row.status, "生成中");
+    assert.equal(row.live, "生成盒型 · 大约还要 4 分钟");
   });
 
   it("keeps structure review recoverable instead of calling it upload failure", () => {
@@ -69,7 +69,7 @@ describe("historyTaskRow", () => {
       job_status: "waiting_input",
       files: [],
     });
-    assert.equal(row.status, "打样失败");
+    assert.equal(row.status, "生成失败");
     assert.equal(row.color, "error");
     assert.equal(row.live, null);
     assert.equal(historyCanDelete(row), true);
@@ -100,7 +100,7 @@ describe("historyTaskRow", () => {
       job_status: "running",
       job_stage_label: "导出",
     });
-    assert.equal(row.status, "打样中");
+    assert.equal(row.status, "生成中");
     assert.equal(row.color, "processing");
     assert.equal(historyCanDelete(row), false);
   });
@@ -124,7 +124,7 @@ describe("historyHasLive", () => {
     assert.equal(historyHasLive([done]), false);
   });
 
-  it("labels pending review as 待审核", () => {
+  it("labels pending review as 待确认", () => {
     const row = historyTaskRow({
       id: "t2",
       title: "花盒",
@@ -132,7 +132,7 @@ describe("historyHasLive", () => {
       type: "pack",
       status: "pending_review",
     });
-    assert.equal(row.status, "待审核");
+    assert.equal(row.status, "待确认");
     assert.doesNotMatch(row.status, /待她判/);
   });
 
@@ -156,7 +156,7 @@ describe("history filters and batch selection", () => {
       kind: "审稿台",
       id: "a",
       title: "喷雾",
-      status: "已签字",
+      status: "已提交",
       color: "success",
       at: "2026-08-26T02:00:00.000Z",
       actor: "籽烨",
@@ -167,7 +167,7 @@ describe("history filters and batch selection", () => {
       kind: "打样台",
       id: "b",
       title: "花盒",
-      status: "已出图",
+      status: "已完成",
       color: "success",
       at: "2026-08-20T02:00:00.000Z",
       actor: "魏炜",
@@ -178,7 +178,7 @@ describe("history filters and batch selection", () => {
       kind: "审稿台",
       id: "c",
       title: "旧单",
-      status: "对照中",
+      status: "检查中",
       color: "processing",
       at: "2026-07-01T02:00:00.000Z",
       actor: "籽烨",

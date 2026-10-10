@@ -58,7 +58,7 @@ test('桌墙显示资源保持原始下载并可复位，离页释放 blob', asy
   await serve(page); await page.goto(`/mockup/${ID}`); await loaded(page);
   await page.locator('.mockup-backdrop-switch').getByText('白底',{exact:true}).click(); await loaded(page);
   const initial = await orbit(page); expect(initial.theta).toBeCloseTo(35,1); expect(initial.phi).toBeCloseTo(72,1);
-  const link = page.getByRole('link',{name:'下载 GLB',exact:true}); const href = await link.getAttribute('href');
+  const link = page.getByRole('link',{name:'下载模型',exact:true}); const href = await link.getAttribute('href');
   await page.locator('.mockup-backdrop-switch').getByText('白桌白墙',{exact:true}).click(); await loaded(page);
   await expect(page.locator('model-viewer')).toHaveAttribute('src',/^blob:/);
   const sceneUrl = await page.locator('model-viewer').getAttribute('src');
@@ -69,7 +69,7 @@ test('桌墙显示资源保持原始下载并可复位，离页释放 blob', asy
   await page.getByRole('button',{name:'复位模型视角'}).click();
   await expect.poll(async()=>Math.round((await orbit(page)).theta)).toBe(35);
   await expect.poll(async()=>Math.round((await orbit(page)).phi)).toBe(72);
-  await page.getByRole('button',{name:'全屏截图',exact:true}).click();
+  await page.getByRole('button',{name:'全屏',exact:true}).click();
   await expect.poll(()=>page.evaluate(()=>Boolean(document.fullscreenElement))).toBe(true);
   await loaded(page);await expect(page.locator('.mockup-sheet-glb a[download]')).toHaveAttribute('href',href!);
   await page.evaluate(()=>document.exitFullscreen());await loaded(page);
@@ -80,7 +80,7 @@ test('桌墙显示资源保持原始下载并可复位，离页释放 blob', asy
 test('GLB 请求失败明确显示错误而保留原始下载',async ({page}) => {
   await serve(page,true);await page.goto(`/mockup/${ID}`);
   await expect(page.getByRole('alert').filter({hasText:'3D 预览加载失败'})).toBeVisible();
-  await expect(page.getByRole('link',{name:'下载 GLB',exact:true})).toHaveAttribute('href',new RegExp(`generation_id=${GENERATION}`));
+  await expect(page.getByRole('link',{name:'下载模型',exact:true})).toHaveAttribute('href',new RegExp(`generation_id=${GENERATION}`));
   await expect(page.getByRole('button',{name:'复位模型视角'})).toBeDisabled();
 });
 

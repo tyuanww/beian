@@ -36,7 +36,7 @@ function waitForLoad(probe: ReviewImageProbe): Promise<void> {
   if (probe.complete && probe.naturalWidth > 1 && probe.naturalHeight > 1) return Promise.resolve();
   return new Promise((resolve, reject) => {
     probe.onload = () => resolve();
-    probe.onerror = () => reject(new Error("核对图加载失败"));
+    probe.onerror = () => reject(new Error("页面图片加载失败"));
   });
 }
 
@@ -53,7 +53,7 @@ async function decodeProbe(probe: ReviewImageProbe, url: string): Promise<void> 
 }
 
 function abortError(): DOMException {
-  return new DOMException("核对图加载已取消", "AbortError");
+  return new DOMException("页面图片加载已取消", "AbortError");
 }
 
 async function guardedDecode(
@@ -76,7 +76,7 @@ async function guardedDecode(
     };
     abort = () => stop(abortError());
     signal?.addEventListener("abort", abort, { once: true });
-    timer = globalThis.setTimeout(() => stop(new Error("核对图加载超时")), timeoutMs);
+    timer = globalThis.setTimeout(() => stop(new Error("页面图片加载超时")), timeoutMs);
   });
   try {
     await Promise.race([decodeProbe(probe, url), stopped]);
@@ -130,7 +130,7 @@ async function prepareCandidates(
       probe.onerror = null;
     }
   }
-  throw new Error("高清核对图加载失败，请刷新后重试");
+  throw new Error("页面图片加载失败，请刷新后重试。");
 }
 
 /**

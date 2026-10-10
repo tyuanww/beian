@@ -1,0 +1,28 @@
+/** 去掉客户页面上的实现名。不改状态值，也不改稿件原文。 */
+export function customerCopy(raw: string): string {
+  return String(raw || "")
+    .replace(/图像识别文字（OCR）/g, "图片文字")
+    .replace(/Illustrator\s*原生文字/g, "原稿文字")
+    .replace(/百度\s*OCR/g, "文字识别")
+    .replace(/补印刷面/g, "生成印刷面")
+    .replace(/打样失败/g, "生成失败")
+    .replace(/打样中断/g, "生成中断")
+    .replace(/打样中/g, "生成中")
+    .replace(/对照失败/g, "检查失败")
+    .replace(/对照中/g, "检查中")
+    .replace(/对红中/g, "复核中")
+    .replace(/已签字/g, "已提交")
+    .replace(/机审/g, "自动检查")
+    .replace(/Illustrator|Blender/gi, "")
+    .replace(/\bOCR\b/g, "")
+    .replace(/\bGLB\b/g, "模型")
+    .replace(/qpdf/gi, "")
+    .replace(/open_id/gi, "")
+    .replace(/宿主/g, "")
+    .replace(/\bPID\b/g, "")
+    .replace(/文件\s*=\s*[A-Za-z]:\\[^\s，,]*/g, "")
+    .replace(/[A-Za-z]:\\[^\s，,]+/g, "")
+    .replace(/\s{2,}/g, " ")
+    .replace(/^[，,。.\s]+|[，,\s]+$/g, "")
+    .trim();
+}

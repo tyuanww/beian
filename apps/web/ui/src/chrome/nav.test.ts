@@ -3,14 +3,14 @@ import { describe, it } from "node:test";
 import { formatVersionLabel, SIDE_NAV } from "./nav.js";
 
 describe("SIDE_NAV", () => {
-  it("locks 审稿台 → 打样台 → 文件压缩 → 历史记录 → 设置", () => {
+  it("locks 审稿台 → 打样台 → 压缩文件 → 历史 → 设置", () => {
     assert.deepEqual(
       SIDE_NAV.map((item) => item.key),
       ["review", "mockup", "compression", "history", "settings"],
     );
     assert.deepEqual(
       SIDE_NAV.map((item) => item.label),
-      ["审稿台", "打样台", "文件压缩", "历史记录", "设置"],
+      ["审稿台", "打样台", "压缩文件", "历史", "设置"],
     );
     assert.equal(SIDE_NAV.at(-1)?.key, "settings");
   });

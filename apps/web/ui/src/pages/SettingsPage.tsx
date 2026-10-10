@@ -126,11 +126,11 @@ export function SettingsPage({
   const catalogGroup = view?.groups.find((g) => g.title === group);
   const menuItems = useMemo(() => {
     const extra = [
-      { key: "外观", label: "外观" },
-      { key: "开工板", label: "开工板" },
-      { key: "费用账单", label: "费用账单" },
+      { key: "外观", label: shortGroupLabel("外观") },
+      { key: "开工板", label: shortGroupLabel("开工板") },
+      { key: "费用账单", label: shortGroupLabel("费用账单") },
     ];
-    return [...extra, ...(view?.groups || []).map((g) => ({ key: g.title, label: g.title }))];
+    return [...extra, ...(view?.groups || []).map((g) => ({ key: g.title, label: shortGroupLabel(g.title) }))];
   }, [view]);
 
   function setField(key: string, value: string) {
@@ -239,9 +239,9 @@ export function SettingsPage({
 
   async function probeGroup() {
     const ids = PROBE_BY_GROUP[group] || [];
-    setProbeBusy(`检测中 0/${ids.length}`);
+    setProbeBusy(`检查中 0/${ids.length}`);
     for (let i = 0; i < ids.length; i++) {
-      setProbeBusy(`检测中 ${i + 1}/${ids.length}`);
+      setProbeBusy(`检查中 ${i + 1}/${ids.length}`);
       await probe(ids[i]);
     }
     setProbeBusy("");
@@ -249,7 +249,7 @@ export function SettingsPage({
 
   async function scanPc() {
     if (!canAdmin) {
-      message.error("扫描这台电脑需要管理员权限。刷新页面后再试。");
+      message.error("扫描环境需要管理员权限。请刷新后再试。");
       return;
     }
     setScanBusy(true);
@@ -308,7 +308,7 @@ export function SettingsPage({
     setBillBusy(true);
     try {
       setBilling(await api.refreshBilling());
-      message.success("已强制刷新厂商余额和月账单");
+      message.success("费用已刷新。");
     } catch (err: unknown) {
       message.error(err instanceof Error ? err.message : "账单刷新失败");
     } finally {
@@ -343,7 +343,7 @@ export function SettingsPage({
       <header className="settings-head">
         <h1 className="settings-title">设置</h1>
         <p className="settings-lead">
-          {group === "开工板" ? setupHeadline(probes) : "密钥不回显、不进 git。籽烨不用进这页。"}
+          {group === "开工板" ? setupHeadline(probes) : "调整页面和服务。"}
         </p>
       </header>
 
@@ -352,7 +352,7 @@ export function SettingsPage({
         <Alert
           type="info"
           showIcon
-          title="系统配置只允许管理员修改；你仍可检测连通，并给当前登录发送测试消息。"
+          title="只有管理员可以修改。"
           className="settings-alert"
         />
       ) : null}
@@ -360,7 +360,7 @@ export function SettingsPage({
         <Alert
           type="warning"
           showIcon
-          title="数据目录或公网开关改过，需要重启服务后才完全生效。"
+          title="保存后请重启服务。"
           className="settings-alert"
         />
       ) : null}
@@ -386,23 +386,23 @@ export function SettingsPage({
             />
           </div>
           <div className="settings-main-head">
-            <h2 className="settings-group-title">{group}</h2>
+            <h2 className="settings-group-title">{shortGroupLabel(group)}</h2>
             {group === "费用账单" ? (
               <Button type="primary" loading={billBusy} onClick={() => void refreshBills()}>
-                强制刷新厂商
+                刷新费用
               </Button>
             ) : group === "开工板" ? (
               <div className="setup-actions">
                 <Button onClick={() => void scanPc()} loading={scanBusy} disabled={!canAdmin}>
-                  {canAdmin ? "扫描这台电脑" : "扫描需管理员"}
+                  {canAdmin ? "扫描环境" : "需管理员"}
                 </Button>
                 <Button type="primary" onClick={() => void probeGroup()} loading={Boolean(probeBusy)}>
-                  {probeBusy || "全部检测"}
+                  {probeBusy || "检查全部"}
                 </Button>
               </div>
             ) : groupProbes.length ? (
               <Button onClick={() => void probeGroup()} loading={Boolean(probeBusy)}>
-                {probeBusy || "检测连通"}
+                {probeBusy || "检查连接"}
               </Button>
             ) : null}
           </div>
@@ -447,17 +447,17 @@ export function SettingsPage({
 
           {group === "飞书登录" ? (
             <Button className="wizard-cta" onClick={() => window.location.assign(feishuLoginHref("开工板"))}>
-              用飞书走一遍授权
+              飞书登录
             </Button>
           ) : null}
           {group === "飞书推送" ? (
             <Button type="primary" className="wizard-cta" loading={sendingPush} onClick={() => void sendPushTest()}>
-              {openId ? "给当前登录发一条测试" : feishuAppReady(view?.groups) ? "先用飞书授权，再发测试" : "先填飞书登录凭证"}
+              {openId ? "发送测试" : feishuAppReady(view?.groups) ? "先登录飞书" : "先完成登录设置"}
             </Button>
           ) : null}
           {showBack ? (
             <Button className="wizard-back" onClick={() => setGroup("开工板")}>
-              回开工板
+              回到状态
             </Button>
           ) : null}
 
@@ -479,7 +479,7 @@ export function SettingsPage({
 
       {group === "外观" || group === "开工板" ? null : (
         <footer className="settings-footer">
-          <Typography.Text type="secondary">保存后立即写入本机，部分项需重启。</Typography.Text>
+          <Typography.Text type="secondary">保存后部分设置需重启。</Typography.Text>
           <Button type="primary" onClick={() => void save()} loading={saving} disabled={!canWrite}>
             保存
           </Button>
@@ -590,7 +590,7 @@ function SetupBoard({
                   onClick={() => (st.cls === "is-ok" ? onProbe(row.id) : onWizard(row))}
                 >
                   {busy ? (
-                    "检测中…"
+                    "检查中…"
                   ) : st.cls === "is-ok" ? (
                     <>
                       <span className="setup-btn-full">再测一次</span>
@@ -603,7 +603,7 @@ function SetupBoard({
               ) : null}
               {row.kind === "push" ? (
                 <button type="button" className="setup-btn" onClick={onPush} disabled={busy} aria-busy={busy}>
-                  {sending ? "发送中…" : pending ? "检测中…" : "发一条测试"}
+                  {sending ? "发送中…" : pending ? "检查中…" : "发送测试"}
                 </button>
               ) : null}
               {row.kind === "scan" ? (
@@ -615,14 +615,14 @@ function SetupBoard({
                   onClick={st.cls === "is-ok" ? () => onProbe(row.id) : onScan}
                 >
                   {busy ? (
-                    scanBusy && !pending ? "扫描中…" : "检测中…"
+                    scanBusy && !pending ? "扫描中…" : "检查中…"
                   ) : st.cls === "is-ok" ? (
                     <>
                       <span className="setup-btn-full">再测一次</span>
                       <span className="setup-btn-short">再测</span>
                     </>
                   ) : canAdmin ? (
-                    "扫描这台电脑"
+                    "扫描环境"
                   ) : (
                     "需管理员"
                   )}
@@ -631,7 +631,7 @@ function SetupBoard({
               {row.kind === "retry" ? (
                 <button type="button" className="setup-btn ghost" disabled={busy} aria-busy={busy} onClick={() => onProbe(row.id)}>
                   {busy ? (
-                    "检测中…"
+                    "检查中…"
                   ) : (
                     <>
                       <span className="setup-btn-full">再测一次</span>
@@ -646,12 +646,12 @@ function SetupBoard({
       </div>
       <p className="setup-meta">
         当前登录：{displayName || "—"}
-        {openId ? ` · 飞书身份 · ${openId}` : " · 显示名登录没有 open_id"}
+        {openId ? " · 已绑定飞书" : " · 尚未绑定飞书"}
       </p>
       {scanHits.length || scanMsg ? (
         <div className="setup-cands">
-          <h3>扫描结果 · 杭州这台 Windows</h3>
-          <p>{scanMsg || "候选不是结论。点采用才写入。"}</p>
+          <h3>扫描结果</h3>
+          <p>{scanMsg || "选择后点采用。"}</p>
           {scanHits.map((h) => (
             <label key={h.path} className="setup-cand">
               <input
@@ -703,7 +703,7 @@ function CatalogFields({
       {reason ? (
         <div className="secrets-fold">
           <p>{reason}</p>
-          <Button onClick={onToggle}>{folded ? (group === "飞书推送" ? "点开改接收人" : "点开改密钥") : "收起"}</Button>
+          <Button onClick={onToggle}>{folded ? (group === "飞书推送" ? "修改接收人" : "修改密钥") : "收起"}</Button>
         </div>
       ) : null}
       {folded ? null : (

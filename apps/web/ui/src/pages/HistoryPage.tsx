@@ -3,6 +3,7 @@ import { Alert, App, Button, Checkbox, Empty, Input, Select, Space, Table, Tag }
 import { api, ApiError, type PendingUploadReceipt } from "../api";
 import { uploadStore } from "../uploadStore";
 import type { HistoryItem, HistoryResult } from "../batchTypes";
+import { customerCopy } from "./customerCopy";
 import { emptyHistoryFilters, historyDeletable, historyKey, historyLive, historyQuery, historyStatusColor, historyTimeFilters, historyTypeLabels, type HistoryFilters, type HistoryTimeMode } from "./historyQuery";
 
 // Kept for callers of the existing row action helper during the data transition.
@@ -34,7 +35,7 @@ function restore(key: string): Saved {
   } catch { /* Storage may be disabled. */ }
   return { filters: { ...emptyHistoryFilters }, cursors: [""], page: 0, scroll: 0 };
 }
-const stateLabels: Record<string, string> = { in_review: "待核对", pending_review: "待审核", comparing: "对照中", compare_failed: "对照失败", reworking: "对红中", uploaded: "待开工", queued: "排队中", running: "处理中", done: "已完成", completed: "已完成", signed: "已签字", failed: "失败", partial: "部分完成", unmet_target: "未达到 10 MB", ready: "待开工", uploading: "上传中", compared: "待核对", review_required: "待确认", unsupported: "暂不支持", reworked: "对红完成", idle: "待开工" };
+const stateLabels: Record<string, string> = { in_review: "待确认", pending_review: "待确认", comparing: "检查中", compare_failed: "检查失败", reworking: "复核中", uploaded: "待处理", queued: "排队中", running: "处理中", done: "已完成", completed: "已完成", signed: "已提交", failed: "失败", partial: "部分完成", unmet_target: "超出限制", ready: "待处理", uploading: "上传中", compared: "待确认", review_required: "待确认", unsupported: "不支持", reworked: "复核完成", idle: "待处理" };
 
 export function HistoryPage({ owner, canCreate, canDelete, onOpenTask, onOpenMockup, onOpenCompression, onOpenUpload }: Props) {
   const { message, modal } = App.useApp();
@@ -72,7 +73,7 @@ export function HistoryPage({ owner, canCreate, canDelete, onOpenTask, onOpenMoc
         if (stopped) return;
         const rebuilding = err instanceof ApiError && err.status === 503 && ["history_index_unavailable", "history_index_corrupt"].includes(err.code || "");
         setBuilding(rebuilding); setLoading(false);
-        setError(rebuilding ? "正在整理历史记录，页面会自动继续加载。" : err instanceof Error ? err.message : "历史记录读取失败，请重试。");
+        setError(rebuilding ? "正在加载记录…" : customerCopy(err instanceof Error ? err.message : "") || "记录读取失败，请重试。");
         // A 10,000-record index requires more than 50 bounded passes.
         if (rebuilding) timer = setTimeout(load, 1200);
       }
@@ -97,7 +98,7 @@ export function HistoryPage({ owner, canCreate, canDelete, onOpenTask, onOpenMoc
     else if (canCreate) {
       try {
         const receipt = (await api.uploads()).find(item => item.id === row.id);
-        if (!receipt) throw new Error("这份上传已开工或过期，请刷新历史记录。");
+        if (!receipt) throw new Error("上传已失效，请刷新历史。");
         onOpenUpload(receipt.kind, receipt.id);
       } catch (err) { message.error(err instanceof Error ? err.message : "无法打开这份上传"); }
     }
@@ -131,29 +132,29 @@ export function HistoryPage({ owner, canCreate, canDelete, onOpenTask, onOpenMoc
   else statuses.delete("unmet_target");
   if (state.filters.status) statuses.add(state.filters.status);
   return <section className="batch-page history-page">
-    <header className="page-head"><div><h1 className="page-title">历史记录</h1><p className="page-lead">搜索品名、批次和子文件名，查看审稿、打样、上传与压缩记录。</p></div><Space><Button aria-label="刷新历史记录" onClick={() => setRefresh(value => value + 1)} loading={loading && !building}>刷新</Button>{canDelete ? <Button disabled={deleting} onClick={() => { setEditing(value => !value); setSelected([]); }}>{editing ? "退出编辑" : "编辑"}</Button> : null}</Space></header>
+    <header className="page-head"><div><h1 className="page-title">历史</h1><p className="page-lead">按名称、类型和日期找记录。</p></div><Space><Button aria-label="刷新历史" onClick={() => setRefresh(value => value + 1)} loading={loading && !building}>刷新</Button>{canDelete ? <Button disabled={deleting} onClick={() => { setEditing(value => !value); setSelected([]); }}>{editing ? "完成" : "管理"}</Button> : null}</Space></header>
     <div className="batch-card history-filterbar">
-      <Input.Search aria-label="搜索历史记录" placeholder="搜索品名、批次或文件名" allowClear value={search} onChange={event => { setSearch(event.target.value); if (!event.target.value) filters({ q: "" }); }} onSearch={q => filters({ q })} enterButton="搜索" />
+      <Input.Search aria-label="搜索历史" placeholder="搜索名称或文件" allowClear value={search} onChange={event => { setSearch(event.target.value); if (!event.target.value) filters({ q: "" }); }} onSearch={q => filters({ q })} enterButton="搜索" />
       <div className="history-filter-grid">
-        <Select aria-label="类型" value={state.filters.type} onChange={type => filters({ type, status: "" })} options={[{ value: "", label: "全部类型" }, ...Object.entries(historyTypeLabels).map(([value, text]) => ({ value, label: text }))]} />
-        <Select aria-label="状态" value={state.filters.status} onChange={status => filters({ status })} options={[{ value: "", label: "全部状态" }, ...[...statuses].map(value => ({ value, label: label(value) }))]} />
-        <Input.Search aria-label="创建人" placeholder="创建人姓名或账号" value={creator} allowClear onChange={event => { setCreator(event.target.value); if (!event.target.value) filters({ creator: "" }); }} onSearch={value => filters({ creator: value })} />
-        <Select aria-label="时间范围" value={state.filters.time_mode} onChange={(mode: HistoryTimeMode) => filters(mode === "custom" ? { time_mode: mode } : historyTimeFilters(mode))} options={[{ value: "all", label: "全部时间" }, { value: "recent", label: "近 7 天" }, { value: "custom", label: "自定义时间" }]} />
-        <Button onClick={() => { setSearch(""); setCreator(""); filters({ ...emptyHistoryFilters }); }}>清空筛选</Button>
+        <Select aria-label="类型" value={state.filters.type} onChange={type => filters({ type, status: "" })} options={[{ value: "", label: "所有类型" }, ...Object.entries(historyTypeLabels).map(([value, text]) => ({ value, label: text }))]} />
+        <Select aria-label="状态" value={state.filters.status} onChange={status => filters({ status })} options={[{ value: "", label: "所有状态" }, ...[...statuses].map(value => ({ value, label: label(value) }))]} />
+        <Input.Search aria-label="创建人" placeholder="创建人" value={creator} allowClear onChange={event => { setCreator(event.target.value); if (!event.target.value) filters({ creator: "" }); }} onSearch={value => filters({ creator: value })} />
+        <Select aria-label="时间范围" value={state.filters.time_mode} onChange={(mode: HistoryTimeMode) => filters(mode === "custom" ? { time_mode: mode } : historyTimeFilters(mode))} options={[{ value: "all", label: "所有时间" }, { value: "recent", label: "近 7 天" }, { value: "custom", label: "自选时间" }]} />
+        <Button onClick={() => { setSearch(""); setCreator(""); filters({ ...emptyHistoryFilters }); }}>清除筛选</Button>
       </div>
       {state.filters.time_mode !== "all" ? <div className="history-date-grid">
         <label className="history-date">开始日期<input type="date" disabled={state.filters.time_mode === "recent"} value={state.filters.date_from} onChange={event => filters({ time_mode: "custom", date_from: event.target.value })} /></label>
         <label className="history-date">结束日期<input type="date" disabled={state.filters.time_mode === "recent"} value={state.filters.date_to} min={state.filters.date_from} onChange={event => filters({ time_mode: "custom", date_to: event.target.value })} /></label>
       </div> : null}
     </div>
-    {error ? <Alert type={building ? "info" : "error"} showIcon title={error} description={data ? "保留上次成功加载的记录。" : undefined} action={!building ? <Button onClick={() => setRefresh(value => value + 1)}>重试</Button> : undefined} /> : null}
+    {error ? <Alert type={building ? "info" : "error"} showIcon title={error} action={!building ? <Button onClick={() => setRefresh(value => value + 1)}>重试</Button> : undefined} /> : null}
     <div className="history-table-shell batch-card">
       <Table<HistoryItem> rowKey={historyKey} loading={loading && !data} dataSource={pageRows} pagination={false} scroll={{ x: 800 }}
-        locale={{ emptyText: error || building || loading ? <Empty description="记录暂未加载完成" /> : <Empty description="没有符合条件的记录，试试调整筛选。" /> }}
-        rowSelection={editing ? { selectedRowKeys: selected.map(historyKey), onSelect: row => toggle(row), onSelectAll: checked => setSelected(current => checked ? [...current.filter(item => !deletable.some(row => historyKey(row) === historyKey(item))), ...deletable] : current.filter(item => !deletable.some(row => historyKey(row) === historyKey(item)))), getCheckboxProps: row => ({ disabled: !historyDeletable(row), title: !historyDeletable(row) ? "正在处理，结束后才能删除" : undefined, "aria-label": `选择 ${row.title}` }) } : undefined}
+        locale={{ emptyText: error || building || loading ? <Empty description="记录加载中…" /> : <Empty description="没有找到相关记录。" /> }}
+        rowSelection={editing ? { selectedRowKeys: selected.map(historyKey), onSelect: row => toggle(row), onSelectAll: checked => setSelected(current => checked ? [...current.filter(item => !deletable.some(row => historyKey(row) === historyKey(item))), ...deletable] : current.filter(item => !deletable.some(row => historyKey(row) === historyKey(item)))), getCheckboxProps: row => ({ disabled: !historyDeletable(row), title: !historyDeletable(row) ? "处理完成后可删除" : undefined, "aria-label": `选择 ${row.title}` }) } : undefined}
         onRow={row => ({ onClick: event => { if (!(event.target as HTMLElement).closest("button,a,input,.ant-checkbox-wrapper")) void open(row); } })}
         columns={[
-          { title: "记录 / 文件", key: "title", render: (_, row) => <div className="batch-file-name"><button className="history-title-button" aria-label={`打开${historyTypeLabels[row.type]}记录：${row.title}`} onClick={() => void open(row)}>{row.title || row.product_name || "未命名记录"}</button><small>{row.matched_names.length ? `命中文件：${row.matched_names.join("、")}` : row.names.join("、")}</small>{editing && !historyDeletable(row) ? <small>正在处理，结束后才能删除</small> : null}</div> },
+          { title: "记录 / 文件", key: "title", render: (_, row) => <div className="batch-file-name"><button className="history-title-button" aria-label={`打开${historyTypeLabels[row.type]}记录：${row.title}`} onClick={() => void open(row)}>{row.title || row.product_name || "未命名记录"}</button><small>{row.matched_names.length ? `相关文件：${row.matched_names.join("、")}` : row.names.join("、")}</small>{editing && !historyDeletable(row) ? <small>处理完成后可删除</small> : null}</div> },
           { title: "类型", dataIndex: "type", width: 90, render: (type: HistoryItem["type"]) => historyTypeLabels[type] },
           { title: "状态", dataIndex: "status", width: 130, render: (status: string) => <Tag color={historyStatusColor(status)}>{label(status)}</Tag> },
           { title: "创建人", dataIndex: "creator_name", width: 160 },
@@ -164,6 +165,6 @@ export function HistoryPage({ owner, canCreate, canDelete, onOpenTask, onOpenMoc
         <Button disabled={!data?.next_cursor || loading || Boolean(error)} onClick={() => setState(current => ({ ...current, cursors: [...current.cursors.slice(0, current.page + 1), data!.next_cursor!], page: current.page + 1, scroll: 0 }))}>下一页</Button>
       </Space></div>
     </div>
-    {editing ? <div className="history-bulkbar"><Checkbox disabled={!deletable.length || deleting} checked={all} indeterminate={!all && deletable.some(row => selectedKeys.has(historyKey(row)))} onChange={event => setSelected(current => event.target.checked ? [...current.filter(item => !deletable.some(row => historyKey(row) === historyKey(item))), ...deletable] : current.filter(item => !deletable.some(row => historyKey(row) === historyKey(item))))}>全选本页</Checkbox><span>已选 {selected.length} 条</span><Button danger disabled={!selected.length || deleting} loading={deleting} onClick={() => modal.confirm({ centered: true, title: `删除选中的 ${selected.length} 条记录？`, content: "删除后将无法从历史记录恢复。正在处理或无权限的记录会保留。", okText: "删除", cancelText: "取消", okButtonProps: { danger: true }, onOk: removeSelected })}>删除选中</Button></div> : null}
+    {editing ? <div className="history-bulkbar"><Checkbox disabled={!deletable.length || deleting} checked={all} indeterminate={!all && deletable.some(row => selectedKeys.has(historyKey(row)))} onChange={event => setSelected(current => event.target.checked ? [...current.filter(item => !deletable.some(row => historyKey(row) === historyKey(item))), ...deletable] : current.filter(item => !deletable.some(row => historyKey(row) === historyKey(item))))}>全选本页</Checkbox><span>已选 {selected.length} 条</span><Button danger disabled={!selected.length || deleting} loading={deleting} onClick={() => modal.confirm({ centered: true, title: `删除 ${selected.length} 条记录？`, content: "删除后无法恢复，处理中的记录不会删除。", okText: "删除", cancelText: "取消", okButtonProps: { danger: true }, onOk: removeSelected })}>删除</Button></div> : null}
   </section>;
 }

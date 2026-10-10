@@ -31,7 +31,7 @@ export function authFailureAction(input: {
 }): { href: string; label: string } {
   if (input.apiBroken && !input.authError) {
     if (isLocalDevHost(input.host || "")) {
-      return { href: "http://127.0.0.1:8787/", label: "打开本机审稿服务" };
+      return { href: "http://127.0.0.1:8787/", label: "打开审稿" };
     }
     const p = input.pathname || "/reviewup";
     return { href: isSpaPath(p) ? p : "/reviewup", label: "刷新后再试" };

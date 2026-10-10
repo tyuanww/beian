@@ -88,8 +88,8 @@ test("右栏与画布同屏，全屏后仍在核对页内，处理疑点后可�
   await expect(dock).toBeVisible();
   expect(await dock.evaluate((node) => Boolean(node.closest(".review-workspace")))).toBe(true);
   await expect(dock.getByLabel("疑点列表")).toBeVisible();
-  await expect(dock.getByText("Excel 应印", { exact: true })).toBeVisible();
-  await expect(dock.getByText("稿上读到", { exact: true })).toBeVisible();
+  await expect(dock.getByText("表格要求", { exact: true })).toBeVisible();
+  await expect(dock.getByText("稿件内容", { exact: true })).toBeVisible();
   const canvas = await page.locator(".review-workspace > .canvas").boundingBox();
   const sidebar = await dock.boundingBox();
   expect(sidebar!.x).toBeGreaterThanOrEqual(canvas!.x + canvas!.width);
@@ -101,10 +101,10 @@ test("右栏与画布同屏，全屏后仍在核对页内，处理疑点后可�
     await dock.locator(".review-evidence-grid").evaluate((node) => getComputedStyle(node).gridTemplateColumns.split(" ").length),
   ).toBe(2);
 
-  await page.getByRole("button", { name: "全屏核对" }).click();
-  await expect(page.getByRole("button", { name: "退出全屏" })).toBeVisible();
+  await page.getByRole("button", { name: "全屏" }).click();
+  await expect(page.getByRole("button", { name: "退出" })).toBeVisible();
   expect(await dock.evaluate((node) => Boolean(node.closest(".review-page.is-fullscreen")))).toBe(true);
-  await page.getByLabel("核对结论").click();
+  await page.getByLabel("审核结果").click();
   const decisionPopup = page.locator(".ant-select-dropdown:not(.ant-select-dropdown-hidden)");
   await expect(decisionPopup).toBeVisible();
   expect(
@@ -113,19 +113,19 @@ test("右栏与画布同屏，全屏后仍在核对页内，处理疑点后可�
   await decisionPopup.getByText("有错", { exact: true }).click();
   await expect.poll(() => syntheticApi.calls.filter((item) => item.path.endsWith("/decision")).length).toBe(1);
 
-  const noteInput = page.getByPlaceholder("补充说明，会进改稿清单");
+  const noteInput = page.getByPlaceholder("补充说明");
   await noteInput.fill("需要补齐中文品名");
   await noteInput.press("Enter");
   await expect.poll(() => syntheticApi.calls.filter((item) => item.path.endsWith("/decision")).length).toBe(2);
 
-  await page.getByRole("button", { name: "退出全屏" }).click();
-  await expect(page.getByRole("button", { name: "全屏核对" })).toBeVisible();
+  await page.getByRole("button", { name: "退出" }).click();
+  await expect(page.getByRole("button", { name: "全屏" })).toBeVisible();
   expect(await dock.evaluate((node) => Boolean(node.closest(".review-workspace")))).toBe(true);
 
   await page.getByRole("textbox", { name: "结论", exact: true }).fill("中文品名需要设计改稿");
-  await page.getByRole("button", { name: "签字并待设计改稿" }).click();
+  await page.getByRole("button", { name: "提交并等新稿" }).click();
 
-  await expect(page.getByText("已签字，不是系统过审")).toBeVisible();
+  await expect(page.locator(".ant-alert").getByText("结果已提交。", { exact: true })).toBeVisible();
   const decisionCalls = syntheticApi.calls.filter((item) => item.path.endsWith("/decision"));
   const decisionCall = decisionCalls.at(-1);
   const completeCall = syntheticApi.calls.find((item) => item.path.endsWith("/complete"));
@@ -180,13 +180,13 @@ test("同页只亮当前疑点，确认后依次前进并跨页定位", async ({
   await expect(canvasBoxes).toHaveCount(1);
   await expect(canvasPins).toHaveText("1");
 
-  await page.getByLabel("核对结论").click();
+  await page.getByLabel("审核结果").click();
   await page.locator(".ant-select-dropdown:not(.ant-select-dropdown-hidden)").getByText("一致", { exact: true }).click();
   await expect(dock.getByRole("button", { name: /英文品名/ })).toHaveAttribute("aria-current", "true");
   await expect(canvasPins).toHaveCount(1);
   await expect(canvasPins).toHaveText("2");
 
-  await page.getByLabel("核对结论").click();
+  await page.getByLabel("审核结果").click();
   await page.locator(".ant-select-dropdown:not(.ant-select-dropdown-hidden)").getByText("一致", { exact: true }).click();
   await expect(dock.getByRole("button", { name: /净含量/ })).toHaveAttribute("aria-current", "true");
   await expect(page.getByRole("button", { name: "第 2 页" })).toHaveClass(/btn-primary/);
@@ -210,7 +210,7 @@ test("记录结论失败时保留当前疑点和页面", async ({ page, syntheti
 
   const current = page.getByTestId("review-dock").getByRole("button", { name: /中文品名/ });
   await expect(current).toHaveAttribute("aria-current", "true");
-  await page.getByLabel("核对结论").click();
+  await page.getByLabel("审核结果").click();
   await page.locator(".ant-select-dropdown:not(.ant-select-dropdown-hidden)").getByText("一致", { exact: true }).click();
   await expect(page.getByText("未保存：合成记录失败", { exact: true })).toBeVisible();
   await expect(current).toHaveAttribute("aria-current", "true");
@@ -228,9 +228,9 @@ test("浏览器拒绝核对全屏时显示可执行中文提示", async ({ page,
   });
   await page.goto(`/review/${task.id}`);
 
-  await page.getByRole("button", { name: "全屏核对" }).click();
+  await page.getByRole("button", { name: "全屏" }).click();
   await expect(page.getByText("全屏打不开")).toBeVisible();
-  await expect(page.getByRole("button", { name: "全屏核对" })).toHaveAttribute("aria-pressed", "false");
+  await expect(page.getByRole("button", { name: "全屏" })).toHaveAttribute("aria-pressed", "false");
   expect(await page.getByTestId("review-dock").evaluate((node) => Boolean(node.closest(".review-workspace")))).toBe(true);
 });
 
@@ -249,8 +249,8 @@ test("一致字段没有疑点时只显示 Excel 应印与稿上读到两列", a
 
   const grid = page.getByTestId("review-dock").locator(".review-evidence-grid");
   await expect(grid.getByText("疑点 / 错误点", { exact: true })).toHaveCount(0);
-  await expect(grid.getByText("Excel 应印", { exact: true })).toBeVisible();
-  await expect(grid.getByText("稿上读到", { exact: true })).toBeVisible();
+  await expect(grid.getByText("表格要求", { exact: true })).toBeVisible();
+  await expect(grid.getByText("稿件内容", { exact: true })).toBeVisible();
   expect(await grid.evaluate((node) => getComputedStyle(node).gridTemplateColumns.split(" ").length)).toBe(2);
   await expect(page.locator(".canvas-zoom")).toHaveCSS("transform", "none");
 });
@@ -292,7 +292,7 @@ test("右栏拖动与键盘调宽，刷新恢复，窄屏不覆盖桌面偏好",
   await page.setViewportSize({ width: 1600, height: 1000 });
   await page.goto(`/review/${task.id}`);
   const dock = page.getByTestId("review-dock");
-  const separator = page.getByRole("separator", { name: "调整右侧核对栏宽度" });
+  const separator = page.getByRole("separator", { name: "调整右侧审核栏宽度" });
   await expect(separator).toHaveAttribute("aria-valuenow", "448");
   const handle = (await separator.boundingBox())!;
   await page.mouse.move(handle.x + 4, handle.y + 100);
@@ -331,11 +331,11 @@ test("收起核对栏不遮挡画布，隐藏内容不进入键盘导航，刷�
   const dock = page.getByTestId("review-dock");
   await dock.getByRole("button", { name: "收起", exact: true }).click();
   await expect(dock).toHaveClass(/is-shut/);
-  await expect(page.getByLabel("核对结论")).toBeHidden();
+  await expect(page.getByLabel("审核结果")).toBeHidden();
   await page.reload();
   await expect(dock).toHaveClass(/is-shut/);
-  await dock.getByRole("button", { name: "展开核对栏" }).click();
-  await expect(page.getByLabel("核对结论")).toBeVisible();
+  await dock.getByRole("button", { name: "展开审核栏" }).click();
+  await expect(page.getByLabel("审核结果")).toBeVisible();
   await expect(page.locator(".canvas-zoom .pin")).toHaveCount(1);
 });
 
@@ -346,7 +346,7 @@ test("24项疑点支持待确认筛选、目录、跨项与刷新恢复当前字
   syntheticApi.tasks.push(task);
   await page.goto(`/review/${task.id}`);
   const dock = page.getByTestId("review-dock");
-  await dock.getByLabel("仅看待确认").check();
+  await dock.getByLabel("只看待确认").check();
   await expect(dock.locator(".review-issue-directory .hit-card")).toHaveCount(12);
   await dock.getByRole("button", { name: "下一待确认", exact: true }).click();
   await expect(dock.locator(".review-current-title")).toHaveText("字段 3");
@@ -355,9 +355,9 @@ test("24项疑点支持待确认筛选、目录、跨项与刷新恢复当前字
   await expect(dock.locator(".review-current-title")).toHaveText("字段 3");
   await expect(page.getByLabel("人工备注")).toHaveValue("未提交的长备注，刷新后继续");
   expect(syntheticApi.calls.filter((call) => call.path.endsWith("/decision"))).toHaveLength(0);
-  await page.getByLabel("核对结论").click();
+  await page.getByLabel("审核结果").click();
   await page.locator(".ant-select-dropdown:not(.ant-select-dropdown-hidden)").getByText("有错", { exact: true }).click();
-  await expect(page.getByText("备注已与服务器同步")).toBeVisible();
+  await expect(page.getByText("已保存", { exact: true })).toBeVisible();
   await page.reload();
   await expect(page.getByLabel("人工备注")).toHaveValue("未提交的长备注，刷新后继续");
 });
@@ -379,15 +379,15 @@ test("大字号和深色下长文本可核对，保存失败的备注刷新仍�
   await expect(page.getByText("未保存：合成记录失败", { exact: true })).toBeVisible();
   await page.reload();
   await expect(note).toHaveValue("保存失败也不能丢失的备注");
-  await expect(page.getByText("备注尚未保存到服务器", { exact: true })).toBeVisible();
+  await expect(page.getByText("未保存", { exact: true })).toBeVisible();
   await page.getByRole("textbox", { name: "结论", exact: true }).fill("不能丢备注");
-  await expect(page.getByRole("button", { name: "签字并待设计改稿", exact: true })).toBeDisabled();
-  await expect(page.getByRole("button", { name: "上传改稿 PDF", exact: true })).toBeDisabled();
-  await page.getByRole("button", { name: "保存备注", exact: true }).click();
-  await expect(page.getByText("备注已与服务器同步", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "提交并等新稿", exact: true })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "上传新稿", exact: true })).toBeDisabled();
+  await page.getByRole("button", { name: "保存说明", exact: true }).click();
+  await expect(page.getByText("已保存", { exact: true })).toBeVisible();
   await page.getByTestId("review-dock").locator(".review-sidebar-body").evaluate((node) => { node.scrollTop = 0; });
   await expectCurrentBoxInCanvas(page);
-  await expect(page.getByRole("button", { name: "签字并待设计改稿", exact: true })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "提交并等新稿", exact: true })).toBeEnabled();
   await page.screenshot({ path: testInfo.outputPath("review-desktop-dark.png") });
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(page.locator(".review-workspace")).toHaveClass(/is-stacked/);

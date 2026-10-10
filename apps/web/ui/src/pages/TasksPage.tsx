@@ -27,14 +27,14 @@ type Layout = "board" | "table";
 type Col = "comparing" | "failed" | "review" | "done";
 
 function statusLabel(row: TaskSummary) {
-  if (row.status === "completed") return { text: "已签字", color: "default" as const };
+  if (row.status === "completed") return { text: "已提交", color: "default" as const };
   if (row.status === "in_review" || row.status === "pending_review") {
     return { text: PENDING_REVIEW, color: "warning" as const };
   }
   if (row.status === "compare_failed" || row.job_status === "failed") {
-    return { text: "对照失败", color: "error" as const };
+    return { text: "检查失败", color: "error" as const };
   }
-  if (row.status === "comparing") return { text: "正在对照", color: "processing" as const };
+  if (row.status === "comparing") return { text: "检查中", color: "processing" as const };
   return { text: row.status, color: "default" as const };
 }
 
@@ -154,7 +154,7 @@ export function TasksPage({ canCreate, onCreate, onOpen, onResumeReceipt }: Prop
     [localUpload, receipts, submitted],
   );
   const pendingCards = useMemo(
-    () => pendingItems.map((item) => pendingUploadCard(item, "待对照")),
+    () => pendingItems.map((item) => pendingUploadCard(item, "待检查")),
     [pendingItems],
   );
   const pendingByKey = useMemo(() => new Map(pendingItems.map((item) => [item.key, item])), [pendingItems]);
@@ -187,10 +187,10 @@ export function TasksPage({ canCreate, onCreate, onOpen, onResumeReceipt }: Prop
     const receipt = item.receipt;
     const productName = item.productName;
     modal.confirm({
-      title: "开始对照这单？",
-      content: `品名：${productName}。上传文件已由服务器确认，开始后会进入对照队列。`,
-      okText: "开始对照",
-      cancelText: "先不开始",
+      title: "开始检查这份文件？",
+      content: `品名：${productName}。上传完成后会进入检查队列。`,
+      okText: "开始检查",
+      cancelText: "稍后开始",
       onOk: async () => {
         if (pendingStarts.current.has(receipt)) return;
         pendingStarts.current.add(receipt);
@@ -203,7 +203,7 @@ export function TasksPage({ canCreate, onCreate, onOpen, onResumeReceipt }: Prop
           });
           uploadStore.clear("compare", receipt);
           setReceipts((current) => current.filter((saved) => saved.id !== receipt));
-          message.success("已开始对照。结论还要你来定。");
+          message.success("检查已开始。");
           rememberReviewHandoff(next);
           onOpen(next.id);
         } catch (err) {
@@ -211,9 +211,9 @@ export function TasksPage({ canCreate, onCreate, onOpen, onResumeReceipt }: Prop
             uploadStore.clear("compare", receipt);
             setReceipts((current) => current.filter((saved) => saved.id !== receipt));
             setReload((value) => value + 1);
-            message.warning("这份上传已开工或过期，列表已刷新。");
+            message.warning("上传已失效，请重新选择文件。");
           } else {
-            message.error(err instanceof Error ? err.message : "无法开始对照");
+            message.error(err instanceof Error ? err.message : "无法开始检查");
           }
         } finally {
           pendingStarts.current.delete(receipt);
@@ -232,14 +232,14 @@ export function TasksPage({ canCreate, onCreate, onOpen, onResumeReceipt }: Prop
     <section>
       <div className="desk-head">
         <div>
-          <h1 className="page-title">审核单</h1>
-          <p className="page-lead">待签在上。机审只标疑点，结论由你来写。</p>
+          <h1 className="page-title">审稿单</h1>
+          <p className="page-lead">先看待确认项，再提交结果。</p>
         </div>
         <Space wrap>
           {showSearch ? (
             <Input.Search
               allowClear
-              placeholder="搜品名或文件名"
+              placeholder="搜索品名或文件名"
               value={q}
               onChange={(event) => setQ(event.target.value)}
               onClear={() => {
@@ -262,7 +262,7 @@ export function TasksPage({ canCreate, onCreate, onOpen, onResumeReceipt }: Prop
           ) : null}
           {canCreate ? (
             <Button type="primary" onClick={onCreate}>
-              进入工作台
+              新建审稿
             </Button>
           ) : null}
         </Space>
@@ -286,13 +286,13 @@ export function TasksPage({ canCreate, onCreate, onOpen, onResumeReceipt }: Prop
             image={Empty.PRESENTED_IMAGE_SIMPLE}
             description={
               loading ? (
-                <div>读取审核单…</div>
+                <div>正在加载…</div>
               ) : submitted ? (
-                <div>没有找到这个品名或文件名</div>
+                <div>没有找到相关记录</div>
               ) : (
                 <div>
-                  <div>还没有审核单</div>
-                  <div className="desk-empty-hint">右上角进入工作台，把 Excel 和备案/包装 PDF 交上来对照</div>
+                  <div>还没有审稿单</div>
+                  <div className="desk-empty-hint">上传 Excel 和包装 PDF 开始。</div>
                 </div>
               )
             }
@@ -308,7 +308,7 @@ export function TasksPage({ canCreate, onCreate, onOpen, onResumeReceipt }: Prop
               </Button>
             ) : canCreate ? (
               <Button type="primary" onClick={onCreate}>
-                进入工作台
+                新建审稿
               </Button>
             ) : null}
           </Empty>
@@ -316,14 +316,14 @@ export function TasksPage({ canCreate, onCreate, onOpen, onResumeReceipt }: Prop
       ) : layout === "board" ? (
         <div className="review-board is-four">
           <DeskCol
-            title="对照中"
-            hint="上传中、待对照或机器运行"
+            title="检查中"
+            hint="正在上传或检查。"
             rows={[...pendingCards, ...board.comparing.map(toDeskCard)]}
             onOpen={openCard}
           />
-          <DeskCol title="对照失败" hint="中断了，点开看原因" rows={board.failed.map(toDeskCard)} onOpen={onOpen} />
-          <DeskCol title="待审核" hint="要人写结论" rows={board.review.map(toDeskCard)} onOpen={onOpen} />
-          <DeskCol title="已签字" hint="结论已记下" rows={board.done.map(toDeskCard)} onOpen={onOpen} />
+          <DeskCol title="检查失败" hint="打开查看原因。" rows={board.failed.map(toDeskCard)} onOpen={onOpen} />
+          <DeskCol title="待确认" hint="等待你确认。" rows={board.review.map(toDeskCard)} onOpen={onOpen} />
+          <DeskCol title="已提交" hint="结果已保存。" rows={board.done.map(toDeskCard)} onOpen={onOpen} />
         </div>
       ) : (
         <Table<DeskCardRow>

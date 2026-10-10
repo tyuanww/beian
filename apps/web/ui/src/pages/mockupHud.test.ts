@@ -5,11 +5,11 @@ import { HUD_MS, FULL_UPGRADE_NOTICE, allowFullUpgradeNotice, downloadHudLine, m
 describe("mockup download hud", () => {
   it("names the file being saved and does not block copy", () => {
     assert.equal(downloadHudLine("白底"), "正在下载白底");
-    assert.equal(downloadHudLine("PPT"), "正在下载PPT");
-    assert.equal(downloadHudLine("GLB"), "正在下载GLB");
+    assert.equal(downloadHudLine("PPT"), "正在下载演示稿");
+    assert.equal(downloadHudLine("GLB"), "正在下载模型");
     assert.equal(downloadHudLine("PDF"), "正在下载PDF");
     assert.equal(downloadHudLine("印刷面"), "正在下载印刷面");
-    assert.equal(missingPptHud(), "PPT 没写成，白底仍可下");
+    assert.equal(missingPptHud(), "演示稿暂不可用，白底仍可下载");
     assert.equal(FULL_UPGRADE_NOTICE, "高清图暂时未加载，重新打开此单可重试");
     assert.equal(HUD_MS, 2200);
     assert.equal(allowFullUpgradeNotice("", "g1", "auto"), true);

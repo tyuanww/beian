@@ -3,8 +3,8 @@ import { describe, it } from "node:test";
 import { PENDING_REVIEW, deskCardState, deskClock, deskShortId } from "./deskBoard.js";
 
 describe("deskBoard", () => {
-  it("keeps the pending-review copy as 待审核", () => {
-    assert.equal(PENDING_REVIEW, "待审核");
+  it("keeps the pending-review copy as 待确认", () => {
+    assert.equal(PENDING_REVIEW, "待确认");
   });
 
   it("shortens a 12-char task id for the card corner", () => {
@@ -25,22 +25,22 @@ describe("deskBoard", () => {
       deskCardState({
         id: "1",
         title: "产品",
-        statusText: "对照中",
+        statusText: "检查中",
         statusColor: "processing",
         progress: 55,
-        live: "认字 · 大约还要 40 秒",
+        live: "读取文字 · 大约还要 40 秒",
       }),
-      "55% · 认字",
+      "55% · 读取文字",
     );
     assert.equal(
       deskCardState({
         id: "2",
         title: "产品",
-        statusText: "正在对照",
+        statusText: "检查中",
         statusColor: "processing",
         live: "大约还要 40 秒",
       }),
-      "正在对照 · 大约还要 40 秒",
+      "检查中 · 大约还要 40 秒",
     );
   });
 });

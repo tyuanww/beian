@@ -9,7 +9,7 @@ function row(kind: HistoryRow["kind"], color: HistoryRow["color"] = "success"): 
     kind,
     id: `${kind}-1`,
     title: "花盒",
-    status: color === "processing" ? "对照中" : "已完成",
+    status: color === "processing" ? "检查中" : "已完成",
     color,
     at: "2026-08-26T00:00:00.000Z",
     actor: "籽烨",

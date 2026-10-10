@@ -143,7 +143,7 @@ export function StructureConfirmPanel({ job, canConfirmStructure, canAdmin = fal
     try {
       const next = await api.confirmMockupStructure(job.id, confirmedAnchor);
       onConfirmed(next);
-      message.success("已选择正面，开始生成打样图。");
+      message.success("已选择正面，开始生成立体图。");
     } catch (error) {
       setSubmitError(structureConfirmationErrorCopy(error));
     } finally {
@@ -266,7 +266,7 @@ export function StructureConfirmPanel({ job, canConfirmStructure, canAdmin = fal
               >
                 {structureInput.image_url && layerPreview ? (
                   <svg
-                    aria-label="当前 Illustrator 稿件与所选图层路径"
+                    aria-label="当前稿件与所选图层"
                     className="structure-input-layer-map"
                     preserveAspectRatio="xMidYMid meet"
                     role="img"
@@ -299,9 +299,9 @@ export function StructureConfirmPanel({ job, canConfirmStructure, canAdmin = fal
                     })}
                   </svg>
                 ) : structureInput.image_url ? (
-                  <img src={structureInput.image_url} alt="当前 Illustrator 稿件预览" />
+                  <img src={structureInput.image_url} alt="当前稿件预览" />
                 ) : (
-                  <div className="structure-input-preview-empty">原稿预览暂不可用，请按 Illustrator 中的图层核对。</div>
+                  <div className="structure-input-preview-empty">原稿预览暂不可用，请按图层查看。</div>
                 )}
               </div>
             </div>
@@ -339,7 +339,7 @@ export function StructureConfirmPanel({ job, canConfirmStructure, canAdmin = fal
                 <span className="structure-step-index">2</span>
                 <div>
                   <strong>点右下角重新识别完整盒型</strong>
-                  <span>所选线条还要通过闭合盒身、上下封口和最终正面确认，不会直接进入 Blender。</span>
+                  <span>确认盒型和封口后才会生成立体图。</span>
                 </div>
               </div>
               <div className="structure-layer-list" role="group" aria-label="选择结构图层">
@@ -389,7 +389,7 @@ export function StructureConfirmPanel({ job, canConfirmStructure, canAdmin = fal
               ) : null}
               {structureInput.truncated ? (
                 <p className="structure-input-truncated">
-                  候选图层超过安全展示上限。若正确图层不在列表里，请先在 Illustrator 整理图层后重新上传。
+                  图层较多，列表未显示全部。请整理图层后重新上传。
                 </p>
               ) : null}
             </div>
@@ -438,7 +438,7 @@ export function StructureConfirmPanel({ job, canConfirmStructure, canAdmin = fal
         <Alert
           type={job.structure_status === "unsupported" ? "error" : "warning"}
           showIcon
-          title={job.structure_status === "unsupported" ? "这类结构暂不支持自动打样" : "结构需要处理后再打样"}
+          title={job.structure_status === "unsupported" ? "这类结构暂不支持" : "请先处理结构"}
           description={issue}
         />
       </div>
@@ -451,9 +451,9 @@ export function StructureConfirmPanel({ job, canConfirmStructure, canAdmin = fal
         <Alert
           type="warning"
           showIcon
-          title={canAdmin ? "这单需要重新识别结构" : "打样失败"}
+          title={canAdmin ? "需要重新识别结构" : "生成失败"}
           description={canAdmin
-            ? "这单是旧版零散候选，或当前线稿还不能形成完整六面。请在 Illustrator 补齐结构语义后重新上传；系统不会继续让你逐个猜盒面。"
+            ? "线稿还不能形成完整六面。请补齐刀线后重新上传。"
             : issue}
         />
       </div>
@@ -468,7 +468,7 @@ export function StructureConfirmPanel({ job, canConfirmStructure, canAdmin = fal
         title="先看展开图，再选产品正面"
         description={canConfirmStructure
           ? "确认左侧是这次要生成的包装，点击印有品名和主视觉的一面。"
-          : "当前账号不能选择产品正面或生成打样图。"}
+          : "当前账号不能选择正面。"}
       />
       <div className="structure-confirm-layout">
         <div className="structure-map-shell">
@@ -599,7 +599,7 @@ export function StructureConfirmPanel({ job, canConfirmStructure, canAdmin = fal
               <span>
                 {canConfirmStructure
                   ? confirmedAnchor
-                    ? "正面已选，可以生成打样图。"
+                    ? "正面已选，可以生成。"
                     : hasArtwork
                       ? "请在展开图或右侧按钮中选择产品正面。"
                       : "原稿预览不可用，不能确认正面。"
@@ -612,7 +612,7 @@ export function StructureConfirmPanel({ job, canConfirmStructure, canAdmin = fal
               loading={submitting}
               onClick={() => void submit()}
             >
-              生成打样图
+              生成立体图
             </Button>
           </div>
         </div>
@@ -646,7 +646,7 @@ export function AdminRotateFront({
         type="info"
         showIcon
         title="换正面"
-        description="只重出 Blender，不重开 Illustrator。点印有品名的那一面。"
+        description="点印有品名的那一面，重新生成立体图。"
       />
       <div className="structure-front-choices" aria-label="更换产品正面">
         <div>

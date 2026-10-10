@@ -2,21 +2,20 @@ import { Table, Tag, Typography } from "antd";
 import type { BillingView, VendorBill } from "../../api";
 
 function vendorTag(v: VendorBill): { color: string; text: string } {
-  if (v.status === "partial") return { color: "warning", text: "部分成功" };
-  if (v.status === "skip") return { color: "default", text: "无按次账单" };
-  if (v.status === "fail" || !v.ok) return { color: "warning", text: "未取全" };
-  return { color: "success", text: "已取到" };
+  if (v.status === "partial") return { color: "warning", text: "部分完成" };
+  if (v.status === "skip") return { color: "default", text: "暂无账单" };
+  if (v.status === "fail" || !v.ok) return { color: "warning", text: "读取不全" };
+  return { color: "success", text: "已更新" };
 }
 
 export function BillingPane({ billing }: { billing: BillingView | null }) {
   if (!billing) {
-    return <Typography.Paragraph type="secondary">正在读取本机记录和上次厂商快照…</Typography.Paragraph>;
+    return <Typography.Paragraph type="secondary">正在读取费用…</Typography.Paragraph>;
   }
   return (
     <div>
       <Typography.Paragraph type="secondary">
-        {billing.cached_at ? `厂商快照时间：${billing.cached_at}` : "尚未拉取厂商。进入本页会冷拉一次；手动按钮才强制刷新。"}
-        厂商余额/月账单不是实时流水。本页不会每十几秒去打厂商。
+        {billing.cached_at ? `更新时间：${billing.cached_at}` : "还没有费用数据。"}
       </Typography.Paragraph>
       {(billing.vendors || []).map((v) => {
         const tag = vendorTag(v);
@@ -31,15 +30,14 @@ export function BillingPane({ billing }: { billing: BillingView | null }) {
             <p>{v.message}</p>
             {v.vendor === "minimax" && v.remains ? (
               <p>
-                余量不是账单。
-                {v.remains.usage_percent != null ? ` 剩余约 ${v.remains.usage_percent}%` : ""}
+                {v.remains.usage_percent != null ? `剩余约 ${v.remains.usage_percent}%` : "剩余情况"}
                 {v.remains.remains_time != null ? ` · remains_time ${v.remains.remains_time}` : ""}
                 {v.remains.model_count != null ? ` · ${v.remains.model_count} 个模型窗口` : ""}
               </p>
             ) : null}
             {v.balance != null ? <p>余额：{String(v.balance)}</p> : null}
             {v.bills_truncated ? (
-              <p>月账单未取全（已显示 {v.bills.length} / {v.bills_total ?? "?"} 条），不是完整月账单。</p>
+              <p>账单未完整加载。</p>
             ) : null}
             {v.bills.length ? (
               <Table
@@ -59,9 +57,9 @@ export function BillingPane({ billing }: { billing: BillingView | null }) {
           </div>
         );
       })}
-      <Typography.Title level={5}>{billing.ledger_label || "本机任务调用记录"}</Typography.Title>
+      <Typography.Title level={5}>{billing.ledger_label || "调用记录"}</Typography.Title>
       <Typography.Paragraph type="secondary">
-        这是本机对照尝试记录，不是厂商已扣费。计费状态一律未知。
+        记录本机调用次数。
         {Object.entries(billing.totals || {})
           .map(([k, v]) => `${k} ×${v.count}`)
           .join("；") || "还没有记过调用"}
@@ -74,11 +72,11 @@ export function BillingPane({ billing }: { billing: BillingView | null }) {
         columns={[
           { title: "时间", dataIndex: "at", width: 200 },
           { title: "厂商", dataIndex: "vendor", width: 90 },
-          { title: "种类", dataIndex: "kind", width: 110 },
-          { title: "尝试", dataIndex: "attempt", width: 70 },
-          { title: "计费", dataIndex: "charge_status", width: 90, render: (v: string) => (v === "unknown" ? "未知" : v || "—") },
+          { title: "类型", dataIndex: "kind", width: 110 },
+          { title: "次数", dataIndex: "attempt", width: 70 },
+          { title: "状态", dataIndex: "charge_status", width: 90, render: (v: string) => (v === "unknown" ? "未知" : v || "—") },
           { title: "任务", dataIndex: "task_id" },
-          { title: "谁", dataIndex: "actor", width: 90 },
+          { title: "操作人", dataIndex: "actor", width: 90 },
           { title: "备注", dataIndex: "note" },
         ]}
       />

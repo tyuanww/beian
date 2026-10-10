@@ -18,6 +18,7 @@ import { detailLoadState, shouldShowWaitCard } from "./waitCard";
 import { reviewHits, shouldUseReworkView } from "./reviewVersion";
 import { ReviewDockPanel } from "./ReviewDockPanel";
 import { firstPendingIssueIndex, issueOrdinal, pageIndexForHit } from "./reviewNav";
+import { customerCopy } from "./customerCopy";
 import { buildRevisionList, partitionReviewHits, withLocalNotes } from "./reviewEvidence";
 import {
   prepareReviewMedia,
@@ -54,11 +55,11 @@ function pageList(task: TaskDetail | null): TaskPage[] {
 
 function statusLead(task: TaskDetail | null, pageIdx: number, pages: TaskPage[]) {
   const pageNo = pages[pageIdx]?.page || pageIdx + 1;
-  if (!task) return "核对页";
-  if (task.status === "completed") return `核对页 · 第 ${pageNo} 页 · 已签字`;
-  if (isReviewable(task.status)) return `核对页 · 点疑点，图上只亮这一条。第 ${pageNo} 页 · 待审核`;
-  if (task.status === "compare_failed") return `核对页 · 第 ${pageNo} 页 · 对照中断`;
-  return `核对页 · 第 ${pageNo} 页`;
+  if (!task) return "审核页";
+  if (task.status === "completed") return `审核页 · 第 ${pageNo} 页 · 已提交`;
+  if (isReviewable(task.status)) return `审核页 · 第 ${pageNo} 页 · 待确认`;
+  if (task.status === "compare_failed") return `审核页 · 第 ${pageNo} 页 · 检查中断`;
+  return `审核页 · 第 ${pageNo} 页`;
 }
 
 export function ReviewPage({ taskId, userId, onBack }: Props) {
@@ -211,7 +212,7 @@ export function ReviewPage({ taskId, userId, onBack }: Props) {
           if (next.conclusion) setConclusion((cur) => cur || next.conclusion || "");
           if (next.job_kind !== "rework" || next.job_status === "failed") return;
           if (shouldUseReworkView(next)) setUseV2(true);
-          message.success("已对照第二份 PDF。请核对上一轮有错的字段。");
+        message.success("新稿已上传，请复核上一轮的问题。");
         })
         .catch((err: unknown) => {
           if (err instanceof ApiError && err.status === 404) {
@@ -289,7 +290,7 @@ export function ReviewPage({ taskId, userId, onBack }: Props) {
         })
         .catch((err: unknown) => {
           if (!cancelled && !controller.signal.aborted) {
-            setReviewMediaError(err instanceof Error ? err.message : "高清核对图加载失败");
+            setReviewMediaError(err instanceof Error ? err.message : "页面图片加载失败");
           }
         });
     }
@@ -305,7 +306,7 @@ export function ReviewPage({ taskId, userId, onBack }: Props) {
     if (!page) return;
     if (failedMedia.source === "raster") {
       setReviewMedia(null);
-      setReviewMediaError("高清核对图显示失败，请刷新后重试");
+      setReviewMediaError("页面图片显示失败，请刷新后重试。");
       return;
     }
     reviewMediaLoad.current?.abort();
@@ -321,7 +322,7 @@ export function ReviewPage({ taskId, userId, onBack }: Props) {
       })
       .catch((err: unknown) => {
         if (!controller.signal.aborted) {
-          setReviewMediaError(err instanceof Error ? err.message : "高清核对图显示失败，请刷新后重试");
+          setReviewMediaError(err instanceof Error ? err.message : "页面图片显示失败，请刷新后重试。");
         }
       });
   }
@@ -390,8 +391,8 @@ export function ReviewPage({ taskId, userId, onBack }: Props) {
 
   if (!taskId) {
     return (
-      <Empty description="还没有打开审核单">
-        <Button onClick={onBack}>回到任务</Button>
+      <Empty description="还没有打开审稿单">
+        <Button onClick={onBack}>回到审稿</Button>
       </Empty>
     );
   }
@@ -471,7 +472,7 @@ export function ReviewPage({ taskId, userId, onBack }: Props) {
   async function uploadRework(file: File) {
     if (!task || !reworkable || hasUnsavedNotes) return;
     if (!(await decisionQueueRef.current)) {
-      message.error("字段结论或备注还没保存，暂不能对红");
+      message.error("先保存备注，再继续。");
       return;
     }
     const fd = new FormData();
@@ -482,9 +483,9 @@ export function ReviewPage({ taskId, userId, onBack }: Props) {
       setTask(next);
       if (shouldShowWaitCard(next)) return;
       setUseV2(true);
-      message.success("已对照第二份 PDF。请核对上一轮有错的字段。");
+      message.success("新稿已上传，请复核上一轮的问题。");
     } catch (err) {
-      message.error(err instanceof Error ? err.message : "对红失败");
+      message.error(err instanceof Error ? err.message : "复核失败");
     } finally {
       endBusy();
     }
@@ -493,16 +494,16 @@ export function ReviewPage({ taskId, userId, onBack }: Props) {
   async function signOff() {
     if (!task || !reviewable || hasUnsavedNotes) return;
     if (!(await decisionQueueRef.current)) {
-      message.error("字段结论或备注还没保存，暂不能签字");
+      message.error("先保存备注，再提交结果。");
       return;
     }
     beginBusy();
     try {
       const next = await api.complete(task.id, { conclusion });
       setTask(next);
-      message.success("已记录你的结论，不是系统过审");
+      message.success("结果已提交。");
     } catch (err) {
-      message.error(err instanceof Error ? err.message : "还不能签字");
+      message.error(err instanceof Error ? err.message : "暂时不能提交结果");
     } finally {
       endBusy();
     }
@@ -549,19 +550,19 @@ export function ReviewPage({ taskId, userId, onBack }: Props) {
     return (
       <section className="review-page">
         <header className="page-head">
-          <h1 className="page-title">审核单</h1>
+          <h1 className="page-title">审稿单</h1>
           <button type="button" className="btn-ghost" onClick={onBack}>
             返回列表
           </button>
         </header>
-        <Alert type="error" showIcon title={error || "审核单加载失败"} />
+        <Alert type="error" showIcon title={error || "审稿单加载失败"} />
       </section>
     );
   }
   if (loadState === "loading") {
     return (
       <div className="desk-empty">
-        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="打开核对页…" />
+        <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="打开审核页…" />
       </div>
     );
   }
@@ -586,7 +587,7 @@ export function ReviewPage({ taskId, userId, onBack }: Props) {
     >
       <header className="page-head">
         <div>
-          <h1 className="page-title">{task?.product_name || task?.title || "核对页"}</h1>
+          <h1 className="page-title">{task?.product_name || task?.title || "审核页"}</h1>
           <p className="page-lead">{statusLead(task, pageIdx, pages)}</p>
         </div>
         <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
@@ -599,7 +600,7 @@ export function ReviewPage({ taskId, userId, onBack }: Props) {
             aria-pressed={reviewFullscreen}
             onClick={() => void toggleReviewFullscreen()}
           >
-            {reviewFullscreen ? "退出全屏" : "全屏核对"}
+            {reviewFullscreen ? "退出" : "全屏"}
           </button>
           {Array.isArray(task?.pages_v2) && task.pages_v2.length > 0 ? (
             <button
@@ -631,10 +632,10 @@ export function ReviewPage({ taskId, userId, onBack }: Props) {
                 input.click();
               }}
             >
-              上传改稿 PDF
+              上传新稿
             </button>
           )}
-          {hasUnsavedNotes ? <span className="review-draft-status" role="status">请先保存各字段备注，再签字或上传改稿</span> : null}
+          {hasUnsavedNotes ? <span className="review-draft-status" role="status">先保存备注，再继续。</span> : null}
           {pages.length > 1
             ? pages.map((p, i) => (
                 <button
@@ -652,7 +653,7 @@ export function ReviewPage({ taskId, userId, onBack }: Props) {
             <label className="review-conclusion review-sign-layer">
               <Input
                 aria-label="结论"
-                placeholder="结论，签字要用"
+                placeholder="写下审核结果"
                 value={conclusion}
                 disabled={busy}
                 onChange={(e) => setConclusion(e.target.value)}
@@ -667,20 +668,20 @@ export function ReviewPage({ taskId, userId, onBack }: Props) {
             disabled={!reviewable || busy || hasUnsavedNotes || !conclusion.trim()}
             onClick={() => void signOff()}
           >
-            {hits.some((h) => h.decision === "issue") ? "签字并待设计改稿" : "签字"}
+            {hits.some((h) => h.decision === "issue") ? "提交并等新稿" : "提交结果"}
           </button>
         </div>
       </header>
 
       {error ? <Alert type="error" title={error} style={{ marginBottom: 16 }} /> : null}
       {task?.error || task?.job_error ? (
-        <Alert type="error" showIcon style={{ marginBottom: 16 }} title={task.error || task.job_error} />
+        <Alert type="error" showIcon style={{ marginBottom: 16 }} title={customerCopy(task.error || task.job_error || "") || "检查失败。"} />
       ) : null}
       {task && reviewable && hits.length === 0 ? (
-        <Alert type="info" showIcon style={{ marginBottom: 16 }} title="机审没标出疑点，仍要你过一遍" />
+        <Alert type="info" showIcon style={{ marginBottom: 16 }} title="没有发现疑点，请快速看一遍。" />
       ) : null}
       {signed ? (
-        <Alert type="success" showIcon style={{ marginBottom: 16 }} title="已签字，不是系统过审" />
+        <Alert type="success" showIcon style={{ marginBottom: 16 }} title="结果已提交。" />
       ) : null}
 
       <ReviewWorkspace key={userId || "session-only"} userId={userId} panel={
@@ -691,7 +692,7 @@ export function ReviewPage({ taskId, userId, onBack }: Props) {
             hits={hits} active={active} current={current} fullscreen={reviewFullscreen}
             currentHasBox={currentHasBox} pageNo={pageNo} reviewable={reviewable} busy={busy}
             note={current?.id ? notes[current.id] ?? current.note ?? "" : ""}
-            emptyMessage={task?.status === "compare_failed" || task?.job_status === "failed" ? "对照没跑完，没有机审条目。" : "没有机审条目。仍请翻页看一遍。"}
+            emptyMessage={task?.status === "compare_failed" || task?.job_status === "failed" ? "检查未完成，暂时没有结果。" : "暂时没有检查结果，请翻页查看。"}
             nativeTaskEvidence={task?.native_text} ocrMeta={task?.ocr_meta} reworkCheck={task?.rework_check} onPick={pickHit}
             onDecide={(hit, decision, note) => void decide(hit, decision, note)}
             onNoteCommit={(hit, decision, note) => void decide(hit, decision, note)}
@@ -755,7 +756,7 @@ export function ReviewPage({ taskId, userId, onBack }: Props) {
                   />
                 ) : (
                   <div className={reviewMediaError ? "review-media-status is-error" : "review-media-status"}>
-                    {reviewMediaError || "正在载入高清核对面…"}
+                    {reviewMediaError || "正在载入页面…"}
                   </div>
                 )}
                 {(reviewMedia ? pinHits : []).map(({ h, i, indices }) => {
@@ -844,7 +845,7 @@ export function ReviewPage({ taskId, userId, onBack }: Props) {
                         writePinsOn(browserStore(), next);
                       }}
                     >
-                      {pinsOn ? "隐藏本字段钉" : "显示本字段钉"}
+                      {pinsOn ? "隐藏本项目钉" : "显示本项目钉"}
                     </button>
                     <button
                       type="button"
@@ -855,7 +856,7 @@ export function ReviewPage({ taskId, userId, onBack }: Props) {
                         writeBoxesOn(browserStore(), next);
                       }}
                     >
-                      {boxesOn ? "隐藏本字段框" : "显示本字段框"}
+                      {boxesOn ? "隐藏本项目框" : "显示本项目框"}
                     </button>
                     <button type="button" className="btn-ghost" onClick={() => setToolsOpen(false)}>
                       收缩
@@ -872,7 +873,7 @@ export function ReviewPage({ taskId, userId, onBack }: Props) {
             <Empty
               description={
                 task?.status === "compare_failed" || task?.job_status === "failed"
-                  ? "对照中断，这一页没有图。看上面的原因，或回看板重传一对。"
+                  ? "检查中断，这一页没有图。请返回看板重新上传。"
                   : "这一页还没有图"
               }
               image={Empty.PRESENTED_IMAGE_SIMPLE}
@@ -880,7 +881,7 @@ export function ReviewPage({ taskId, userId, onBack }: Props) {
             />
           )}
           <p className="page-lead" style={{ padding: "0 16px 12px" }}>
-            只亮当前疑点 · 紫框已命中 · 黄框待核对 · 钉和框只作用于本字段 · 拖动画布会暂时藏框 · 滚轮缩放
+只标当前项目。拖动时暂时隐藏。
           </p>
         </div>
 

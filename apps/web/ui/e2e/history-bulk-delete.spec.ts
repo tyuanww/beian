@@ -14,12 +14,12 @@ test("历史批删跳过进行中记录，并保留删除失败的部分结果",
   syntheticApi.mockups.push(completedMockup("cccccccccccc", "已出图打样"));
   syntheticApi.failDeletes.add("mockup:cccccccccccc");
   await page.goto("/history");
-  await page.getByRole("button", { name: /^编\s*辑$/ }).click();
+  await page.getByRole("button", { name: /管\s*理/ }).click();
   await expect(page.getByRole("checkbox", { name: "选择 正在对照审稿" })).toBeDisabled();
-  await expect(page.getByRole("row").filter({ hasText: "正在对照审稿" }).getByText("正在处理，结束后才能删除")).toBeVisible();
+  await expect(page.getByRole("row").filter({ hasText: "正在对照审稿" }).getByText("处理完成后可删除")).toBeVisible();
   await page.getByRole("checkbox", { name: "选择 已签字审稿" }).check();
   await page.getByRole("checkbox", { name: "选择 已出图打样" }).check();
-  await page.getByRole("button", { name: "删除选中" }).click();
+  await page.locator(".history-bulkbar").getByRole("button", { name: /^删\s*除$/ }).click();
   await page.getByRole("dialog").getByRole("button", { name: /^删\s*除$/ }).click();
   await expect(page.getByText(/1 条未删除/)).toBeVisible();
   await expect(page.getByRole("button", { name: "打开审稿记录：已签字审稿" })).toHaveCount(0);
@@ -39,14 +39,14 @@ test("本地日期快捷筛选和自定义时间跨刷新恢复，UI字段不传
   await page.reload();
   await expect(page.getByLabel("开始日期")).toHaveValue("2025-12-28");
   await page.getByRole("combobox", { name: "时间范围" }).click();
-  await page.locator(".ant-select-dropdown:visible").getByText("自定义时间", { exact: true }).click();
+  await page.locator(".ant-select-dropdown:visible").getByText("自选时间", { exact: true }).click();
   await page.getByLabel("开始日期").fill("2025-12-30");
   await page.getByLabel("结束日期").fill("2026-01-02");
   await page.reload();
   await expect(page.getByLabel("开始日期")).toHaveValue("2025-12-30");
   await expect(page.getByLabel("结束日期")).toHaveValue("2026-01-02");
   await page.getByRole("combobox", { name: "时间范围" }).click();
-  await page.locator(".ant-select-dropdown:visible").getByText("全部时间", { exact: true }).click();
+  await page.locator(".ant-select-dropdown:visible").getByText("所有时间", { exact: true }).click();
   await expect(page.getByLabel("开始日期")).toHaveCount(0);
   await expect.poll(() => queries[queries.length - 1].has("date_from")).toBe(false);
   expect(queries.every(query => !query.has("time_mode"))).toBe(true);
@@ -64,7 +64,7 @@ test("未达10MB筛选使用虚拟状态，失败标签采用错误色", async (
   await page.goto("/history");
   await expect(page.locator(".ant-tag-error").getByText("失败", { exact: true })).toBeVisible();
   await page.getByRole("combobox", { name: "状态" }).click();
-  await page.locator(".ant-select-dropdown:visible").getByText("未达到 10 MB", { exact: true }).click();
+  await page.locator(".ant-select-dropdown:visible").getByText("超出限制", { exact: true }).click();
   await expect.poll(() => status).toBe("unmet_target");
   await expect(page.locator(".ant-tag-error").getByText("失败", { exact: true })).toBeVisible();
   await page.reload();
@@ -74,18 +74,18 @@ test("未达10MB筛选使用虚拟状态，失败标签采用错误色", async (
 test("窄屏批量栏和确认框保持视口居中", async ({ page, syntheticApi }) => {
   await page.setViewportSize({ width: 375, height: 812 });
   syntheticApi.tasks.push(completedTask("dddddddddddd", "可全选审稿"));
-  await page.goto("/history"); await page.getByRole("button", { name: /^编\s*辑$/ }).click();
+  await page.goto("/history"); await page.getByRole("button", { name: /管\s*理/ }).click();
   await page.locator(".history-bulkbar").getByRole("checkbox", { name: "全选本页" }).check();
   const box = await page.locator(".history-bulkbar").boundingBox();
   expect(Math.abs(box!.x + box!.width / 2 - 187.5)).toBeLessThan(3);
-  await page.getByRole("button", { name: "删除选中" }).click();
+  await page.locator(".history-bulkbar").getByRole("button", { name: /^删\s*除$/ }).click();
   const dialog = await page.getByRole("dialog").boundingBox();
   expect(Math.abs(dialog!.x + dialog!.width / 2 - 187.5)).toBeLessThan(3);
 });
 
 test("只有进行中记录时不能全选删除", async ({ page, syntheticApi }) => {
   syntheticApi.tasks.push(runningTask("eeeeeeeeeeee", "正在处理中"));
-  await page.goto("/history"); await page.getByRole("button", { name: /^编\s*辑$/ }).click();
+  await page.goto("/history"); await page.getByRole("button", { name: /管\s*理/ }).click();
   await expect(page.locator(".history-bulkbar").getByRole("checkbox", { name: "全选本页" })).toBeDisabled();
 });
 
@@ -97,18 +97,18 @@ test("服务端分页每页十行，搜索重置第一页，不调用旧全量�
   await page.screenshot({ path: info.outputPath("history-desktop.png"), fullPage: true });
   await page.getByRole("button", { name: "下一页" }).click(); await expect(page.getByText(/第 2 页/)).toBeVisible();
   await page.getByRole("button", { name: "下一页" }).click(); await expect(rows).toHaveCount(3);
-  await page.getByLabel("搜索历史记录").fill("批次 23");
-  await page.getByLabel("搜索历史记录").press("Enter");
+  await page.getByLabel("搜索历史").fill("批次 23");
+  await page.getByLabel("搜索历史").press("Enter");
   await expect(page.getByText(/第 1 页/)).toBeVisible(); await expect(rows).toHaveCount(1);
   expect(syntheticApi.calls.some(call => call.path === "/api/tasks" || call.path === "/api/mockups")).toBe(false);
   await page.reload();
-  await expect(page.getByLabel("搜索历史记录")).toHaveValue("批次 23");
+  await expect(page.getByLabel("搜索历史")).toHaveValue("批次 23");
   await expect(rows).toHaveCount(1);
 });
 
 test("跨页选择保留，取消本页不清除其他页", async ({ page, syntheticApi }) => {
   for (let index = 1; index <= 12; index++) syntheticApi.tasks.push(completedTask(index.toString(16).padStart(12, "0"), `记录 ${index}`));
-  await page.goto("/history"); await page.getByRole("button", { name: /^编\s*辑$/ }).click();
+  await page.goto("/history"); await page.getByRole("button", { name: /管\s*理/ }).click();
   await page.getByRole("checkbox", { name: "选择 记录 1", exact: true }).check();
   await page.getByRole("button", { name: "下一页" }).click();
   const select = page.locator(".history-bulkbar").getByRole("checkbox", { name: "全选本页" });
@@ -127,9 +127,9 @@ test("历史请求失败保留上次记录，重建索引自动继续", async ({
     if (count++ < 2) await route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ detail: "rebuilding", code: "history_index_unavailable" }) });
     else await route.fallback();
   });
-  await page.getByRole("button", { name: "刷新历史记录" }).click();
-  await expect(page.getByText("正在整理历史记录，页面会自动继续加载。")).toBeVisible();
+  await page.getByRole("button", { name: "刷新历史" }).click();
+  await expect(page.getByText("正在加载记录…")).toBeVisible();
   await expect(page.getByRole("button", { name: /打开审稿记录/ })).toBeVisible();
-  await expect(page.getByText("正在整理历史记录，页面会自动继续加载。")).toHaveCount(0, { timeout: 8000 });
+  await expect(page.getByText("正在加载记录…")).toHaveCount(0, { timeout: 8000 });
   expect(count).toBeGreaterThanOrEqual(3);
 });

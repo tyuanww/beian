@@ -36,12 +36,12 @@ test("压缩上传复用分片 receipt，刷新详情并只重试服务端允许
   await expect(page.getByText("8.20 MB")).toBeVisible();
   await page.screenshot({ path: info.outputPath("compression-desktop.png"), fullPage: true });
   await expect(page.getByText("未生成", { exact: true })).toBeVisible();
-  await expect(page.getByRole("link", { name: "下载可用文件 ZIP" })).toHaveAttribute("href", `/api/compressions/${id}/zip`);
+  await expect(page.getByRole("link", { name: /下载结果\s*ZIP/ })).toHaveAttribute("href", `/api/compressions/${id}/zip`);
   await page.reload();
   await expect(page.getByText("检测报告.pdf", { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "重试可重试项" }).click();
+  await page.getByRole("button", { name: "重试失败项" }).click();
   expect(retryBody).toEqual({ expected_revision: 1, file_ids: ["asset2"] });
-  await expect(page.getByRole("button", { name: "下载可用文件 ZIP" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: /下载结果\s*ZIP/ })).toBeDisabled();
 });
 
 test("净版七标签显示关闭未确认，并复用一次请求", async ({ page, syntheticApi }) => {
@@ -55,14 +55,15 @@ test("净版七标签显示关闭未确认，并复用一次请求", async ({ pa
     await route.fulfill({ status: 202, contentType: "application/json", body: JSON.stringify(job) });
   });
   await page.goto(`/mockup/${id}`);
-  const tabs = page.getByRole("region", { name: "2D 平面图" }).getByRole("tab");
-  await expect(tabs).toHaveText(["2D展开图", "正面", "反面", "左侧", "右侧", "顶部", "底部"]);
-  await page.getByRole("button", { name: "生成净版展开图" }).click();
-  await expect(page.getByText("Illustrator 还没有确认关闭，净版先不算做好。")).toBeVisible();
+  const tabs = page.getByRole("region", { name: "印刷面" }).getByRole("tab");
+  await expect(tabs).toHaveText(["2D 展开图", "正面", "反面", "左侧", "右侧", "顶部", "底部"]);
+  await expect(page.getByRole("region", { name: "展开图" }).getByRole("heading", { name: "展开图" })).toBeVisible();
+  await page.getByRole("button", { name: "生成展开图" }).click();
+  await expect(page.getByText("展开图还在生成，请稍后查看。")).toBeVisible();
   await expect(page.getByRole("button", { name: "正在生成" })).toBeDisabled();
-  await expect(page.getByRole("button", { name: "下载六面 ZIP" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "下载六面" })).toBeDisabled();
   await page.reload();
-  await expect(page.getByText("Illustrator 还没有确认关闭，净版先不算做好。")).toBeVisible();
+  await expect(page.getByText("展开图还在生成，请稍后查看。")).toBeVisible();
   expect(posts).toBe(1);
 });
 
@@ -73,20 +74,20 @@ test("净版展示毫米和两个独立下载键；变更后不展示旧 PDF", a
   await page.route(`**/api/mockups/${id}/files/unfolded_print`, route => route.fulfill({ contentType: "application/pdf", body: "%PDF-1.4\n%%EOF" }));
   await page.goto(`/mockup/${id}`);
   await expect(page.getByText("420 × 280 mm · 1:1")).toBeVisible();
-  await expect(page.getByRole("link", { name: "下载展开 PDF" })).toHaveAttribute("href", `/api/mockups/${id}/files/unfolded_print?download=1`);
-  await expect(page.getByRole("link", { name: "下载六面 ZIP" })).toHaveAttribute("href", `/api/mockups/${id}/files/print_faces_zip?download=1`);
+  await expect(page.getByRole("link", { name: "下载 PDF" })).toHaveAttribute("href", `/api/mockups/${id}/files/unfolded_print?download=1`);
+  await expect(page.getByRole("link", { name: "下载六面" })).toHaveAttribute("href", `/api/mockups/${id}/files/print_faces_zip?download=1`);
   Object.assign(job, { unfolded_print: { status: "failed", reason: "source_changed" } });
   await page.reload();
-  await expect(page.getByTitle("净版展开图预览")).toHaveCount(0);
-  await expect(page.getByRole("link", { name: "下载展开 PDF" })).toHaveCount(0);
-  await expect(page.getByText("源稿已经变了，这份净版不再对应当前稿。")).toBeVisible();
+  await expect(page.getByTitle("展开图预览")).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "下载 PDF" })).toHaveCount(0);
+  await expect(page.getByText("源稿已变化，请重新生成展开图。")).toBeVisible();
 });
 
 test("文件压缩在窄屏和深色主题可使用", async ({ page }, info) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.addInitScript(() => localStorage.setItem("wb_appearance", JSON.stringify({ theme: "dark", fontPx: 16 })));
   await page.goto("/compress");
-  await expect(page.getByRole("heading", { name: "文件压缩" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "压缩文件" })).toBeVisible();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
   await expect(page.getByLabel("选择压缩文件")).toBeEnabled();
   const width = await page.evaluate(() => ({ width: document.documentElement.scrollWidth, viewport: innerWidth }));

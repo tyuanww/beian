@@ -20,13 +20,13 @@ export const BOARD_ROWS: {
   group: string;
   kind: "wizard" | "push" | "scan" | "retry";
 }[] = [
-  { id: "feishu", title: "飞书登录", group: "飞书登录", kind: "wizard" },
-  { id: "lark", title: "飞书推送", group: "飞书推送", kind: "push" },
-  { id: "baidu", title: "百度 OCR", group: "百度 OCR", kind: "wizard" },
-  { id: "minimax", title: "MiniMax", group: "MiniMax（可选）", kind: "wizard" },
-  { id: "python", title: "Python", group: "本机依赖", kind: "retry" },
-  { id: "blender", title: "Blender", group: "本机依赖", kind: "scan" },
-  { id: "illustrator", title: "Illustrator", group: "本机依赖", kind: "scan" },
+  { id: "feishu", title: "登录设置", group: "飞书登录", kind: "wizard" },
+  { id: "lark", title: "消息通知", group: "飞书推送", kind: "push" },
+  { id: "baidu", title: "文字识别", group: "百度 OCR", kind: "wizard" },
+  { id: "minimax", title: "智能复核", group: "MiniMax（可选）", kind: "wizard" },
+  { id: "python", title: "脚本服务", group: "本机依赖", kind: "retry" },
+  { id: "blender", title: "3D 服务", group: "本机依赖", kind: "scan" },
+  { id: "illustrator", title: "排版服务", group: "本机依赖", kind: "scan" },
 ];
 
 export type WizardGuide = {
@@ -36,44 +36,44 @@ export type WizardGuide = {
 
 export const WIZARD: Record<string, WizardGuide> = {
   飞书登录: {
-    intro: "网页应用走完 OAuth 才算绿。不是第二套登录，籽烨日常进站不走这页。",
+    intro: "连接飞书账号。",
     steps: [
-      "开放平台建网页应用，复制 App ID / App Secret。",
-      "回调地址填对外网址 + /api/auth/feishu/callback。",
-      "保存后点「用飞书走一遍授权」，或回开工板复测这一行。",
+      "填写飞书应用信息。",
+      "填写回调地址。",
+      "保存后点击飞书登录完成授权。",
     ],
   },
   飞书推送: {
-    intro: "点发一条测试。不必装 lark-cli，也不必手填开关、open_id、bot。发给当前登录的飞书。",
+    intro: "向当前账号发送一条测试消息。",
     steps: [
-      "没有飞书身份时，按钮会直接带你去飞书授权。授权回来再点一次。",
-      "点发一条测试。用已填的飞书应用发给当前登录。成功会自动打开推送并记下你的 open_id。",
-      "手机飞书应收到「审稿台推送测试」。没有则去开放平台给应用开通发消息，并先跟这个机器人说过一句话。",
+      "没有登录时，先完成飞书授权。",
+      "点击发送测试。",
+      "在飞书中确认是否收到消息。",
     ],
   },
   "百度 OCR": {
-    intro: "做不到静默授权。绿的意思是对照遇到图片或原生未覆盖区域时需要调用的识别接口通了；纯原生覆盖稿不依赖它。",
+    intro: "设置图片文字识别。",
     steps: [
-      "打开百度智能云文字识别控制台。",
-      "建应用，复制 API Key 和 Secret。",
-      "粘贴到下面保存。开工板会用对照同款接口复测，没有静默授权。",
+      "填写文字识别服务密钥。",
+      "保存设置。",
+      "回到运行状态重新检查。",
     ],
   },
   "MiniMax（可选）": {
-    intro: "探测是 GET /v1/models 模型列表，不是对话，也不是余额。",
+    intro: "设置智能复核。",
     steps: [
-      "粘贴国内能用的 API Key。",
-      "模型只留国内可用项，默认 MiniMax-M3，不要铺全球模型。",
-      "保存后回开工板复测。通了必须看见「模型列表」，不能只写一个「通」。",
+      "填写服务密钥。",
+      "选择可用模型。",
+      "保存后重新检查。",
     ],
   },
 };
 
 export const HOST_INTRO =
-  "这是杭州 Windows 上的 exe，不是云账号。只有显式授权的管理员能扫、能采用。扫到路径要点采用才写入。找不到就人话列出搜过的目录和 PATH。";
+  "检查服务器上的运行环境。";
 
 export const PUSH_INTRO =
-  "点发一条测试即可。不必装 lark-cli，不必手填开关、open_id、bot。开工板绿不等于籽烨已收到；她作为审稿接收人可在本页再测一次。";
+  "向当前账号发送一条测试消息。";
 
 export function settingsGroupPath(group: string): string {
   return "/settings?group=" + encodeURIComponent(group);
@@ -92,20 +92,27 @@ export function feishuAppReady(
 }
 
 export function shortGroupLabel(title: string): string {
-  if (title === "费用账单") return "费用";
-  if (title === "MiniMax（可选）") return "MiniMax";
-  if (title === "本机依赖") return "本机";
-  return title;
+  const labels: Record<string, string> = {
+    外观: "外观",
+    开工板: "运行状态",
+    费用账单: "费用",
+    飞书登录: "登录设置",
+    飞书推送: "消息通知",
+    "百度 OCR": "文字识别",
+    "MiniMax（可选）": "智能复核",
+    本机依赖: "运行环境",
+  };
+  return labels[title] || title;
 }
 
 export function setupHeadline(probes: Record<string, ProbeResult | { pending: true }>): string {
   const rows = BOARD_ROWS.map((row) => probes[row.id]);
   const done = rows.filter((r): r is ProbeResult => Boolean(r) && !("pending" in r));
   const ok = done.filter((r) => r.ok).length;
-  if (done.length === 0) return "还没测过。先点全部检测。";
-  if (ok === BOARD_ROWS.length) return "七条探测通过。不是对照已跑通，也不是 8/31 验收。";
+  if (done.length === 0) return "还没检查。先检查全部。";
+  if (ok === BOARD_ROWS.length) return "运行环境正常。";
   const firstBad = firstBadRow(probes);
-  return `杭州这台机还缺 ${BOARD_ROWS.length - ok} 条。${firstBad ? `下一步：${firstBad.title}` : "红的右边有下一步。"}`;
+  return `还有 ${BOARD_ROWS.length - ok} 项待处理。${firstBad ? `下一步：${firstBad.title}` : "请查看状态。"}`;
 }
 
 export function firstBadRow(probes: Record<string, ProbeResult | { pending: true }>) {
@@ -119,12 +126,12 @@ export function statusWord(
   r: ProbeResult | { pending: true } | undefined,
   mode?: "send",
 ): { cls: string; text: string } {
-  if (!r) return { cls: "is-idle", text: "未测" };
-  if ("pending" in r) return { cls: "is-wait", text: mode === "send" ? "发送中" : "检测中" };
-  if (r.ok && /未启用/.test(r.message)) return { cls: "is-ok", text: "未用" };
-  if (r.ok) return { cls: "is-ok", text: "可用" };
+  if (!r) return { cls: "is-idle", text: "未检查" };
+  if ("pending" in r) return { cls: "is-wait", text: mode === "send" ? "发送中" : "检查中" };
+  if (r.ok && /未启用/.test(r.message)) return { cls: "is-ok", text: "未启用" };
+  if (r.ok) return { cls: "is-ok", text: "正常" };
   if (/超时/.test(r.message)) return { cls: "is-wait", text: "超时" };
-  return { cls: "is-bad", text: "还缺" };
+  return { cls: "is-bad", text: "待处理" };
 }
 
 export function isPending(r: ProbeResult | { pending: true } | undefined): r is { pending: true } {
@@ -137,13 +144,13 @@ export function rowDetail(
   who: string,
   sending = false,
 ): string {
-  if (sending && row.kind === "push") return "正在发给当前登录的飞书，请稍等。";
+  if (sending && row.kind === "push") return "正在发送测试消息。";
   if (isPending(r)) {
-    if (row.kind === "scan") return "正在扫这台电脑…";
-    return "正在检测，请稍等。";
+    if (row.kind === "scan") return "正在检查运行环境…";
+    return "正在检查…";
   }
   if (r) {
-    if (row.id === "lark" && r.ok) return `能发给当前登录 · ${who}`;
+    if (row.id === "lark" && r.ok) return `可以发给当前账号 · ${who}`;
     return r.message;
   }
   return idleRowMessage(row.id, row.kind);
@@ -156,51 +163,51 @@ export function foldCatalogReason(
 ): string | null {
   const probeOk = Boolean(probe && !("pending" in probe) && probe.ok);
   if (group === "飞书推送") {
-    return "接收人和发送身份由「发一条测试」自动写入。点开才改。";
+    return "接收人会由测试消息自动设置。";
   }
   if (group === "百度 OCR") {
     const ak = fields.find((f) => f.key === "BAIDU_OCR_API_KEY");
     if (ak?.set || probeOk) {
-      return `对照识别已可用${ak?.last4 ? `（Key ${ak.last4}）` : ""}。密钥默认收起。`;
+      return "文字识别已可用。密钥已收起。";
     }
   }
   if (group === "MiniMax（可选）") {
     const enabled = fields.find((f) => f.key === "MINIMAX_ENABLED");
     const key = fields.find((f) => f.key === "MINIMAX_API_KEY");
     if (enabled?.value === "false" || (probe && !("pending" in probe) && /未启用/.test(probe.message))) {
-      return "语义复核未开，不影响主对照。密钥默认收起。";
+      return "智能复核未启用。密钥已收起。";
     }
     if (key?.set || probeOk) {
-      return `模型列表已测通${key?.last4 ? `（Key ${key.last4}）` : ""}。密钥默认收起。`;
+      return "智能复核已可用。密钥已收起。";
     }
   }
   return null;
 }
 
 export function progressSpoken(probes: Record<string, ProbeResult | { pending: true }>, probeBusy: string): string {
-  if (probeBusy) return probeBusy.replace("检测中 ", "检测中 ");
+  if (probeBusy) return probeBusy.replaceAll("检测中", "检查中");
   const done = BOARD_ROWS.map((row) => probes[row.id]).filter(
     (r): r is ProbeResult => Boolean(r) && !("pending" in r),
   );
   const ok = done.filter((r) => r.ok).length;
-  if (done.length === 0) return `0 分之 ${BOARD_ROWS.length} 未测，先点全部检测`;
+  if (done.length === 0) return `0 / ${BOARD_ROWS.length} 未检查，先检查全部`;
   const firstBad = firstBadRow(probes);
-  if (ok === BOARD_ROWS.length) return `${BOARD_ROWS.length} 分之 ${BOARD_ROWS.length} 可用，七条探测通过`;
-  if (firstBad) return `${ok} 分之 ${BOARD_ROWS.length} 可用，下一步 ${firstBad.title}`;
-  return `${ok} 分之 ${BOARD_ROWS.length} 可用`;
+  if (ok === BOARD_ROWS.length) return `${BOARD_ROWS.length} / ${BOARD_ROWS.length} 正常`;
+  if (firstBad) return `${ok} / ${BOARD_ROWS.length} 正常，下一步 ${firstBad.title}`;
+  return `${ok} / ${BOARD_ROWS.length} 正常`;
 }
 
 export function idleRowMessage(id: string, kind: (typeof BOARD_ROWS)[number]["kind"]): string {
-  if (id === "minimax") return "模型列表 GET /v1/models，不是对话";
-  if (kind === "scan") return "路径还没确认。请由管理员点扫描，再点采用。";
-  if (kind === "push") return "点发一条测试。没有飞书身份会先带你去授权，不必手填 open_id。";
-  return "点全部检测或这一行";
+  if (id === "minimax") return "检查可用模型。";
+  if (kind === "scan") return "请先检查运行环境。";
+  if (kind === "push") return "点击发送测试。";
+  return "点击检查。";
 }
 
 export function probeErrorMessage(err: unknown): string {
   const raw = err instanceof Error ? err.message : "探测失败";
   if (/failed to fetch|networkerror|load failed/i.test(raw)) {
-    return "服务没连上。看杭州 :8787 还在不在。";
+    return "服务没连上，请稍后重试。";
   }
   return raw;
 }

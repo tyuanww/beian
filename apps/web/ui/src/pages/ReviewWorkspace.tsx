@@ -37,7 +37,7 @@ export function ReviewWorkspace({ userId, children, panel }: Props) {
       style={{ gridTemplateColumns: stacked ? "minmax(0, 1fr)" : preference.open ? `minmax(480px, 1fr) 8px ${width}px` : "minmax(0, 1fr) 56px" }}>
       {children}
       {!stacked && preference.open ? (
-        <div className="review-sidebar-resizer" role="separator" tabIndex={0} aria-label="调整右侧核对栏宽度"
+        <div className="review-sidebar-resizer" role="separator" tabIndex={0} aria-label="调整右侧审核栏宽度"
           aria-orientation="vertical" aria-valuemin={SIDEBAR_MIN} aria-valuemax={maximum} aria-valuenow={width}
           onKeyDown={(event) => {
             const next = event.key === "ArrowLeft" ? width + 16 : event.key === "ArrowRight" ? width - 16 : event.key === "Home" ? SIDEBAR_MIN : event.key === "End" ? maximum : null;
@@ -54,11 +54,11 @@ export function ReviewWorkspace({ userId, children, panel }: Props) {
           onPointerMove={(event) => { if (drag.current) changeWidth(drag.current.width + drag.current.x - event.clientX); }}
           onPointerUp={() => { drag.current = null; }} onPointerCancel={() => { drag.current = null; }} onLostPointerCapture={() => { drag.current = null; }} />
       ) : null}
-      <aside data-testid="review-dock" className={`review-sidebar glass-pane${preference.open ? "" : " is-shut"}`} aria-label="右侧核对栏">
+      <aside data-testid="review-dock" className={`review-sidebar glass-pane${preference.open ? "" : " is-shut"}`} aria-label="右侧审核栏">
         <div className="review-sidebar-header">
-          {preference.open ? <strong>核对与处理</strong> : null}
+          {preference.open ? <strong>审核栏</strong> : null}
           <button type="button" className="btn-ghost" aria-expanded={preference.open} aria-controls="review-sidebar-content" onClick={toggle}>
-            {preference.open ? "收起" : "展开核对栏"}
+            {preference.open ? "收起" : "展开审核栏"}
           </button>
         </div>
         <div id="review-sidebar-content" className="review-sidebar-body" hidden={!preference.open}>{panel}</div>

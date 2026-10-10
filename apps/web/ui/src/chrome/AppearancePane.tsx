@@ -66,7 +66,7 @@ export function AppearancePane() {
       <div className="appear-row">
         <div>
           <div className="appear-label">主题</div>
-          <p className="appear-help">浅色对准锁定稿。深色是同一套淡紫品牌，不是灰黑中台。</p>
+          <p className="appear-help">选择浅色、深色或跟随系统。</p>
         </div>
         <Segmented
           value={prefs.theme}
@@ -81,15 +81,15 @@ export function AppearancePane() {
 
       <div className="appear-row appear-row-stack">
         <div>
-          <div className="appear-label">UI 字号</div>
-          <p className="appear-help">13–28 px。锁定稿正文 16。可拖，也可直接填数字。</p>
+          <div className="appear-label">文字大小</div>
+          <p className="appear-help">调整页面文字大小。</p>
         </div>
         <div className="appear-control">
           <AppleSlider
             min={FONT_PX_MIN}
             max={FONT_PX_MAX}
             value={prefs.fontPx}
-            ariaLabel="UI 字号"
+            ariaLabel="文字大小"
             onChange={(n) => setPrefs({ ...prefs, fontPx: clampFontPx(n) })}
           />
           <label className="appear-px">
@@ -118,10 +118,8 @@ export function AppearancePane() {
 
       <div className="appear-row appear-row-stack">
         <div>
-          <div className="appear-label">侧栏材质</div>
-          <p className="appear-help">
-            毛玻璃是雾面对照锁定稿。液态玻璃按 iOS 27：折射壳上的紫雾，加高光边和暗边。实心不透、滚动更轻。
-          </p>
+          <div className="appear-label">侧栏样式</div>
+          <p className="appear-help">选择侧栏显示方式。</p>
         </div>
         <Segmented
           value={prefs.glassStyle}
@@ -137,7 +135,7 @@ export function AppearancePane() {
       <div className={isGlassOn(prefs.glassStyle) ? "appear-row appear-row-stack" : "appear-row appear-row-stack is-dim"}>
         <div>
           <div className="appear-label">对比度</div>
-          <p className="appear-help">只调毛玻璃和液态玻璃的雾面。低更透、高更实。实心时无效。</p>
+          <p className="appear-help">调整侧栏明暗。</p>
         </div>
         <div className="appear-control">
           <span className="appear-ends">透</span>
@@ -155,8 +153,8 @@ export function AppearancePane() {
 
       <div className="appear-row">
         <div>
-          <div className="appear-label">差异标记</div>
-          <p className="appear-help">核对页图上的钉。色块是锁定稿；下划线更克制；关闭只留右侧列表。</p>
+          <div className="appear-label">差异显示</div>
+          <p className="appear-help">选择差异的显示方式。</p>
         </div>
         <Segmented
           value={prefs.diffMarkers}
