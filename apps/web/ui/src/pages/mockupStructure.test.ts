@@ -150,16 +150,16 @@ describe("mockup V2 structure UX", () => {
   });
 
   it("distinguishes a human confirmation from a failed mockup", () => {
-    assert.equal(structureStatusLabel({ structure_status: "analyzing" }), "生成中");
+    assert.equal(structureStatusLabel({ structure_status: "analyzing" }), "正在出图");
     assert.equal(structureStatusLabel({ structure_status: "review_required" }), "生成失败");
     assert.equal(
       structureStatusLabel({
         structure_status: "review_required",
         structure_code: "structure_face_mapping_incomplete",
       }),
-      "选个正面",
+      "待选正面",
     );
-    assert.equal(structureStatusLabel({ structure_status: "unsupported" }), "暂不支持此盒型");
+    assert.equal(structureStatusLabel({ structure_status: "unsupported" }), "结构暂不支持");
     assert.match(
       structureIssueCopy({ structure_code: "structure_semantics_missing" }),
       /没有可自动识别的刀版/,

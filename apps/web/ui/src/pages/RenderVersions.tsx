@@ -143,10 +143,10 @@ export function RenderVersions({job,open,productLight,backgroundLight,onJob}: {
       {notice || (unresolved ? "有一条上次请求尚待确认，当前图片仍可用" : mutationLine)}
     </div> : null}
     <section id="mockup-render-versions" className="mockup-versions" aria-label="出图版本" hidden={!open}>
-      <p className="mockup-versions-help">选中后全组看到这一版</p>
+      <p className="mockup-versions-help">使用此版本会切换团队共同看到的图片。调灯和换背景不会生成版本。</p>
       {canManage ? <div className="mockup-version-actions">
         <Button disabled={writing || (!unresolved && !caps?.legacy_relight.allowed)} loading={writing} onClick={()=>void create()}>
-          {unresolved ? "确认上次操作" : "重新出图"}
+          {unresolved ? "确认上次请求" : "重新出图"}
         </Button>
         <Button disabled>升级新版</Button>
         {!unresolved && !caps?.legacy_relight.allowed ? <RenderReason reason={caps?.legacy_relight.reason} /> : null}
@@ -157,14 +157,14 @@ export function RenderVersions({job,open,productLight,backgroundLight,onJob}: {
         {history.items.map(row=><li key={row.generation_id} data-generation-id={row.generation_id}>
           <time dateTime={row.created_at}>{new Date(row.created_at).toLocaleString("zh-CN",{month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",hour12:false})}</time>
           <span>{renderVersionLabel(row)}</span><span className="mockup-version-actor">{row.actor_label || "—"}</span>
-          <span>{row.generation_id === job.current_render_generation_id ? "正在用" : ""}</span>
+          <span>{row.generation_id === job.current_render_generation_id ? "当前" : ""}</span>
           {canManage ? <Button size="small" disabled={writing || !caps?.activate.allowed || row.generation_id === job.current_render_generation_id}
-            onClick={()=>void activate(row.generation_id)}>用这一版</Button> : null}
+            onClick={()=>void activate(row.generation_id)}>使用此版本</Button> : null}
         </li>)}
       </ul>
-      {!historyBusy && !historyError && !history.items.length ? <p className="mockup-versions-help">还没有其他版本</p> : null}
+      {!historyBusy && !historyError && !history.items.length ? <p className="mockup-versions-help">还没有历史版本，当前原图仍可使用。</p> : null}
       {canManage && history.items.length > 0 && !caps?.activate.allowed ? <div className="mockup-versions-help"><RenderReason reason={caps?.activate.reason} /></div> : null}
-      {historyBusy ? <p className="mockup-versions-help" role="status">正在读取版本…</p> : history.next_cursor ? <Button onClick={()=>void loadHistory(history.next_cursor!)}>更多</Button> : null}
+      {historyBusy ? <p className="mockup-versions-help" role="status">正在读取版本…</p> : history.next_cursor ? <Button onClick={()=>void loadHistory(history.next_cursor!)}>更多版本</Button> : null}
     </section>
   </>;
 }

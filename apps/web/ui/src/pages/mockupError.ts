@@ -10,7 +10,7 @@ export function mockupFailReason(raw?: string | null): string {
   const t = String(raw || "").replace(/\s+/g, " ").trim();
   if (!t) return "生成中断，请打开查看。";
   if (/没有刀线或刀版/.test(t)) {
-    return "没找到刀线，请保留后重传";
+    return "没有刀线，无法生成展开图。请保留刀线后重新上传。";
   }
   if (/刀线读不出结构/.test(t)) {
     return "刀线无法折成盒面。请检查展开图。";

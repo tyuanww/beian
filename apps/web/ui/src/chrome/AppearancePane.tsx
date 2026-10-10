@@ -66,7 +66,7 @@ export function AppearancePane() {
       <div className="appear-row">
         <div>
           <div className="appear-label">主题</div>
-          <p className="appear-help">浅色、深色或跟随系统</p>
+          <p className="appear-help">选择浅色、深色或跟随系统。</p>
         </div>
         <Segmented
           value={prefs.theme}
@@ -81,8 +81,8 @@ export function AppearancePane() {
 
       <div className="appear-row appear-row-stack">
         <div>
-          <div className="appear-label">字号</div>
-          <p className="appear-help">页面文字大小</p>
+          <div className="appear-label">文字大小</div>
+          <p className="appear-help">调整页面文字大小。</p>
         </div>
         <div className="appear-control">
           <AppleSlider
@@ -118,8 +118,8 @@ export function AppearancePane() {
 
       <div className="appear-row appear-row-stack">
         <div>
-          <div className="appear-label">菜单样式</div>
-          <p className="appear-help">菜单栏的外观</p>
+          <div className="appear-label">侧栏样式</div>
+          <p className="appear-help">选择侧栏显示方式。</p>
         </div>
         <Segmented
           value={prefs.glassStyle}
@@ -135,7 +135,7 @@ export function AppearancePane() {
       <div className={isGlassOn(prefs.glassStyle) ? "appear-row appear-row-stack" : "appear-row appear-row-stack is-dim"}>
         <div>
           <div className="appear-label">透明度</div>
-          <p className="appear-help">菜单栏透明程度</p>
+          <p className="appear-help">调整侧栏明暗。</p>
         </div>
         <div className="appear-control">
           <span className="appear-ends">透</span>
@@ -144,7 +144,7 @@ export function AppearancePane() {
             max={100}
             value={prefs.glassContrast}
             disabled={!isGlassOn(prefs.glassStyle)}
-            ariaLabel="菜单玻璃透明度"
+            ariaLabel="侧栏玻璃透明度"
             onChange={(n) => setPrefs({ ...prefs, glassContrast: clampGlassContrast(n) })}
           />
           <span className="appear-ends">实</span>
@@ -153,8 +153,8 @@ export function AppearancePane() {
 
       <div className="appear-row">
         <div>
-          <div className="appear-label">问题标注</div>
-          <p className="appear-help">稿件上问题怎么标出</p>
+          <div className="appear-label">差异显示</div>
+          <p className="appear-help">选择差异的显示方式。</p>
         </div>
         <Segmented
           value={prefs.diffMarkers}

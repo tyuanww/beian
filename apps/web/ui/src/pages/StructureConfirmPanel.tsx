@@ -143,7 +143,7 @@ export function StructureConfirmPanel({ job, canConfirmStructure, canAdmin = fal
     try {
       const next = await api.confirmMockupStructure(job.id, confirmedAnchor);
       onConfirmed(next);
-      message.success("已选择正面，开始生成 3D 效果图。");
+      message.success("已选择正面，开始生成立体图。");
     } catch (error) {
       setSubmitError(structureConfirmationErrorCopy(error));
     } finally {
@@ -213,7 +213,7 @@ export function StructureConfirmPanel({ job, canConfirmStructure, canAdmin = fal
           <Alert
             type="info"
             showIcon
-            title="正在识别盒型"
+            title="正在识别完整盒型"
             description="已按本稿默认结构层处理，不展示选层。下一步请选择产品正面。"
           />
         </div>
@@ -224,7 +224,7 @@ export function StructureConfirmPanel({ job, canConfirmStructure, canAdmin = fal
         <Alert
           type={hadSelection ? "warning" : "info"}
           showIcon
-          title={hadSelection ? "这组线拼不成花盒" : "选出刀线图层"}
+          title={hadSelection ? "这组线组不成花盒" : "请选择刀版或刀线所在图层"}
           description={hadSelection
             ? `${issue} 可以只留刀版再识别；系统仍会检查连续盒身和上下封口。`
             : "系统已盘点本稿中的刀版/刀线和描边层。请勾选「刀版」或「刀线」，再交给拓扑引擎验证。烫金等工艺板只用来看，不会当成刀线。"}
@@ -232,7 +232,7 @@ export function StructureConfirmPanel({ job, canConfirmStructure, canAdmin = fal
         <div className="structure-confirm-layout structure-input-layout">
           <div className="structure-map-shell structure-input-preview">
             <div className="structure-input-preview-toolbar" aria-label="结构图层预览缩放">
-              <span>图层预览</span>
+              <span>高清分层预览</span>
               <Button
                 aria-label="缩小结构预览"
                 disabled={previewScale === STRUCTURE_PREVIEW_ZOOMS[0]}
@@ -317,14 +317,14 @@ export function StructureConfirmPanel({ job, canConfirmStructure, canAdmin = fal
           <div className="structure-guide-card">
             {showLayerGuide ? (
               <div
-                aria-label="三步确认盒型"
+                aria-label="三步完成结构确认"
                 aria-modal="false"
                 className="structure-input-coachmark"
                 role="dialog"
               >
-                <strong>三步确认盒型</strong>
-                <span>①选图层　②看左侧高亮　③点“重新识别”</span>
-                <Button onClick={dismissLayerGuide} size="small" type="primary">开始</Button>
+                <strong>三步完成结构确认</strong>
+                <span>1 选择候选图层　2 看左侧真实路径高亮　3 点右下角重新识别完整盒型</span>
+                <Button onClick={dismissLayerGuide} size="small" type="primary">开始选择</Button>
               </div>
             ) : null}
             <div className="structure-guide">
@@ -338,8 +338,8 @@ export function StructureConfirmPanel({ job, canConfirmStructure, canAdmin = fal
               <div className="structure-guide-step">
                 <span className="structure-step-index">2</span>
                 <div>
-                  <strong>点右下角“重新识别”</strong>
-                  <span>确认盒型和封口后才会生成 3D 效果图。</span>
+                  <strong>点右下角重新识别完整盒型</strong>
+                  <span>确认盒型和封口后才会生成立体图。</span>
                 </div>
               </div>
               <div className="structure-layer-list" role="group" aria-label="选择结构图层">
@@ -357,7 +357,7 @@ export function StructureConfirmPanel({ job, canConfirmStructure, canAdmin = fal
                   >
                     <strong>{candidate.name}</strong>
                     <small>
-                      {candidate.stroke_only_path_count} 条线
+                      {candidate.stroke_only_path_count} 条纯描边路径
                       {layerPreviewPaths.has(candidate.id)
                         ? previewTruncatedIds.has(candidate.id) ? " · 预览已安全截取" : " · 可在左侧高亮"
                         : " · 本次无分层预览"}
@@ -367,7 +367,7 @@ export function StructureConfirmPanel({ job, canConfirmStructure, canAdmin = fal
               </div>
               {structureInput.preview_plates?.length ? (
                 <div className="structure-preview-plates" role="group" aria-label="工艺与印刷板">
-                  <strong>工艺层 / 印刷层</strong>
+                  <strong>工艺 / 印刷板</strong>
                   <span>点一下只在左侧高亮查看，不会当成刀线折盒。</span>
                   {structureInput.preview_plates.map((plate) => (
                     <button
@@ -423,7 +423,7 @@ export function StructureConfirmPanel({ job, canConfirmStructure, canAdmin = fal
                 loading={selectingLayers}
                 onClick={() => void submitLayers()}
               >
-                重新识别
+                重新识别完整盒型
               </Button>
             </div>
           </div>
@@ -465,7 +465,7 @@ export function StructureConfirmPanel({ job, canConfirmStructure, canAdmin = fal
       <Alert
         type="info"
         showIcon
-        title="选出产品正面"
+        title="先看展开图，再选产品正面"
         description={canConfirmStructure
           ? "确认左侧是这次要生成的包装，点击印有品名和主视觉的一面。"
           : "当前账号不能选择正面。"}
@@ -561,8 +561,8 @@ export function StructureConfirmPanel({ job, canConfirmStructure, canAdmin = fal
             <div className="structure-guide-step">
               <span className="structure-step-index">2</span>
               <div>
-                <strong>选正面</strong>
-                <span>印着品牌和品名的那面</span>
+                <strong>选择产品正面</strong>
+                <span>通常是印有品名、品牌和主视觉的那一面。</span>
               </div>
             </div>
 
@@ -612,7 +612,7 @@ export function StructureConfirmPanel({ job, canConfirmStructure, canAdmin = fal
               loading={submitting}
               onClick={() => void submit()}
             >
-              生成 3D
+              生成立体图
             </Button>
           </div>
         </div>
@@ -646,7 +646,7 @@ export function AdminRotateFront({
         type="info"
         showIcon
         title="换正面"
-        description="点品名那面，重新生成"
+        description="点印有品名的那一面，重新生成立体图。"
       />
       <div className="structure-front-choices" aria-label="更换产品正面">
         <div>
@@ -677,7 +677,7 @@ export function AdminRotateFront({
           }).finally(() => setSubmitting(false));
         }}
       >
-        换正面重做
+        换正面重出
       </Button>
     </div>
   );

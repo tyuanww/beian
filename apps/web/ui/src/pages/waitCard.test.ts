@@ -185,16 +185,16 @@ describe("waitCardCopy", () => {
 
   it("feishuReady true tells her she can leave", () => {
     const copy = waitCardCopy({ kind: "compare", job_status: "running", feishuReady: true });
-    assert.match(copy.hint, /可以先离开，好了飞书通知你/);
+    assert.match(copy.hint, /可以离开，完了飞书叫你/);
   });
 
   it("running uses Figma wait-card body, not a fake cancel", () => {
     const compare = waitCardCopy({ kind: "compare", job_status: "running", feishuReady: false });
     const rework = waitCardCopy({ kind: "rework", job_status: "queued", queue_ahead: 1, feishuReady: false });
     const mockup = waitCardCopy({ kind: "mockup", job_status: "running", feishuReady: false });
-    assert.match(compare.hint, /正在逐项核对稿件/);
-    assert.match(rework.hint, /好了再回来看/);
-    assert.match(mockup.hint, /正在生成 3D 效果图/);
+    assert.match(compare.hint, /正在读取文件并检查内容/);
+    assert.match(rework.hint, /完成后回到审稿台/);
+    assert.match(mockup.hint, /正在生成立体图/);
     assert.doesNotMatch(compare.hint, /可以离开/);
     assert.doesNotMatch(`${compare.hint}${mockup.hint}`, /取消/);
   });

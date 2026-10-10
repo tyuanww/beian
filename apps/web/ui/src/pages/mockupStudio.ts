@@ -8,7 +8,7 @@ export const BACKDROP_DEFAULT: BackdropPreset = "white_set";
 export const BACKDROP_LABEL: Record<BackdropPreset, string> = {
   white: "白底",
   silver: "银底",
-  white_set: "桌面场景",
+  white_set: "白桌白墙",
 };
 const BACKDROP_STORAGE_KEY = "beian.mockup.backdrop";
 const WHITE_SET_HORIZON = 0.58;

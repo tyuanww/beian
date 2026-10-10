@@ -7,7 +7,7 @@ import { WaitLoader } from "./WaitLoader";
 const STEPS: Record<WaitKind, string[]> = {
   compare: ["读取表格", "读取稿件", "找出差异"],
   rework: ["读取表格", "读取稿件", "找出差异"],
-  mockup: ["读取设计稿", "搭出盒子", "生成效果图", "打包文件"],
+  mockup: ["读取平面稿", "生成盒型", "生成预览", "导出模型"],
 };
 
 type Props = {

@@ -223,7 +223,7 @@ export function MockupGlbViewer({ source, poster, backdrop, backgroundLight, pro
       interaction-prompt="none"
       style={{ background: studioBackdrop(backgroundLight, backdrop), opacity: ready ? 1 : 0, pointerEvents: interactive ? "auto" : "none" }}
     />}
-    {error && <p role="alert" className="mockup-glb-message">3D 没加载出来，请刷新重试</p>}
+    {error && <p role="alert" className="mockup-glb-message">3D 预览加载失败，请重新打开此单。下载仍为原始模型。</p>}
     {loading && <div className="mockup-glb-message mockup-glb-progress">
       <span className="mockup-glb-progress-visual" aria-hidden="true">
         {progress.kind === "percent" ? <Progress percent={progress.percent} size="small" status="active" /> : null}
@@ -231,7 +231,7 @@ export function MockupGlbViewer({ source, poster, backdrop, backgroundLight, pro
       </span>
       <span role="status" className="sr-only">{glbStatusText(progress)}</span>
     </div>}
-    <button type="button" className="mockup-dl mockup-glb-reset" aria-label="回到初始角度"
-      disabled={!ready || error} onClick={() => { void frame(true); }}>回正</button>
+    <button type="button" className="mockup-dl mockup-glb-reset" aria-label="复位模型视角"
+      disabled={!ready || error} onClick={() => { void frame(true); }}>复位</button>
   </>;
 }

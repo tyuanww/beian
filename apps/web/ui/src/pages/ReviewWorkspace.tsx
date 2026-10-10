@@ -56,9 +56,9 @@ export function ReviewWorkspace({ userId, children, panel }: Props) {
       ) : null}
       <aside data-testid="review-dock" className={`review-sidebar glass-pane${preference.open ? "" : " is-shut"}`} aria-label="右侧审核栏">
         <div className="review-sidebar-header">
-          {preference.open ? <strong>核对清单</strong> : null}
+          {preference.open ? <strong>审核栏</strong> : null}
           <button type="button" className="btn-ghost" aria-expanded={preference.open} aria-controls="review-sidebar-content" onClick={toggle}>
-            {preference.open ? "收起" : "展开清单"}
+            {preference.open ? "收起" : "展开审核栏"}
           </button>
         </div>
         <div id="review-sidebar-content" className="review-sidebar-body" hidden={!preference.open}>{panel}</div>

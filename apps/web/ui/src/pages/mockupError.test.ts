@@ -21,7 +21,7 @@ describe("mockupFailReason", () => {
 
   it("explains a missing knife layer", () => {
     const text = mockupFailReason("稿里没有刀线或刀版层，也无法匹配已登记刀模。实际画板=[1, 1]");
-    assert.match(text, /没找到刀线/);
+    assert.match(text, /没有刀线/);
   });
 
   it("explains a knife layer that does not fold", () => {

@@ -57,8 +57,8 @@ test("打样台与审稿台共用一行品名状态和底部日期", async ({ pa
   await page.goto("/mockup");
 
   const cases = [
-    ["生成中", running.title, "70% · 搭出盒子"],
-    ["没生成", failed.title, "生成中断"],
+    ["生成中", running.title, "70% · 生成盒型"],
+    ["生成失败", failed.title, "生成中断"],
     ["已完成", done.title, "已完成"],
   ] as const;
   for (const [columnTitle, product, state] of cases) {
@@ -95,7 +95,7 @@ test("打样台轮询真实阶段百分比并可点进打样单", async ({ page,
 
   running.job_stage = "export";
   running.job_stage_label = "导出";
-  await expect(card.locator(".review-card-summary-state")).toHaveText("90% · 打包文件", { timeout: 5_000 });
+  await expect(card.locator(".review-card-summary-state")).toHaveText("90% · 整理文件", { timeout: 5_000 });
 
   await card.click();
   await expect(page).toHaveURL(`/mockup/${running.id}`);
@@ -157,7 +157,7 @@ test("结构待确认和不支持均显示可执行状态，不伪装成打样�
 
   await expect(
     page.locator(".review-card").filter({ hasText: reviewRequired.title }).locator(".review-card-summary-state"),
-  ).toHaveText("选个正面");
+  ).toHaveText("待选正面");
   await expect(
     page.locator(".review-card").filter({ hasText: unsupported.title }).locator(".review-card-summary-state"),
   ).toHaveText("暂不支持");
@@ -180,12 +180,12 @@ test("完成态打样单可分开调产品和背景灯光，原图灯箱也能�
 
   await page.goto(`/mockup/${mockup.id}`);
 
-  await expect(page.getByRole("button", { name: "调光" })).toBeVisible();
-  await expect(page.getByRole("slider", { name: "产品亮度" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "调灯" })).toBeVisible();
+  await expect(page.getByRole("slider", { name: "产品灯光" })).toHaveCount(0);
   await page.locator(".mockup-backdrop-switch").getByText("白底", { exact: true }).click();
-  await page.getByRole("button", { name: "调光" }).click();
-  const productLight = page.getByRole("slider", { name: "产品亮度" }).first();
-  const backgroundLight = page.getByRole("slider", { name: "背景亮度" }).first();
+  await page.getByRole("button", { name: "调灯" }).click();
+  const productLight = page.getByRole("slider", { name: "产品灯光" }).first();
+  const backgroundLight = page.getByRole("slider", { name: "背景灯光" }).first();
   await expect(productLight).toBeVisible();
   await expect(backgroundLight).toBeVisible();
   await expect(page.locator(".mockup-sheet-photos [role='slider']")).toHaveCount(0);
@@ -206,11 +206,11 @@ test("完成态打样单可分开调产品和背景灯光，原图灯箱也能�
   const originalButtons = page.getByRole("button", { name: /打开.+原图/ });
   await expect(originalButtons).toHaveCount(2);
   await originalButtons.nth(0).click();
-  const dialog = page.getByRole("dialog", { name: "正面图原图" });
+  const dialog = page.getByRole("dialog", { name: "正面 + 侧面原图" });
   await expect(dialog).toBeVisible();
-  await expect(dialog.getByRole("slider", { name: "产品亮度" })).toBeVisible();
-  await expect(dialog.getByRole("slider", { name: "背景亮度" })).toBeVisible();
-  await dialog.getByRole("slider", { name: "产品亮度" }).fill("0.8");
+  await expect(dialog.getByRole("slider", { name: "产品灯光" })).toBeVisible();
+  await expect(dialog.getByRole("slider", { name: "背景灯光" })).toBeVisible();
+  await dialog.getByRole("slider", { name: "产品灯光" }).fill("0.8");
   await expect.poll(red).toBeLessThan(initialRed);
   await dialog.getByRole("button", { name: "关闭" }).click();
   await expect(dialog).toHaveCount(0);
@@ -227,7 +227,7 @@ test("白底图损坏时隐藏原图和下载操作", async ({ page, syntheticAp
   await page.goto(`/mockup/${mockup.id}`);
 
   const shot = page.locator(".mockup-sheet-photo").filter({
-    has: page.getByText("正面图", { exact: true }),
+    has: page.getByText("正面 + 侧面", { exact: true }),
   });
   await expect(shot.getByText("这张预览图无法显示，请重新生成。")).toBeVisible();
   await expect(shot.getByRole("link")).toHaveCount(0);
@@ -262,7 +262,7 @@ test("完成态打样单在三图下用印刷面读字并可放大", async ({ pa
   await page.goto(`/mockup/${mockup.id}`);
 
   const read = page.getByRole("region", { name: "印刷面" });
-  await expect(page.getByText("上面看效果，下面看印刷面")).toBeVisible();
+  await expect(page.getByText("上面看立体效果，下面看印刷文字。")).toBeVisible();
   await expect(read.getByRole("heading", { name: "印刷面" })).toBeVisible();
   await expect(read.getByText("这单没有印刷面图。")).toHaveCount(0);
   await page.getByRole("tab", { name: "正面", exact: true }).click();
@@ -336,7 +336,7 @@ test("缺印刷面且可补时点生成印刷面后读字出现，看板仍已�
   await page.goto(`/mockup/${mockup.id}`);
 
   const alert = page.locator(".mockup-print-alert");
-  await expect(alert).toContainText("缺印刷面，点右侧生成");
+  await expect(alert).toContainText("缺少印刷面图，可重新生成。");
   const photos = page.locator(".mockup-sheet-photos");
   const alertBox = await alert.boundingBox();
   const photosBox = await photos.boundingBox();
@@ -452,15 +452,15 @@ test("有 ground 的已出图单走 canvas 成片，不显示 PPT，调灯默认
   await expect(page.locator(".mockup-sheet-hero")).toHaveCount(0);
   await expect(page.locator(".mockup-sheet-photos.is-grounded > *")).toHaveCount(3);
   await expect(page.locator(".mockup-sheet-photos [role='slider']")).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "调光" })).toBeVisible();
-  await expect(page.getByRole("slider", { name: "产品亮度" })).toHaveCount(0);
-  await expect(page.getByRole("link", { name: "下载 PPT" })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "下载 PPT" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "调灯" })).toBeVisible();
+  await expect(page.getByRole("slider", { name: "产品灯光" })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "下载演示稿" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "下载演示稿" })).toHaveCount(0);
   await expect(page.locator(".mockup-sheet-photos.is-grounded .mockup-sheet-frame").first()).toHaveCSS("aspect-ratio", /5\s*\/\s*6/);
   const switcher = page.locator(".mockup-backdrop-switch");
   await expect(switcher.getByText("白底", { exact: true })).toBeVisible();
   await expect(switcher.getByText("银底", { exact: true })).toBeVisible();
-  await expect(switcher.getByText("桌面场景", { exact: true })).toBeVisible();
+  await expect(switcher.getByText("白桌白墙", { exact: true })).toBeVisible();
   const postsBefore = syntheticApi.calls.filter((call) => call.method === "POST").length;
   await switcher.getByText("银底", { exact: true }).click();
   await expect(page.locator(".mockup-sheet-photos.is-grounded canvas").first()).toBeVisible();
@@ -468,14 +468,14 @@ test("有 ground 的已出图单走 canvas 成片，不显示 PPT，调灯默认
   expect(syntheticApi.calls.filter((call) => call.method === "POST").length).toBe(postsBefore);
   await switcher.getByText("白底", { exact: true }).click();
   await expect(page.locator(".mockup-sheet-frame").first()).toHaveClass(/is-backdrop-white/);
-  await switcher.getByText("桌面场景", { exact: true }).click();
+  await switcher.getByText("白桌白墙", { exact: true }).click();
   await expect(page.locator(".mockup-sheet-frame").first()).toHaveClass(/is-backdrop-white-set/);
   expect(syntheticApi.calls.filter((call) => call.method === "POST").length).toBe(postsBefore);
   expect(fetchedSet).toBeGreaterThan(0);
-  await page.getByRole("button", { name: "调光" }).click();
-  await expect(page.getByRole("slider", { name: "产品亮度" })).toBeVisible();
+  await page.getByRole("button", { name: "调灯" }).click();
+  await expect(page.getByRole("slider", { name: "产品灯光" })).toBeVisible();
   await page.getByRole("button", { name: /打开正面/ }).click();
-  await expect(page.getByRole("dialog", { name: "正面图原图" })).toBeVisible();
+  await expect(page.getByRole("dialog", { name: "正面 + 侧面原图" })).toBeVisible();
   await expect(page.locator(".mockup-still-lightbox-stage.is-studio-ground")).toBeVisible();
 });
 
@@ -545,9 +545,9 @@ test("无 ground 的已出图单保持 canvas 合成、三栏和 PPT", async ({ 
   await page.goto(`/mockup/${mockup.id}`);
   await expect(page.locator("canvas[aria-label='正面与侧面白底']")).toBeVisible();
   await expect(page.locator(".mockup-sheet-photos > figure")).toHaveCount(3);
-  await expect(page.getByRole("link", { name: "下载 PPT" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "调光" })).toBeVisible();
-  await expect(page.getByRole("slider", { name: "产品亮度" })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "下载演示稿" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "调灯" })).toBeVisible();
+  await expect(page.getByRole("slider", { name: "产品灯光" })).toHaveCount(0);
   await expect(page.locator(".mockup-sheet-hero")).toHaveCount(0);
 });
 

@@ -25,7 +25,7 @@ export function UploadProgressSlot({
   const line = ready
     ? readyText
     : receipt?.phase === "paused"
-      ? "已暂停，传过的部分已保存"
+      ? "上传已暂停，服务器已保存收到的部分"
       : snapshot
         ? uploadPhaseLine(snapshot, readyText)
         : readyText;
@@ -45,7 +45,7 @@ export function UploadProgressSlot({
           ) : null}
           {onDiscard ? (
             <button type="button" className="upload-progress-discard" onClick={onDiscard}>
-              {ready ? "删除文件" : phase === "paused" || phase === "failed" ? "放弃" : "停止并删除"}
+              {ready ? "删除暂存" : phase === "paused" || phase === "failed" ? "放弃" : "停止并删除"}
             </button>
           ) : null}
         </div>
@@ -57,13 +57,13 @@ export function UploadProgressSlot({
         </span>
       </div>
       <div className="upload-progress-steps" aria-label="上传处理阶段">
-        <span className="is-done">选好文件</span>
+        <span className="is-done">已选文件</span>
         <i>→</i>
-        <span className={pct > 0 || ready ? "is-done" : ""}>上传中</span>
+        <span className={pct > 0 || ready ? "is-done" : ""}>上传到服务器</span>
         <i>→</i>
-        <span className={serverDone ? "is-done" : ""}>核对文件</span>
+        <span className={serverDone ? "is-done" : ""}>服务器确认</span>
         <i>→</i>
-        <span className={ready ? "is-done" : ""}>可以开始</span>
+        <span className={ready ? "is-done" : ""}>待开工</span>
       </div>
       <progress className="upload-progress-meter" max={100} value={pct} aria-label={line} />
     </div>

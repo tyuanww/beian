@@ -15,7 +15,7 @@ import { WaitCard } from "../chrome/WaitCard";
 import { mockupFailReason, mockupFailTag } from "./mockupError";
 import { AdminRotateFront, StructureConfirmPanel } from "./StructureConfirmPanel";
 import { RenderVersions } from "./RenderVersions";
-import { MOCKUP_STATUS_LABEL, NAV_LABEL } from "../copy/labels";
+import { NAV_LABEL } from "../copy/labels";
 import { structureIssueCopy, structureStatusLabel } from "./mockupStructure";
 import { liveJobLine, mockupBoardProgress, shouldShowWaitCard } from "./waitCard";
 import { stemFromFilename } from "./stemName";
@@ -103,7 +103,7 @@ function mockLabel(row: MockupJob) {
   if (row.status === "done") return { text: "已完成", color: "success" as const };
   if (row.structure_status === "review_required") {
     return row.structure_code === "structure_face_mapping_incomplete"
-      ? { text: MOCKUP_STATUS_LABEL.needFront, color: "warning" as const }
+      ? { text: "待选正面", color: "warning" as const }
       : { text: "生成失败", color: "error" as const };
   }
   if (row.structure_status === "unsupported") return { text: "暂不支持", color: "error" as const };
@@ -391,13 +391,13 @@ export function MockupPage({
       <div className="desk-head">
         <div>
           <h1 className="page-title">{NAV_LABEL.mockup}</h1>
-          <p className="page-lead">设计稿一键变 3D 效果图</p>
+          <p className="page-lead">查看包装的立体效果和印刷面。</p>
         </div>
         <Space wrap>
           {showSearch ? (
             <Input.Search
               allowClear
-              placeholder="搜品名或文件名"
+              placeholder="搜索品名或文件名"
               value={q}
               onChange={(event) => setQ(event.target.value)}
               onClear={() => {
@@ -413,8 +413,8 @@ export function MockupPage({
               value={layout}
               onChange={(value) => setLayout(value as Layout)}
               options={[
-                { label: "卡片", value: "board" },
-                { label: "列表", value: "table" },
+                { label: "看板", value: "board" },
+                { label: "表格", value: "table" },
               ]}
             />
           ) : null}
@@ -433,7 +433,7 @@ export function MockupPage({
           title={error}
           action={
             <Button size="small" onClick={() => setReload((count) => count + 1)}>
-              重试
+              再试一次
             </Button>
           }
         />
@@ -449,8 +449,8 @@ export function MockupPage({
                 <div>没有找到相关记录</div>
               ) : (
                 <div>
-                  <div>还没有打样</div>
-                  <div className="desk-empty-hint">传一份 AI 设计稿就能开始</div>
+                  <div>还没有打样记录</div>
+                  <div className="desk-empty-hint">上传平面稿开始。</div>
                 </div>
               )
             }
@@ -462,7 +462,7 @@ export function MockupPage({
                   setSubmitted("");
                 }}
               >
-                清除搜索
+                清空
               </Button>
             ) : canCreate ? (
               <Button type="primary" onClick={onCompose}>
@@ -475,12 +475,12 @@ export function MockupPage({
         <div className="review-board">
           <DeskCol
             title="生成中"
-            hint="好了会通知你"
+            hint="正在上传或生成。"
             rows={[...pendingCards, ...board.running.map(toMockCard)]}
             onOpen={openCard}
           />
-          <DeskCol title="没生成" hint="点开看原因" rows={board.failed.map(toMockCard)} onOpen={onOpenJob} />
-          <DeskCol title="已完成" hint="点开看效果" rows={board.done.map(toMockCard)} onOpen={onOpenJob} />
+          <DeskCol title="生成失败" hint="打开查看原因。" rows={board.failed.map(toMockCard)} onOpen={onOpenJob} />
+          <DeskCol title="已完成" hint="打开查看结果。" rows={board.done.map(toMockCard)} onOpen={onOpenJob} />
         </div>
       ) : (
         <Table<DeskCardRow>
@@ -503,7 +503,7 @@ export function MockupPage({
               ),
             },
             { title: "更新时间", dataIndex: "at", width: 180, render: (value: string) => deskClock(value) },
-            { title: "负责人", dataIndex: "actor", width: 100, render: (value: string) => value || "—" },
+            { title: "操作人", dataIndex: "actor", width: 100, render: (value: string) => value || "—" },
             { title: "", key: "open", width: 100, render: () => <Button type="link">打开</Button> },
           ]}
         />
@@ -664,11 +664,11 @@ export function MockupNewPage({
 
   function confirmAbandon() {
     modal.confirm({
-      title: "删除这次上传？",
+      title: "放弃这次上传？",
       content: "暂存文件会删除；以后需要时要重新选择并上传。",
-      okText: "删除",
+      okText: "放弃上传",
       okButtonProps: { danger: true },
-      cancelText: "保留",
+      cancelText: "继续保留",
       onOk: async () => {
         try {
           if (resumeSource === "remote" && restoredReceipt) {
@@ -695,7 +695,7 @@ export function MockupNewPage({
           <h1 className="page-title">新建打样</h1>
           <button type="button" className="btn-ghost" onClick={onBack}>返回</button>
         </header>
-        <Alert type="warning" showIcon title="你的账号只能查看" />
+        <Alert type="warning" showIcon title="当前账号只有查看权限，不能上传或新建打样。" />
       </section>
     );
   }
@@ -705,7 +705,7 @@ export function MockupNewPage({
       <header className="page-head">
         <div>
           <h1 className="page-title">新建打样</h1>
-          <p className="page-lead">传设计稿，生成 3D 效果</p>
+          <p className="page-lead">上传平面稿，生成立体图。</p>
         </div>
         <div style={{ display: "flex", gap: 12 }}>
           <button type="button" className="btn-ghost" disabled={submitting} onClick={onBack}>
@@ -726,7 +726,7 @@ export function MockupNewPage({
           品名
           <input
             maxLength={80}
-            placeholder="选稿后自动填，可改"
+            placeholder="选稿后自动填写，可修改。"
             value={productName}
             onChange={(event) => updateName(event.target.value)}
           />
@@ -743,8 +743,8 @@ export function MockupNewPage({
       <div className="upload-row is-single">
         <UploadWell
           icon="/brand/ui/well-pdf.svg"
-          title="设计稿"
-          hint="拖进来或点选 .ai"
+          title="平面稿"
+          hint="拖入或选择文件。"
           accept=".ai"
           fileName={ai?.name}
           fileBytes={ai?.bytes}
@@ -752,7 +752,7 @@ export function MockupNewPage({
           onFile={takeFile}
           onReject={() => message.warning("请选择 AI 文件。")}
         >
-          <span className="upload-well-btn">{ai ? "换一个" : "选设计稿"}</span>
+          <span className="upload-well-btn">{ai ? "更换平面稿" : "选择平面稿"}</span>
         </UploadWell>
       </div>
     </section>
@@ -983,7 +983,7 @@ export function MockupJobPage({
         <header className="page-head">
           <div>
             <h1 className="page-title">{mockTitle(job)}</h1>
-            <p className="page-lead">正在生成，可以先离开</p>
+            <p className="page-lead">正在生成，可离开页面。</p>
           </div>
           <div className="mockup-sheet-head-actions">
             {canCreate ? (
@@ -1052,7 +1052,7 @@ export function MockupJobPage({
   const repairFailed = job.print_faces_repair?.status === "failed";
   const showPrintAlert = job.status === "done" && (missingRequired.length > 0 || repairPending || repairFailed);
   const printAlertCopy = repairFailed ? "印刷面生成失败，请重试。" : canRepairPrint && canCreate
-    ? "缺印刷面，点右侧生成"
+    ? "缺少印刷面图，可重新生成。"
     : canCreate
       ? "没有可用底稿，请重新生成。"
       : "没有印刷面图，请重新生成。";
@@ -1062,7 +1062,7 @@ export function MockupJobPage({
       <header className="page-head">
         <div>
           <h1 className="page-title">{mockTitle(job)}</h1>
-          <p className="page-lead">上面看效果，下面看印刷面</p>
+          <p className="page-lead">上面看立体效果，下面看印刷文字。</p>
         </div>
         <div className="mockup-sheet-head-actions">
           <button
@@ -1072,7 +1072,7 @@ export function MockupJobPage({
             aria-controls="mockup-studio-lights"
             onClick={() => setLightsOpen((open) => !open)}
           >
-            {lightsOpen ? "收起" : "调光"}
+            {lightsOpen ? "收起调灯" : "调灯"}
           </button>
           {canCreate && job.status === "failed" ? (
             <button type="button" className="btn-ghost" disabled={retrying} onClick={() => void retry()}>
@@ -1081,7 +1081,7 @@ export function MockupJobPage({
           ) : null}
           {job.render_generation_capabilities?.history.allowed ? (
             <button type="button" className="btn-ghost" aria-expanded={versionsOpen} aria-controls="mockup-render-versions" onClick={()=>setVersionsOpen(value=>!value)}>
-              {versionsOpen ? "收起" : "历史版本"}
+              {versionsOpen ? "收起版本" : "出图版本"}
             </button>
           ) : null}
           <button type="button" className="btn-ghost" onClick={onBack}>
@@ -1094,11 +1094,11 @@ export function MockupJobPage({
               download
               onClick={() => notice(downloadHudLine("PPT"))}
             >
-              下载 PPT
+              下载演示稿
             </a>
           ) : grounded ? null : (
             <button type="button" className="btn-ghost" onClick={() => notice(missingPptHud())}>
-              下载 PPT
+              下载演示稿
             </button>
           )}
         </div>
@@ -1163,7 +1163,7 @@ export function MockupJobPage({
         </div>
       ) : null}
 
-      {!boundAssetsReady ? <p className="page-lead" role="status">正在加载…</p> : <div key={`${job.id}:${generation}`} data-render-generation={generation} className={grounded ? "mockup-sheet-photos is-grounded" : "mockup-sheet-photos"}>
+      {!boundAssetsReady ? <p className="page-lead" role="status">正在确认当前版本资源。</p> : <div key={`${job.id}:${generation}`} data-render-generation={generation} className={grounded ? "mockup-sheet-photos is-grounded" : "mockup-sheet-photos"}>
         {groundA && whiteA ? (
           <GroundedShot
             generation={generation}
@@ -1173,14 +1173,14 @@ export function MockupJobPage({
             fileKey="white_a"
             groundKey="white_a_ground"
             alt="正面与侧面成片"
-            caption="正面图"
+            caption="正面 + 侧面"
             downloadName={whiteA.name}
             productLight={productLight}
             backgroundLight={backgroundLight}
             backdrop={backdrop}
             onProductLight={setProductLight}
             onBackgroundLight={setBackgroundLight}
-            onDownload={() => notice(downloadHudLine("效果图"))}
+            onDownload={() => notice(downloadHudLine("成片"))}
             onError={() => notice("导出失败")}
             onNotice={notice}
           />
@@ -1192,14 +1192,14 @@ export function MockupJobPage({
             jobId={job.id}
             fileKey="white_a"
             alt="正面与侧面白底"
-            caption="正面图"
+            caption="正面 + 侧面"
             downloadName={whiteA.name}
             productLight={productLight}
             backgroundLight={backgroundLight}
             backdrop={backdrop}
             onProductLight={setProductLight}
             onBackgroundLight={setBackgroundLight}
-            onDownload={() => notice(downloadHudLine("白底图"))}
+            onDownload={() => notice(downloadHudLine("白底"))}
           />
         ) : (
           <figure className="mockup-sheet-photo">
@@ -1209,7 +1209,7 @@ export function MockupJobPage({
             >
               <p className="page-lead">还没有正面+侧面。</p>
             </div>
-            <figcaption className="mockup-sheet-cap">正面图</figcaption>
+            <figcaption className="mockup-sheet-cap">正面 + 侧面</figcaption>
           </figure>
         )}
         {groundB && whiteB ? (
@@ -1221,14 +1221,14 @@ export function MockupJobPage({
             fileKey="white_b"
             groundKey="white_b_ground"
             alt="反面与侧面成片"
-            caption="背面图"
+            caption="反面 + 侧面"
             downloadName={whiteB.name}
             productLight={productLight}
             backgroundLight={backgroundLight}
             backdrop={backdrop}
             onProductLight={setProductLight}
             onBackgroundLight={setBackgroundLight}
-            onDownload={() => notice(downloadHudLine("效果图"))}
+            onDownload={() => notice(downloadHudLine("成片"))}
             onError={() => notice("导出失败")}
             onNotice={notice}
           />
@@ -1240,14 +1240,14 @@ export function MockupJobPage({
             jobId={job.id}
             fileKey="white_b"
             alt="反面与侧面白底"
-            caption="背面图"
+            caption="反面 + 侧面"
             downloadName={whiteB.name}
             productLight={productLight}
             backgroundLight={backgroundLight}
             backdrop={backdrop}
             onProductLight={setProductLight}
             onBackgroundLight={setBackgroundLight}
-            onDownload={() => notice(downloadHudLine("白底图"))}
+            onDownload={() => notice(downloadHudLine("白底"))}
           />
         ) : (
           <figure className="mockup-sheet-photo">
@@ -1257,7 +1257,7 @@ export function MockupJobPage({
             >
               <p className="page-lead">还没有反面+侧面。</p>
             </div>
-            <figcaption className="mockup-sheet-cap">背面图</figcaption>
+            <figcaption className="mockup-sheet-cap">反面 + 侧面</figcaption>
           </figure>
         )}
         {hasGlb ? (
@@ -1276,9 +1276,9 @@ export function MockupJobPage({
         ) : (
           <figure className="mockup-sheet-photo">
             <div className="mockup-sheet-frame">
-              <Empty description={job.status === "done" ? "暂无 3D" : "3D 还没好"} />
+              <Empty description={job.status === "done" ? "暂无 3D 模型" : "3D 模型还未生成"} />
             </div>
-            <figcaption className="mockup-sheet-cap">3D 预览</figcaption>
+            <figcaption className="mockup-sheet-cap">3D 模型</figcaption>
           </figure>
         )}
       </div>}
@@ -1286,13 +1286,13 @@ export function MockupJobPage({
         <div className="batch-section-head">
           <div>
             <div className="asset-title-row"><h2 className="mockup-read-title">印刷面</h2><span className="format-tag">PNG</span></div>
-            <p className="page-lead">点图可放大</p>
+            <p className="page-lead">各面图片可放大查看。</p>
           </div>
           <Button href={job.print_faces_zip?.status === "ready" ? fileHref(job.id, "print_faces_zip", true) : undefined}
-            disabled={job.print_faces_zip?.status !== "ready"}>下载全部面</Button>
+            disabled={job.print_faces_zip?.status !== "ready"}>下载六面</Button>
         </div>
         <Tabs activeKey={activePlane} onChange={setActivePlane} items={[
-          { key: "unfolded", label: "展开图", children: <UnfoldedPanel job={job} canCreate={canCreate}
+          { key: "unfolded", label: "2D 展开图", children: <UnfoldedPanel job={job} canCreate={canCreate}
             submitting={unfoldedSubmitting} error={unfoldedError} onRequest={async () => {
               setUnfoldedSubmitting(true); setUnfoldedError(null);
               try { const next = await api.requestUnfoldedPrint(job.id); if (alive.current) setJob(next); }
@@ -1558,7 +1558,7 @@ function GlbShot({
             void enterElementFullscreen(el).catch(() => onNotice("全屏打不开"));
           }}
         >
-          {glbFs ? "退出全屏" : "全屏"}
+          {glbFs ? "退出" : "全屏"}
         </button>
         <a
           className="mockup-dl mockup-dl-corner"
@@ -1570,7 +1570,7 @@ function GlbShot({
           下载
         </a>
       </div>
-      <figcaption className="mockup-sheet-cap">3D 预览</figcaption>
+      <figcaption className="mockup-sheet-cap">3D 模型</figcaption>
     </figure>
   );
 }
@@ -1987,9 +1987,9 @@ function StudioLightSliders({
   return (
     <div className="mockup-studio-lights">
       <label className="mockup-studio-light">
-        产品亮度
+        产品灯光
         <input
-          aria-label="产品亮度"
+          aria-label="产品灯光"
           aria-valuemax={STUDIO_LIGHT_MAX}
           aria-valuemin={STUDIO_LIGHT_MIN}
           aria-valuenow={productLight}
@@ -2002,9 +2002,9 @@ function StudioLightSliders({
         />
       </label>
       <label className="mockup-studio-light">
-        背景亮度
+        背景灯光
         <input
-          aria-label="背景亮度"
+          aria-label="背景灯光"
           aria-valuemax={STUDIO_LIGHT_MAX}
           aria-valuemin={STUDIO_LIGHT_MIN}
           aria-valuenow={backgroundLight}
@@ -2211,7 +2211,7 @@ function UnfoldedPanel({ job, canCreate, submitting, error, onRequest }: {
   return <section className="unfolded-panel" aria-label="展开图">
     <div className="batch-section-head"><div>
       <div className="asset-title-row"><h3>展开图</h3><span className="format-tag">2D</span></div>
-      <p className="page-lead">只留印刷内容，可按原尺寸打印</p>
+      <p className="page-lead">只保留印刷内容，支持原尺寸打印。</p>
       {ready ? <p className="physical-size">{result.width_mm} × {result.height_mm} mm · 1:1</p> : null}
     </div><div className="asset-actions">
       {ready ? <><Button href={fileHref(job.id, "unfolded_print")} target="_blank">预览</Button><Button type="primary" href={fileHref(job.id, "unfolded_print", true)}>下载 PDF</Button><span className="format-tag">PDF</span></>
@@ -2221,6 +2221,6 @@ function UnfoldedPanel({ job, canCreate, submitting, error, onRequest }: {
     </div></div>
     {error || result?.reason ? <Alert type={pending ? "info" : "warning"} showIcon title={error || UNFOLDED_COPY[result?.reason || ""] || "展开图暂不可用，请重试。"} /> : null}
     {ready ? <iframe key={job.current_render_generation_id || "current"} title="展开图预览" className="unfolded-preview" src={fileHref(job.id, "unfolded_print")} />
-      : <Empty description={pending ? "排队中，可以先离开" : "生成后可预览下载"} />}
+      : <Empty description={pending ? "已进入队列，可以离开页面。" : "生成后可预览和下载。"} />}
   </section>;
 }

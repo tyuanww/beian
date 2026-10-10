@@ -5,10 +5,10 @@ import { REVIEW_STATUS_LABEL, reviewCompletedLabel } from "../copy/labels";
 export function statusLead(task: TaskDetail | null, pageIdx: number, pages: TaskPage[]) {
   const pageNo = pages[pageIdx]?.page || pageIdx + 1;
   if (!task) return "审核页";
-  if (task.status === "completed") return `第 ${pageNo} 页 · ${reviewCompletedLabel(task.complete_kind)}`;
-  if (task.status === "pending_review" || task.status === "in_review") return `第 ${pageNo} 页 · ${REVIEW_STATUS_LABEL.pending}`;
-  if (task.status === "compare_failed") return `第 ${pageNo} 页 · 检查中断`;
-  return `第 ${pageNo} 页`;
+  if (task.status === "completed") return `审核页 · 第 ${pageNo} 页 · ${reviewCompletedLabel(task.complete_kind)}`;
+  if (task.status === "pending_review" || task.status === "in_review") return `审核页 · 第 ${pageNo} 页 · ${REVIEW_STATUS_LABEL.pending}`;
+  if (task.status === "compare_failed") return `审核页 · 第 ${pageNo} 页 · 检查中断`;
+  return `审核页 · 第 ${pageNo} 页`;
 }
 
 /**

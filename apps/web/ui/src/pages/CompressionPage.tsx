@@ -3,9 +3,12 @@ import { Alert, App, Button, Empty, Input, Modal, Progress, Space, Table, Tag } 
 import { api, UploadPausedError, type PendingUploadReceipt } from "../api";
 import type { CompressionBatch, CompressionFile } from "../batchTypes";
 import { customerCopy } from "./customerCopy";
-import { COMPRESSION_STATUS_LABEL, NAV_LABEL } from "../copy/labels";
+import { COMPRESSION_STATUS_LABEL } from "../copy/labels";
 
-export const compressionStatus: Record<string, string> = COMPRESSION_STATUS_LABEL;
+export const compressionStatus: Record<string, string> = {
+  queued: "排队中", running: "处理中", succeeded: "已完成", passthrough: COMPRESSION_STATUS_LABEL.passthrough,
+  unmet_target: COMPRESSION_STATUS_LABEL.unmet_target, unsupported: "不支持", failed: "处理失败", done: "已完成", partial: "部分完成",
+};
 export function displayBytes(bytes: number | null) {
   if (bytes === null) return "—";
   return bytes < 1_000_000 ? `${(bytes / 1000).toFixed(1)} KB` : `${(bytes / 1_000_000).toFixed(2)} MB`;
@@ -50,8 +53,8 @@ function UnreadableRecovery({ canAdmin }: { canAdmin: boolean }) {
       setError(err instanceof Error ? err.message : "隔离损坏记录失败");
     } finally { setBusy(null); }
   }
-  return <Alert type="warning" showIcon title="有几条记录坏了"
-    description={<Space wrap>{ids.map(id => <span key={id} className="compression-recovery-item"><code>{id}</code><Button size="small" loading={busy === id} onClick={() => void quarantine(id)}>移除</Button></span>)}{error ? <span>{error}</span> : null}</Space>} />;
+  return <Alert type="warning" showIcon title="有异常记录需要处理"
+    description={<Space wrap>{ids.map(id => <span key={id} className="compression-recovery-item"><code>{id}</code><Button size="small" loading={busy === id} onClick={() => void quarantine(id)}>移除记录</Button></span>)}{error ? <span>{error}</span> : null}</Space>} />;
 }
 
 function CompressionNew({ canCreate, canAdmin, receiptId, onOpen, onHistory }: Props) {
@@ -114,27 +117,27 @@ function CompressionNew({ canCreate, canAdmin, receiptId, onOpen, onHistory }: P
     } finally { if (alive.current) setBusy(false); }
   }
   return <section className="batch-page">
-    <header className="page-head"><div><h1 className="page-title">{NAV_LABEL.compression}</h1><p className="page-lead">图片、PDF 变小，结果存历史</p></div><Button onClick={onHistory}>{NAV_LABEL.history}</Button></header>
+    <header className="page-head"><div><h1 className="page-title">压缩文件</h1><p className="page-lead">图片和 PDF 一起压缩，结果保存在历史。</p></div><Button onClick={onHistory}>看历史</Button></header>
     <UnreadableRecovery canAdmin={canAdmin} />
     {error ? <Alert type="error" showIcon title={error} /> : null}
     <div className="batch-card">
       <h2>新建压缩</h2>
-      <label className="batch-label">名称<Input value={title} maxLength={120} disabled={busy} onChange={event => setTitle(event.target.value)} placeholder="例如：海葡萄冰冰贴" /></label>
+      <label className="batch-label">批次名<Input value={title} maxLength={120} disabled={busy} onChange={event => setTitle(event.target.value)} placeholder="例如：海葡萄冰冰贴" /></label>
       <label className={`compression-drop ${busy || !canCreate || readyReceipt ? "is-disabled" : ""}`}
         onDragOver={event => event.preventDefault()} onDrop={event => { event.preventDefault(); if (!busy && canCreate && !readyReceipt) selectFiles(Array.from(event.dataTransfer.files)); }}>
         <img src="/brand/ui/well-pdf.svg" alt="" width="48" height="48" />
-        <strong>{readyReceipt ? "上传完成，可以开始压缩。" : receipt ? "重新选" : "拖进来或点选文件"}</strong>
-        <span>PDF/JPG/PNG/WebP，最多 20 个</span>
+        <strong>{readyReceipt ? "上传完成，可以开始压缩。" : receipt ? "重新选择文件" : "拖入或选择文件"}</strong>
+        <span>支持 PDF、JPG、PNG、WebP，最多 20 个。</span>
         <input aria-label="选择压缩文件" type="file" multiple accept=".pdf,.jpg,.jpeg,.png,.webp" disabled={busy || !canCreate || Boolean(readyReceipt)} onChange={event => selectFiles(Array.from(event.target.files || []))} />
       </label>
       {files.length || receipt ? <ul className="compression-file-list">{(files.length ? files.map(file => ({ name: file.name, bytes: file.size })) : receipt!.files).map((file, i) => <li key={i}><span>{file.name}</span><span>{displayBytes(file.bytes)}</span></li>)}</ul> : null}
       {progress !== null ? <Progress percent={progress} status={busy ? "active" : error ? "exception" : "normal"} format={percent => `${percent}% 已上传`} /> : null}
-      <Alert type="info" showIcon title="PDF 压到 10MB 以内" description="文字和公章不变" />
-      <Space wrap className="batch-actions"><Button type="primary" size="large" loading={busy} disabled={!canCreate || (!readyReceipt && !files.length)} onClick={() => void start()}>{readyReceipt ? "开始压缩" : error && files.length ? "继续" : "开始压缩"}</Button>
+      <Alert type="info" showIcon title="PDF 自动压到 10 MB 内。" description="保留页面、文字和公章。" />
+      <Space wrap className="batch-actions"><Button type="primary" size="large" loading={busy} disabled={!canCreate || (!readyReceipt && !files.length)} onClick={() => void start()}>{readyReceipt ? "开始压缩" : error && files.length ? "继续压缩" : "上传并压缩"}</Button>
         {(receipt || readyReceipt) && !busy ? <Button onClick={() => { setReceipt(null); setReadyReceipt(null); setFiles([]); setError(null); setProgress(null); clientId.current = crypto.randomUUID(); }}>新建压缩</Button> : null}
       </Space>
     </div>
-    {pending.length ? <div className="batch-card"><h2>没传完的</h2>{pending.map(row => <div className="batch-section-head" key={row.id}><span>{row.files[0]?.name} · {row.files.length} 个文件</span><Button disabled={busy} onClick={() => chooseReceipt(row)}>{row.phase === "ready" ? "继续压缩" : "继续上传"}</Button></div>)}</div> : null}
+    {pending.length ? <div className="batch-card"><h2>待处理文件</h2>{pending.map(row => <div className="batch-section-head" key={row.id}><span>{row.files[0]?.name} · {row.files.length} 个文件</span><Button disabled={busy} onClick={() => chooseReceipt(row)}>{row.phase === "ready" ? "继续压缩" : "继续上传"}</Button></div>)}</div> : null}
   </section>;
 }
 
@@ -176,16 +179,16 @@ function CompressionDetail({ id, canCreate, canExport, canAdmin, onBack, onHisto
     <UnreadableRecovery canAdmin={canAdmin} />
     {error ? <Alert type="error" showIcon title={error} action={<Button onClick={() => setReload(value => value + 1)}>刷新</Button>} /> : null}
     {batch ? <div className="batch-card">
-      <div className="batch-section-head"><div><Tag color={active ? "processing" : batch.status === "done" ? "success" : batch.status === "failed" ? "error" : "warning"}>{compressionStatus[batch.status]}</Tag><span>可下载 {available} · 处理中 {processing} · 失败 {unsuccessful}</span><p className="page-lead">{active ? `前面还有 ${batch.queue_ahead} 批，可离开页面。` : "下载前看看文字和公章清不清楚"}</p></div><Space wrap>
-        <Button disabled={!canCreate || active || !batch.files.some(file => file.can_retry)} loading={busy} onClick={() => void retry(batch.files.filter(file => file.can_retry).map(file => file.id))}>重试失败的</Button>
-        <Button type="primary" aria-label="下载结果 ZIP" href={!active && available > 0 && canExport ? `/api/compressions/${id}/zip` : undefined} disabled={active || !canExport || available === 0}>全部下载</Button>
+      <div className="batch-section-head"><div><Tag color={active ? "processing" : batch.status === "done" ? "success" : batch.status === "failed" ? "error" : "warning"}>{compressionStatus[batch.status]}</Tag><span>可下载 {available} · 处理中 {processing} · 失败 {unsuccessful}</span><p className="page-lead">{active ? `前面还有 ${batch.queue_ahead} 批，可离开页面。` : "下载前请查看文字、公章和页面。"}</p></div><Space wrap>
+        <Button disabled={!canCreate || active || !batch.files.some(file => file.can_retry)} loading={busy} onClick={() => void retry(batch.files.filter(file => file.can_retry).map(file => file.id))}>重试失败项</Button>
+        <Button type="primary" aria-label="下载结果 ZIP" href={!active && available > 0 && canExport ? `/api/compressions/${id}/zip` : undefined} disabled={active || !canExport || available === 0}>下载 ZIP</Button>
       </Space></div>
       <Table<CompressionFile> rowKey="id" dataSource={batch.files} pagination={false} scroll={{ x: 780 }} columns={[
         { title: "文件", key: "name", render: (_, file) => <div className="batch-file-name"><strong>{file.name}</strong><small>{file.media_type === "application/pdf" ? "目标：小于 10 MB" : "压缩图片"}</small></div> },
-        { title: "压缩前", dataIndex: "input_bytes", width: 115, render: displayBytes },
-        { title: "压缩后", key: "output_bytes", width: 125, render: (_, file) => file.output_bytes === null
+        { title: "原大小", dataIndex: "input_bytes", width: 115, render: displayBytes },
+        { title: "新大小", key: "output_bytes", width: 125, render: (_, file) => file.output_bytes === null
           ? file.status === "queued" || file.status === "running" ? "等待处理" : "未生成"
-          : <div>{displayBytes(file.output_bytes)}<small className="compression-saving">小了 {Math.max(0, (1 - file.output_bytes / file.input_bytes) * 100).toFixed(1)}%</small></div> },
+          : <div>{displayBytes(file.output_bytes)}<small className="compression-saving">节省 {Math.max(0, (1 - file.output_bytes / file.input_bytes) * 100).toFixed(1)}%</small></div> },
         { title: "状态", key: "status", render: (_, file) => <div><Tag color={ready(file) ? "success" : file.status === "running" || file.status === "queued" ? "processing" : file.status === "failed" ? "error" : "warning"}>{compressionStatus[file.status]}</Tag>{file.message ? <p className="page-lead">{customerCopy(file.message)}</p> : null}</div> },
         { title: "操作", key: "actions", width: 220, render: (_, file) => <Space wrap>{ready(file) && canExport ? <><span className="format-tag">{file.media_type === "application/pdf" ? "PDF" : "图片"}</span><Button size="small" onClick={() => setPreview(file)}>预览</Button><Button size="small" href={fileUrl(id, file.key!)}>下载</Button></> : null}{file.can_retry && canCreate ? <Button size="small" disabled={active || busy} onClick={() => void retry([file.id])}>重试</Button> : null}</Space> },
       ]} />
@@ -210,7 +213,7 @@ function ResultPreview({ id, file, onClose }: { id: string; file: CompressionFil
     return () => { controller.abort(); if (objectUrl) URL.revokeObjectURL(objectUrl); };
   }, [id, file.key]);
   return <Modal open title={file.name} width={980} onCancel={onClose} footer={<Button href={fileUrl(id, file.key!)}>下载</Button>}>
-    <p className="page-lead">看看文字和公章清不清楚</p>
+    <p className="page-lead">请查看文字、公章和页面。</p>
     {error ? <Alert type="error" title={error} /> : url ? file.media_type === "application/pdf"
       ? <iframe className="result-preview" title="压缩结果预览" src={url} /> : <img className="result-preview" alt="压缩结果" src={url} /> : <p role="status">正在加载预览…</p>}
   </Modal>;

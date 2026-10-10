@@ -88,11 +88,11 @@ export function sameStructureLayerSelection(input: StructureInput, selectedIds: 
 }
 
 export function structureStatusLabel(job: Pick<MockupJob, "structure_status" | "structure_code">): string | null {
-  if (job.structure_status === "analyzing") return "生成中";
+  if (job.structure_status === "analyzing") return "正在出图";
   if (job.structure_status === "review_required") {
-    return job.structure_code === "structure_face_mapping_incomplete" ? "选个正面" : "生成失败";
+    return job.structure_code === "structure_face_mapping_incomplete" ? "待选正面" : "生成失败";
   }
-  if (job.structure_status === "unsupported") return "暂不支持此盒型";
+  if (job.structure_status === "unsupported") return "结构暂不支持";
   return null;
 }
 

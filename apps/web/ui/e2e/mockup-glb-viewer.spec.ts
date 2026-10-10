@@ -46,7 +46,7 @@ async function serve(page: Page, fail = false, white = false) {
   });
 }
 async function loaded(page: Page) {
-  await expect(page.getByRole('button',{name:'回到初始角度'})).toBeEnabled();
+  await expect(page.getByRole('button',{name:'复位模型视角'})).toBeEnabled();
   await expect.poll(() => page.locator('model-viewer').evaluate((el:any) => el.loaded)).toBe(true);
 }
 async function orbit(page: Page) {
@@ -59,14 +59,14 @@ test('桌墙显示资源保持原始下载并可复位，离页释放 blob', asy
   await page.locator('.mockup-backdrop-switch').getByText('白底',{exact:true}).click(); await loaded(page);
   const initial = await orbit(page); expect(initial.theta).toBeCloseTo(35,1); expect(initial.phi).toBeCloseTo(72,1);
   const link = page.getByRole('link',{name:'下载模型',exact:true}); const href = await link.getAttribute('href');
-  await page.locator('.mockup-backdrop-switch').getByText('桌面场景',{exact:true}).click(); await loaded(page);
+  await page.locator('.mockup-backdrop-switch').getByText('白桌白墙',{exact:true}).click(); await loaded(page);
   await expect(page.locator('model-viewer')).toHaveAttribute('src',/^blob:/);
   const sceneUrl = await page.locator('model-viewer').getAttribute('src');
   await page.locator('.mockup-sheet-glb').screenshot({path:test.info().outputPath('textured-carton-room.png')});
   await expect(link).toHaveAttribute('href',href!);
   const bytes = await page.evaluate(async url => [...new Uint8Array(await (await fetch(url)).arrayBuffer())],href!);
   expect(Buffer.from(bytes)).toEqual(source);
-  await page.getByRole('button',{name:'回到初始角度'}).click();
+  await page.getByRole('button',{name:'复位模型视角'}).click();
   await expect.poll(async()=>Math.round((await orbit(page)).theta)).toBe(35);
   await expect.poll(async()=>Math.round((await orbit(page)).phi)).toBe(72);
   await page.getByRole('button',{name:'全屏',exact:true}).click();
@@ -79,9 +79,9 @@ test('桌墙显示资源保持原始下载并可复位，离页释放 blob', asy
 
 test('GLB 请求失败明确显示错误而保留原始下载',async ({page}) => {
   await serve(page,true);await page.goto(`/mockup/${ID}`);
-  await expect(page.getByRole('alert').filter({hasText:'3D 没加载出来'})).toBeVisible();
+  await expect(page.getByRole('alert').filter({hasText:'3D 预览加载失败'})).toBeVisible();
   await expect(page.getByRole('link',{name:'下载模型',exact:true})).toHaveAttribute('href',new RegExp(`generation_id=${GENERATION}`));
-  await expect(page.getByRole('button',{name:'回到初始角度'})).toBeDisabled();
+  await expect(page.getByRole('button',{name:'复位模型视角'})).toBeDisabled();
 });
 
 
@@ -96,17 +96,17 @@ test('用户旋转缩放后切背景保持轨道',async ({page})=>{
     await new Promise<void>(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve())));
   });
   const moved=await orbit(page);
-  await page.locator('.mockup-backdrop-switch').getByText('桌面场景',{exact:true}).click();await loaded(page);
+  await page.locator('.mockup-backdrop-switch').getByText('白桌白墙',{exact:true}).click();await loaded(page);
   const after=await orbit(page);expect(after.theta).toBeCloseTo(moved.theta,1);expect(after.phi).toBeCloseTo(moved.phi,1);
   expect(after.radius*Math.sin(after.fov*Math.PI/360)/(moved.radius*Math.sin(moved.fov*Math.PI/360))).toBeCloseTo(1,1);
 });
 
 test('已加载显示场景报错立即释放blob',async({page})=>{
   await serve(page);await page.goto(`/mockup/${ID}`);await loaded(page);
-  await page.locator('.mockup-backdrop-switch').getByText('桌面场景',{exact:true}).click();await loaded(page);
+  await page.locator('.mockup-backdrop-switch').getByText('白桌白墙',{exact:true}).click();await loaded(page);
   const sceneUrl=await page.locator('model-viewer').getAttribute('src');expect(sceneUrl).toMatch(/^blob:/);
   await page.locator('model-viewer').dispatchEvent('error');
-  await expect(page.getByRole('alert').filter({hasText:'3D 没加载出来'})).toBeVisible();
+  await expect(page.getByRole('alert').filter({hasText:'3D 预览加载失败'})).toBeVisible();
   await expect.poll(()=>page.evaluate(url=>(window as any).__blobAudit.revoked.includes(url),sceneUrl)).toBe(true);
 });
 
@@ -125,7 +125,7 @@ test('真实指针拖动可旋转模型',async({page})=>{
 
 test('产品灯变化保留桌墙背景亮度并改变盒身',async({page})=>{
   await serve(page);await page.goto(`/mockup/${ID}`);await loaded(page);
-  await page.locator('.mockup-backdrop-switch').getByText('桌面场景',{exact:true}).click();await loaded(page);
+  await page.locator('.mockup-backdrop-switch').getByText('白桌白墙',{exact:true}).click();await loaded(page);
   const frame=page.locator('.mockup-sheet-glb'),src=await page.locator('model-viewer').getAttribute('src');
   async function pixels(){
     return page.evaluate(async bytes=>{
@@ -136,8 +136,8 @@ test('产品灯变化保留桌墙背景亮度并改变盒身',async({page})=>{
     },[...await frame.screenshot()]);
   }
   const before=await pixels();
-  await page.getByRole('button',{name:'调光',exact:true}).click();
-  await page.getByRole('slider',{name:'产品亮度',exact:true}).fill('1.3');
+  await page.getByRole('button',{name:'调灯',exact:true}).click();
+  await page.getByRole('slider',{name:'产品灯光',exact:true}).fill('1.3');
   await expect(page.locator('model-viewer')).toHaveAttribute('exposure','0.91');
   await page.evaluate(()=>new Promise<void>(r=>requestAnimationFrame(()=>requestAnimationFrame(()=>r()))));
   const after=await pixels();
@@ -149,7 +149,7 @@ test('产品灯变化保留桌墙背景亮度并改变盒身',async({page})=>{
 
 test('白盒三种背景展示证据',async({page})=>{
   await serve(page,false,true);await page.goto(`/mockup/${ID}`);await loaded(page);
-  for(const [name,file] of [['白底','white'],['银底','silver'],['桌面场景','room']]){
+  for(const [name,file] of [['白底','white'],['银底','silver'],['白桌白墙','room']]){
     await page.locator('.mockup-backdrop-switch').getByText(name,{exact:true}).click();await loaded(page);
     await page.locator('.mockup-sheet-glb').screenshot({path:process.env.GLB_EVIDENCE_DIR ? join(process.env.GLB_EVIDENCE_DIR,`white-carton-${file}.png`) : test.info().outputPath(`white-carton-${file}.png`)});
   }
@@ -158,7 +158,7 @@ test('白盒三种背景展示证据',async({page})=>{
 test('近墙在八个方位不遮挡包装，背面可查看', async ({page}) => {
   test.setTimeout(45_000);
   await serve(page); await page.goto(`/mockup/${ID}`); await loaded(page);
-  await page.locator('.mockup-backdrop-switch').getByText('桌面场景',{exact:true}).click(); await loaded(page);
+  await page.locator('.mockup-backdrop-switch').getByText('白桌白墙',{exact:true}).click(); await loaded(page);
   const viewer=page.locator('model-viewer');
   for (const theta of [0,45,90,135,180,225,270,315]) {
     await viewer.evaluate(async (el:any, angle:number) => {

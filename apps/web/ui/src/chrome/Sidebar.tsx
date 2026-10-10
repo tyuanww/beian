@@ -35,7 +35,7 @@ export function Sidebar({
   return (
     <aside
       className={collapsed ? "sidebar is-collapsed" : "sidebar"}
-      aria-label="主菜单"
+      aria-label="审稿室"
       aria-expanded={!collapsed}
     >
       <div className="sidebar-glass" aria-hidden="true" />
@@ -46,7 +46,7 @@ export function Sidebar({
           onClick={onToggle}
           tabIndex={collapsed ? 0 : -1}
           aria-hidden={!collapsed}
-          aria-label="展开菜单"
+          aria-label="展开侧栏"
           aria-expanded={false}
         >
           <img className="brand-hit-logo" src="/brand/logo-mark.png" alt="" width={32} height={32} />
@@ -66,7 +66,7 @@ export function Sidebar({
           onClick={onToggle}
           tabIndex={collapsed ? -1 : 0}
           aria-hidden={collapsed}
-          aria-label="收起菜单"
+          aria-label="折叠侧栏"
           aria-expanded={true}
         >
           <img src="/brand/ui/sidebar-collapse.svg" alt="" width={22} height={22} />
@@ -83,8 +83,8 @@ export function Sidebar({
               type="button"
               className={on ? "side-item is-on" : "side-item"}
               aria-current={on ? "page" : undefined}
-              aria-label={live ? `${item.label}，有任务在跑` : undefined}
-              title={collapsed ? (live ? `${item.label} · 有任务在跑` : item.label) : undefined}
+              aria-label={live ? `${item.label}，进行中` : undefined}
+              title={collapsed ? (live ? `${item.label} · 进行中` : item.label) : undefined}
               onClick={() => onNavigate(item.key)}
             >
               <img className="side-icon" src={item.icon} alt="" width={24} height={24} />
@@ -101,7 +101,7 @@ export function Sidebar({
         trigger={["click"]}
         placement="topLeft"
         menu={{
-          items: [{ key: "logout", label: "退出登录", danger: true }],
+          items: [{ key: "logout", label: "退出", danger: true }],
           onClick: ({ key }) => {
             if (key === "logout") onLogout();
           },
@@ -116,7 +116,7 @@ export function Sidebar({
           <span className="account-copy">
             <span className="account-name">{displayName}</span>
             {versionLabel ? (
-              <span className="sidebar-version" title={`版本 ${versionLabel}`}>
+              <span className="sidebar-version" title={`当前版本 ${versionLabel}`}>
                 {versionLabel}
               </span>
             ) : null}

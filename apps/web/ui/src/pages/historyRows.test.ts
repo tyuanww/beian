@@ -61,7 +61,7 @@ describe("historyTaskRow", () => {
       job_eta_s: 240,
     });
     assert.equal(row.status, "生成中");
-    assert.equal(row.live, "搭出盒子 · 大约还要 4 分钟");
+    assert.equal(row.live, "生成盒型 · 大约还要 4 分钟");
   });
 
   it("keeps structure review recoverable instead of calling it upload failure", () => {
@@ -79,7 +79,7 @@ describe("historyTaskRow", () => {
     assert.equal(historyCanDelete(row), true);
   });
 
-  it("keeps a unique missing front as 选个正面 instead of a failed mockup", () => {
+  it("keeps a unique missing front as 待选正面 instead of a failed mockup", () => {
     const row = historyMockRow({
       id: "structure2",
       title: "花盒",
@@ -89,7 +89,7 @@ describe("historyTaskRow", () => {
       job_status: "waiting_input",
       files: [],
     });
-    assert.equal(row.status, "选个正面");
+    assert.equal(row.status, "待选正面");
     assert.equal(row.color, "warning");
     assert.equal(row.live, null);
     assert.equal(historyCanDelete(row), true);

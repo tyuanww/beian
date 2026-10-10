@@ -32,7 +32,7 @@ const SIDEBAR_KEY = "wb_sidebar";
 const AUTH_FALLBACK: Record<string, string> = {
   denied: "已取消飞书授权。",
   expired: "登录已过期，请再点一次。",
-  forbidden: "请用伸美公司飞书账号登录。",
+  forbidden: "只允许伸美公司的飞书号进入。",
   failed: "飞书授权失败，请再试一次。",
 };
 
@@ -46,10 +46,10 @@ function readAuthHint(): string {
 }
 
 function authTitle(message: string): string {
-  if (message.includes("伸美") || message.includes("不允许")) return "暂时无法进入";
+  if (message.includes("伸美") || message.includes("不允许")) return "进不了这间审稿室";
   if (message.includes("取消")) return "授权未完成";
   if (message.includes("过期")) return "登录已过期";
-  return "登录没完成";
+  return "飞书授权未完成";
 }
 
 function AuthShell({ title, children }: { title?: string; children: ReactNode }) {
@@ -162,7 +162,7 @@ export function App() {
     if (boot.taskId) stashTid(TASK_STASH, boot.taskId);
     if (boot.mockupId) stashTid(MOCK_STASH, boot.mockupId);
     if (err) {
-      setAuthError(readAuthHint() || AUTH_FALLBACK[err] || "登录没完成。");
+      setAuthError(readAuthHint() || AUTH_FALLBACK[err] || "飞书授权未完成。");
       const url = new URL(window.location.href);
       url.searchParams.delete("feishu_error");
       window.history.replaceState({}, "", url.pathname + url.search);
@@ -363,7 +363,7 @@ export function App() {
         host: window.location.host,
       });
       return (
-        <AuthShell title={authError ? authTitle(authError) : "暂时无法进入"}>
+        <AuthShell title={authError ? authTitle(authError) : "进不了这间审稿室"}>
           <p>{message}</p>
           <a className="auth-result-retry" href={action.href}>
             {action.label}
@@ -373,7 +373,7 @@ export function App() {
     }
     return (
       <AuthShell>
-        <p>正在跳转飞书登录…</p>
+        <p>正在前往飞书授权…</p>
       </AuthShell>
     );
   }
@@ -382,7 +382,7 @@ export function App() {
     <div className="shell">
       <div className="workspace">
         {!collapsed ? (
-          <button type="button" className="sidebar-scrim" aria-label="收起菜单" onClick={toggleSidebar} />
+          <button type="button" className="sidebar-scrim" aria-label="收起侧栏" onClick={toggleSidebar} />
         ) : null}
         <Sidebar
           collapsed={collapsed}
@@ -397,7 +397,7 @@ export function App() {
         />
         <main className={view === "settings" ? "stage stage-flush" : "stage"}>
         {view === "settings" ? (
-          <Suspense fallback={<PaneFallback label="正在打开设置…" />}>
+          <Suspense fallback={<PaneFallback label="打开设置…" />}>
             <SettingsPage
               canAdmin={me.role === "admin"}
               openId={me.open_id || ""}
@@ -406,7 +406,7 @@ export function App() {
           </Suspense>
         ) : null}
         {view === "mockup" || view === "mockupNew" ? (
-          <Suspense fallback={<PaneFallback label="正在打开 3D 打样…" />}>
+          <Suspense fallback={<PaneFallback label="打开 3D 打样…" />}>
             <MockupDesk
               canCreate={me.perms.includes("create")}
               canConfirmStructure={me.perms.includes("confirm_structure")}
@@ -421,14 +421,14 @@ export function App() {
             />
           </Suspense>
         ) : null}
-        {view === "compression" ? <Suspense fallback={<PaneFallback label="正在打开压缩…" />}>
+        {view === "compression" ? <Suspense fallback={<PaneFallback label="打开压缩文件…" />}>
           <CompressionPage id={compressionId} receiptId={receiptId} owner={me.open_id || me.display_name || ""}
             canCreate={me.perms.includes("create")} canExport={me.perms.includes("export")} canAdmin={me.role === "admin"}
             onOpen={id => goRoute({ view: "compression", compressionId: id })}
             onBack={() => goRoute({ view: "compression" })} onHistory={() => goRoute({ view: "history" })} />
         </Suspense> : null}
         {view === "history" ? (
-          <Suspense fallback={<PaneFallback label="正在打开历史记录…" />}>
+          <Suspense fallback={<PaneFallback label="打开历史…" />}>
             <HistoryPage key={me.open_id || me.display_name || ""} owner={me.open_id || me.display_name || ""}
               onOpenCompression={id => goRoute({ view: "compression", compressionId: id })}
               canCreate={me.perms.includes("create")}

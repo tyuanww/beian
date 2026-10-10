@@ -91,7 +91,7 @@ export function NewTaskPage({ canCreate, receiptId, onCreated, onBack }: Props) 
           setProductName(found.product_name || "");
           setPack(found.pack_surface || "carton");
         } else {
-          setResumeError("上传已失效，请返回审稿重新选择文件。");
+          setResumeError("上传已失效，请返回审稿台重新选择文件。");
         }
       })
       .catch((err: unknown) => {
@@ -174,11 +174,11 @@ export function NewTaskPage({ canCreate, receiptId, onCreated, onBack }: Props) 
 
   function confirmAbandon() {
     modal.confirm({
-      title: "删除这次上传？",
+      title: "放弃这次上传？",
       content: "暂存文件会删除；以后需要时要重新选择并上传。",
-      okText: "删除",
+      okText: "放弃上传",
       okButtonProps: { danger: true },
-      cancelText: "保留",
+      cancelText: "继续保留",
       onOk: async () => {
         try {
           if (resumeSource === "remote" && restoredReceipt) {
@@ -205,7 +205,7 @@ export function NewTaskPage({ canCreate, receiptId, onCreated, onBack }: Props) 
           <h1 className="page-title">新建审稿</h1>
           <button type="button" className="btn-ghost" onClick={onBack}>返回</button>
         </header>
-        <Alert type="warning" showIcon title="你的账号只能查看" />
+        <Alert type="warning" showIcon title="当前账号只有查看权限，不能上传或新建审稿。" />
       </section>
     );
   }
@@ -215,7 +215,7 @@ export function NewTaskPage({ canCreate, receiptId, onCreated, onBack }: Props) 
       <header className="page-head">
         <div>
           <h1 className="page-title">新建审稿</h1>
-          <p className="page-lead">传确认表和设计稿各一份</p>
+          <p className="page-lead">上传一份表和一份 PDF。</p>
         </div>
         <div style={{ display: "flex", gap: 12 }}>
           <button type="button" className="btn-ghost" disabled={submitting} onClick={onBack}>
@@ -237,7 +237,7 @@ export function NewTaskPage({ canCreate, receiptId, onCreated, onBack }: Props) 
           品名
           <input
             maxLength={80}
-            placeholder="选表格后自动填，可改"
+            placeholder="选 Excel 后自动填，可改"
             value={productName}
             onChange={(event) => updateName(event.target.value)}
           />
@@ -276,7 +276,7 @@ export function NewTaskPage({ canCreate, receiptId, onCreated, onBack }: Props) 
         <UploadWell
           icon="/brand/ui/well-excel.svg"
           title="确认表"
-          hint="拖进来或点选 .xlsx"
+          hint="拖入或选择 Excel 文件。"
           accept=".xlsx"
           fileName={excel?.name}
           fileBytes={excel?.bytes}
@@ -284,11 +284,11 @@ export function NewTaskPage({ canCreate, receiptId, onCreated, onBack }: Props) 
           onFile={(file) => takeFile("excel", file)}
           onReject={() => message.warning("Excel 只要 .xlsx。")}
         >
-          <span className="upload-well-btn">选表格</span>
+          <span className="upload-well-btn">选择 Excel</span>
         </UploadWell>
         <UploadWell
           icon="/brand/ui/well-pdf.svg"
-          title="设计稿"
+          title="包装稿"
           hint="花盒或膜袋展开图。"
           accept=".pdf"
           fileName={pdf?.name}
@@ -297,21 +297,21 @@ export function NewTaskPage({ canCreate, receiptId, onCreated, onBack }: Props) 
           onFile={(file) => takeFile("pdf", file)}
           onReject={() => message.warning("包装稿只要 PDF。")}
         >
-          <span className="upload-well-btn">选 PDF</span>
+          <span className="upload-well-btn">选择 PDF</span>
         </UploadWell>
       </div>
 
-      <p className="new-ocr-hint">先读稿件文字，图片里的字再识别</p>
+      <p className="new-ocr-hint">优先读取原稿文字，图片区域再识别。</p>
 
       <div className="step-row">
         <article className="step-card">
           <b>1</b>
-          <strong>传文件</strong>
+          <strong>上传文件</strong>
           <p>一份 Excel 和一份包装稿。</p>
         </article>
         <article className="step-card">
           <b>2</b>
-          <strong>机器核对</strong>
+          <strong>自动检查</strong>
           <p>不确定的内容会请你确认。</p>
         </article>
         <article className="step-card">
