@@ -42,18 +42,18 @@ function png(value = 11): Buffer {
     chunk("IDAT",deflateSync(Buffer.from([0,value,22,33]))),chunk("IEND",Buffer.alloc(0))]);
 }
 
-function glb(): Buffer {
-  const json = Buffer.from('{"asset":{"version":"2.0"}} ');
+function glb(pad=0): Buffer {
+  const json = Buffer.from('{"asset":{"version":"2.0"}} '+" ".repeat(pad));
   const header = Buffer.alloc(20); header.write("glTF"); header.writeUInt32LE(2,4);
   header.writeUInt32LE(20+json.length,8); header.writeUInt32LE(json.length,12); header.writeUInt32LE(0x4e4f534a,16);
   return Buffer.concat([header,json]);
 }
 
-function seed(id:string, managed=false) {
+function seed(id:string, managed=false, glbPad=0) {
   const root = join(process.env.WB_DATA_DIR!,"mockups",id); mkdirSync(join(root,"assets"),{recursive:true});
   const files = [["white_a","front_right_white.png"],["white_b","back_left_white.png"],["glb","box.glb"],
     ["white_a_ground","front_right_ground.png"],["white_a_card","front_right_card.png"]].map(([key,name]) => {
-      const path = join(root,name); writeFileSync(path,key === "glb" ? glb() : png()); return {key,name,path};
+      const path = join(root,name); writeFileSync(path,key === "glb" ? glb(glbPad) : png()); return {key,name,path};
     });
   for (const face of ["front","right","back","left","top","bottom"]) writeFileSync(join(root,"assets",`panel_${face}.png`),png());
   saveMockup({id,owner:owner.open_id,created_at:"2026-09-06T00:00:00Z",status:"done",job_kind:"mockup",job_status:"succeeded",files});
@@ -420,4 +420,17 @@ it("RF-04 old in-place work cannot mint a root snapshot, and query/cross-job fai
   assert.equal((await request(`/api/mockups/f004ffffffff/render-generations`)).status,404);
   const list=await (await request("/api/mockups")).json();
   assert.equal(list.find((row:{id:string})=>row.id === f.id).render_generation_capabilities,undefined);
+});
+
+it("generation GLB is sent uncompressed with Content-Length on GET and HEAD", async () => {
+  const f=seed("f00600000006",true,8192); const bytes=glb(8192);
+  const url=`/api/mockups/${f.id}/files/glb?generation_id=g0-legacy-original`;
+  const get=await request(url,reader,{"accept-encoding":"gzip, deflate"});
+  assert.equal(get.status,200); assert.equal(get.headers.get("content-type"),"model/gltf-binary");
+  assert.equal(get.headers.get("content-encoding"),null);
+  assert.equal(get.headers.get("content-length"),String(bytes.length));
+  assert.deepEqual(Buffer.from(await get.arrayBuffer()),bytes);
+  const head=await app.request(url,{method:"HEAD",headers:{authorization:`Bearer ${reader.token}`,"accept-encoding":"gzip"}});
+  assert.equal(head.status,200); assert.equal(head.headers.get("content-encoding"),null);
+  assert.equal(head.headers.get("content-length"),String(bytes.length)); assert.equal(await head.text(),"");
 });
