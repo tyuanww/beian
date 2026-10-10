@@ -1,6 +1,6 @@
 import { useId, useMemo, useState } from "react";
 import { Button } from "antd";
-import { expandLabel, splitHit, summarizeFiles } from "./historyFiles";
+import { expandLabel, splitHit, summarizeFiles } from "./historyFileSummary";
 
 type Props = { names: readonly string[]; matched: readonly string[]; query: string };
 

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { classifyFile, expandLabel, HISTORY_NAME_LIMIT, splitHit, summarizeFiles } from "./historyFiles";
+import { classifyFile, expandLabel, HISTORY_NAME_LIMIT, splitHit, summarizeFiles } from "./historyFileSummary";
 
 const P = "cc99285d_pack";
 const real = [
