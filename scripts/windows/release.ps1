@@ -796,7 +796,9 @@ function Assert-StagedOfflineIntegrity([object]$Plan) {
       # apps\web\ui\dist first (Vite default outDir inside the stage). Only the three
       # node_modules directories are ever swapped into D:\beian, so this dist never
       # reaches the live checkout; the live UI is rebuilt by the post-merge ui_build.
-      Assert-NativeOfflineProbe "staged UI build" $npm.Source @("run", "build", "-w", "beian-ui") $stage
+      # tsc/Vite print warnings on stderr; under PS 5.1 a redirected native stderr line
+      # is a terminating error, so judge this build only by exit code and keep its log.
+      Invoke-BoundedProcess "staged UI build" $npm.Source @("run", "build", "-w", "beian-ui") $stage (Join-Path $Plan.StageWork "logs\ui-build.log") 600
       if (-not (Test-Path -LiteralPath (Join-Path $stageDist "index.html") -PathType Leaf)) {
         throw "staged UI build 未产出 index.html；拒绝停 8787"
       }

@@ -1042,7 +1042,7 @@ describe("windows release.ps1 contract", () => {
       /require\('sharp'\)/,
       /sharp\.versions\.vips/,
       /"staged Rollup native module"/,
-      /"staged UI build" \$npm\.Source @\("run", "build", "-w", "beian-ui"\) \$stage/,
+      /Invoke-BoundedProcess "staged UI build" \$npm\.Source @\("run", "build", "-w", "beian-ui"\) \$stage \(Join-Path \$Plan\.StageWork "logs\\ui-build\.log"\) 600/,
     ]) {
       assert.match(integrity, probe);
     }

@@ -66,7 +66,7 @@ $integrityAst = $releaseAst.Find({ param($node)
 Assert-True ($null -ne $integrityAst) "Assert-StagedOfflineIntegrity missing"
 $probeCalls = @($integrityAst.FindAll({ param($node)
   $node -is [System.Management.Automation.Language.CommandAst] -and
-  @("Assert-NativeOfflineProbe", "Assert-IsolatedServerEntryImport") -contains $node.GetCommandName() }, $true) |
+  @("Assert-NativeOfflineProbe", "Invoke-BoundedProcess", "Assert-IsolatedServerEntryImport") -contains $node.GetCommandName() }, $true) |
   Sort-Object { $_.Extent.StartOffset })
 $probeNames = @($probeCalls | ForEach-Object {
   if ($_.GetCommandName() -eq "Assert-IsolatedServerEntryImport") { "entry" } else { [string]$_.CommandElements[1].Value } })
