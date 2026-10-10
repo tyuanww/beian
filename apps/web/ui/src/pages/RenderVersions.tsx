@@ -10,7 +10,7 @@ function RenderReason({reason}:{reason?:string}) {
   const copy=renderReasonCopy(reason);
   return <div className="mockup-render-reason">
     <span>{copy.plain}</span>
-    <Collapse ghost size="small" items={[{key:"detail",label:"查看原因",children:<span className="mockup-render-reason-detail">{copy.detail}</span>}]} />
+    <Collapse ghost size="small" items={[{key:"detail",label:"查看原因",styles:{header:{padding:0},body:{padding:"4px 0 0"}},children:<span className="mockup-render-reason-detail">{copy.detail}</span>}]} />
   </div>;
 }
 
