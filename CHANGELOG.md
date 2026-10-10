@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.31.1.1] - 2026-10-10
+
+### Fixed
+- 离线依赖交接的 staged 探针先在 stage 内构建 `apps/web/ui/dist`，再导入 Hono 入口；此前入口在导入时挂载 `serveStatic(UI_DIST)`，stage 没有 dist 导致杭州发版在停服前安全失败。stage 的 dist 不会换入 `D:\beian`，线上 UI 仍由合并后的正常构建产出。
+
 ## [0.31.1.0] - 2026-10-10
 
 ### Added

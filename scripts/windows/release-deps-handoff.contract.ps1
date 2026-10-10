@@ -59,6 +59,22 @@ $releaseMarker = ${function:Get-DependencyTreeMarker}
   "Get-VerifiedDependencyRestorePlan", "Move-DependencyTreeAside", "Restore-DependencyBackup"
 ))))
 
+# --- staged probe ordering (PS 5.1 AST): Hono entry mounts serveStatic(UI_DIST) at import -
+$releaseAst = [System.Management.Automation.Language.Parser]::ParseFile($releasePath, [ref]$null, [ref]$null)
+$integrityAst = $releaseAst.Find({ param($node)
+  $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq "Assert-StagedOfflineIntegrity" }, $true)
+Assert-True ($null -ne $integrityAst) "Assert-StagedOfflineIntegrity missing"
+$probeCalls = @($integrityAst.FindAll({ param($node)
+  $node -is [System.Management.Automation.Language.CommandAst] -and
+  @("Assert-NativeOfflineProbe", "Assert-IsolatedServerEntryImport") -contains $node.GetCommandName() }, $true) |
+  Sort-Object { $_.Extent.StartOffset })
+$probeNames = @($probeCalls | ForEach-Object {
+  if ($_.GetCommandName() -eq "Assert-IsolatedServerEntryImport") { "entry" } else { [string]$_.CommandElements[1].Value } })
+$uiBuildAt = [array]::IndexOf($probeNames, "staged UI build")
+$entryAt = [array]::IndexOf($probeNames, "entry")
+Assert-True ($uiBuildAt -ge 0 -and $entryAt -gt $uiBuildAt) "staged UI build must run before the Hono entry import ($($probeNames -join ' > '))"
+Assert-True ($integrityAst.Extent.Text -notmatch '--outDir') "staged UI build must use the stage's own default dist"
+
 # --- recovery decision table (design §7.2) -------------------------------------
 $table = @(
   @($true, $false, $false, $true, "none"),

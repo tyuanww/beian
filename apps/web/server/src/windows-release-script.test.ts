@@ -1042,7 +1042,7 @@ describe("windows release.ps1 contract", () => {
       /require\('sharp'\)/,
       /sharp\.versions\.vips/,
       /"staged Rollup native module"/,
-      /"staged UI build" \$npm\.Source @\("run", "build", "-w", "beian-ui", "--", "--outDir", \$uiProbeOut, "--emptyOutDir"\)/,
+      /"staged UI build" \$npm\.Source @\("run", "build", "-w", "beian-ui"\) \$stage/,
     ]) {
       assert.match(integrity, probe);
     }
@@ -1052,6 +1052,22 @@ describe("windows release.ps1 contract", () => {
     assert.match(offline, /npm_config_registry = "http:\/\/127\.0\.0\.1:9\/"/);
     assert.match(offline, /finally \{[\s\S]*SetEnvironmentVariable\(\$name, \$prior\[\$name\], "Process"\)/);
     assert.doesNotMatch(script, /netsh\s+advfirewall|New-NetFirewallRule/i);
+  });
+
+  it("builds the stage's own UI dist before importing the Hono entry, and never swaps dist into the checkout", () => {
+    const integrity = script.slice(indexOf(/function Assert-StagedOfflineIntegrity/), indexOf(/function Test-ReusableDependencyStage/));
+    const buildIdx = integrity.indexOf('"staged UI build"');
+    const distIdx = integrity.indexOf('Join-Path $stageDist "index.html"');
+    const importIdx = integrity.indexOf("Assert-IsolatedServerEntryImport $tsx $stage");
+    assert.ok(buildIdx >= 0 && distIdx > buildIdx && importIdx > distIdx, "UI build must precede the Hono entry import");
+    assert.match(integrity, /\$stageDist = Join-Path \$stage "apps\\web\\ui\\dist"/);
+    assert.doesNotMatch(integrity, /--outDir/);
+    assert.doesNotMatch(integrity, /Join-Path \$Root "apps\\web\\ui\\dist"/);
+    assert.doesNotMatch(script, /"apps\\web\\ui\\dist"[^\n]*\$DependencySetRelativePaths|DependencySetRelativePaths = @\([^)]*dist/);
+    const index = readFileSync(join(repoRoot, "apps/web/server/src/index.ts"), "utf8");
+    assert.match(index, /serveStatic\(\{ root: UI_DIST \}\)/, "probe ordering exists because the entry mounts UI_DIST at import");
+    const contract = readFileSync(join(repoRoot, "scripts/windows/release-deps-handoff.contract.ps1"), "utf8");
+    assert.match(contract, /staged UI build must run before the Hono entry import/);
   });
 
   it("copies the checkout ACL, checks D: space, and never follows junctions when deleting", () => {

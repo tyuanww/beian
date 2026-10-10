@@ -762,7 +762,7 @@ function Assert-StagedOfflineIntegrity([object]$Plan) {
   $npm = Get-Command npm.cmd -ErrorAction Stop
   $stage = [string]$Plan.StageSource
   $emptyCache = Join-Path $Plan.StageWork ("offline-cache-" + [Guid]::NewGuid().ToString("N"))
-  $uiProbeOut = Join-Path $Plan.StageWork "ui-dist-probe"
+  $stageDist = Join-Path $stage "apps\web\ui\dist"
   New-Item -ItemType Directory -Force -Path $emptyCache | Out-Null
   try {
     Invoke-WithOfflineNetworkEnvironment $emptyCache {
@@ -788,20 +788,24 @@ function Assert-StagedOfflineIntegrity([object]$Plan) {
 
       Assert-NativeOfflineProbe "staged npm installed graph" $npm.Source @("ls", "--all", "--offline", "--ignore-scripts", "--silent") $stage
       Assert-NativeOfflineProbe "staged tsx launcher" $tsx @("--version") $stage
-      Assert-IsolatedServerEntryImport $tsx $stage
       Assert-NativeOfflineProbe "staged sharp native module" $node.Source @("-e", $sharpProbe, $logo) (Join-Path $stage "apps\web\server")
       Assert-NativeOfflineProbe "staged Vite CLI" $node.Source @($vite, "--version") $stage
       Assert-NativeOfflineProbe "staged Rollup native module" $node.Source @("-e", "require(process.argv[1])", [string]$rollupNative.FullName) $stage
-      Assert-NativeOfflineProbe "staged UI build" $npm.Source @("run", "build", "-w", "beian-ui", "--", "--outDir", $uiProbeOut, "--emptyOutDir") $stage
-      if (-not (Test-Path -LiteralPath (Join-Path $uiProbeOut "index.html") -PathType Leaf)) {
+      # The Hono entry mounts serveStatic(UI_DIST) at import time, exactly like the
+      # live probe sees the live tree's built dist. Build the stage's own
+      # apps\web\ui\dist first (Vite default outDir inside the stage). Only the three
+      # node_modules directories are ever swapped into D:\beian, so this dist never
+      # reaches the live checkout; the live UI is rebuilt by the post-merge ui_build.
+      Assert-NativeOfflineProbe "staged UI build" $npm.Source @("run", "build", "-w", "beian-ui") $stage
+      if (-not (Test-Path -LiteralPath (Join-Path $stageDist "index.html") -PathType Leaf)) {
         throw "staged UI build 未产出 index.html；拒绝停 8787"
       }
+      Assert-IsolatedServerEntryImport $tsx $stage
     }
   } finally {
     Remove-Item -LiteralPath $emptyCache -Recurse -Force -ErrorAction SilentlyContinue
-    Remove-Item -LiteralPath $uiProbeOut -Recurse -Force -ErrorAction SilentlyContinue
   }
-  Write-Host "staged offline integrity verified: installed graph, npm ls, tsx, Hono entry, sharp, Vite, Rollup, UI build"
+  Write-Host "staged offline integrity verified: installed graph, npm ls, tsx, sharp, Vite, Rollup, UI build, Hono entry"
 }
 
 function Test-ReusableDependencyStage([object]$Plan) {
