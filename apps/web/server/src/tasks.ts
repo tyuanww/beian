@@ -3,7 +3,7 @@ import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameS
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { DATA_DIR } from "./config.js";
-import { forgetHistory, noteHistoryReview } from "./historyIndex.js";
+import { cleanCompleteKind, forgetHistory, noteHistoryReview } from "./historyIndex.js";
 import { skipPackSheetField } from "./sheetSkip.js";
 
 export type Hit = {
@@ -287,7 +287,7 @@ export function listTasks(q: string, viewer: Viewer): Record<string, unknown>[] 
     created_at: t.created_at,
     owner: t.created_by || t.actor || t.owner,
     completed_by: t.completed_by,
-    complete_kind: t.status === "completed" ? t.complete_kind : undefined,
+    complete_kind: t.status === "completed" ? cleanCompleteKind(t.complete_kind) : null,
     round: t.round || 1,
     board: boardColumn(t.status, t.job_status),
     error: typeof t.error === "string" ? t.error : t.job_error || "",

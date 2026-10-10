@@ -251,7 +251,7 @@ function parseStored(value: unknown): Stored | null {
   });
 }
 
-function cleanCompleteKind(value: unknown): string | null {
+export function cleanCompleteKind(value: unknown): string | null {
   return value === "signed" || value === "rework" ? value : null;
 }
 
