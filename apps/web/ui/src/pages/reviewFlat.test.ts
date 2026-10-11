@@ -75,6 +75,8 @@ describe("reviewFlat", () => {
     assert.deepEqual(tabIndices(hs, "issue", 0), [0, 1]);
     assert.equal(positionLabel([0, 2], 2), "2/2");
     assert.equal(positionLabel([], 0), "全部已下结论");
+    assert.equal(positionLabel([3], 3, 0), "全部已下结论");
+    assert.equal(positionLabel([0, 3], 3, 1), "2/2");
   });
   it("快捷键条只在首次打开显示", () => {
     assert.equal(shouldShowShortcutsOnOpen({ getItem: () => null }), true);

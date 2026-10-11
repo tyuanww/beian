@@ -180,6 +180,8 @@ test("按 1 标一致自动跳下一条并跨页；打字时快捷键不生效�
   await expect(pins).toHaveText("3");
   await page.keyboard.press("2");
   await expect.poll(() => decisions(syntheticApi).length).toBe(3);
+  // 待确认清零后位置不写「1/1」。
+  await expect(page.getByTestId("review-posn")).toHaveText("全部已下结论");
   await page.getByLabel("写原因").fill("123");
   await expect.poll(() => decisions(syntheticApi).length).toBe(3);
   await expect(page.getByRole("button", { name: "第2页，1 处有错" })).toBeVisible();

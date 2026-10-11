@@ -196,8 +196,9 @@ export function markShortcutsSeen(store: Pick<Storage, "setItem"> | null): void 
 }
 
 /** 位置「3/9」：当前在该 tab 列表中的序号。 */
-export function positionLabel(list: number[], active: number): string {
-  if (!list.length) return REVIEW_COPY.allDecided;
+export function positionLabel(list: number[], active: number, pendingLeft?: number): string {
+  // 「待确认」tab 会把刚下完结论的当前条留在列表里不跳走；待确认已清零时不写「1/1」，写「全部已下结论」。
+  if (!list.length || pendingLeft === 0) return REVIEW_COPY.allDecided;
   const k = list.indexOf(active);
   return `${k < 0 ? "–" : k + 1}/${list.length}`;
 }
