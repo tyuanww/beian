@@ -5,7 +5,7 @@ import { blenderBin, illustratorBin, pythonBin } from "./settings.js";
  * 给非管理员和飞书看的报错：去掉本机目录，只留文件名；没有文件名的目录写成「本机路径」。
  *
  * 先把 URL 编码的分隔符 `%5C` / `%2F` 还原。手写的线性扫描器（不用回溯正则，避免 ReDoS）。规则：
- * - 路径起点：Windows 盘符 `X:\` / `X:/`；UNC `\\`（含 `\\?\`）；Unix 绝对路径 `/`（前一个字符不是 ASCII 字母数字或 `. _ - ~ / \`，
+ * - 路径起点：Windows 盘符 `X:\` / `X:/`（前一个字符不能是 ASCII 字母数字，`abc:\x` 不算）；`file://` 前缀先去掉；UNC `\\`（含 `\\?\`）；Unix 绝对路径 `/`（前一个字符不是 ASCII 字母数字或 `. _ - ~ / \`，
  *   所以紧贴中文也算起点，相对路径 `docs/x.md` 不算）。Unix 路径至少要有一级目录（`/tmp` 原样保留）。
  * - 路径在空白、引号、括号、逗号分号等中英文标点处结束；Windows / UNC 目录名中的空格见 scanPath。
  * - 末段带 1–8 位 ASCII 扩展名的当作文件名保留；扩展名后紧跟非 ASCII 字符（如「失败」）时，文件名到扩展名为止。
@@ -41,7 +41,7 @@ function pathStart(s: string, i: number): number {
   const ch = s[i];
   const prev = i > 0 ? s[i - 1] : "";
   if (ch === "\\" && s[i + 1] === "\\" && prev !== "\\") return i + 2;
-  if (isAsciiLetter(ch) && s[i + 1] === ":" && isSep(s[i + 2] || "")) return i + 3;
+  if (isAsciiLetter(ch) && !(prev && /[A-Za-z0-9]/.test(prev)) && s[i + 1] === ":" && isSep(s[i + 2] || "")) return i + 3;
   if (ch === "/" && !(prev && isAsciiWordish(prev))) return i + 1;
   return -1;
 }
@@ -152,6 +152,8 @@ export function redactLocalPaths(message: string | undefined | null): string {
   if (!s) return s;
   // URL 编码的分隔符（%5C、%2F，大小写不限）先还原，再按普通路径处理。
   s = s.replace(/%5c/gi, "\\").replace(/%2f/gi, "/");
+  // file:// 前缀去掉，后面按普通路径处理（file:///Users/... → /Users/...，file:///C:/... → C:/...）。
+  s = s.replace(/file:\/\/\/?(?=[A-Za-z]:[\\/])/gi, "").replace(/file:\/\/(?=\/)/gi, "");
   // 先处理已知目录（可能含空格，如 C:\Program Files\...）：整段是文件就换成文件名，是目录就换占位，其下文件再留文件名。
   for (const known of knownLocalPaths()) {
     if (!s.includes(known)) continue;
