@@ -80,7 +80,7 @@ import {
 } from "./workers.js";
 import { inspectRenderGenerationGroup, recoverWindowsRenderGeneration, signalRenderGenerationGroup } from "./renderGenerationProcess.js";
 import { illustratorBin } from "./settings.js";
-import { redactLocalPaths } from "./pathRedact.js";
+import { guardErrorFields, guardPublicError } from "./pathRedact.js";
 import { rasterAiFile } from "./aiRaster.js";
 import { readIllustratorAgentStatus } from "./illustratorAgent.js";
 import {
@@ -413,8 +413,8 @@ export function publicTask(task: Task, viewer?: Viewer): Record<string, unknown>
   const redact = !viewer?.admin;
   return {
     ...rest,
-    ...(redact && typeof rest.job_error === "string" ? { job_error: redactLocalPaths(rest.job_error) } : {}),
-    ...(redact && typeof rest.error === "string" ? { error: redactLocalPaths(rest.error) } : {}),
+    // 最后一步兜底：脱敏后仍有本机路径 / 凭据特征时整条隐藏，加 error_hidden / error_ticket（单号 = task.id）。
+    ...(redact ? guardErrorFields(task.id, { job_error: rest.job_error, error: rest.error }) : {}),
     ...(nativePublic(task) ? { native_text: nativePublic(task) } : {}),
     queue_ahead: queueAheadFrom(queueRanks(), task.id, task.job_kind, task.job_status),
   };
@@ -3598,7 +3598,7 @@ async function fireTaskNotify(task: Task, ok: boolean): Promise<void> {
     title: String(task.product_name || task.title || task.id),
     kind: task.job_kind === "rework" ? "rework" : "compare",
     ok,
-    error: task.job_error ? redactLocalPaths(task.job_error) : task.job_error,
+    error: task.job_error ? guardPublicError(task.job_error, task.id).text : task.job_error,
   });
   if (r.ok || r.skipped) {
     // 已结束任务允许在通知飞行期间删除；晚到的通知只能放弃收尾，不能复活 JSON。
@@ -3649,7 +3649,7 @@ async function fireMockupNotify(job: MockupJob, ok: boolean): Promise<void> {
     title: job.id,
     kind: "mockup",
     ok,
-    error: job.job_error ? redactLocalPaths(job.job_error) : job.job_error,
+    error: job.job_error ? guardPublicError(job.job_error, job.id).text : job.job_error,
   });
   if (r.ok || r.skipped) {
     const fresh = loadMockup(job.id);

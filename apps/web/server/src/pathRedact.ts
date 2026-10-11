@@ -366,3 +366,49 @@ function redactPlain(input: string, knownPaths: string[]): string {
   });
   return scanAndRedact(s);
 }
+
+// ---------------------------------------------------------------------------
+// 保守兜底：脱敏 + 截断之后若仍匹配下列特征，整条报错换成「任务失败，请联系管理员（单号 <任务编号>）」。
+// 特征：`/Users/`、`/home/`、`\Users\`（大小写不限）；盘符 `X:\` / `X:/`（前一个字符不是字母，避免 `http://` 误判）；
+// `%2F`、`%5C`；窄版凭据 `://用户名:…@`（用户名后紧跟 `:`，且 `@` 之前没有 `/ ? #` 或空白，带端口的 `http://host:8080/x` 不触发）。
+const LEAK_RESIDUE = [
+  /\/users\//i,
+  /\/home\//i,
+  /\\users\\/i,
+  /(?<![A-Za-z])[A-Za-z]:[\\/]/,
+  /%2f/i,
+  /%5c/i,
+  /:\/\/[^\s/?#@:]+:[^\s/?#@]*@/,
+];
+
+export function hasLeakResidue(text: string): boolean {
+  return LEAK_RESIDUE.some((re) => re.test(text));
+}
+
+export function hiddenErrorText(ticket: string): string {
+  return `任务失败，请联系管理员（单号 ${ticket}）`;
+}
+
+/** 非管理员 / 飞书出口的最后一步：脱敏 + 截断，仍有残留特征就整条隐藏。ticket 只能传纯任务编号（task.id / job.id）。 */
+export function guardPublicError(message: string, ticket: string): { text: string; hidden: boolean } {
+  const text = redactLocalPaths(message);
+  return hasLeakResidue(text) ? { text: hiddenErrorText(ticket), hidden: true } : { text, hidden: false };
+}
+
+/**
+ * 结构化出口用：对给出的报错字段（只处理字符串值）逐个兜底；任一字段被隐藏，所有给出的报错字段都换成兜底文案，
+ * 并加 `error_hidden: true` 与 `error_ticket: <任务编号>`。未隐藏时只返回脱敏后的字段，不加标记。
+ */
+export function guardErrorFields(ticket: string, fields: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  let hidden = false;
+  for (const [k, v] of Object.entries(fields)) {
+    if (typeof v !== "string") continue;
+    const g = guardPublicError(v, ticket);
+    out[k] = g.text;
+    hidden ||= g.hidden;
+  }
+  if (!hidden) return out;
+  for (const k of Object.keys(out)) out[k] = hiddenErrorText(ticket);
+  return { ...out, error_hidden: true, error_ticket: ticket };
+}
