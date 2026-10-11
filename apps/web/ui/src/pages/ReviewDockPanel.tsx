@@ -87,7 +87,7 @@ export function ReviewDockPanel({
       </div>
       {taskNote ? <p className="review-native-evidence" role="status">{taskNote}</p> : null}
       {ocrMeta?.skipped && ocrMeta.reason === "native_coverage" ? (
-        <p className="review-native-evidence" role="status">已直接读取原稿文字。</p>
+        <p className="review-native-evidence" role="status">已直接读取原稿文字</p>
       ) : null}
       {counts.total === 0 && reviewable ? <p className="review-zero" role="status">{REVIEW_COPY.zeroIssues}</p> : null}
       <ol className="review-flat-list" aria-label="疑点列表">
@@ -146,7 +146,7 @@ export function ReviewDockPanel({
                     <section className="review-native-evidence" aria-label="文字来源证据">
                       <h3>{nativeEvidence.title}</h3>
                       <p>{nativeEvidence.message}</p>
-                      <p className="review-native-hint">请确认结果。</p>
+                      <p className="review-native-hint">请确认结果</p>
                       {nativeEvidence.nativeText || nativeEvidence.ocrText ? (
                         <details key={current.id || active}>
                           <summary>查看文字来源</summary>

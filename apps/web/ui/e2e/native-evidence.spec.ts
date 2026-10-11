@@ -37,7 +37,7 @@ test("原生覆盖完整时核对栏说明未调用 OCR", async ({ page, synthet
   task.ocr_meta = { skipped: true, reason: "native_coverage", pages_ran: 0, engines: ["illustrator_native"] };
   syntheticApi.tasks.push(task);
   await page.goto(`/review/${task.id}`);
-  await expect(page.getByRole("status").filter({ hasText: "已直接读取原稿文字。" })).toBeVisible();
+  await expect(page.getByRole("status").filter({ hasText: "已直接读取原稿文字" })).toBeVisible();
 });
 
 test("窄屏深色长文字来源可展开阅读，未知版本不会显示成功", async ({ page, syntheticApi }, info) => {

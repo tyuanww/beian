@@ -843,7 +843,7 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
             onCollapse={() => setPanelOpen(false)}
             currentHasBox={currentHasBox} pageNo={pageNo} reviewable={reviewable && !locked} busy={busy}
             note={noteFor(current)}
-            emptyMessage={task?.status === "compare_failed" || task?.job_status === "failed" ? "检查未完成，暂时没有结果。" : "暂时没有检查结果，请翻页查看。"}
+            emptyMessage={task?.status === "compare_failed" || task?.job_status === "failed" ? "检查未完成，暂时没有结果" : "暂时没有检查结果，请翻页查看"}
             nativeTaskEvidence={task?.native_text} ocrMeta={task?.ocr_meta} reworkCheck={task?.rework_check} onPick={pickHit}
             onDecide={(hit, decision, note) => void decide(hit, decision, note)}
             onNoteCommit={(hit, decision, note) => void decide(hit, decision, note, { undoable: false })}
