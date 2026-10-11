@@ -15,6 +15,7 @@ export type GlbTextureFormat = "webp" | "png";
 export type GlbWebpResult =
   | { status: "converted"; beforeBytes: number; afterBytes: number; textures: number }
   | { status: "skipped"; reason: "no_textures" | "already_webp" | "not_smaller"; beforeBytes: number; afterBytes?: number }
+  | { status: "skipped"; reason: "deadline_insufficient" | "lock_wait_timeout" }
   | { status: "failed"; reason: string };
 
 /** 读 GLB JSON chunk；不是合法 GLB 返回 null。只读文件头和 JSON，不读 BIN。 */
@@ -158,19 +159,39 @@ export function glbWebpTempPath(path: string): string {
 /** 进程内串行锁：同一时刻只跑一个 GLB 压缩，限制服务进程的解码内存峰值。 */
 let compressionTail: Promise<unknown> = Promise.resolve();
 
-export function compressGlbTexturesToWebp(
-  path: string,
-  opts: { quality?: number; convert?: typeof convertGlbBytesToWebp } = {},
-): Promise<GlbWebpResult> {
-  const run = compressionTail.then(() => compressGlbTexturesToWebpUnlocked(path, opts));
+export type GlbWebpOptions = {
+  quality?: number;
+  convert?: typeof convertGlbBytesToWebp;
+  /** 等锁上限；超时放弃排队，返回 skipped/lock_wait_timeout，排到时也不再执行。 */
+  lockWaitMs?: number;
+  /** 改名替换前最后一问；返回 false 则丢弃临时文件、保留原文件，记 skipped/deadline_insufficient。 */
+  beforeCommit?: () => boolean;
+};
+
+export function compressGlbTexturesToWebp(path: string, opts: GlbWebpOptions = {}): Promise<GlbWebpResult> {
+  // 状态机：waiting → started（拿到锁，结果只由本次执行给出）或 abandoned（等锁超时，排到也不执行）。
+  let state: "waiting" | "started" | "abandoned" = "waiting";
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const run = compressionTail.then((): Promise<GlbWebpResult> | GlbWebpResult => {
+    if (state === "abandoned") return { status: "skipped", reason: "lock_wait_timeout" };
+    state = "started";
+    if (timer) clearTimeout(timer);
+    return compressGlbTexturesToWebpUnlocked(path, opts);
+  });
   compressionTail = run.catch(() => undefined);
-  return run;
+  const lockWaitMs = opts.lockWaitMs;
+  if (lockWaitMs === undefined) return run;
+  const timeout = new Promise<GlbWebpResult>((resolve) => {
+    timer = setTimeout(() => {
+      if (state !== "waiting") return;
+      state = "abandoned";
+      resolve({ status: "skipped", reason: "lock_wait_timeout" });
+    }, Math.max(0, lockWaitMs));
+  });
+  return Promise.race([run, timeout]);
 }
 
-async function compressGlbTexturesToWebpUnlocked(
-  path: string,
-  opts: { quality?: number; convert?: typeof convertGlbBytesToWebp },
-): Promise<GlbWebpResult> {
+async function compressGlbTexturesToWebpUnlocked(path: string, opts: GlbWebpOptions): Promise<GlbWebpResult> {
   const tmp = glbWebpTempPath(path);
   try {
     if (!existsSync(path)) return { status: "failed", reason: "missing" };
@@ -199,6 +220,10 @@ async function compressGlbTexturesToWebpUnlocked(
     if (!structureOk) {
       rmSync(tmp, { force: true });
       return { status: "failed", reason: "output_structure_mismatch" };
+    }
+    if (opts.beforeCommit && !opts.beforeCommit()) {
+      rmSync(tmp, { force: true });
+      return { status: "skipped", reason: "deadline_insufficient" };
     }
     renameSync(tmp, path);
     return { status: "converted", beforeBytes, afterBytes: bytes.length, textures };

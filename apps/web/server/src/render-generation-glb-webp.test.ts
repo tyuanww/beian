@@ -4,7 +4,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { makeTestTempDir } from "./testTemp.js";
-import { buildPngTexturedGlbForProbe, compressGlbTexturesToWebp, glbTextureFormat } from "./glbWebp.js";
+import { buildPngTexturedGlbForProbe, compressGlbTexturesToWebp, glbTextureFormat, type GlbWebpOptions, type GlbWebpResult } from "./glbWebp.js";
 import { createRenderGenerationBridge, type RenderBridgeValidation } from "./renderGenerationBridge.js";
 import { renderGenerationProcessSupported } from "./renderGenerationProcess.js";
 import { contentFingerprint, type QualityVerifyInput } from "./renderGenerations.js";
@@ -39,7 +39,7 @@ let input='';process.stdin.setEncoding('utf8');process.stdin.on('data',b=>input+
   console.log(JSON.stringify(result));
 });`;
 
-function fixture(compressGlb?: (path: string) => Promise<never> | ReturnType<typeof compressGlbTexturesToWebp>) {
+function fixture(compressGlb?: (path: string, opts?: GlbWebpOptions) => Promise<GlbWebpResult>, timeoutMs = 600_000) {
   const root = makeTestTempDir("beian-render-glb-webp-");
   const jobRoot = join(root, "job");
   const packagingDir = join(root, "worker");
@@ -49,7 +49,7 @@ function fixture(compressGlb?: (path: string) => Promise<never> | ReturnType<typ
   const raw = Buffer.from(JSON.stringify({ assets }));
   writeFileSync(join(jobRoot, "resolved_job.json"), raw);
   writeFileSync(join(packagingDir, "render_generation.py"), worker);
-  const bridge = createRenderGenerationBridge({ pythonExecutable: process.execPath, packagingDir, dataRoot: root, timeoutMs: 20000, compressGlb });
+  const bridge = createRenderGenerationBridge({ pythonExecutable: process.execPath, packagingDir, dataRoot: root, timeoutMs, compressGlb });
   const input: RenderBridgeValidation = {
     jobRoot, mode: "legacy_relight", expectedSourceSha256: sha(raw),
     expectedAssetSha256: Object.fromEntries(faces.map((face) => [face, sha("synthetic-face")])) as RenderBridgeValidation["expectedAssetSha256"],
@@ -58,9 +58,9 @@ function fixture(compressGlb?: (path: string) => Promise<never> | ReturnType<typ
   return { bridge, input, candidate: join(jobRoot, ".render-generations", ".candidate-test") };
 }
 
-async function renderAndProve(f: ReturnType<typeof fixture>) {
+async function renderAndProve(f: ReturnType<typeof fixture>, signal?: AbortSignal) {
   const receipt = await f.bridge.verify(f.input);
-  const candidate = await f.bridge.render(receipt, f.candidate, process.execPath);
+  const candidate = await f.bridge.render(receipt, f.candidate, process.execPath, signal ? { signal } : {});
   const files = Object.entries(candidate.outputs).map(([key, row]) => ({ key: MAP[key], sha256: row.sha256.slice(7), bytes: row.bytes }));
   const faceHashes = Object.fromEntries(faces.map((face) => [face, sha("synthetic-face").slice(7)])) as QualityVerifyInput["faces"];
   const proof = f.bridge.createPartialSealVerifier(candidate);
@@ -97,6 +97,66 @@ describe("render-generation GLB WebP before seal", { skip: !renderGenerationProc
     const { candidate, verdict } = await renderAndProve(f);
     assert.equal(candidate.outputs.glb.sha256, sha("synthetic-glb"));
     assert.equal(verdict.verifier_status, "accepted");
+  });
+});
+
+describe("render-generation GLB WebP never fails a render for time", { skip: !renderGenerationProcessSupported() }, () => {
+  it("low remaining budget skips compression (deadline_insufficient) and the render still proves", async () => {
+    let called = 0;
+    const f = fixture(async () => { called += 1; return { status: "failed", reason: "should not run" }; }, 20_000);
+    const { candidate, verdict } = await renderAndProve(f);
+    assert.equal(called, 0);
+    assert.equal(candidate.outputs.glb.sha256, sha("synthetic-glb"));
+    assert.equal(verdict.verifier_status, "accepted");
+  });
+
+  it("lock wait is bounded by the remaining budget; giving up keeps the original and the render proves", async () => {
+    let seen: GlbWebpOptions | undefined;
+    const f = fixture(async (_path, opts) => { seen = opts; return { status: "skipped", reason: "lock_wait_timeout" }; }, 600_000);
+    const { candidate, verdict } = await renderAndProve(f);
+    assert.ok(seen && typeof seen.lockWaitMs === "number");
+    assert.ok(seen!.lockWaitMs! > 0 && seen!.lockWaitMs! <= 600_000 - 120_000, String(seen!.lockWaitMs));
+    assert.equal(typeof seen!.beforeCommit, "function");
+    assert.equal(candidate.outputs.glb.sha256, sha("synthetic-glb"));
+    assert.equal(verdict.verifier_status, "accepted");
+  });
+
+  it("user cancellation during compression still fails the render", async () => {
+    const controller = new AbortController();
+    const f = fixture(async () => { controller.abort(); return { status: "failed", reason: "cancelled mid-way" }; }, 600_000);
+    await assert.rejects(renderAndProve(f, controller.signal), /cancelled/);
+  });
+});
+
+describe("glbWebp lock wait / commit gate", () => {
+  it("gives up waiting after lockWaitMs and never runs later", async () => {
+    const root = makeTestTempDir("beian-glb-webp-lock-");
+    const a = join(root, "a.glb");
+    const b = join(root, "b.glb");
+    writeFileSync(a, await buildPngTexturedGlbForProbe(256));
+    const bBytes = Buffer.from(await buildPngTexturedGlbForProbe(256));
+    writeFileSync(b, bBytes);
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    let bRan = false;
+    const holder = compressGlbTexturesToWebp(a, { convert: async (input) => { await gate; return (await import("./glbWebp.js")).convertGlbBytesToWebp(input); } });
+    const waiter = await compressGlbTexturesToWebp(b, { lockWaitMs: 30, convert: async (input) => { bRan = true; return (await import("./glbWebp.js")).convertGlbBytesToWebp(input); } });
+    assert.deepEqual(waiter, { status: "skipped", reason: "lock_wait_timeout" });
+    release();
+    assert.equal((await holder).status, "converted");
+    await compressGlbTexturesToWebp(a); // drain queue
+    assert.equal(bRan, false);
+    assert.ok(readFileSync(b).equals(bBytes));
+  });
+
+  it("beforeCommit=false discards the result and keeps the original", async () => {
+    const root = makeTestTempDir("beian-glb-webp-commit-");
+    const p = join(root, "c.glb");
+    const bytes = Buffer.from(await buildPngTexturedGlbForProbe(256));
+    writeFileSync(p, bytes);
+    const result = await compressGlbTexturesToWebp(p, { beforeCommit: () => false });
+    assert.deepEqual(result, { status: "skipped", reason: "deadline_insufficient" });
+    assert.ok(readFileSync(p).equals(bytes));
   });
 });
 
