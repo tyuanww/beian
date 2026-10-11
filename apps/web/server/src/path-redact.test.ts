@@ -368,3 +368,18 @@ describe("redactLocalPaths: stack line under a directory with a space", () => {
     assert.equal(r("at f (/home/bob/My Project/src/x.ts:12:5)"), "at f (x.ts:12:5)");
   });
 });
+
+describe("redactLocalPaths: CJK punctuation inside directory names", () => {
+  it("continues past CJK punctuation when a separator follows before whitespace", () => {
+    assert.equal(r("/Users/bob/【内部】/a.pdf"), "a.pdf");
+    assert.equal(r("/Users/bob/a，b/c.pdf"), "c.pdf");
+    assert.equal(r("http://x/?p=/Users/bob/【内部】/a.pdf"), "http://x/?p=/本机路径");
+    assert.equal(r("http://x/?p=/Users/bob/a，b/c.pdf"), "http://x/?p=/本机路径");
+    assert.equal(r("C:\\客户\\【内部】\\a.pdf"), "a.pdf");
+  });
+  it("still stops at CJK punctuation that ends the sentence", () => {
+    assert.equal(r("见：/home/bob/a.pdf，请检查"), "见：a.pdf，请检查");
+    assert.equal(r("目录 /a/b 不可写，见 docs/x.md"), "目录 本机路径 不可写，见 docs/x.md");
+    assert.equal(r("（/home/bob/a.pdf）"), "（a.pdf）");
+  });
+});
