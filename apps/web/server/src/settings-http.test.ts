@@ -58,8 +58,18 @@ describe("settings http", () => {
     assert.equal(res.status, 403);
   });
 
-  it("reviewer keeps the independent lark test action without open_id", async () => {
+  it("reviewer cannot send lark test (probe is admin only)", async () => {
     const sess = issueSessionForTest("审稿", "reviewer", "");
+    const res = await app.request("/api/settings/probe", {
+      method: "POST",
+      headers: { authorization: `Bearer ${sess.token}`, "content-type": "application/json" },
+      body: JSON.stringify({ id: "lark_send" }),
+    });
+    assert.equal(res.status, 403);
+  });
+
+  it("admin keeps the lark test action without open_id", async () => {
+    const sess = issueSessionForTest("魏炜", "admin", "");
     const res = await app.request("/api/settings/probe", {
       method: "POST",
       headers: { authorization: `Bearer ${sess.token}`, "content-type": "application/json" },

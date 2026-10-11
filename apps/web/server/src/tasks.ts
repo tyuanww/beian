@@ -3,6 +3,7 @@ import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameS
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { DATA_DIR } from "./config.js";
+import { guardErrorFields } from "./pathRedact.js";
 import { cleanCompleteKind, forgetHistory, noteHistoryReview } from "./historyIndex.js";
 import { skipPackSheetField } from "./sheetSkip.js";
 
@@ -278,7 +279,10 @@ export function listTasks(q: string, viewer: Viewer): Record<string, unknown>[] 
   const byTime = (a: Task, b: Task) => String(b.created_at || "").localeCompare(String(a.created_at || ""));
   open.sort(byTime);
   done.sort(byTime);
-  return [...open, ...done].map((t) => ({
+  // 非管理员：报错字段脱敏 + 兜底（残留特征时整条隐藏并加 error_hidden / error_ticket，单号 = t.id）；管理员看原文。
+  const guarded = (t: Task, row: Record<string, unknown>) =>
+    viewer.admin ? row : { ...row, ...guardErrorFields(t.id, { error: row.error, job_error: row.job_error }) };
+  return [...open, ...done].map((t) => guarded(t, {
     id: t.id,
     title: t.title,
     product_name: t.product_name || "",

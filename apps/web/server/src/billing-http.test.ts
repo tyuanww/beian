@@ -24,8 +24,14 @@ describe("billing http", () => {
     assert.equal(res.status, 401);
   });
 
-  it("hydrates snapshot for a logged-in reviewer without hitting live vendors", async () => {
-    const sess = issueSessionForTest("审稿", "reviewer", "ou_bill_http_xx");
+  it("rejects billing read for a reviewer", async () => {
+    const sess = issueSessionForTest("审稿", "reviewer", "ou_bill_http_rv");
+    const res = await app.request("/api/settings/billing", { headers: { authorization: `Bearer ${sess.token}` } });
+    assert.equal(res.status, 403);
+  });
+
+  it("hydrates snapshot for an admin without hitting live vendors", async () => {
+    const sess = issueSessionForTest("魏炜", "admin", "ou_bill_http_xx");
     setBillingHooksForTest({
       bceJson: async () => ({ ok: false, status: 0, data: null, error: "test-skip" }),
       fetch: async () => new Response("skip", { status: 500 }),

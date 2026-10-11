@@ -1433,6 +1433,32 @@ html[data-theme="dark"] .workspace {
   margin-bottom: 6px;
 }
 
+/* 头像菜单「外观」弹窗：实心 --surface 面，背后压暗遮罩，浅/深色都不透出页面。 */
+.appearance-modal .ant-modal-mask {
+  background: var(--mask);
+}
+
+.appearance-modal .ant-modal-container,
+.appearance-modal .ant-modal-content,
+.appearance-modal .ant-modal-header {
+  background: var(--surface);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+.settings-denied {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 32px 0;
+}
+
+.settings-denied .auth-result-retry {
+  border: 0;
+  cursor: pointer;
+}
+
 .settings-page {
   height: 100%;
   display: flex;

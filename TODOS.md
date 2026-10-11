@@ -317,7 +317,65 @@ RF-10–RF-13 的原始依赖见 [ADR-007 §20.7](docs/adr-007-packaging-render-
   2. 由用户确认组织仓迁移或第二管理员方案；具体设置变更、邀请人员或迁移仓库按对应授权落实，不重复启用已生效的 main 保护。
   3. 保护设置已完成只读回读；后续如获准变更，再只读复核有效设置与权限，不用破坏性 push 试验。**验收：归属/移交、管理人员、有效保护证据齐全；套餐不支持时保留明确缺口，脚本不冒充不可绕过保护。**
 
-## P3 — 独立后续（7 项）
+## P3 — 独立后续（11 项）
+
+- [ ] **F12 — 飞书签字通知只数 `task.hits`，忽略 `hits_v2`**
+
+  状态：未开始。`apps/web/server/src/notify.ts` 的 `taskCompleteHeadline` / `taskCompleteText` 只读 `task.hits`；有 `hits_v2` 的任务（`tasks.ts` 摘要已优先用 `hits_v2`）在缺 `complete_kind` 时可能把标题判错、改稿条数和字段列表也不准。设置 PR 合入后单独做一个小修复：与 `tasks.ts` 一样优先 `hits_v2`，非空时用它，否则回落 `hits`。**验收：只有 `hits_v2` 含改稿项的任务，飞书标题为「已退回」且条数正确，有单测。**
+
+- [ ] **F11 — 0.31.1.15 飞书告警一起做：发送测试可发给已配置接收人（产品哥建议）**
+
+  状态：未开始。0.31.1.14 起「发送测试」只对管理员开放，发给当前登录者的 `open_id`；接收人 `FEISHU_OPEN_ID` 为空时会被设成当前登录者。产品哥建议与 0.31.1.15 飞书告警一起做：
+
+  1. 发送测试可直接发给已配置接收人 `FEISHU_OPEN_ID`，不改接收人。
+  2. 接收人为空时，在按钮旁提示「接收人还没填，测试后会设成你自己」，或禁用按钮。
+  3. **验收：已配置接收人时测试消息到达该接收人且 `FEISHU_OPEN_ID` 不变；为空时界面有提示或按钮禁用，并有测试覆盖。**
+
+- [ ] **F10 — 任务/作业失败报错是否向非管理员带出本机路径（部分解决）**
+
+  已做（0.31.1.14，`fix/settings-admin-only`）：`/api/tasks` 列表与详情的 `job_error` / `error` 对非管理员去目录留文件名，管理员看原文；飞书失败通知（`fireTaskNotify`、`fireMockupNotify`）同样脱敏，兜底文案「任务失败，原文已隐藏，请到后台查看（单号 …）」。规则见 `docs/contracts/identity-settings.md`（`apps/web/server/src/pathRedact.ts`，测试 `path-redact.test.ts`、`job-error-redact.test.ts`）。打样单列表 / 详情（`publicMockupSummaryFields`、`publicRenderMutation`）对非管理员在原 `publicMockupError` 之后叠加脱敏 + 兜底（单号 `job.id`，测试 `mockup-error-guard.test.ts`），管理员照旧只走 `publicMockupError`。
+
+  明确不在本次范围、未审计（可能仍带出本机路径）：
+  - `apps/web/server/src/index.ts:424` 全局错误处理对 4xx 原样返回 `err.message` 作 `detail`。
+  - `notifyIllustratorWatchdog`（`notify.ts:247`，`jobs.ts:959`、`nativeTextJobs.ts:176` 调用）的飞书告警文案。
+  - `apps/web/server/src/mockup.ts:595` `print_faces_repair.error` 未接兜底：来源是白名单文案，不含原始报错。
+  - 已知规则缺口：斜杠写法只剩末尾一截文件名含空格或中文标点时露出后半截文件名（`/Users/bob/my docs/a b.pdf` → `本机路径 b.pdf`，`/home/bob/a，b.pdf` → `本机路径，b.pdf`）；目录名已不漏。
+  - 已知规则缺口：网址里百分号编码的用户名密码（`http://bob%3Apw%40x/`）原样输出，不拦。
+  - 已知规则缺口（不拦）：全角斜杠 `／`、`＼`、`∖` 不当分隔符；超长 UTF-8 `%c0%af`、HTML 实体 `&#47;` 不解码；路径被换行断开时只认换行前半截。
+  - 已知规则缺口（不拦）：`ftp://` 等非 http(s) 网址按普通路径处理，输出 `ftp:本机路径`。
+  - 已知取舍（不拦）：8000 字截断落在占位词中间时留半截占位词；打样单报错（含兜底后）只留前 80 字。
+  - 已知取舍：渲染代际提交结果（`publicMutationResult*`，`jobs.ts`）拿不到角色，`mutation.error` 一律按非管理员规则输出，管理员在这一处也看不到原文。
+  - 已知副作用：`%2F` / `%5C`（含 `%252F` 等多重编码）整条报错一起解码，非路径文字也会变（如 `进度 50%2F100` → `进度 50/100`，网址里的 `%2F` 同样被解开）。
+  - 已知取舍：Windows/UNC 末段无扩展名、空格后的词以扩展名结尾时合成一个文件名（`C:\x\dir see.log` → `dir see.log`），只认一个空格。
+  - 已知取舍：反斜杠根路径只要有一段目录名不少于 2 个字符就脱敏；兜底再拦「反斜杠 + 至少 2 个字母」（`C:\Documents and Settings\bob` 这类空格过多的目录），所以报错里字面的 `\nfoo` 这类转义串会整条隐藏；单字母 `\n`、`\t` 不受影响。
+  - 已知取舍：查询参数名为 `password` / `pw` / `token` / `secret` / `key` 等（含 `api_key`、`access_token`）时整条隐藏，即使值无害；`monkey`、`keyword`、`tokens_left` 不算。
+  - 已知规则缺口（不拦）：网址外的凭据写法（`password=hunter2`、`token: xxx`、`"password":"x"`）。原因：`Unexpected token: }`、`missing key: foo` 这类常见报错会被大量误隐藏；等报错分级上错误码后统一处理。
+  - 已知规则缺口（不拦）：网址 fragment（`#access_token=…`）和网址路径里的令牌（`/token/abc123`）。
+  - 已知规则缺口（不拦）：斜杠写法目录名含空格时露出最后一截（`/Users/bob/Google Drive` 这类，空格后只剩一段时）。`/Users/`、`/home/` 后的用户名段已改为含空格时一直替换到下一个 `/` 或行尾（`/Users/bob smith` → `本机路径`）；取舍：同一行后面没有 `/` 时，用户名后面的文字一起并掉（`读取 /Users/bob smith 失败` → `读取 本机路径`）。
+  - 已知规则缺口（不拦）：打样单 `读取 D:\a b\c 失败` 输出 `读取 本机稿件 b\c 失败`，残留 `b\c`（单字母目录段，不触发反斜杠兜底）。
+  - 已知取舍（不拦）：`共享盘\\` 会被改写，任务链输出 `共享盘 本机路径`，打样单输出 `共享盘本机稿件`（`\\` 被当成 UNC 起点）；兜底测试只锁了它不触发整条隐藏。
+  - 已知取舍（不拦）：打样单 `bearer 字段为空` 被 `publicMockupError` 整条换成「打样失败，请让管理员在本机检查详细原因」（原有 `Bearer\s+` 规则，管理员同样）。
+  - 已知规则缺口（不拦）：`postgres://…` 等非 http(s) 连接串输出成 `postgres:本机路径`。
+  - 已知取舍：兜底「反斜杠 + 非 ASCII」与「非 ASCII 紧贴反斜杠再接内容」会把中文紧贴的转义（`换行\n`）整条隐藏；`共享盘\\` 这类后面是空白或反斜杠的不算。
+  - 已知取舍：`Bearer` / `Basic` 后含数字或符号、不少于 6 字符的值拦；`Basic` 后另拦至少 8 位、首字母外有大写或含数字 / `+` / `/` / `=` 的 base64 串（`Basic dXNlcjpwYXNz` 拦，`Basic settings`、`Basic Settings` 不拦）；全小写无数字符号的 `Basic` 串、纯字母 `Bearer abcdefgh` 不拦；`Authorization` 任意大小写都拦。
+  - 已知取舍：兜底拦单个盘符字母 + 冒号紧贴「本机稿件 / 本机路径」后还有内容（`D:本机稿件 张三/报价`）；`open:本机稿件` 这类单词加冒号不算。选兜底而非调换打样链顺序，以免改动已有打样文案。
+  - 已知规则缺口（不拦）：凭据词与前缀无分隔符连写的参数名（`?apikey=1`、`?accesstoken=`）不触发兜底。
+  - 已知取舍：网址路径里出现 `/Users/`、`/home/`、`/root/`、`/var/folders/`、`/private/var/` 时，即使是公开网站也会被替换（`https://example.com/Users/list` → `https://example.com/本机路径`），宁可误伤也不漏。
+  - `apps/web/backend` worker 输出与其他 HTTP `detail` 未逐一盘点。
+
+  原状态：2026-10-11 设置接口按角色收紧（`fix/settings-role-trim`）自查时发现，不在该 PR 范围内，未审计。`/api/settings` 已对非管理员去掉本机路径，但审稿任务、打样、出图、压缩等作业失败时返回给前端的报错文案（HTTP `detail`、任务/作业的 error/reason 字段、worker stderr 摘要）可能原样带出 `C:\`、`/Users/`、`/home/`、数据目录（`WB_DATA_DIR`）、Python 或 Blender/Illustrator 路径。
+
+  1. 盘点 server 中所有把作业错误、子进程 stderr 或异常 message 回传给客户端的位置（含 `apps/web/backend` worker 输出）。
+  2. 对 reviewer/viewer 做路径脱敏（或只给通用文案），管理员保留原文；脱敏规则与 `settings.ts` 的 `redact` 对齐。
+  3. **验收：三种角色的失败用例测试中，非管理员响应序列化后不含上述路径模式；管理员报错不变。**
+
+- [ ] **F09 — Node 20 下的测试 glob 兼容与 CI 覆盖**
+
+  状态：生产 Windows 跑 Node 20 LTS，但 `.github/workflows/quality.yml` 里完整 L0（`npm test`、`npm run test:quality`、`npm run typecheck`）只在 ubuntu + Node 22 上跑；Node 20 只用于 Windows 的 GLB WebP probe。2026-10-11 在 Mac 上用 `npx -p node@20`（v20.20.2）手动跑过一次 server `tsx --test src/*.test.ts`：900 项，通过 898，失败 0，跳过 2。`src/*.test.ts` 由 `sh` 展开，没有依赖 Node 22 的 `--test` 内置 glob；UI vitest、pytest、quality 没有在 Node 20 下验证过。
+
+  1. 在 CI 加一条 Node 20 的 server L0 job（或 matrix），至少跑 `npm test -w beian-server`。
+  2. 约定测试脚本不要用依赖 Node 22 的 `node --test` 引号 glob（Windows `cmd` 不会展开 `*`），新增脚本要在 Windows + Node 20 上跑一次。
+  3. **验收：CI 上同一 SHA 的 Node 20 与 Node 22 server 测试数量和结果一致。**
 
 - [ ] **F01 — 退役核对原型清理（独立 PR）**
 

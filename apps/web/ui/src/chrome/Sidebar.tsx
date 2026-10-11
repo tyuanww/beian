@@ -1,5 +1,7 @@
-import { Dropdown } from "antd";
-import { formatVersionLabel, SIDE_NAV, type NavKey } from "./nav";
+import { useState } from "react";
+import { Dropdown, Modal } from "antd";
+import { AppearancePane } from "./AppearancePane";
+import { formatVersionLabel, sideNavFor, type NavKey } from "./nav";
 
 export type { NavKey };
 
@@ -13,6 +15,7 @@ type Props = {
   onLogout: () => void;
   livePulse?: { review?: boolean; mockup?: boolean };
   version?: string | null;
+  isAdmin?: boolean;
 };
 
 function initial(name: string) {
@@ -30,8 +33,12 @@ export function Sidebar({
   onLogout,
   livePulse,
   version,
+  isAdmin = false,
 }: Props) {
   const versionLabel = formatVersionLabel(version);
+  const [appearanceOpen, setAppearanceOpen] = useState(false);
+  // 外观（主题、字号）只写本机 localStorage，所有人从头像菜单打开，改了立刻生效。
+  const menuItems = [{ key: "appearance", label: "外观" }, { key: "logout", label: "退出", danger: true }];
   return (
     <aside
       className={collapsed ? "sidebar is-collapsed" : "sidebar"}
@@ -74,7 +81,7 @@ export function Sidebar({
       </div>
 
       <nav className="side-nav">
-        {SIDE_NAV.map((item) => {
+        {sideNavFor(isAdmin).map((item) => {
           const on = item.key === active;
           const live = (item.key === "review" && livePulse?.review) || (item.key === "mockup" && livePulse?.mockup);
           return (
@@ -101,8 +108,9 @@ export function Sidebar({
         trigger={["click"]}
         placement="topLeft"
         menu={{
-          items: [{ key: "logout", label: "退出", danger: true }],
+          items: menuItems,
           onClick: ({ key }) => {
+            if (key === "appearance") setAppearanceOpen(true);
             if (key === "logout") onLogout();
           },
         }}
@@ -123,6 +131,18 @@ export function Sidebar({
           </span>
         </button>
       </Dropdown>
+      <Modal
+        open={appearanceOpen}
+        title="外观"
+        footer={null}
+        width={640}
+        rootClassName="appearance-modal"
+        mask
+        onCancel={() => setAppearanceOpen(false)}
+        destroyOnHidden
+      >
+        <AppearancePane />
+      </Modal>
     </aside>
   );
 }

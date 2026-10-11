@@ -23,6 +23,7 @@ import { blenderBin } from "./settings.js";
 import { forgetHistory, noteHistoryMockup } from "./historyIndex.js";
 import { canAccessOwner, isTid, replaceFile, type Viewer } from "./tasks.js";
 import { atomicReplaceJobJson } from "./mockupAtomicWrite.js";
+import { collapseHomeUser, guardErrorFields } from "./pathRedact.js";
 import { isRenderGenerationOutputKey, type RenderActivationFact } from "./renderGenerations.js";
 import {
   PRINT_FACE_NAMES,
@@ -530,7 +531,37 @@ function publicMockupError(value: unknown): string | undefined {
   return (safe || PUBLIC_MOCKUP_ERROR_FALLBACK).slice(0, 80);
 }
 
-export function publicRenderMutation(job: Pick<MockupJob, "render_mutation">): PublicRenderMutationSummary | undefined {
+/** 非管理员：publicMockupError 之后再脱敏 + 兜底（guardErrorFields），仍只留前 80 字；管理员照旧只走 publicMockupError。 */
+function capMockupError(value: unknown): string | undefined {
+  const t = typeof value === "string" ? value.trim() : "";
+  return t ? t.slice(0, 80) : undefined;
+}
+
+function guardedMockupErrors(job: Pick<MockupJob, "id" | "error" | "job_error" | "render_mutation">) {
+  // 先走原来的打样脱敏（客户稿件名、网址/凭据整条替换、80 字），再叠加通用脱敏 + 兜底。
+  const str = (v: unknown) => publicMockupError(typeof v === "string" ? collapseHomeUser(v) : v) || "";
+  const g = guardErrorFields(job.id, {
+    error: str(job.error),
+    job_error: str(job.job_error),
+    render_error: str(job.render_mutation?.error),
+  });
+  return {
+    error: capMockupError(g.error),
+    job_error: capMockupError(g.job_error),
+    render_error: capMockupError(g.render_error),
+    flags: g.error_hidden ? { error_hidden: true as const, error_ticket: job.id } : {},
+  };
+}
+
+export type MockupErrorView = {
+  /** 管理员看 publicMockupError 结果（原行为）；其余角色走脱敏 + 兜底。 */
+  admin?: boolean;
+};
+
+export function publicRenderMutation(
+  job: Pick<MockupJob, "id" | "render_mutation"> & Partial<Pick<MockupJob, "error" | "job_error">>,
+  view: MockupErrorView = {},
+): PublicRenderMutationSummary | undefined {
   const mutation = job.render_mutation;
   if (!mutation || typeof mutation !== "object") return undefined;
   const summary: PublicRenderMutationSummary = {
@@ -539,7 +570,7 @@ export function publicRenderMutation(job: Pick<MockupJob, "render_mutation">): P
     status: mutation.status,
   };
   if (mutation.stage) summary.stage = mutation.stage;
-  if (mutation.error) summary.error = publicMockupError(mutation.error);
+  if (mutation.error) summary.error = view.admin ? publicMockupError(mutation.error) : guardedMockupErrors(job).render_error;
   if (!summary.id || (summary.mode !== "legacy_relight" && summary.mode !== "upgrade")) return undefined;
   if (summary.status !== "queued" && summary.status !== "running" && summary.status !== "succeeded" && summary.status !== "failed") {
     return undefined;
@@ -547,11 +578,13 @@ export function publicRenderMutation(job: Pick<MockupJob, "render_mutation">): P
   return summary;
 }
 
-function publicMockupSummaryFields(job: MockupJob) {
-  const legacyError = publicMockupError(job.error);
-  const jobError = publicMockupError(job.job_error);
-  const mutation = publicRenderMutation(job);
+function publicMockupSummaryFields(job: MockupJob, view: MockupErrorView = {}) {
+  const guarded = view.admin ? undefined : guardedMockupErrors(job);
+  const legacyError = guarded ? guarded.error : publicMockupError(job.error);
+  const jobError = guarded ? guarded.job_error : publicMockupError(job.job_error);
+  const mutation = publicRenderMutation(job, view);
   return {
+    ...(guarded?.flags || {}),
     id: job.id,
     status: job.status,
     title: job.title || "",
@@ -577,11 +610,11 @@ function publicMockupSummaryFields(job: MockupJob) {
   };
 }
 
-export function publicMockupSummary(job: MockupJob) {
-  return publicMockupSummaryFields(job);
+export function publicMockupSummary(job: MockupJob, view: MockupErrorView = {}) {
+  return publicMockupSummaryFields(job, view);
 }
 
-export type PublicMockupView = {
+export type PublicMockupView = MockupErrorView & {
   /** Admin structure desk. Reviewer/viewer never receive layer candidates. */
   structureDesk?: boolean;
 };
@@ -589,7 +622,7 @@ export type PublicMockupView = {
 export function publicMockup(job: MockupJob, view: PublicMockupView = {}) {
   const resolution = readStructureResolution(job);
   return {
-    ...publicMockupSummaryFields(job),
+    ...publicMockupSummaryFields(job, view),
     files: visibleMockupFiles(job),
     can_repair_print_faces: canRepairPrintFaces(job),
     print_faces_repair: job.print_faces_request ? { status: job.print_faces_request.status, error: job.print_faces_request.error } : undefined,

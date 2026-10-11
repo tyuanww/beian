@@ -80,6 +80,7 @@ import {
 } from "./workers.js";
 import { inspectRenderGenerationGroup, recoverWindowsRenderGeneration, signalRenderGenerationGroup } from "./renderGenerationProcess.js";
 import { illustratorBin } from "./settings.js";
+import { guardErrorFields, guardNotifyError } from "./pathRedact.js";
 import { rasterAiFile } from "./aiRaster.js";
 import { readIllustratorAgentStatus } from "./illustratorAgent.js";
 import {
@@ -408,8 +409,12 @@ export function publicTask(task: Task, viewer?: Viewer): Record<string, unknown>
     source_receipt: _sourceReceipt,
     ...rest
   } = task;
+  // 非管理员（含没带 viewer 的调用）看到的报错去掉本机目录，只留文件名；管理员看原文。
+  const redact = !viewer?.admin;
   return {
     ...rest,
+    // 最后一步兜底：脱敏后仍有本机路径 / 凭据特征时整条隐藏，加 error_hidden / error_ticket（单号 = task.id）。
+    ...(redact ? guardErrorFields(task.id, { job_error: rest.job_error, error: rest.error }) : {}),
     ...(nativePublic(task) ? { native_text: nativePublic(task) } : {}),
     queue_ahead: queueAheadFrom(queueRanks(), task.id, task.job_kind, task.job_status),
   };
@@ -1916,7 +1921,7 @@ function publicMutationResultFromFact(
   job: MockupJob,
   fact: RenderGenerationIdempotencyFact,
 ): RenderGenerationMutationEnqueueResult {
-  const mutation = publicRenderMutation({render_mutation:fact.mutation});
+  const mutation = publicRenderMutation({id:job.id,render_mutation:fact.mutation});
   if (!mutation) throw generationError("render_generation_invalid", "渲染代际记录无效", 409, "核验已有请求");
   return {
     mutation,
@@ -3593,7 +3598,7 @@ async function fireTaskNotify(task: Task, ok: boolean): Promise<void> {
     title: String(task.product_name || task.title || task.id),
     kind: task.job_kind === "rework" ? "rework" : "compare",
     ok,
-    error: task.job_error,
+    error: task.job_error ? guardNotifyError(task.job_error, task.id) : task.job_error,
   });
   if (r.ok || r.skipped) {
     // 已结束任务允许在通知飞行期间删除；晚到的通知只能放弃收尾，不能复活 JSON。
@@ -3644,7 +3649,7 @@ async function fireMockupNotify(job: MockupJob, ok: boolean): Promise<void> {
     title: job.id,
     kind: "mockup",
     ok,
-    error: job.job_error,
+    error: job.job_error ? guardNotifyError(job.job_error, job.id) : job.job_error,
   });
   if (r.ok || r.skipped) {
     const fresh = loadMockup(job.id);

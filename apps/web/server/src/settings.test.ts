@@ -10,12 +10,12 @@ describe("settings mask", () => {
   it("secret never echoed", () => {
     saveSettings({ FEISHU_APP_SECRET: "super-secret-value-9999" });
     assert.equal(getSetting("FEISHU_APP_SECRET"), "super-secret-value-9999");
-    const view = publicView();
+    const view = publicView({ admin: true });
     const field = view.groups.flatMap((g) => g.fields).find((f) => f.key === "FEISHU_APP_SECRET");
     assert.ok(field);
     assert.equal(field.value, "");
     assert.equal(field.set, true);
-    assert.match(field.last4, /9999|已填/);
+    assert.match(String(field.last4), /9999|已填/);
     const dumped = JSON.stringify(view);
     assert.equal(dumped.includes("super-secret-value-9999"), false);
   });

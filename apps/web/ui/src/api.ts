@@ -776,8 +776,9 @@ export type SettingFieldView = {
   restart: boolean;
   adminOnly?: boolean;
   set: boolean;
-  last4: string;
-  value: string;
+  /** 非管理员时后端对敏感字段省略 last4 / value（不是 null），只留 set。 */
+  last4?: string;
+  value?: string;
 };
 
 export type SettingsView = {

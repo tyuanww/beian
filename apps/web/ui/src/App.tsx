@@ -2,6 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useState, type ReactNode } from
 import { api, brokenApiMessage, type Me } from "./api";
 import { authFailureAction, feishuLoginHref, shouldAutoRedirectToFeishu } from "./authGate";
 import { Sidebar, type NavKey } from "./chrome/Sidebar";
+import { isAdmin } from "./authRole";
 import { hrefOf, parsePath, type AppRoute, type AppView } from "./appRoute";
 import { liveNavPulse } from "./pages/waitCard";
 import { useAppearance } from "./chrome/AppearanceRoot";
@@ -394,12 +395,22 @@ export function App() {
           onLogout={() => void logout()}
           livePulse={livePulse}
           version={version}
+          isAdmin={isAdmin(me)}
         />
-        <main className={view === "settings" ? "stage stage-flush" : "stage"}>
-        {view === "settings" ? (
+        <main className={view === "settings" && isAdmin(me) ? "stage stage-flush" : "stage"}>
+        {view === "settings" && !isAdmin(me) ? (
+          <section className="settings-denied" role="status">
+            <h1 className="settings-title">设置</h1>
+            <p>这里只有管理员能看</p>
+            <button type="button" className="auth-result-retry" onClick={() => goRoute({ view: "tasks" })}>
+              回审稿台
+            </button>
+          </section>
+        ) : null}
+        {view === "settings" && isAdmin(me) ? (
           <Suspense fallback={<PaneFallback label="打开设置…" />}>
             <SettingsPage
-              canAdmin={me.role === "admin"}
+              canAdmin={isAdmin(me)}
               openId={me.open_id || ""}
               displayName={me.display_name}
             />
@@ -410,7 +421,7 @@ export function App() {
             <MockupDesk
               canCreate={me.perms.includes("create")}
               canConfirmStructure={me.perms.includes("confirm_structure")}
-              canAdmin={me.role === "admin"}
+              canAdmin={isAdmin(me)}
               openId={view === "mockupNew" ? null : mockupId}
               composing={view === "mockupNew"}
               receiptId={receiptId}
@@ -423,7 +434,7 @@ export function App() {
         ) : null}
         {view === "compression" ? <Suspense fallback={<PaneFallback label="打开压缩文件…" />}>
           <CompressionPage id={compressionId} receiptId={receiptId} owner={me.open_id || me.display_name || ""}
-            canCreate={me.perms.includes("create")} canExport={me.perms.includes("export")} canAdmin={me.role === "admin"}
+            canCreate={me.perms.includes("create")} canExport={me.perms.includes("export")} canAdmin={isAdmin(me)}
             onOpen={id => goRoute({ view: "compression", compressionId: id })}
             onBack={() => goRoute({ view: "compression" })} onHistory={() => goRoute({ view: "history" })} />
         </Suspense> : null}
