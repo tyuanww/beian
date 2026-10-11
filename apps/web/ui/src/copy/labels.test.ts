@@ -83,6 +83,7 @@ describe("REVIEW_COPY（老板 2026-10-11 已批文案）", () => {
     assert.equal(REVIEW_COPY.signConclusion, "无改稿项");
     assert.equal(REVIEW_COPY.rejectBlockedByPending(4), "还有 4 条待确认，处理完才能退回");
     assert.equal(REVIEW_COPY.noBox, "没找到位置，请看整页");
+    assert.equal(REVIEW_COPY.pendingEmpty, "没有待确认的了");
     assert.equal(REVIEW_COPY.rejectConclusion(3), "退回：3 条有错，见清单");
     assert.equal(REVIEW_COPY.signTitle, "签字这份稿？");
     assert.equal(REVIEW_COPY.signBody, "签字后会通知「已签字」，不能撤回。");

@@ -676,7 +676,7 @@ test("锁页横幅：只留 🔒 一个图标，第二行写「只能查看，�
   await expect(lock.locator(".ant-alert-title")).toHaveText("🔒 这一单已被天元签字");
 });
 
-test("锁页：页头位置写「当前/总数」不写「全部已下结论」；右栏空态和列表同左内边距", async ({ page, syntheticApi }) => {
+test("锁页：页头位置写「当前/总数」不写「全部已下结论」；右栏待确认空态写「没有待确认的了」，和列表同左内边距", async ({ page, syntheticApi }) => {
   const task = reviewTask("e5969b58cda3");
   for (const h of task.hits!) Object.assign(h, { status: "一致", decision: undefined });
   Object.assign(task, { status: "completed", board: "done", completed_by: "天元", complete_kind: "signed" });
@@ -684,7 +684,7 @@ test("锁页：页头位置写「当前/总数」不写「全部已下结论」�
   await page.goto(`/review/${task.id}`);
   await expect(page.getByTestId("review-posn")).toHaveText(`1/${task.hits!.length}`);
   const none = page.locator(".review-dock-none");
-  await expect(none).toHaveText("全部已下结论");
+  await expect(none).toHaveText("没有待确认的了");
   await expect(none).toHaveCSS("padding-left", "16px");
   await expect(none).toHaveCSS("padding-top", "16px");
 });

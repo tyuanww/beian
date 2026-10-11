@@ -164,7 +164,7 @@ export function ReviewDockPanel({
             </li>
           );
         })}
-        {!list.length ? <li className="review-dock-none">{hits.length ? REVIEW_COPY.allDecided : emptyMessage}</li> : null}
+        {!list.length ? <li className="review-dock-none">{hits.length ? (tab === "pending" ? REVIEW_COPY.pendingEmpty : REVIEW_COPY.allDecided) : emptyMessage}</li> : null}
       </ol>
       <div className="review-pfoot">
         <span aria-live="polite">{REVIEW_COPY.footer(counts.pending, progress.pageLeft)}</span>
