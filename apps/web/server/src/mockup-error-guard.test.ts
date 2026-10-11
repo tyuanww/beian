@@ -99,4 +99,16 @@ describe("mockup list/detail errors go through redact + guard for non-admins", (
     const v = await views(id, auth("reviewer", "ou_mg_rv"));
     assert.equal(String(v.detail.job_error).length, 80);
   });
+
+  it("backslash + non-ASCII left by publicMockupError hides (D:\\客户 张三\\报价)", async () => {
+    for (const [i, input] of ["读取 D:\\客户 张三\\报价 失败", "读取 D:\\张三 李四\\x\\y 失败"].entries()) {
+      const id = `0000000e02${String(i).padStart(2, "0")}`;
+      save(id, "job_error", input);
+      const v = await views(id, auth("reviewer", "ou_mg_rv"));
+      for (const obj of [v.row, v.detail]) {
+        assert.equal(obj.job_error, `任务失败，请联系管理员（单号 ${id}）`, `${input} -> ${String(obj.job_error)}`);
+        assert.equal(obj.error_hidden, true);
+      }
+    }
+  });
 });

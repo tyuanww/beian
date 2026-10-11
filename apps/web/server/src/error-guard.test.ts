@@ -264,3 +264,58 @@ describe("leak residue: secret-looking query parameter names", () => {
     }
   });
 });
+
+let chainSeq = 0;
+/** 任务链路：列表、详情、飞书通知三处输出；返回给调用方断言。 */
+async function taskChain(input: string) {
+  chainSeq += 1;
+  const id = `0000000f${String(chainSeq).padStart(4, "0")}`;
+  const seen: Array<string | undefined> = [];
+  setJobsTestHooks({ notify: async (opts) => { if (opts.tid === id) seen.push(opts.error); return { ok: true }; } });
+  try {
+    saveTask({
+      id, title: "链", product_name: "某某精华", type: "excel_pdf", status: "compare_failed",
+      job_kind: "compare", job_status: "failed", job_error: input,
+      notify_job_id: `${id}:compare:t`, notify_sent: false, owner: "ou_chain_rv",
+    });
+    const h = auth("reviewer", "ou_chain_rv");
+    const row = ((await (await app.request("/api/tasks", { headers: h })).json()) as Array<Record<string, unknown>>).find((t) => t.id === id);
+    const detail = (await (await app.request(`/api/tasks/${id}`, { headers: h })).json()) as Record<string, unknown>;
+    reclaimOnBoot();
+    await new Promise((r) => setTimeout(r, 50));
+    return { id, list: String(row?.job_error), listHidden: row?.error_hidden, detail: String(detail.job_error), detailTicket: detail.error_ticket, notify: String(seen[0]) };
+  } finally {
+    resetJobsTestHooks();
+  }
+}
+
+async function assertTaskChainHidden(input: string) {
+  const r = await taskChain(input);
+  assert.equal(r.list, `任务失败，请联系管理员（单号 ${r.id}）`, `list: ${input} -> ${r.list}`);
+  assert.equal(r.listHidden, true);
+  assert.equal(r.detail, `任务失败，请联系管理员（单号 ${r.id}）`, `detail: ${input} -> ${r.detail}`);
+  assert.equal(r.detailTicket, r.id);
+  assert.equal(r.notify, `任务失败，原文已隐藏，请到后台查看（单号 ${r.id}）`, `notify: ${input} -> ${r.notify}`);
+}
+
+/** 不要求一定隐藏，但三处都不得残留给定片段。 */
+async function assertTaskChainNoLeak(input: string, leak: RegExp) {
+  const r = await taskChain(input);
+  for (const [where, v] of [["list", r.list], ["detail", r.detail], ["notify", r.notify]] as const) {
+    assert.doesNotMatch(v, leak, `${where}: ${input} -> ${v}`);
+  }
+}
+
+describe("leak residue: backslash + non-ASCII", () => {
+  it("D:\\客户 张三\\报价 and D:\\张三 李四\\x\\y leak nothing on list, detail and Feishu", async () => {
+    await assertTaskChainNoLeak("读取 D:\\客户 张三\\报价 失败", /客户|张三|报价|\\/);
+    await assertTaskChainNoLeak("读取 D:\\张三 李四\\x\\y 失败", /张三|李四|\\/);
+    // 两个空格时脱敏只吃到第一段，剩「本机路径 张三 李四\报价」，必须由兜底整条隐藏。
+    await assertTaskChainHidden("读取 D:\\客户 张三 李四\\报价 失败");
+  });
+  it("residue check itself; single-letter escapes still pass", () => {
+    assert.equal(hasLeakResidue("本机稿件 张三\\报价"), true);
+    assert.equal(hasLeakResidue("用 \\n 换行"), false);
+    assert.equal(hasLeakResidue("\\t\\r"), false);
+  });
+});
