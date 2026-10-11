@@ -72,10 +72,26 @@ function pathStart(s: string, i: number): number {
  * 单趟扫描不回看；回退的那一段最多再被外层逐字扫一次，整体线性。
  */
 function scanPath(s: string, from: number, allowSpaces: boolean, leafSpace: boolean): [number, number] {
+  return scanRun(s, from, allowSpaces, leafSpace, isStop);
+}
+
+/** 中文标点：软终点。之后到下一个空白前若还有分隔符，就当作目录名的一部分继续（`【内部】/a.pdf`、`a，b/c.pdf`）。 */
+function isSoftStop(ch: string): boolean {
+  return ch.charCodeAt(0) > 0x7f && HARD_STOP.has(ch);
+}
+
+/**
+ * 路径扫描核心（网址外与网址内共用），单趟、线性。空格（allowSpaces 时）和中文标点是「软终点」：记下最早的暂定结束位置
+ * 继续往后扫，在下一个空白 / 硬终点 / 新路径起点之前遇到分隔符就确认续接；否则路径在暂定位置结束。
+ * 空格后紧跟分隔符或新路径起点视为另一条路径。leafSpace 时额外允许文件名含一个空格（`a b.pdf`）。
+ */
+function scanRun(s: string, from: number, allowSpaces: boolean, leafSpace: boolean, hard: (ch: string) => boolean): [number, number] {
   let j = from;
   let lastSep = from - 1;
   let pending = -1;
   let newPath = false;
+  // 空格之后第一个中文标点的位置：`a b.pdf，请检查` 判断文件名含空格时，空格后的词到这里为止。
+  let softAfterSpace = -1;
   while (j < s.length) {
     const ch = s[j];
     if (ch === " " && allowSpaces) {
@@ -84,16 +100,24 @@ function scanPath(s: string, from: number, allowSpaces: boolean, leafSpace: bool
       j += 1;
       continue;
     }
-    if (isStop(ch)) break;
+    if (isSoftStop(ch)) {
+      if (pending < 0) pending = j;
+      else if (s[pending] === " " && softAfterSpace < 0) softAfterSpace = j;
+      j += 1;
+      continue;
+    }
+    if (hard(ch)) break;
+    const afterSpace = pending >= 0 && s[pending] === " ";
     if (isSep(ch)) {
       // 空格后紧跟分隔符（`\\`、`/` 开头）视为新路径，不续接。
-      if (pending >= 0 && j === pending + 1) {
+      if (afterSpace && j === pending + 1) {
         newPath = true;
         break;
       }
       lastSep = j;
       pending = -1;
-    } else if (pending >= 0 && pathStart(s, j) >= 0) {
+      softAfterSpace = -1;
+    } else if (afterSpace && pathStart(s, j) >= 0) {
       newPath = true;
       break;
     }
@@ -101,8 +125,15 @@ function scanPath(s: string, from: number, allowSpaces: boolean, leafSpace: bool
   }
   if (pending < 0) return [j, lastSep];
   // 文件名含一个空格（`a b.pdf`）：空格前的末段没有扩展名、空格后的词以扩展名结尾时，把这个词算进文件名。
-  if (leafSpace && !newPath && !EXT_AT_END.test(s.slice(lastSep + 1, pending)) && EXT_AT_END.test(s.slice(pending + 1, j))) {
-    return [j, lastSep];
+  const wordEnd = softAfterSpace >= 0 ? softAfterSpace : j;
+  if (
+    leafSpace &&
+    !newPath &&
+    s[pending] === " " &&
+    !EXT_AT_END.test(s.slice(lastSep + 1, pending)) &&
+    EXT_AT_END.test(s.slice(pending + 1, wordEnd))
+  ) {
+    return [wordEnd, lastSep];
   }
   return [pending, lastSep];
 }
@@ -224,36 +255,7 @@ function urlPathAt(s: string, j: number, known: string[]): string | null {
  * 出现分隔符才续接；空格前末段无扩展名、空格后的词以扩展名结尾（`a b.pdf`）时把这个词算进来。单趟扫描，线性。
  */
 function urlPathEnd(s: string, from: number, leafSpace: boolean): number {
-  const stop = (ch: string) => isSpace(ch) || URL_PATH_STOP.has(ch);
-  let j = from;
-  let lastSep = from - 1;
-  let pending = -1;
-  let newPath = false;
-  while (j < s.length) {
-    const ch = s[j];
-    if (ch === " ") {
-      if (pending >= 0) break;
-      pending = j;
-      j += 1;
-      continue;
-    }
-    if (stop(ch)) break;
-    if (isSep(ch)) {
-      if (pending >= 0 && j === pending + 1) {
-        newPath = true;
-        break;
-      }
-      lastSep = j;
-      pending = -1;
-    } else if (pending >= 0 && pathStart(s, j) >= 0) {
-      newPath = true;
-      break;
-    }
-    j += 1;
-  }
-  if (pending < 0) return j;
-  if (leafSpace && !newPath && !EXT_AT_END.test(s.slice(lastSep + 1, pending)) && EXT_AT_END.test(s.slice(pending + 1, j))) return j;
-  return pending;
+  return scanRun(s, from, true, leafSpace, (ch) => isSpace(ch) || URL_PATH_STOP.has(ch))[0];
 }
 
 /**
