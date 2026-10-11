@@ -404,8 +404,11 @@ test("手机 <720：只看稿和签字/退回，注明逐条下结论仅电脑�
 test("深色主题：状态标签用 dark-tags.md 专用亮版，深底上过 AA（已批第 38 行）", async ({ page, syntheticApi }) => {
   const task = reviewTask();
   syntheticApi.tasks.push(task);
+  // 走真实外观设置：页面加载后 AppearanceRoot 的 effect 会按已存外观重写 html[data-theme]，
+  // 之前在 goto 之后手改 DOM 属性，满负载下会被这次重写成浅色覆盖掉（竞态，约 2/10 失败）。
+  await page.addInitScript(() => localStorage.setItem("wb_appearance", JSON.stringify({ theme: "dark" })));
   await page.goto(`/review/${task.id}`);
-  await page.evaluate(() => document.documentElement.setAttribute("data-theme", "dark"));
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
   const tag = page.getByTestId("review-dock").locator(".ant-tag.t-pend").first();
   await expect(tag).toHaveCSS("color", "rgb(242, 180, 76)");
   await expect(tag).toHaveCSS("background-color", "rgb(67, 51, 46)");
