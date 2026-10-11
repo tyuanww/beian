@@ -6,6 +6,8 @@ import type { RejectRow } from "./reviewFlat";
 type Props = {
   kind: "sign" | "reject" | null;
   rows: RejectRow[];
+  /** 还没下结论的条数；>0 时服务端不收 /complete，确认按钮挡住。 */
+  pending?: number;
   busy: boolean;
   failed: boolean;
   onCancel: () => void;
@@ -13,19 +15,20 @@ type Props = {
 };
 
 /** 签字/退回确认框；文案按 deviations.md 第 33–35b 行（已批 2026-10-11）。提交失败不关框、不清补充说明。 */
-export function ReviewSubmitDialog({ kind, rows, busy, failed, onCancel, onConfirm }: Props) {
+export function ReviewSubmitDialog({ kind, rows, pending = 0, busy, failed, onCancel, onConfirm }: Props) {
   const [extra, setExtra] = useState("");
   const reject = kind === "reject";
+  const blocked = pending > 0;
   return (
     <Modal
       open={kind != null}
       title={reject ? REVIEW_COPY.rejectTitle : REVIEW_COPY.signTitle}
       okText={failed ? REVIEW_COPY.retry : reject ? REVIEW_COPY.rejectConfirm : REVIEW_COPY.signConfirm}
       cancelText={REVIEW_COPY.cancel}
-      okButtonProps={{ danger: reject, loading: busy, autoInsertSpace: false }}
+      okButtonProps={{ danger: reject, loading: busy, disabled: blocked, autoInsertSpace: false }}
       cancelButtonProps={{ autoInsertSpace: false }}
       onCancel={onCancel}
-      onOk={() => onConfirm(extra)}
+      onOk={() => { if (!blocked) onConfirm(extra); }}
       mask={{ closable: !busy }}
       destroyOnHidden={false}
       className="review-submit-dialog"
@@ -47,6 +50,7 @@ export function ReviewSubmitDialog({ kind, rows, busy, failed, onCancel, onConfi
           </label>
         </>
       ) : null}
+      {blocked ? <p className="review-submit-error" role="status">{REVIEW_COPY.pendingHint(pending)}</p> : null}
       {failed ? <p className="review-submit-error" role="alert">{REVIEW_COPY.submitFailed}</p> : null}
     </Modal>
   );

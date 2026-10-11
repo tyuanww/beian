@@ -18,7 +18,7 @@ describe("reviewFlat", () => {
     const pend = [hit("a"), hit("b", "confirm")];
     assert.deepEqual(verdictCounts(pend), { pending: 1, issue: 0, total: 2 });
     const g = submitGate(pend, true);
-    assert.equal(g.canSign, false); assert.equal(g.canReject, false); assert.equal(g.hint, "还有 1 条没下结论");
+    assert.equal(g.canSign, false); assert.equal(g.canReject, true); assert.equal(g.hint, "还有 1 条没下结论");
     assert.deepEqual([submitGate([hit("a", "issue")], true).canSign, submitGate([hit("a", "issue")], true).canReject], [false, true]);
     assert.equal(submitGate([hit("a", "ignore")], true).canSign, true);
     assert.equal(submitGate([], true).canSign, true, "零疑点可直接签字");

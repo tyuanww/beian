@@ -52,7 +52,9 @@ export function submitGate(hits: FieldHit[], reviewable: boolean, locked = false
   if (c.pending > 0) {
     return {
       canSign: false,
-      canReject: false,
+      // 老板 2026-10-11 已批：签字禁用时退回不禁用。服务端 /complete 仍要求先下完结论，
+      // 所以确认框里「确认退回」会挡住并写「还有 N 条没下结论」（不改后端）。
+      canReject: true,
       hint: REVIEW_COPY.pendingHint(c.pending),
       title: REVIEW_COPY.pendingTitle(c.pending),
     };

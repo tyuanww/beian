@@ -960,6 +960,7 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack }: Props
         key={dialog || "closed"}
         kind={dialog}
         rows={issueRows}
+        pending={counts.pending}
         busy={busy}
         failed={submitFailed}
         onCancel={() => { if (!busy) { setDialog(null); setSubmitFailed(false); } }}

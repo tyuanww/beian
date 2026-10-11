@@ -97,6 +97,15 @@ test("三栏通铺：1440 稿件 ≥70%、右栏 320、工具条在画布下方�
   const sign = page.getByRole("button", { name: "签字", exact: true });
   await expect(sign).toBeDisabled();
   await expect(page.getByText("还有 1 条没下结论", { exact: true })).toBeVisible();
+  // 签字禁用时退回不禁用；还有待确认时确认框挡住「确认退回」（服务端 /complete 要求先下完结论）。
+  const rejectBtn = page.getByRole("button", { name: "退回", exact: true });
+  await expect(rejectBtn).toBeEnabled();
+  await rejectBtn.click();
+  const pendingDialog = page.getByRole("dialog");
+  await expect(pendingDialog.getByText("还有 1 条没下结论")).toBeVisible();
+  await expect(pendingDialog.getByRole("button", { name: "确认退回" })).toBeDisabled();
+  await pendingDialog.getByRole("button", { name: "再看看" }).click();
+  await expect(pendingDialog).toBeHidden();
   await expect(page.getByLabel("写原因")).toHaveCount(0);
 
   await page.getByRole("button", { name: "全屏" }).click();
