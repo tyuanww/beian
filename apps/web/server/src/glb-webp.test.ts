@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { describe, it } from "node:test";
@@ -13,6 +13,7 @@ const {
   compressGlbTexturesToWebp,
   convertGlbBytesToWebp,
   glbTextureFormat,
+  glbTextureFormatParseCountForTest,
   readGlbJson,
   resetGlbTextureFormatCacheForTest,
 } = await import("./glbWebp.js");
@@ -57,13 +58,17 @@ describe("glb webp post-step", () => {
     assert.equal(glbTextureFormat(join(dir, "missing.glb")), undefined);
   });
 
-  it("caches the parse by path+size+mtime", async () => {
+  it("caches the parse by path+size+mtime: repeat reads do not re-parse, a changed file does", async () => {
     resetGlbTextureFormatCacheForTest();
     const path = join(dir, "d.glb");
     writeFileSync(path, await buildPngTexturedGlbForProbe(16));
-    assert.equal(glbTextureFormat(path), "png");
-    await compressGlbTexturesToWebp(path);
-    assert.equal(glbTextureFormat(path), "webp");
+    utimesSync(path, new Date(1_700_000_000_000), new Date(1_700_000_000_000));
+    for (let i = 0; i < 5; i++) assert.equal(glbTextureFormat(path), "png");
+    assert.equal(glbTextureFormatParseCountForTest(), 1);
+    const result = await compressGlbTexturesToWebp(path);
+    assert.equal(result.status, "converted");
+    for (let i = 0; i < 5; i++) assert.equal(glbTextureFormat(path), "webp");
+    assert.equal(glbTextureFormatParseCountForTest(), 2);
   });
 
   it("encodes every texture through our sharp (not ndarray-pixels)", async () => {

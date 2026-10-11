@@ -45,6 +45,7 @@ export function textureFormatOfGlbJson(json: Record<string, unknown>): GlbTextur
 
 const formatCache = new Map<string, GlbTextureFormat | null>();
 const FORMAT_CACHE_MAX = 2000;
+let formatParseCount = 0;
 
 /**
  * GLB 贴图格式，按 path+size+mtime 缓存，不在每次请求里重新解析。
@@ -61,6 +62,7 @@ export function glbTextureFormat(path: string | undefined): GlbTextureFormat | u
     return undefined;
   }
   if (formatCache.has(key)) return formatCache.get(key) ?? undefined;
+  formatParseCount += 1;
   const json = readGlbJson(path);
   const format = json ? textureFormatOfGlbJson(json) : null;
   if (formatCache.size >= FORMAT_CACHE_MAX) formatCache.clear();
@@ -70,6 +72,12 @@ export function glbTextureFormat(path: string | undefined): GlbTextureFormat | u
 
 export function resetGlbTextureFormatCacheForTest(): void {
   formatCache.clear();
+  formatParseCount = 0;
+}
+
+/** 测试用：glbTextureFormat 实际解析 GLB 的次数（命中缓存不计）。 */
+export function glbTextureFormatParseCountForTest(): number {
+  return formatParseCount;
 }
 
 /** 把 GLB 内贴图转成 WebP，内存中完成；不写盘。 */
