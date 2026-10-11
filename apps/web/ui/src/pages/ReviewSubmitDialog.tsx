@@ -26,7 +26,7 @@ export function ReviewSubmitDialog({ kind, rows, busy, failed, onCancel, onConfi
       cancelButtonProps={{ autoInsertSpace: false }}
       onCancel={onCancel}
       onOk={() => onConfirm(extra)}
-      maskClosable={!busy}
+      mask={{ closable: !busy }}
       destroyOnHidden={false}
       className="review-submit-dialog"
     >
