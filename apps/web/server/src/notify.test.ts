@@ -11,7 +11,7 @@ process.env.VITEST = "1";
 after(() => rmSync(dataDir, { recursive: true, force: true }));
 
 const { saveSettings } = await import("./settings.js");
-const { createTextSender, illustratorWatchdogText, jobOpenPath, sendText, taskCompleteHeadline, taskCompleteText } = await import("./notify.js");
+const { createTextSender, illustratorWatchdogText, watchdogEventFromStdout, jobOpenPath, sendText, taskCompleteHeadline, taskCompleteText } = await import("./notify.js");
 
 function isolatedSender() {
   const calls = { cli: 0, app: 0 };
@@ -143,5 +143,19 @@ describe("illustratorWatchdogText", () => {
     assert.match(text, /图像识别/);
     assert.match(text, /\/review\/aabbccddeeff/);
     assert.equal(/[A-Z]:\\|pid|sha256/i.test(text), false);
+  });
+});
+
+describe("watchdog events", () => {
+  it("source change and restart cap say so explicitly", () => {
+    assert.match(illustratorWatchdogText({ id: "aabbccddeeff" }, "save_source_changed"), /原稿可能被改动/);
+    assert.match(illustratorWatchdogText({ id: "aabbccddeeff" }, "save_source_changed"), /不回退图像识别/);
+    assert.match(illustratorWatchdogText({ id: "aabbccddeeff" }, "watchdog_restart_cap"), /1 小时内已自动重启 2 次/);
+    assert.match(illustratorWatchdogText({ id: "m1" }, "save_timeout", "mockup"), /\/mockup\/m1/);
+  });
+  it("parses only known reasons from the last stdout line", () => {
+    assert.equal(watchdogEventFromStdout('noise\n{"reason":"save_timeout"}'), "save_timeout");
+    assert.equal(watchdogEventFromStdout('{"reason":"export_failed"}'), undefined);
+    assert.equal(watchdogEventFromStdout("not json"), undefined);
   });
 });
