@@ -122,10 +122,13 @@ describe("redactLocalPaths: ReDoS / performance", () => {
   for (const [name, input] of Object.entries(inputs)) {
     it(`${name} (${input.length} chars) < 50ms`, () => {
       assert.ok(input.length >= 5000);
-      r(input); // warm-up
-      const t0 = performance.now();
-      r(input);
-      const ms = performance.now() - t0;
+      // 取 5 次最快值：整套并行跑时单次计时会被 GC / 调度拖慢，最快值才反映算法本身。
+      let ms = Infinity;
+      for (let k = 0; k < 5; k += 1) {
+        const t0 = performance.now();
+        r(input);
+        ms = Math.min(ms, performance.now() - t0);
+      }
       assert.ok(ms < 50, `${name}: ${ms.toFixed(1)}ms`);
     });
   }
@@ -192,9 +195,12 @@ describe("redactLocalPaths: length cap and linear time", () => {
   ] as const) {
     it(`${name} (${input.length} chars) < 200ms`, () => {
       assert.ok(input.length >= 300000);
-      const t0 = performance.now();
-      r(input);
-      const ms = performance.now() - t0;
+      let ms = Infinity;
+      for (let k = 0; k < 3; k += 1) {
+        const t0 = performance.now();
+        r(input);
+        ms = Math.min(ms, performance.now() - t0);
+      }
       assert.ok(ms < 200, `${name}: ${ms.toFixed(1)}ms`);
     });
   }
