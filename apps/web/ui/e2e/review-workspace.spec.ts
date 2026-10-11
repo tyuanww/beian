@@ -635,3 +635,31 @@ test.describe("已被别人完成：锁页文案 + 完成时间（固定上海�
     await expect(page.locator(".review-top").getByRole("button", { name: "上传新稿" })).toBeVisible();
   });
 });
+
+for (const theme of ["light", "dark"]) {
+  test(`锁页时签字/退回都按禁用样式显示且点不动（${theme}）`, async ({ page, syntheticApi }) => {
+    const task = reviewTask(theme === "light" ? "e5969b58cda0" : "e5969b58cda1");
+    Object.assign(task, { status: "completed", board: "done", completed_by: "天元", complete_kind: "signed" });
+    syntheticApi.tasks.push(task);
+    await page.addInitScript((t) => localStorage.setItem("wb_appearance", JSON.stringify({ theme: t })), theme);
+    await page.goto(`/review/${task.id}`);
+    await expect(page.locator(".review-lock")).toBeVisible();
+    const styles: string[] = [];
+    for (const name of ["签字", "退回"]) {
+      const b = page.getByRole("button", { name, exact: true });
+      await expect(b).toBeDisabled();
+      await expect(b).toHaveCSS("opacity", "1");
+      const r = await b.evaluate((el) => {
+        const rgb = (s: string) => (s.match(/[\d.]+/g) || []).slice(0, 3).map(Number);
+        const lum = ([r, g, b]: number[]) => { const f = (c: number) => { c /= 255; return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; }; return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b); };
+        const c = getComputedStyle(el); const a = lum(rgb(c.color)), d = lum(rgb(c.backgroundColor));
+        return { ratio: (Math.max(a, d) + 0.05) / (Math.min(a, d) + 0.05), key: `${c.color}|${c.backgroundColor}` };
+      });
+      expect(r.ratio).toBeGreaterThanOrEqual(4.5);
+      styles.push(r.key);
+      await b.click({ force: true });
+      await expect(page.getByRole("dialog")).toHaveCount(0);
+    }
+    expect(styles[0]).toBe(styles[1]);
+  });
+}
