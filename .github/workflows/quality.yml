@@ -89,6 +89,9 @@ jobs:
           try {
             & (Join-Path $env:GITHUB_WORKSPACE "node_modules\.bin\tsx.cmd") "src\glbWebpProbe.ts"
             if ($LASTEXITCODE -ne 0) { throw "GLB WebP probe failed exit=$LASTEXITCODE" }
+            # Synthetic GLB with the real mockup texture layout (no customer data); logs peak RSS.
+            & (Join-Path $env:GITHUB_WORKSPACE "node_modules\.bin\tsx.cmd") "src\glbWebpMemoryProbe.ts"
+            if ($LASTEXITCODE -ne 0) { throw "GLB WebP memory probe failed exit=$LASTEXITCODE" }
           } finally {
             Pop-Location
           }
