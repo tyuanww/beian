@@ -1,0 +1,10 @@
+# gstack-redact 放行清单：每行是一条已审核的假凭据样例原文（逐条精确匹配，非文件/通配符）。
+# 全部来自 pathRedact 脱敏测试与 F10 文档里的示例，账号密码均为虚构。
+# apps/web/server/src/path-redact.test.ts、CHANGELOG.md / TODOS.md F10：网址用户名密码整段换成 ***@
+http://bob:s3cr3t@x
+# apps/web/server/src/path-redact.test.ts：userinfo 里含多个 @ 且带端口
+https://a:b@c@h:8787
+# apps/web/server/src/path-redact.test.ts：截断点落在网址凭据中间
+http://bob:SECRET@x
+# TODOS.md F10：非 http(s) 连接串输出 postgres:本机路径 的已知缺口示例
+postgres://u:p@db
