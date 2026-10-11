@@ -194,7 +194,7 @@ async function denyWebp(page: Page) {
 test('WebP 贴图在不能解码的设备上只显示效果图和说明，不请求模型',async({page})=>{
   let glbRequests=0;page.on('request',r=>{if(r.url().includes('/files/glb')&&!r.url().includes('download=1'))glbRequests++;});
   await denyWebp(page);await serve(page,false,false,'webp');await page.goto(`/mockup/${ID}`);
-  await expect(page.getByRole('status').filter({hasText:'此设备无法显示 3D 预览'})).toBeVisible();
+  await expect(page.getByRole('status').filter({hasText:'此设备无法显示 3D 预览'})).toHaveText('此设备无法显示 3D 预览，先看效果图。');
   await expect(page.locator('.mockup-sheet-glb img.mockup-glb-poster')).toBeVisible();
   await expect(page.locator('model-viewer')).toHaveCount(0);
   await expect(page.locator('.mockup-sheet-glb .ant-progress, .mockup-sheet-glb .ant-spin')).toHaveCount(0);

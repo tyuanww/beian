@@ -7,8 +7,8 @@ type GlbTextureFormat = "webp" | "png";
 /** 混入 MockupJob.files 的可选字段；缺字段 = 旧单，按 PNG 处理。 */
 export type GlbTextureInfo = { [K in typeof GLB_TEXTURE_FORMAT_FIELD]?: GlbTextureFormat | (string & {}) };
 
-// 无文档依据，需老板定（见 webp-fallback-basis.md）；句式沿用「3D 预览加载失败…下载仍为原始模型。」
-export const GLB_WEBP_UNSUPPORTED_TEXT = "此设备无法显示 3D 预览，先看效果图。下载仍为原始模型。";
+// 老板定稿（2026-10-11）；见 DESIGN.md「3D 贴图不支持」。
+export const GLB_WEBP_UNSUPPORTED_TEXT = "此设备无法显示 3D 预览，先看效果图。";
 
 /** 最小合法 1×1 无损 WebP（base64）。本地 atob 成 Blob，不走 fetch，也不用 data: URL，免得被 CSP 误判为不支持。 */
 const WEBP_PROBE_BASE64 = "UklGRhoAAABXRUJQVlA4TA0AAAAvAAAAEAcQERGIiP4HAA==";

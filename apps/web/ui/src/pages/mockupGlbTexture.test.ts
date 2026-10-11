@@ -79,6 +79,7 @@ test("每个会话只探测一次", async () => {
   assert.equal(support.known(), true);
 });
 
-test("降级说明不含禁用词", () => {
+test("降级说明为定稿文案且不含禁用词", () => {
+  assert.equal(GLB_WEBP_UNSUPPORTED_TEXT, "此设备无法显示 3D 预览，先看效果图。");
   for (const banned of ["已过审", "已发送", "AI 已确认", "AI 已过审", "Generating"]) assert.ok(!GLB_WEBP_UNSUPPORTED_TEXT.includes(banned));
 });
