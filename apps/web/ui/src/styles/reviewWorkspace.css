@@ -72,6 +72,14 @@ html[data-theme="dark"] .review-thumbs { background: #1f1a24; }
 .review-flat .ant-tag.t-pend { color: #8a5a00; background: #fff7e6; border-color: #ffd591; }
 .review-flat .ant-tag.t-err { color: #a8071a; background: #fff1f0; border-color: #ffa39e; }
 .review-flat .ant-tag.t-ok { color: #237804; background: #f6ffed; border-color: #b7eb8f; }
+/* 已批第 38 行：深色主题用各自更浅的专用色；对比度（字/标签底、字/页底 #221b28）都 ≥ 6.5:1，过 AA。 */
+html[data-theme="dark"] .review-flat .ant-tag.t-pend { color: #ffc069; background: #2b2111; border-color: #594214; }
+html[data-theme="dark"] .review-flat .ant-tag.t-err { color: #ff7875; background: #2a1215; border-color: #5c2223; }
+html[data-theme="dark"] .review-flat .ant-tag.t-ok { color: #95de64; background: #162312; border-color: #274916; }
+html[data-theme="dark"] .review-th.s-err .review-th-s, html[data-theme="dark"] .review-submit-error { color: #ff7875; }
+html[data-theme="dark"] .review-th.s-done .review-th-s { color: #95de64; }
+html[data-theme="dark"] .review-zero { color: #95de64; background: #162312; }
+html[data-theme="dark"] .review-miss { color: #ffc069; background: #2b2111; }
 .review-flat .ant-tag.t-ign { color: #4a4550; background: #f5f5f5; border-color: #d9d9d9; }
 .review-workspace .pin { transform: scale(var(--review-pin-scale, 1)); }
 

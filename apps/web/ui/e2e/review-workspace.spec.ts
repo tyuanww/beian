@@ -366,3 +366,21 @@ test("手机 <720：只看稿和签字/退回，注明逐条下结论仅电脑�
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.screenshot({ path: testInfo.outputPath("review-mobile-dark.png") });
 });
+
+test("深色主题：状态标签用更浅专用色，深底上过 AA（已批第 38 行）", async ({ page, syntheticApi }) => {
+  const task = reviewTask();
+  syntheticApi.tasks.push(task);
+  await page.goto(`/review/${task.id}`);
+  await page.evaluate(() => document.documentElement.setAttribute("data-theme", "dark"));
+  const tag = page.getByTestId("review-dock").locator(".ant-tag.t-pend").first();
+  await expect(tag).toHaveCSS("color", "rgb(255, 192, 105)");
+  const ratio = await tag.evaluate((el) => {
+    const rgb = (s: string) => (s.match(/\d+(\.\d+)?/g) || []).slice(0, 3).map(Number);
+    const lum = ([r, g, b]: number[]) => [r, g, b].map((v) => { const c = v / 255; return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; })
+      .reduce((sum, c, i) => sum + c * [0.2126, 0.7152, 0.0722][i], 0);
+    const st = getComputedStyle(el);
+    const a = lum(rgb(st.color)); const b = lum(rgb(st.backgroundColor));
+    return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+  });
+  expect(ratio).toBeGreaterThanOrEqual(4.5);
+});
