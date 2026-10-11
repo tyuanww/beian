@@ -105,6 +105,44 @@ describe("glb webp post-step", () => {
     assert.ok(readFileSync(path).equals(original));
   });
 
+  it("serializes concurrent compressions in-process (no overlap)", async () => {
+    const a = join(dir, "g1.glb");
+    const b = join(dir, "g2.glb");
+    writeFileSync(a, await buildPngTexturedGlbForProbe(256));
+    writeFileSync(b, await buildPngTexturedGlbForProbe(256));
+    const spans: { name: string; start: number; end: number }[] = [];
+    let active = 0;
+    let maxActive = 0;
+    const slow = (name: string) => async (input: Uint8Array) => {
+      const start = performance.now();
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      await new Promise((r) => setTimeout(r, 60));
+      const out = await convertGlbBytesToWebp(input);
+      active -= 1;
+      spans.push({ name, start, end: performance.now() });
+      return out;
+    };
+    const [ra, rb] = await Promise.all([
+      compressGlbTexturesToWebp(a, { convert: slow("a") }),
+      compressGlbTexturesToWebp(b, { convert: slow("b") }),
+    ]);
+    assert.equal(ra.status, "converted");
+    assert.equal(rb.status, "converted");
+    assert.equal(maxActive, 1);
+    assert.deepEqual(spans.map((s) => s.name), ["a", "b"]);
+    assert.ok(spans[1].start >= spans[0].end);
+  });
+
+  it("a failing compression does not wedge the lock", async () => {
+    const path = join(dir, "h.glb");
+    writeFileSync(path, await buildPngTexturedGlbForProbe(256));
+    const failed = compressGlbTexturesToWebp(path, { convert: async () => { throw new Error("boom"); } });
+    const next = compressGlbTexturesToWebp(path);
+    assert.equal((await failed).status, "failed");
+    assert.equal((await next).status, "converted");
+  });
+
   it("encodes every texture through our sharp (not ndarray-pixels)", async () => {
     const sharp = (await import("sharp")).default;
     let calls = 0;

@@ -150,9 +150,21 @@ async function readGlbStructure(bytes: Uint8Array): Promise<GlbStructure> {
 /**
  * 原地转换一个新生成的 GLB。成功才原子替换；失败、无贴图、已是 WebP 或没变小都保留原文件。
  */
-export async function compressGlbTexturesToWebp(
+/** 进程内串行锁：同一时刻只跑一个 GLB 压缩，限制服务进程的解码内存峰值。 */
+let compressionTail: Promise<unknown> = Promise.resolve();
+
+export function compressGlbTexturesToWebp(
   path: string,
   opts: { quality?: number; convert?: typeof convertGlbBytesToWebp } = {},
+): Promise<GlbWebpResult> {
+  const run = compressionTail.then(() => compressGlbTexturesToWebpUnlocked(path, opts));
+  compressionTail = run.catch(() => undefined);
+  return run;
+}
+
+async function compressGlbTexturesToWebpUnlocked(
+  path: string,
+  opts: { quality?: number; convert?: typeof convertGlbBytesToWebp },
 ): Promise<GlbWebpResult> {
   const tmp = join(dirname(path), `.${basename(path)}.webp-${process.pid}-${Date.now()}.tmp`);
   try {
