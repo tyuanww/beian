@@ -95,6 +95,19 @@ jobs:
           } finally {
             Pop-Location
           }
+      - name: GLB WebP variant rename-while-open + directory fsync best-effort (Windows semantics)
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          Push-Location (Join-Path $env:GITHUB_WORKSPACE "apps\web\server")
+          try {
+            # Synthetic temp dirs only. Old handle must keep reading the full old variant after unlink/rename;
+            # directory fsync may fail on Windows (EISDIR/EPERM) and must stay best-effort, never throw.
+            & (Join-Path $env:GITHUB_WORKSPACE "node_modules\.bin\tsx.cmd") --test "src\glb-webp-variant-rename-open.test.ts" "src\glb-webp-variant-fsync.test.ts"
+            if ($LASTEXITCODE -ne 0) { throw "GLB WebP variant Windows fs tests failed exit=$LASTEXITCODE" }
+          } finally {
+            Pop-Location
+          }
 
   quality:
     runs-on: ubuntu-latest
