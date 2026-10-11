@@ -117,13 +117,13 @@ export function rejectRows(hits: FieldHit[], notes: Record<string, string>): Rej
 }
 
 /**
- * 服务端 /complete 要求非空 conclusion；确认框里「补充说明」选填，空时用固定结论补上。
+ * 服务端 /complete 要求非空 conclusion；确认框里「补充说明」选填。审核人写了就原样用他的，
+ * 不再拼自动文案；空时才补固定结论（签字「无改稿项」/ 退回「退回：N 条有错，见清单」）。
  */
 export function conclusionFor(kind: "sign" | "reject", extra: string, rows: RejectRow[]): string {
   const text = extra.trim();
   if (kind === "sign") return text || REVIEW_COPY.signConclusion;
-  const head = REVIEW_COPY.rejectConclusion(rows.length);
-  return text ? `${head}；${text}` : head;
+  return text || REVIEW_COPY.rejectConclusion(rows.length);
 }
 
 /** 已被别人签字/退回：只用现有 completed_by / complete_kind 字段，不新增接口。 */

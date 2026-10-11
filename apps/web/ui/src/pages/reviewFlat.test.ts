@@ -44,8 +44,8 @@ describe("reviewFlat", () => {
   it("退回清单：没写原因只提醒；结论自动补齐", () => {
     const rows = rejectRows([hit("a", "issue"), hit("b", "issue", 1, "疑点", "错字"), hit("c", "confirm")], { a: "" });
     assert.deepEqual(rows.map((r) => r.missingReason), [true, false]);
-    assert.equal(conclusionFor("reject", "", rows), "退回：2 条有错");
-    assert.equal(conclusionFor("reject", "找受委托方", rows), "退回：2 条有错；找受委托方");
+    assert.equal(conclusionFor("reject", "", rows), "退回：2 条有错，见清单");
+    assert.equal(conclusionFor("reject", "找受委托方", rows), "找受委托方");
     assert.equal(conclusionFor("sign", " ", []), "无改稿项");
   });
   it("已被他人签字锁定只看 completed_by", () => {

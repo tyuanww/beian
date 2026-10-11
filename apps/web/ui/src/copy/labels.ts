@@ -96,7 +96,7 @@ export const REVIEW_COPY = {
   submitFailed: "没提交成功，请重试",
   retry: "重试",
   signConclusion: "无改稿项",
-  rejectConclusion: (n: number) => `退回：${n} 条有错`,
+  rejectConclusion: (n: number) => `退回：${n} 条有错，见清单`,
   lead: "核对要点",
   marker: "标记",
   verdict: { confirm: "一致", issue: "有错", ignore: "忽略" } as Record<"confirm" | "issue" | "ignore", string>,

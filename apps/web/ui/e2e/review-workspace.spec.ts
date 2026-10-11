@@ -122,7 +122,7 @@ test("三栏通铺：1440 稿件 ≥70%、右栏 320、工具条在画布下方�
   await dialog.getByRole("button", { name: "确认退回" }).click();
   await expect(page.locator(".ant-alert").getByText("已退回。", { exact: true })).toBeVisible();
   expect(decisions(syntheticApi).at(-1)?.body).toMatchObject({ hit_id: "hit_name", decision: "issue", note: "需要补齐中文品名" });
-  expect(syntheticApi.calls.find((item) => item.path.endsWith("/complete"))?.body).toEqual({ conclusion: "退回：1 条有错；请设计今天改完" });
+  expect(syntheticApi.calls.find((item) => item.path.endsWith("/complete"))?.body).toEqual({ conclusion: "请设计今天改完" });
 });
 
 test("按 1 标一致自动跳下一条并跨页；打字时快捷键不生效；位置写 n/N", async ({ page, syntheticApi }) => {
