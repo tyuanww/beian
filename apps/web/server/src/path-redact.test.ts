@@ -317,3 +317,12 @@ describe("redactLocalPaths: URL-embedded paths continue through CJK / emoji", ()
     assert.equal(r("请求http://x/a/b失败"), "请求http://x/a/b失败");
   });
 });
+
+describe("redactLocalPaths: URL userinfo is replaced", () => {
+  it("user:pass@ and user@ become ***@", () => {
+    assert.equal(r("http://bob:s3cr3t@x/Users/bob/a.pdf"), "http://***@x/本机路径");
+    assert.equal(r("https://bob@x/a"), "https://***@x/a");
+    assert.equal(r("https://a:b@c@h:8787/api?x=1"), "https://***@h:8787/api?x=1");
+    assert.equal(r("https://example.com/api?mail=a@b.com"), "https://example.com/api?mail=a@b.com");
+  });
+});
