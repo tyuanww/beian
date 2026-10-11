@@ -1408,19 +1408,19 @@ def match_field(
             )
         else:
             status = "缺失" if score < 50 else "疑点"
-            ev = "确认单要的净含量，我在这一面没读到。"
+            ev = "确认单要的净含量，这一面没读到，请核对"
     elif fg == "净含量&条形码":
         net_ok = bool(net_branch_info and net_branch_info.get("hit") and not net_branch_info.get("miss"))
         bar_cov = (cov or {}).get("parts", {}).get("barcode") if isinstance((cov or {}).get("parts"), dict) else None
         bar_ok = bool(bar_cov and (bar_cov.get("coverage") or 0) >= 0.99)
         if net_ok and bar_ok:
-            status, ev = "一致", "净含量和条码都在这一面读到了。"
+            status, ev = "一致", "净含量和条码都在这一面读到了"
         elif net_ok or bar_ok:
             status = "疑点"
-            ev = "净含量和条码没有都读全，请对着这一面看毫升和条码。"
+            ev = "净含量和条码没有都读全，请对着这一面看毫升和条码"
         else:
             status = "疑点"
-            ev = "确认单要的毫升和条码，我在这一面没读全。"
+            ev = "确认单要的毫升和条码，这一面没读全，请核对"
     elif fg == "二维码":
         if score >= SCORE_OK and (cov or {}).get("coverage", 0) >= 0.85:
             status, ev = (

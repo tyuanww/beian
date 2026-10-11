@@ -53,7 +53,7 @@ export function buildRevisionList(
     ...issues.map((hit, index) => {
       const note = hit.note ? `（${hit.note}）` : "";
       const spoken = spokenAsk(hit, hit.field, options.located?.(hit));
-      const doubts = spoken ? [spoken.lead, spoken.ask] : doubtLines(hit);
+      const doubts = spoken ? [spoken.lead, spoken.ask].filter(Boolean) : doubtLines(hit);
       const miss = humanMissLines(hit);
       const missText = miss.length ? ` / 没读到：${miss.join("；")}` : "";
       const doubtText = doubts.length ? ` / 疑点：${doubts.join("；")}` : "";
