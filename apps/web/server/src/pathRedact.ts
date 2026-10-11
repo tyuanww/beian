@@ -413,6 +413,9 @@ const LEAK_RESIDUE = [
   // 以免误伤「bearer 字段为空」「Basic settings」这类文字；中文「基本信息」不受影响。
   /authorization/i,
   /\b(?:bearer|basic)\s+(?=[A-Za-z0-9._~+/=-]*[0-9._~+/=-])[A-Za-z0-9._~+/=-]{6,}/i,
+  // `Basic ` 后一整串 base64（无空格）至少 8 位，且除首字母外还有大写字母，或含数字、`+`、`/`、`=`
+  //（`Basic dXNlcjpwYXNz` 命中；`Basic settings`、`Basic Settings` 不命中）。关键字不分大小写，串本身区分。
+  /\b[Bb][Aa][Ss][Ii][Cc]\s+(?=[A-Za-z0-9+/=]{8,}(?![A-Za-z0-9+/=]))[A-Za-z0-9+/=][a-z]*[A-Z0-9+/=]/,
   // 查询参数名像凭据：password / passwd / pwd / pw / token / secret / key，或以 `_` `-` `.` 接这些词结尾
   //（`api_key`、`access_token`、`client_secret`）。大小写不限；`monkey`、`keyword`、`tokens_left` 不算。
   /[?&](?:[A-Za-z0-9_.-]*[_.-])?(?:password|passwd|pwd|pw|token|secret|key)=/i,
