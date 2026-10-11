@@ -158,7 +158,10 @@ describe("leak safety net on every exit", () => {
       });
       reclaimOnBoot();
       await new Promise((r) => setTimeout(r, 50));
-      assert.deepEqual(seen, [FALLBACK(id)]);
+      assert.deepEqual(seen, [`任务失败，原文已隐藏，请到后台查看（单号 ${id}）`]);
+      // 页面 / 接口给非管理员的文案不变。
+      const page = (await (await app.request(`/api/tasks/${id}`, { headers: auth("reviewer", "ou_guard_rv") })).json()) as Record<string, unknown>;
+      assert.equal(page.job_error, FALLBACK(id));
     } finally {
       resetJobsTestHooks();
     }
@@ -222,6 +225,7 @@ describe("mockup Feishu failure notification is guarded", () => {
       assert.equal(seen.length, 1);
       assert.doesNotMatch(String(seen[0]), /Users|bob|a\.pdf/);
       assert.match(String(seen[0]), new RegExp(`单号 ${id}`));
+      assert.equal(seen[0], `任务失败，原文已隐藏，请到后台查看（单号 ${id}）`);
     } finally {
       resetJobsTestHooks();
     }
