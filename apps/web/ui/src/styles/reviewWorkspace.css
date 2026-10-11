@@ -54,7 +54,7 @@ html[data-theme="dark"] .review-thumbs { background: #1f1a24; }
 .review-ptab i { font-style: normal; font-variant-numeric: tabular-nums; }
 .review-pcollapse { margin-left: auto; border: 0; background: none; color: var(--muted); cursor: pointer; font-size: 14px; }
 .review-flat-list { list-style: none; margin: 0; padding: 0; }
-.review-flat-list > li { border-bottom: 1px solid #f1edf4; }
+.review-flat-list > li { border-bottom: 1px solid var(--line); } /* visual-check #5：line #E7E2EC */
 .review-flat-list > li.is-on { background: var(--accent-soft); } /* visual-check #4：purple-soft #F6F1F8 */
 .review-flat-row { display: grid; grid-template-columns: 24px minmax(0, 1fr) auto auto; align-items: center; gap: 8px; width: 100%; text-align: left; border: 0; background: none; padding: 6px 12px; font-size: 14px; cursor: pointer; color: var(--ink); }
 .review-flat-row strong { overflow-wrap: anywhere; font-weight: 500; }

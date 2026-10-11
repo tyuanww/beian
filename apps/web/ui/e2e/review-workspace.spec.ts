@@ -98,6 +98,8 @@ test("三栏通铺：1440 稿件 ≥70%、右栏 320、工具条在画布下方�
   await expect(page.locator(".review-th")).toHaveText(/P1/);
   // visual-check #4：当前行底色 = --accent-soft #F6F1F8。
   await expect(page.getByTestId("review-dock").locator(".review-flat-list > li.is-on")).toHaveCSS("background-color", "rgb(246, 241, 248)");
+  // visual-check #5：列表行分隔线 = --line #E7E2EC。
+  await expect(page.getByTestId("review-dock").locator(".review-flat-list > li").first()).toHaveCSS("border-bottom-color", "rgb(231, 226, 236)");
   // visual-check #3：1440 常驻右栏 tabs 行也有「收起」，收起后右上出现「展开疑点」，再展开回到常驻。
   await page.getByRole("button", { name: "收起右栏" }).click();
   await expect(page.getByTestId("review-dock")).toHaveText(/^展开疑点 · 待确认/);
