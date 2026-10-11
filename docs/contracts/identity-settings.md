@@ -6,7 +6,7 @@
 
 杭州机箱管理员必须在生产数据目录 `users.json` 中用真实飞书 `open_id` 显式绑定 `role: "admin"`，才能扫描 Blender / Illustrator（含 PATH）。姓名、花名和显示名只展示，绝不参与提权；同企业首次登录一律是 `reviewer`。删除账号、设 `disabled: true` 或调整角色后，已有飞书会话在下一次请求立即撤销或同步，不要求重新登录；公网模式还必须撤销并落盘清除旧显示名会话。退出直接删 token，不得因账号目录暂时不可读而保留。伸美其他人默认审稿员：能进审稿台，不能扫本机 exe。2026-08-24 当周曾决定不做品牌登录闪屏、申请权限工单（office-hours D1=A）；未有新决定前不主动扩展，相关新请求出现时再核对范围。
 
-飞书推送不必装 lark-cli。点「发一条测试」用已填的飞书应用发给**当前登录**；成功才打开 `FEISHU_ENABLED` 并在空时写入 `FEISHU_OPEN_ID`。`lark_send` 走 `POST /api/settings/probe`，自 0.31.1.14 起仅管理员可用（reviewer / viewer 一律 403）。开工板绿 ≠ 籽烨已收到；她当审稿接收人要在「飞书推送」页自己再测。不要把开关 / open_id / bot 当主路径让人手填。探测 id `lark_send` 的 pending/结果必须画在行 `lark`，否则按钮看起来没反应。
+飞书推送不必装 lark-cli。点「发一条测试」用已填的飞书应用发给**当前登录**；成功才打开 `FEISHU_ENABLED` 并在空时写入 `FEISHU_OPEN_ID`。`lark_send` 走 `POST /api/settings/probe`，权限见下文 0.31.1.14 一节。开工板绿 ≠ 籽烨已收到。「发一条测试」只发给点按钮的当前登录管理员，不能代发给别人；`FEISHU_OPEN_ID` 为空时，第一次测试成功会把接收人写成这位管理员，所以要先填好接收人再测。真实通知（签字完成、对照/打样完成或失败、Illustrator 看门狗告警）都不指定收件人，统一发给 `FEISHU_OPEN_ID` 这一个人，且只在 `FEISHU_ENABLED` 打开时发送。要确认籽烨作为审稿接收人能收到：管理员核对 `FEISHU_OPEN_ID` 填的是她，再由她确认收到下一条真实通知。不要把开关 / open_id / bot 当主路径让人手填。探测 id `lark_send` 的 pending/结果必须画在行 `lark`，否则按钮看起来没反应。
 
 MiniMax 未开语义复核是「未用」，不是「可用」；探测是 `GET /v1/models`，不是对话也不是余额。百度 OCR 绿 = 对照同款识别接口通了，不是静默授权。已通的密钥默认折叠，点开才改。
 
