@@ -44,10 +44,10 @@
 - 转换失败、无贴图、已是 WebP 或结果不比原文件小时，保留原 PNG GLB 原样不动，只写服务日志（`glb webp failed, keep original PNG GLB` / `glb webp skipped`），打样照常成功。成功时先写同目录临时文件（`.<name>.glb.webp-<pid>-<ms>.tmp`），复核 `extensionsUsed`，再把临时文件完整读回、核对结构计数与原文件一致，不一致记 `output_structure_mismatch` 并保留原文件，全部通过才原子改名替换。同一服务进程内压缩串行执行，一次只跑一个 GLB，限制解码内存峰值；旧管线调用不设等锁上限和替换前复查（不传 `lockWaitMs` / `beforeCommit`）。服务启动时清理 `DATA_DIR/mockups` 下被中断压缩遗留、名字完全匹配且超过 10 分钟的临时文件（不跟随符号链接），失败只记日志。
 - 不在原位转换旧文件；旧文件只走下面的 WebP 旁路，原件不动。
 
-### 旧 GLB 的 WebP 旁路（0.31.1.18，开关默认关）
+### 旧 GLB 的 WebP 旁路（0.31.1.19，开关默认关）
 
 - 开关在已提交的 `apps/web/server/src/rolloutFlags.ts`，不读环境变量：`GLB_WEBP_VARIANT = false`（是否对外返回旁路），`GLB_WEBP_BACKFILL_LIMIT = 0`（0 表示不回填）。改值或回滚都是发一个只改这个文件的 PR，经老板批准后合并发版。回填本身不在本版，本版只有旁路的存储和读取。
-- 旁路存在打样目录下隐藏的 `.webp-variant/`，原件不改。元数据记原件和旁路两边的 sha256。写入顺序：旁路文件 → fsync → 元数据 → 目录 fsync。服务启动时清理临时文件、孤儿旁路，以及原件已经不在的旁路。会改 GLB 的 10 个入口都先删旁路，有静态测试锁住。
+- 旁路存在打样目录下隐藏的 `.webp-variant/`，原件不改，按内容哈希命名：`<原名>.<旁路 sha256 前 16 位>.webpv`；元数据 `<原名>.webpv.json`（schema `glb-webp-variant/2`）记原件和旁路两边的 sha256，`variant.file` 指向当前文件，只认它指向且校验通过的文件。替换时写新文件名、元数据 tmp 改名原子覆盖，不覆盖旧旁路（Windows 上被打开的文件不能删或覆盖）；元数据只一次性读完即关，更新失败返回 failed、旧元数据不动、照旧服务旧旁路或原件。旧哈希文件尽力删，删不掉（EPERM/EBUSY）跳过，下次写入或启动清理再删，绝不删元数据当前指向的文件。服务启动时清理临时/staging 文件、读不出或原件已不在或指向文件缺失的元数据，以及没有被有效元数据指向的所有旁路。会改 GLB 的 10 个入口都先删旁路，有静态测试锁住。
 - 开关关着时（当前线上）：行为和 0.31.1.17 一样。两个地址都返回原件，`?v=` 被忽略，`files[]` 里不出现 `glb_version` / `glb_original_version`。
 - 开关打开后：
   - `GET /api/mockups/:id/files/glb` 默认返回校验通过的旁路，校验不过就返回原件；加 `?variant=original` 总是返回原件。`download=1` 仍下载原件。
