@@ -4,14 +4,15 @@ export const PUBLIC_UPLOAD_BYTES = PUBLIC_UPLOAD_MB * 1024 * 1024;
 const MB = 1024 * 1024;
 
 /** /api/auth/me 可选下发 upload_limit_bytes；是正数就取它和公网上限里小的那个，缺或不合法就用公网上限。 */
-export function uploadLimitBytes(me?: { upload_limit_bytes?: number | null } | null): number {
-  const v = Number(me?.upload_limit_bytes);
-  return Number.isFinite(v) && v > 0 ? Math.min(v, PUBLIC_UPLOAD_BYTES) : PUBLIC_UPLOAD_BYTES;
+export function uploadLimitBytes(me?: { upload_limit_bytes?: unknown } | null): number {
+  const v = me?.upload_limit_bytes;
+  // 只认真正的数字：字符串 "50000000"、NaN、Infinity、0、负数都当没给。
+  return typeof v === "number" && Number.isFinite(v) && v > 0 ? Math.min(v, PUBLIC_UPLOAD_BYTES) : PUBLIC_UPLOAD_BYTES;
 }
 
 let currentLimit = PUBLIC_UPLOAD_BYTES;
 /** 登录信息到手后调用一次（App 里），之后预检和提示文案都按它。 */
-export function setUploadLimitFromMe(me?: { upload_limit_bytes?: number | null } | null): void {
+export function setUploadLimitFromMe(me?: { upload_limit_bytes?: unknown } | null): void {
   currentLimit = uploadLimitBytes(me);
 }
 export function currentUploadLimitBytes(): number {

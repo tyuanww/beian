@@ -29,6 +29,13 @@ describe("uploadLimitBytes", () => {
     assert.equal(uploadLimitBytes({ upload_limit_bytes: 0 }), PUBLIC_UPLOAD_BYTES);
     assert.equal(uploadLimitBytes({ upload_limit_bytes: -5 }), PUBLIC_UPLOAD_BYTES);
   });
+  it("只认 number 类型、有限、>0：字符串/NaN/Infinity/null 都回退", () => {
+    assert.equal(uploadLimitBytes({ upload_limit_bytes: "5000000" }), PUBLIC_UPLOAD_BYTES);
+    assert.equal(uploadLimitBytes({ upload_limit_bytes: Number.NaN }), PUBLIC_UPLOAD_BYTES);
+    assert.equal(uploadLimitBytes({ upload_limit_bytes: Number.POSITIVE_INFINITY }), PUBLIC_UPLOAD_BYTES);
+    assert.equal(uploadLimitBytes({ upload_limit_bytes: null }), PUBLIC_UPLOAD_BYTES);
+    assert.equal(uploadLimitBytes({ upload_limit_bytes: true }), PUBLIC_UPLOAD_BYTES);
+  });
   it("更小的值照用，预检和文案（MB 向下取整）都跟着变", () => {
     const small = 30.7 * MB;
     assert.equal(uploadLimitBytes({ upload_limit_bytes: small }), small);
