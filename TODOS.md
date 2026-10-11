@@ -466,3 +466,5 @@ RF-10–RF-13 的原始依赖见 [ADR-007 §20.7](docs/adr-007-packaging-render-
   3. 还有以「你」称呼用户的句子：`NewTaskPage.tsx:315`「不确定的内容会请你确认。」、`:319`「你来确认」，`mockupRenderVersions.ts:41`「你的账号只能查看。」（改版前就有）。
 - 工具链：`apps/web/ui` 的 `npm test` 在 Node 20 上 `src/**/*.test.ts` glob 不展开（报找不到文件），Node 24 正常；需改成由脚本展开或锁定 Node 版本。
 - 工具链：干净环境首次构建缺 `@rollup/rollup-linux-x64-gnu`（npm 可选依赖的已知问题），需在 lockfile/CI 里显式装上或文档写明 `npm i @rollup/rollup-linux-x64-gnu`。
+- 后端下发 `upload_limit_bytes`（`/api/auth/me`）暂缓：前端已支持该可选字段，线上目前不返回，统一用 99MB（99,000,000 字节）默认上限。
+- 3D 打样 GLB 两地址（默认 WebP 版 / `?variant=original`）与 `glb_version` / `glb_original_version` 依赖后端 PR-a（开发哥 `aff0608`，未合入；当前开关关着，线上两字段不出现）；前端已按合同实现并用测试 mock，PR-a 合入后用真后端复验缓存头（匹配 `?v=` 为 immutable，不匹配 no-cache + ETag）并定版本号。

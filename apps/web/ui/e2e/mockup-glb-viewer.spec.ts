@@ -20,7 +20,9 @@ test.beforeAll(() => {
 test.afterAll(() => { if (dist) rmSync(dist, { recursive: true }); });
 
 const source = carton();
-async function serve(page: Page, fail = false, white = false, textureFormat?: string) {
+type GlbMode = { primary?: 'ok' | '500' | 'corrupt'; original?: 'ok' | '500'; versions?: boolean };
+const PRIMARY_V = 'aaaa1111bbbb2222', ORIGINAL_V = 'cccc3333dddd4444';
+async function serve(page: Page, fail = false, white = false, textureFormat?: string, mode: GlbMode = {}) {
   await page.addInitScript(() => {
     const audit = { created: [] as string[], revoked: [] as string[] };
     Object.assign(window, { __blobAudit: audit });
@@ -37,10 +39,16 @@ async function serve(page: Page, fail = false, white = false, textureFormat?: st
     }
     if (path === '/api/auth/me') return json({logged_in:true,display_name:'合成',open_id:'synthetic',role:'reviewer',perms:['read']});
     if (path === '/api/status' || path === '/api/health') return json({ok:true,version:'0.0.0.0',jobs:{}});
-    if (path.endsWith('/files/glb')) return route.fulfill({status:fail?500:200,contentType:'model/gltf-binary',body:fail?'failed':white?carton(true):source});
+    if (path.endsWith('/files/glb')) {
+      // 模拟 PR-a：默认地址可能是 WebP 版，?variant=original 永远是原始。
+      const state = fail ? '500' : url.searchParams.get('variant') === 'original' ? (mode.original ?? 'ok') : (mode.primary ?? 'ok');
+      if (state === '500') return route.fulfill({status:500,body:'failed'});
+      if (state === 'corrupt') return route.fulfill({contentType:'model/gltf-binary',body:Buffer.from('glTF-not-really-a-model')});
+      return route.fulfill({contentType:'model/gltf-binary',body:white?carton(true):source});
+    }
     if (path.includes('/files/')) return route.fulfill({contentType:'image/svg+xml',body:'<svg xmlns="http://www.w3.org/2000/svg" width="80" height="96"><rect width="80" height="96" fill="white"/></svg>'});
     if (path === `/api/mockups/${ID}`) return json({id:ID,title:'SYNTHETIC GLB',status:'done',owner:'synthetic',current_render_generation_id:GENERATION,
-      files:['glb','white_a','white_b','white_a_ground','white_b_ground','white_a_set','white_b_set'].map(key=>({key,name:key,...(key==='glb'&&textureFormat?{texture_format:textureFormat}:{})}))});
+      files:['glb','white_a','white_b','white_a_ground','white_b_ground','white_a_set','white_b_set'].map(key=>({key,name:key,...(key==='glb'&&textureFormat?{texture_format:textureFormat}:{}),...(key==='glb'&&mode.versions?{glb_version:PRIMARY_V,glb_original_version:ORIGINAL_V}:{})}))});
     if (path.endsWith('/render-generations')) return json({items:[],next_cursor:null});
     return json([]);
   });
@@ -81,9 +89,14 @@ test('桌墙显示资源保持原始下载并可复位，离页释放 blob', asy
   await expect.poll(()=>page.evaluate(url=>(window as any).__blobAudit.revoked.includes(url),sceneUrl)).toBe(true);
 });
 
-test('GLB 请求失败明确显示错误而保留原始下载',async ({page}) => {
-  await serve(page,true);await page.goto(`/mockup/${ID}`);
-  await expect(page.getByRole('alert').filter({hasText:'3D 预览加载失败'})).toBeVisible();
+test('默认与原始 GLB 都失败时显示效果图和说明，保留原始下载',async ({page}) => {
+  const urls: string[] = [];page.on('request',r=>{if(r.url().includes('/files/glb')&&!r.url().includes('download=1'))urls.push(r.url());});
+  await serve(page,true,false,'webp',{versions:true});await page.goto(`/mockup/${ID}`);
+  await expect(page.getByRole('status').filter({hasText:'这台设备显示不了 3D'})).toHaveText('这台设备显示不了 3D，已换成效果图');
+  await expect(page.locator('.mockup-sheet-glb .mockup-glb-poster')).toBeVisible();
+  await expect(page.locator('model-viewer')).toHaveCount(0);
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  expect(urls.some(u=>u.includes('variant=original'))).toBe(true);
   await expect(page.getByRole('link',{name:'下载模型',exact:true})).toHaveAttribute('href',new RegExp(`generation_id=${GENERATION}`));
   await expect(page.getByRole('button',{name:'复位模型视角'})).toBeDisabled();
 });
@@ -106,12 +119,17 @@ test('用户旋转缩放后切背景保持轨道',async ({page})=>{
 });
 
 test('已加载显示场景报错立即释放blob',async({page})=>{
-  await serve(page);await page.goto(`/mockup/${ID}`);await loaded(page);
+  await serve(page,false,false,'webp',{versions:true});await page.goto(`/mockup/${ID}`);await loaded(page);
   await page.locator('.mockup-backdrop-switch').getByText('白桌白墙',{exact:true}).click();await loaded(page);
   const sceneUrl=await page.locator('model-viewer').getAttribute('src');expect(sceneUrl).toMatch(/^blob:/);
   await page.locator('model-viewer').dispatchEvent('error');
-  await expect(page.getByRole('alert').filter({hasText:'3D 预览加载失败'})).toBeVisible();
   await expect.poll(()=>page.evaluate(url=>(window as any).__blobAudit.revoked.includes(url),sceneUrl)).toBe(true);
+  // 默认地址报错后自动改拉原始一次，重新组装出新的场景
+  await loaded(page);
+  const retried=await page.locator('model-viewer').getAttribute('src');expect(retried).toMatch(/^blob:/);expect(retried).not.toBe(sceneUrl);
+  await page.locator('model-viewer').dispatchEvent('error');
+  await expect(page.getByRole('status').filter({hasText:'这台设备显示不了 3D'})).toBeVisible();
+  await expect.poll(()=>page.evaluate(url=>(window as any).__blobAudit.revoked.includes(url),retried)).toBe(true);
 });
 
 test('真实指针拖动可旋转模型',async({page})=>{
@@ -195,17 +213,77 @@ async function denyWebp(page: Page) {
   });
 }
 
-test('WebP 贴图在不能解码的设备上只显示效果图和说明，不请求模型',async({page})=>{
+test('开关关着（无版本字段）GLB 失败：只拉默认地址一次，不带 v 也不退原始，显示效果图和说明',async({page})=>{
+  const urls: string[] = [];page.on('request',r=>{if(r.url().includes('/files/glb')&&!r.url().includes('download=1'))urls.push(r.url());});
+  await serve(page,true);await page.goto(`/mockup/${ID}`);
+  await expect(page.getByRole('status').filter({hasText:'这台设备显示不了 3D'})).toBeVisible();
+  expect(urls.length).toBeGreaterThan(0);
+  for (const u of urls) { expect(u).not.toContain('variant=original'); expect(new URL(u).searchParams.has('v')).toBe(false); }
+});
+
+test('开关关着（无版本字段）且本机解码不了 WebP 贴图：照旧只显示效果图和说明，不请求模型',async({page})=>{
   let glbRequests=0;page.on('request',r=>{if(r.url().includes('/files/glb')&&!r.url().includes('download=1'))glbRequests++;});
   await denyWebp(page);await serve(page,false,false,'webp');await page.goto(`/mockup/${ID}`);
   await expect(page.getByRole('status').filter({hasText:'这台设备显示不了 3D'})).toHaveText('这台设备显示不了 3D，已换成效果图');
-  await expect(page.locator('.mockup-sheet-glb img.mockup-glb-poster')).toBeVisible();
   await expect(page.locator('model-viewer')).toHaveCount(0);
-  await expect(page.locator('.mockup-sheet-glb .ant-progress, .mockup-sheet-glb .ant-spin')).toHaveCount(0);
+  await page.waitForTimeout(500);expect(glbRequests).toBe(0);
+});
+
+test('WebP 贴图在不能解码的设备上直接拉原始 GLB，不先拉默认地址',async({page})=>{
+  const urls: string[] = [];page.on('request',r=>{if(r.url().includes('/files/glb')&&!r.url().includes('download=1'))urls.push(r.url());});
+  await denyWebp(page);await serve(page,false,false,'webp',{versions:true});await page.goto(`/mockup/${ID}`);await loaded(page);
+  await expect(page.getByText('这台设备显示不了 3D')).toHaveCount(0);
+  expect(urls.length).toBeGreaterThan(0);
+  for (const u of urls) { expect(u).toContain('variant=original'); expect(u).toContain(`v=${ORIGINAL_V}`); }
   await expect(page.getByRole('button',{name:/重试|再试/})).toHaveCount(0);
-  await expect(page.getByRole('link',{name:'下载模型',exact:true})).toHaveAttribute('href',new RegExp(`generation_id=${GENERATION}`));
-  await page.locator('.mockup-sheet-glb').screenshot({path:test.info().outputPath('webp-unsupported-fallback.png')});
+});
+
+test('找茬哥 a1：WebP 版下载失败自动改拉原始，文字不变不另提示',async({page})=>{
+  const urls: string[] = [];page.on('request',r=>{if(r.url().includes('/files/glb')&&!r.url().includes('download=1'))urls.push(r.url());});
+  await serve(page,false,false,'webp',{primary:'500',versions:true});await page.goto(`/mockup/${ID}`);await loaded(page);
+  expect(urls[0]).toContain(`v=${PRIMARY_V}`);expect(urls[0]).not.toContain('variant=original');
+  expect(urls.some(u=>u.includes('variant=original')&&u.includes(`v=${ORIGINAL_V}`))).toBe(true);
+  await expect(page.getByText('这台设备显示不了 3D')).toHaveCount(0);
+  await expect(page.getByRole('alert')).toHaveCount(0);
+});
+
+test('找茬哥 a2：WebP 版贴图解码出错（坏模型）自动改拉原始',async({page})=>{
+  const urls: string[] = [];page.on('request',r=>{if(r.url().includes('/files/glb')&&!r.url().includes('download=1'))urls.push(r.url());});
+  await serve(page,false,false,'webp',{primary:'corrupt',versions:true});await page.goto(`/mockup/${ID}`);await loaded(page);
+  expect(urls.some(u=>!u.includes('variant=original'))).toBe(true);
+  expect(urls.some(u=>u.includes('variant=original'))).toBe(true);
+  // 白桌白墙要先在本机解析 GLB：坏字节在组装时就报错，同样自动改拉原始；最后一次请求是原始。
+  expect(urls[urls.length-1]).toContain('variant=original');
+  await expect(page.getByText('这台设备显示不了 3D')).toHaveCount(0);
+});
+
+test('先显示效果图和「正在加载 3D」，浏览器空闲后才开始拉 GLB',async({page})=>{
+  await page.addInitScript(()=>{
+    const held: Array<() => void> = [];
+    (window as any).requestIdleCallback=(cb: () => void)=>{held.push(cb);return held.length;};
+    (window as any).cancelIdleCallback=()=>undefined;
+    (window as any).__releaseIdle=()=>{for(const cb of held.splice(0))cb();};
+  });
+  let glbRequests=0;page.on('request',r=>{if(r.url().includes('/files/glb')&&!r.url().includes('download=1'))glbRequests++;});
+  await serve(page);await page.goto(`/mockup/${ID}`);
+  await expect(page.locator('.mockup-sheet-glb .mockup-glb-poster')).toBeVisible();
+  await expect(page.locator('.mockup-sheet-glb .mockup-glb-progress')).toContainText('正在加载 3D');
+  await page.waitForTimeout(800);
   expect(glbRequests).toBe(0);
+  await expect(page.locator('model-viewer')).toHaveCount(0);
+  await page.evaluate(()=>(window as any).__releaseIdle());
+  await loaded(page);
+  expect(glbRequests).toBeGreaterThan(0);
+});
+
+test('找茬哥 b：默认与原始是两个带各自 ?v= 的不同地址，缓存分开',async({page})=>{
+  const urls = new Set<string>();page.on('request',r=>{if(r.url().includes('/files/glb')&&!r.url().includes('download=1'))urls.add(new URL(r.url()).pathname+new URL(r.url()).search);});
+  await serve(page,false,false,'webp',{primary:'500',versions:true});await page.goto(`/mockup/${ID}`);await loaded(page);
+  const list=[...urls];
+  const primary=list.find(u=>!u.includes('variant=original'))!, original=list.find(u=>u.includes('variant=original'))!;
+  expect(new URLSearchParams(primary.split('?')[1]).get('v')).toBe(PRIMARY_V);
+  expect(new URLSearchParams(original.split('?')[1]).get('v')).toBe(ORIGINAL_V);
+  expect(primary).not.toBe(original);
 });
 
 test('WebP 贴图在能解码的设备上照常加载 3D',async({page})=>{
