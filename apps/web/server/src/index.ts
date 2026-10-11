@@ -1,5 +1,5 @@
 import { cleanupStaleGlbWebpTemps } from "./glbWebp.js";
-import { cleanupGlbWebpVariantsOnBoot, glbWebpVariantEnabled, openGlbForServe } from "./glbWebpVariant.js";
+import { cleanupGlbWebpVariantsOnBoot, glbWebpVariantEnabled, glbVersionOf, openGlbForServe, openGlbOriginalForServe } from "./glbWebpVariant.js";
 import {
   closeSync,
   copyFileSync,
@@ -369,15 +369,15 @@ function fileEtag(path: string): string {
 }
 
 /**
- * 旧打样 GLB 的 WebP 旁路（开关打开、非下载、非 variant=original、非代际托管单）。
- * 核验和输出用同一个 fd；核不过就用已打开的原件 fd 输出，原件 ETag、no-cache、绝不 immutable。
- * 旁路：ETag "sha256-<sha>"；?v=<sha 前 16 位> 才给 immutable，否则 no-cache；304 头与 200 相同。
+ * 旧打样 GLB（开关打开、非下载、非代际托管单）。默认端点返回校验通过的 WebP 旁路，核不过用已打开的原件 fd；
+ * ?variant=original 总是原件。核验、hash 和输出用同一个 fd。
+ * ETag "sha256-<实际返回字节的 sha>"；?v= 等于其前 16 位（= 文件信息里的 glb_version / glb_original_version）
+ * 才给 immutable，不匹配或缺省 no-cache；304 头与 200 相同。
  */
-function glbVariantResponse(c: Context, jobId: string, path: string, name: string): Response {
-  const opened = openGlbForServe(jobId, path);
-  const variant = opened.kind === "variant";
-  const etag = variant ? `"sha256-${opened.sha256}"` : opened.etag;
-  const immutable = variant && c.req.query("v") === opened.sha256.slice(0, 16);
+function glbVariantResponse(c: Context, jobId: string, path: string, name: string, wantOriginal: boolean): Response {
+  const opened = wantOriginal ? openGlbOriginalForServe(path) : openGlbForServe(jobId, path);
+  const etag = `"sha256-${opened.sha256}"`;
+  const immutable = c.req.query("v") === glbVersionOf(opened.sha256);
   const headers = {
     ETag: etag,
     "Cache-Control": immutable ? "private, max-age=31536000, immutable" : "private, no-cache",
@@ -1634,8 +1634,8 @@ app.get("/api/mockups/:id/files/:key", (c) => {
   const ascii = f.name.replace(/[^\x20-\x7E]/g, "_").replace(/"/g, "");
   const encoded = encodeURIComponent(f.name);
   const forceAttach = c.req.query("download") === "1";
-  if (key === "glb" && !forceAttach && c.req.query("variant") !== "original" && glbWebpVariantEnabled() && !isGenerationManagedMockup(job)) {
-    return glbVariantResponse(c, job.id, f.path, f.name);
+  if (key === "glb" && !forceAttach && glbWebpVariantEnabled() && !isGenerationManagedMockup(job)) {
+    return glbVariantResponse(c, job.id, f.path, f.name, c.req.query("variant") === "original");
   }
   const disposition =
     forceAttach || !(type.startsWith("image/") || type.startsWith("model/") || key === "unfolded_print") ? "attachment" : "inline";

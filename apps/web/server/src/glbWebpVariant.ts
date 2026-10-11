@@ -194,14 +194,19 @@ export function readGlbWebpVariantMeta(path: string): GlbWebpVariantMeta | null 
   }
 }
 
-function originalEtagOfFd(fd: number): string {
-  const st = fstatSync(fd);
-  return `W/"${st.size.toString(16)}-${Math.trunc(st.mtimeMs).toString(16)}"`;
-}
-
+/**
+ * sha256 是本次实际返回字节的 hex，sourceSha256 是原件的 hex（两者在原件分支相同）。
+ * 对外版本号 glb_version / glb_original_version 取各自前 16 位。
+ */
 export type OpenedGlb =
-  | { kind: "variant"; fd: number; bytes: number; sha256: string }
-  | { kind: "original"; fd: number; bytes: number; etag: string; reason: string };
+  | { kind: "variant"; fd: number; bytes: number; sha256: string; sourceSha256: string }
+  | { kind: "original"; fd: number; bytes: number; sha256: string; sourceSha256: string; reason: string };
+
+export const GLB_VERSION_HEX_CHARS = 16;
+
+export function glbVersionOf(sha256: string): string {
+  return sha256.slice(0, GLB_VERSION_HEX_CHARS);
+}
 
 const warnedMismatch = new Set<string>();
 
@@ -228,7 +233,8 @@ export function openGlbForServe(jobId: string, glbPath: string): OpenedGlb {
   }
   const original = (reason: string): OpenedGlb => {
     if (reason !== "no_meta" && reason !== "no_paths") warnMismatch(jobId, reason);
-    return { kind: "original", fd: fdS, bytes: bytesS, etag: originalEtagOfFd(fdS), reason };
+    const own = sha256OfFd(fdS).sha256;
+    return { kind: "original", fd: fdS, bytes: bytesS, sha256: own, sourceSha256: own, reason };
   };
   try {
     const paths = glbWebpVariantPaths(jobId, glbPath);
@@ -252,7 +258,7 @@ export function openGlbForServe(jobId: string, glbPath: string): OpenedGlb {
         return original("variant_hash_mismatch");
       }
       closeSync(fdS);
-      return { kind: "variant", fd: fdV, bytes: variant.bytes, sha256: variant.sha256 };
+      return { kind: "variant", fd: fdV, bytes: variant.bytes, sha256: variant.sha256, sourceSha256: source.sha256 };
     } catch (error) {
       try { closeSync(fdV); } catch { /* ignore */ }
       throw error;
@@ -263,11 +269,26 @@ export function openGlbForServe(jobId: string, glbPath: string): OpenedGlb {
   }
 }
 
-/** texture_format 用：旁路校验通过报 "webp"，否则 null（调用方按原件判断）。走同一个 hash 缓存。 */
-export function glbWebpVariantTextureFormat(jobId: string, glbPath: string | undefined): "webp" | null {
+/** ?variant=original：总是原件，带原件 sha256（同一 hash 缓存）。调用方负责关闭 fd。 */
+export function openGlbOriginalForServe(glbPath: string): OpenedGlb {
+  const fd = openSync(glbPath, "r");
+  try {
+    const own = sha256OfFd(fd);
+    return { kind: "original", fd, bytes: own.bytes, sha256: own.sha256, sourceSha256: own.sha256, reason: "requested" };
+  } catch (error) {
+    try { closeSync(fd); } catch { /* ignore */ }
+    throw error;
+  }
+}
+
+export type GlbWebpVariantVersions = { variantVerified: boolean; glb_version: string; glb_original_version: string };
+
+/**
+ * 文件信息用：与文件路由同一校验、同一缓存。glb_version = 默认端点实际返回内容的 sha256 前 16 位，
+ * glb_original_version = 原件的。读不了原件返回 null（调用方不输出版本字段）。
+ */
+export function glbWebpVariantVersions(jobId: string, glbPath: string | undefined): GlbWebpVariantVersions | null {
   if (!glbPath) return null;
-  const paths = glbWebpVariantPaths(jobId, glbPath);
-  if (!paths || !isRegularFile(paths.meta)) return null;
   let opened: OpenedGlb;
   try {
     opened = openGlbForServe(jobId, glbPath);
@@ -275,7 +296,7 @@ export function glbWebpVariantTextureFormat(jobId: string, glbPath: string | und
     return null;
   }
   closeSync(opened.fd);
-  return opened.kind === "variant" ? "webp" : null;
+  return { variantVerified: opened.kind === "variant", glb_version: glbVersionOf(opened.sha256), glb_original_version: glbVersionOf(opened.sourceSha256) };
 }
 
 const dropEpoch = new Map<string, number>();
