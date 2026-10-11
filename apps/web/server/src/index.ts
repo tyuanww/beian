@@ -1,4 +1,5 @@
 import { cleanupStaleGlbWebpTemps } from "./glbWebp.js";
+import { cleanupGlbWebpVariantsOnBoot } from "./glbWebpVariant.js";
 import {
   closeSync,
   copyFileSync,
@@ -1794,6 +1795,8 @@ if (process.env.VITEST !== "1") {
   try {
     const staleGlbTemps = cleanupStaleGlbWebpTemps(join(DATA_DIR, "mockups"));
     if (staleGlbTemps) console.info(`removed ${staleGlbTemps} stale glb webp temp file(s)`);
+    const staleVariants = cleanupGlbWebpVariantsOnBoot(join(DATA_DIR, "mockups"));
+    if (staleVariants) console.info(`removed ${staleVariants} stale glb webp variant file(s)`);
   } catch (err) {
     console.warn("glb webp temp cleanup failed:", err instanceof Error ? err.message : err);
   }
