@@ -97,3 +97,12 @@ describe("redactLocalPaths: stack trace locations", () => {
     assert.equal(r("at /Users/bob/app/z.mjs:7:1"), "at z.mjs:7:1");
   });
 });
+
+describe("redactLocalPaths: home-relative paths", () => {
+  it("~/ and ~user/ keep only the file name", () => {
+    assert.equal(r("~/Desktop/a.ai"), "a.ai");
+    assert.equal(r("~bob/a.ai"), "a.ai");
+    assert.equal(r("打开~/稿件/b.pdf失败"), "打开 b.pdf 失败");
+    assert.equal(r("约 ~3 秒"), "约 ~3 秒");
+  });
+});
