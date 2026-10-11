@@ -338,3 +338,13 @@ describe("redactLocalPaths: multi-layer URL encoding of separators", () => {
     assert.equal(r("进度 50%25 完成"), "进度 50%25 完成");
   });
 });
+
+describe("redactLocalPaths: URL-embedded Windows paths with spaces", () => {
+  it("aligned with the rule outside URLs", () => {
+    assert.equal(r("http://x/?f=C:\\Program Files\\x\\a.pdf"), "http://x/?f=本机路径");
+    assert.equal(r("http://x/?f=C:\\Program Files\\x\\a.pdf 打不开"), "http://x/?f=本机路径 打不开");
+    assert.equal(r("http://x/?f=C:\\x\\a b.pdf&q=1"), "http://x/?f=本机路径&q=1");
+    assert.equal(r("http://x/?f=C:\\x\\a.pdf failed"), "http://x/?f=本机路径 failed");
+    assert.equal(r("http://x/?f=C:\\a\\b.pdf D:\\c\\d.pdf"), "http://x/?f=本机路径 d.pdf");
+  });
+});
