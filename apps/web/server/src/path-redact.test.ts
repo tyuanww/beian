@@ -43,3 +43,14 @@ describe("redactLocalPaths regression baseline", () => {
     assert.equal(r("目录 /tmp 不可写"), "目录 /tmp 不可写");
   });
 });
+
+describe("redactLocalPaths: path glued to CJK", () => {
+  it("path right after CJK text is redacted and trailing CJK kept", () => {
+    assert.equal(r("找不到文件/Users/bob/a.pdf"), "找不到文件 a.pdf");
+    assert.equal(r("打开/tmp/abc/a.pdf失败"), "打开 a.pdf 失败");
+    assert.equal(r("读取C:\\data\\客户\\b.ai出错"), "读取 b.ai 出错");
+    assert.equal(r("打开/tmp/abc失败"), "打开 本机路径 失败");
+    assert.equal(r("打开 /tmp/abc/a.pdf 失败"), "打开 a.pdf 失败");
+    assert.equal(r("见：/home/bob/a.pdf，请检查"), "见：a.pdf，请检查");
+  });
+});
