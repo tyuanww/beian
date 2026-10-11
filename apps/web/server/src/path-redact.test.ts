@@ -267,3 +267,15 @@ describe("redactLocalPathsUncapped: linear without the length cap", () => {
     });
   }
 });
+
+describe("redactLocalPaths: root-relative backslash directories", () => {
+  it("directory-only \\Users\\bob\\Desktop becomes 本机路径", () => {
+    assert.equal(r("\\Users\\bob\\Desktop"), "本机路径");
+    assert.equal(r("目录 \\Users\\bob\\Desktop 不可写"), "目录 本机路径 不可写");
+    assert.equal(r("%5CUsers%5Cbob"), "本机路径");
+  });
+  it("one-letter escape runs still stay", () => {
+    assert.equal(r("ratio:\\n\\t"), "ratio:\\n\\t");
+    assert.equal(r("a\\b\\c"), "a\\b\\c");
+  });
+});
