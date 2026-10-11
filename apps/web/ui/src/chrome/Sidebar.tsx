@@ -1,5 +1,5 @@
 import { Dropdown } from "antd";
-import { formatVersionLabel, SIDE_NAV, type NavKey } from "./nav";
+import { formatVersionLabel, sideNavFor, type NavKey } from "./nav";
 
 export type { NavKey };
 
@@ -13,6 +13,7 @@ type Props = {
   onLogout: () => void;
   livePulse?: { review?: boolean; mockup?: boolean };
   version?: string | null;
+  isAdmin?: boolean;
 };
 
 function initial(name: string) {
@@ -30,6 +31,7 @@ export function Sidebar({
   onLogout,
   livePulse,
   version,
+  isAdmin = false,
 }: Props) {
   const versionLabel = formatVersionLabel(version);
   return (
@@ -74,7 +76,7 @@ export function Sidebar({
       </div>
 
       <nav className="side-nav">
-        {SIDE_NAV.map((item) => {
+        {sideNavFor(isAdmin).map((item) => {
           const on = item.key === active;
           const live = (item.key === "review" && livePulse?.review) || (item.key === "mockup" && livePulse?.mockup);
           return (

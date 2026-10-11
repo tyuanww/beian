@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { formatVersionLabel, SIDE_NAV } from "./nav.js";
+import { formatVersionLabel, SIDE_NAV, sideNavFor } from "./nav.js";
 
 describe("SIDE_NAV", () => {
   it("locks 审稿台 → 3D 打样 → 压缩文件 → 历史 → 设置", () => {
@@ -20,5 +20,18 @@ describe("SIDE_NAV", () => {
     assert.equal(formatVersionLabel(" 0.20.2.0 "), "v0.20.2.0");
     assert.equal(formatVersionLabel("0.20.2"), null);
     assert.equal(formatVersionLabel(undefined), null);
+  });
+});
+
+describe("sideNavFor", () => {
+  it("keeps 设置 last for admin", () => {
+    assert.deepEqual(sideNavFor(true), SIDE_NAV);
+  });
+
+  it("drops 设置 for non-admin", () => {
+    assert.deepEqual(
+      sideNavFor(false).map((item) => item.key),
+      ["review", "mockup", "compression", "history"],
+    );
   });
 });

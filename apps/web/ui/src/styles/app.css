@@ -1433,6 +1433,19 @@ html[data-theme="dark"] .workspace {
   margin-bottom: 6px;
 }
 
+.settings-denied {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 32px 0;
+}
+
+.settings-denied .auth-result-retry {
+  border: 0;
+  cursor: pointer;
+}
+
 .settings-page {
   height: 100%;
   display: flex;
