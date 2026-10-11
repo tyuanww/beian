@@ -80,7 +80,7 @@ import {
 } from "./workers.js";
 import { inspectRenderGenerationGroup, recoverWindowsRenderGeneration, signalRenderGenerationGroup } from "./renderGenerationProcess.js";
 import { illustratorBin } from "./settings.js";
-import { guardErrorFields, guardPublicError } from "./pathRedact.js";
+import { guardErrorFields, guardNotifyError } from "./pathRedact.js";
 import { rasterAiFile } from "./aiRaster.js";
 import { readIllustratorAgentStatus } from "./illustratorAgent.js";
 import {
@@ -3598,7 +3598,7 @@ async function fireTaskNotify(task: Task, ok: boolean): Promise<void> {
     title: String(task.product_name || task.title || task.id),
     kind: task.job_kind === "rework" ? "rework" : "compare",
     ok,
-    error: task.job_error ? guardPublicError(task.job_error, task.id).text : task.job_error,
+    error: task.job_error ? guardNotifyError(task.job_error, task.id) : task.job_error,
   });
   if (r.ok || r.skipped) {
     // 已结束任务允许在通知飞行期间删除；晚到的通知只能放弃收尾，不能复活 JSON。
@@ -3649,7 +3649,7 @@ async function fireMockupNotify(job: MockupJob, ok: boolean): Promise<void> {
     title: job.id,
     kind: "mockup",
     ok,
-    error: job.job_error ? guardPublicError(job.job_error, job.id).text : job.job_error,
+    error: job.job_error ? guardNotifyError(job.job_error, job.id) : job.job_error,
   });
   if (r.ok || r.skipped) {
     const fresh = loadMockup(job.id);

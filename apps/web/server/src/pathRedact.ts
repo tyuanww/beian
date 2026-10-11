@@ -402,14 +402,26 @@ export function hasLeakResidue(text: string, known: string[] = knownLocalPaths()
   return LEAK_RESIDUE.some((re) => re.test(text)) || known.some((k) => text.includes(k));
 }
 
-function hiddenErrorText(ticket: string): string {
-  return `任务失败，请联系管理员（单号 ${ticket}）`;
+/** 兜底文案：页面 / 接口给非管理员的是「请联系管理员」；飞书通知是「原文已隐藏，请到后台查看」。 */
+type GuardAudience = "page" | "notify";
+function hiddenErrorText(ticket: string, audience: GuardAudience = "page"): string {
+  return audience === "notify" ? `任务失败，原文已隐藏，请到后台查看（单号 ${ticket}）` : `任务失败，请联系管理员（单号 ${ticket}）`;
 }
 
 /** 非管理员 / 飞书出口的最后一步：脱敏 + 截断，仍有残留特征就整条隐藏。ticket 只能传纯任务编号（task.id / job.id）。 */
-export function guardPublicError(message: string, ticket: string, known: string[] = knownLocalPaths()): { text: string; hidden: boolean } {
+export function guardPublicError(
+  message: string,
+  ticket: string,
+  known: string[] = knownLocalPaths(),
+  audience: GuardAudience = "page",
+): { text: string; hidden: boolean } {
   const text = redactCapped(message, known);
-  return hasLeakResidue(text, known) ? { text: hiddenErrorText(ticket), hidden: true } : { text, hidden: false };
+  return hasLeakResidue(text, known) ? { text: hiddenErrorText(ticket, audience), hidden: true } : { text, hidden: false };
+}
+
+/** 飞书失败通知用：同 guardPublicError，触发兜底时文案为「任务失败，原文已隐藏，请到后台查看（单号 …）」。 */
+export function guardNotifyError(message: string, ticket: string): string {
+  return guardPublicError(message, ticket, knownLocalPaths(), "notify").text;
 }
 
 /**
