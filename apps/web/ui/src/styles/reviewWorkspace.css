@@ -73,7 +73,8 @@ html[data-theme="dark"] .review-thumbs { background: #1f1a24; }
 .review-verdicts button:disabled { cursor: not-allowed; opacity: .6; }
 .review-pfoot { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 16px; border-top: 1px solid var(--line); font-size: 13px; color: var(--muted); position: sticky; bottom: 0; background: var(--stage); flex-wrap: wrap; }
 .review-zero { margin: 16px; padding: 8px 16px; border-radius: 10px; background: color-mix(in srgb, var(--ok) 10%, var(--stage)); color: #237804; font-weight: 600; }
-.review-dock-none { padding: 16px 16px; color: var(--muted); }
+/* 覆盖 app.css 的 6px 2px：和右栏其他内容同 16px 内边距。 */
+.review-flat-page .review-dock-none { padding: 16px; color: var(--muted); font-size: 14px; }
 .review-flat .ant-tag.t-pend { color: #8a5a00; background: #fff7e6; border-color: #ffd591; }
 .review-flat .ant-tag.t-err { color: #a8071a; background: #fff1f0; border-color: #ffa39e; }
 .review-flat .ant-tag.t-ok { color: #237804; background: #f6ffed; border-color: #b7eb8f; }
