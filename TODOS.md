@@ -351,10 +351,14 @@ RF-10–RF-13 的原始依赖见 [ADR-007 §20.7](docs/adr-007-packaging-render-
   - 已知取舍：查询参数名为 `password` / `pw` / `token` / `secret` / `key` 等（含 `api_key`、`access_token`）时整条隐藏，即使值无害；`monkey`、`keyword`、`tokens_left` 不算。
   - 已知规则缺口（不拦）：网址外的凭据写法（`password=hunter2`、`token: xxx`、`"password":"x"`）。原因：`Unexpected token: }`、`missing key: foo` 这类常见报错会被大量误隐藏；等报错分级上错误码后统一处理。
   - 已知规则缺口（不拦）：网址 fragment（`#access_token=…`）和网址路径里的令牌（`/token/abc123`）。
-  - 已知规则缺口（不拦）：斜杠写法目录名含空格时露出最后一截（`/Users/bob smith/a.pdf`、`/Users/bob/Google Drive/a.pdf` 这类，空格后只剩一段时）。
+  - 已知规则缺口（不拦）：斜杠写法目录名含空格时露出最后一截（`/Users/bob/Google Drive` 这类，空格后只剩一段时）。`/Users/`、`/home/` 后的用户名段已改为含空格时一直替换到下一个 `/` 或行尾（`/Users/bob smith` → `本机路径`）；取舍：同一行后面没有 `/` 时，用户名后面的文字一起并掉（`读取 /Users/bob smith 失败` → `读取 本机路径`）。
+  - 已知规则缺口（不拦）：打样单 `读取 D:\a b\c 失败` 输出 `读取 本机稿件 b\c 失败`，残留 `b\c`（单字母目录段，不触发反斜杠兜底）。
+  - 已知取舍（不拦）：`共享盘\\` 会被改写，任务链输出 `共享盘 本机路径`，打样单输出 `共享盘本机稿件`（`\\` 被当成 UNC 起点）；兜底测试只锁了它不触发整条隐藏。
+  - 已知取舍（不拦）：打样单 `bearer 字段为空` 被 `publicMockupError` 整条换成「打样失败，请让管理员在本机检查详细原因」（原有 `Bearer\s+` 规则，管理员同样）。
   - 已知规则缺口（不拦）：`postgres://…` 等非 http(s) 连接串输出成 `postgres:本机路径`。
   - 已知取舍：兜底「反斜杠 + 非 ASCII」与「非 ASCII 紧贴反斜杠再接内容」会把中文紧贴的转义（`换行\n`）整条隐藏；`共享盘\\` 这类后面是空白或反斜杠的不算。
-  - 已知取舍：`Bearer` / `Basic` 后只拦含数字或符号、不少于 6 字符的值；纯字母值（`Bearer abcdefgh`、`Basic dXNlcjpwYXNz`）不拦，以免误伤「bearer 字段为空」「Basic settings」；`Authorization` 任意大小写都拦。
+  - 已知取舍：`Bearer` / `Basic` 后含数字或符号、不少于 6 字符的值拦；`Basic` 后另拦至少 8 位、首字母外有大写或含数字 / `+` / `/` / `=` 的 base64 串（`Basic dXNlcjpwYXNz` 拦，`Basic settings`、`Basic Settings` 不拦）；全小写无数字符号的 `Basic` 串、纯字母 `Bearer abcdefgh` 不拦；`Authorization` 任意大小写都拦。
+  - 已知取舍：兜底拦单个盘符字母 + 冒号紧贴「本机稿件 / 本机路径」后还有内容（`D:本机稿件 张三/报价`）；`open:本机稿件` 这类单词加冒号不算。选兜底而非调换打样链顺序，以免改动已有打样文案。
   - 已知规则缺口（不拦）：凭据词与前缀无分隔符连写的参数名（`?apikey=1`、`?accesstoken=`）不触发兜底。
   - 已知取舍：网址路径里出现 `/Users/`、`/home/`、`/root/`、`/var/folders/`、`/private/var/` 时，即使是公开网站也会被替换（`https://example.com/Users/list` → `https://example.com/本机路径`），宁可误伤也不漏。
   - `apps/web/backend` worker 输出与其他 HTTP `detail` 未逐一盘点。
