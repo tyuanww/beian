@@ -420,5 +420,9 @@ test("768 宽页头不折行，退回/签字靠右（design F-002）", async ({ 
   const reject = (await page.getByRole("button", { name: "退回", exact: true }).boundingBox())!;
   expect(top.x + top.width - (sign.x + sign.width)).toBeLessThanOrEqual(24);
   expect(Math.abs(reject.y - sign.y)).toBeLessThan(2);
+  // <1024 隐藏「还有 N 条没下结论」，改为签字按钮悬停说明。
+  await expect(page.locator(".review-signhint")).toBeHidden();
+  await expect(page.getByRole("button", { name: "签字", exact: true })).toHaveAttribute("title", /没下结论|待确认/);
+  expect((await page.locator(".review-title").boundingBox())!.height).toBeLessThan(40);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
