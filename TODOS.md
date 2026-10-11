@@ -340,6 +340,9 @@ RF-10–RF-13 的原始依赖见 [ADR-007 §20.7](docs/adr-007-packaging-render-
   - `notifyIllustratorWatchdog`（`notify.ts:247`，`jobs.ts:959`、`nativeTextJobs.ts:176` 调用）的飞书告警文案。
   - `apps/web/server/src/mockup.ts:595` `print_faces_repair.error` 原样返回。
   - 已知规则缺口：Unix 目录名含空格时空格后的片段会留下（`/Users/bob/My Docs/a.pdf` → `本机路径 Docs/a.pdf`）。
+  - 已知规则缺口：双重编码（`%255C`、`%252F`）只解一层，不当分隔符。
+  - 已知规则缺口：全角斜杠 `／`、`＼` 不当分隔符。
+  - 已知副作用：`%2F` / `%5C` 整条报错一起解码，非路径文字也会变（如 `进度 50%2F100` → `进度 50/100`，网址里的 `%2F` 同样被解开）。
   - `apps/web/backend` worker 输出与其他 HTTP `detail` 未逐一盘点。
 
   原状态：2026-10-11 设置接口按角色收紧（`fix/settings-role-trim`）自查时发现，不在该 PR 范围内，未审计。`/api/settings` 已对非管理员去掉本机路径，但审稿任务、打样、出图、压缩等作业失败时返回给前端的报错文案（HTTP `detail`、任务/作业的 error/reason 字段、worker stderr 摘要）可能原样带出 `C:\`、`/Users/`、`/home/`、数据目录（`WB_DATA_DIR`）、Python 或 Blender/Illustrator 路径。
