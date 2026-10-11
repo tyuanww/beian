@@ -116,6 +116,8 @@ test("三栏通铺：1440 稿件 ≥70%、右栏 320、工具条在画布下方�
   const pendingDialog = page.getByRole("dialog");
   await expect(pendingDialog.getByText("还有 1 条没下结论")).toBeVisible();
   await expect(pendingDialog.getByRole("button", { name: "确认退回" })).toBeDisabled();
+  // qa #3：交不了时补充说明也禁用，避免白写；提示沿用「还有 N 条没下结论」。
+  await expect(pendingDialog.getByLabel("补充说明（选填）")).toBeDisabled();
   await pendingDialog.getByRole("button", { name: "再看看" }).click();
   await expect(pendingDialog).toBeHidden();
   await expect(page.getByLabel("写原因")).toHaveCount(0);

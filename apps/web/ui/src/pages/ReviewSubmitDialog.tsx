@@ -46,11 +46,11 @@ export function ReviewSubmitDialog({ kind, rows, pending = 0, busy, failed, onCa
           </ul>
           <label className="review-extra">
             <span>{REVIEW_COPY.extraNote}</span>
-            <Input.TextArea aria-label={REVIEW_COPY.extraNote} autoSize={{ minRows: 2, maxRows: 5 }} value={extra} onChange={(e) => setExtra(e.target.value)} />
+            <Input.TextArea aria-label={REVIEW_COPY.extraNote} disabled={blocked} aria-describedby={blocked ? "review-reject-blocked" : undefined} autoSize={{ minRows: 2, maxRows: 5 }} value={extra} onChange={(e) => setExtra(e.target.value)} />
           </label>
         </>
       ) : null}
-      {blocked ? <p className="review-submit-error" role="status">{REVIEW_COPY.pendingHint(pending)}</p> : null}
+      {blocked ? <p id="review-reject-blocked" className="review-submit-error" role="status">{REVIEW_COPY.pendingHint(pending)}</p> : null}
       {failed ? <p className="review-submit-error" role="alert">{REVIEW_COPY.submitFailed}</p> : null}
     </Modal>
   );
