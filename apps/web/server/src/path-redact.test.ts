@@ -306,3 +306,14 @@ describe("redactLocalPaths: configured dirs inside http(s) URLs keep the leading
     assert.equal(r("http://x/?p=D:\\Tools\\blender.exe&q=1"), "http://x/?p=本机路径&q=1");
   });
 });
+
+describe("redactLocalPaths: URL-embedded paths continue through CJK / emoji", () => {
+  it("replaces up to & # ? whitespace or quotes, not stopping at non-ASCII", () => {
+    assert.equal(r("http://x/Users/张三/a.pdf"), "http://x/本机路径");
+    assert.equal(r("http://x/?p=/Users/bob/项目/合同.pdf"), "http://x/?p=/本机路径");
+    assert.equal(r("http://x/?p=/Users/bob/项目😀/合同.pdf&q=1"), "http://x/?p=/本机路径&q=1");
+    assert.equal(r("http://x/?p=C:\\客户\\合同.pdf#f 打不开"), "http://x/?p=本机路径#f 打不开");
+    assert.equal(r("见 \"http://x/?p=/home/张三/a.pdf\" 失败"), "见 \"http://x/?p=/本机路径\" 失败");
+    assert.equal(r("请求http://x/a/b失败"), "请求http://x/a/b失败");
+  });
+});
