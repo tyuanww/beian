@@ -168,10 +168,24 @@ def test_save_watchdog_reports_save_timeout_and_closes_only_with_proof(tmp_path,
     worker = _illustrator_worker()
     config = {"protocol": "beian.illustrator.export/2", "request_kind": "native_text", "attempt_id": "a" * 32, "source_sha256": "b" * 64, "close_json": str(tmp_path / "close.json")}
     observation = {"attempt_id": "a" * 32, "source_sha256": "b" * 64, "bridge_exited": True, "document_count": 0, "documents": []}
-    error = worker.IllustratorAgentError("illustrator_save_timeout", "stalled", details={"close_observation": observation} if proven else {})
+    error = worker.IllustratorAgentError("illustrator_save_timeout", "stalled", details={"source_unchanged": True, **({"close_observation": observation} if proven else {})})
     code = worker.save_watchdog_exit(config, error)
     public = json.loads(capsys.readouterr().out)
     assert public["reason"] == "save_timeout" and public["ok"] is False
     assert code == (4 if proven else 8)
     assert (tmp_path / "close.json").is_file() is proven
     assert worker.save_watchdog_exit(config, worker.IllustratorAgentError("illustrator_timeout", "x")) is None
+
+
+def test_save_watchdog_source_change_never_closes_and_cap_is_reported(tmp_path, capsys):
+    worker = _illustrator_worker()
+    config = {"protocol": "beian.illustrator.export/2", "request_kind": "unfolded_print", "attempt_id": "a" * 32, "source_sha256": "b" * 64, "close_json": str(tmp_path / "close.json")}
+    observation = {"attempt_id": "a" * 32, "source_sha256": "b" * 64, "bridge_exited": True, "document_count": 0, "documents": []}
+    changed = worker.IllustratorAgentError("illustrator_save_timeout", "stalled", details={"source_unchanged": False, "close_observation": observation})
+    assert worker.save_watchdog_exit(config, changed) == 8
+    assert json.loads(capsys.readouterr().out)["reason"] == "save_source_changed"
+    assert not (tmp_path / "close.json").exists()
+    capped = worker.IllustratorAgentError("illustrator_recovery_failed", "cap", details={"watchdog_cap": True})
+    assert worker.save_watchdog_exit(config, capped) == 6
+    assert json.loads(capsys.readouterr().out)["reason"] == "watchdog_restart_cap"
+    assert worker.save_watchdog_exit(config, worker.IllustratorAgentError("illustrator_recovery_failed", "x")) is None

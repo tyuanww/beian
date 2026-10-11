@@ -183,36 +183,47 @@ def agent_error_exit_code(error: IllustratorAgentError) -> int:
 
 
 def save_watchdog_exit(config: dict, error: IllustratorAgentError) -> int | None:
-    """Report an agent save-watchdog kill as a closed native/unfolded failure.
+    """Report an agent watchdog outcome as a path-free public reason.
 
-    The agent ended only the identity-matched Illustrator and proved a fresh
-    host has zero documents. The close record still goes through the normal
-    confirm_export_close checks; without proof the slot stays fenced (exit 8).
+    save_timeout: the identity-matched Illustrator was ended and a fresh host
+    has zero documents; the close record still goes through
+    confirm_export_close, otherwise the slot stays fenced (exit 8).
+    save_source_changed: the source hash differed after the stall; never
+    close, never fall back automatically (exit 8, human check).
+    watchdog_restart_cap: the agent refused another restart and faulted.
     """
 
     kind = config.get("request_kind")
-    if error.code != "illustrator_save_timeout" or kind not in {"unfolded_print", "native_text"}:
+    if kind not in {"unfolded_print", "native_text"}:
         return None
+    details = error.details if isinstance(error.details, dict) else {}
+    public = {
+        "ok": False,
+        "attempt_id": str(config.get("attempt_id") or ""),
+        "close_confirmed": False,
+        "request_kind": kind,
+    }
+    if error.code == "illustrator_recovery_failed" and details.get("watchdog_cap") is True:
+        print(json.dumps({**public, "reason": "watchdog_restart_cap"}, ensure_ascii=False))
+        return agent_error_exit_code(error)
+    if error.code != "illustrator_save_timeout":
+        return None
+    if details.get("source_unchanged") is not True:
+        print(json.dumps({**public, "reason": "save_source_changed"}, ensure_ascii=False))
+        return 8
     identity = {
         "protocol": config.get("protocol"),
         "request_kind": kind,
         "attempt_id": config.get("attempt_id"),
         "source_sha256": config.get("source_sha256"),
     }
-    record = confirm_export_close(identity, 0, error.details.get("close_observation"))
-    public = {
-        "ok": False,
-        "reason": "save_timeout",
-        "attempt_id": str(config.get("attempt_id") or ""),
-        "close_confirmed": record is not None,
-        "request_kind": kind,
-    }
+    record = confirm_export_close(identity, 0, details.get("close_observation"))
     if record is not None:
         Path(config["close_json"]).write_text(
             json.dumps(record, ensure_ascii=False, indent=2) + "\n",
             encoding="utf-8",
         )
-    print(json.dumps(public, ensure_ascii=False))
+    print(json.dumps({**public, "reason": "save_timeout", "close_confirmed": record is not None}, ensure_ascii=False))
     return 4 if record is not None else 8
 
 
