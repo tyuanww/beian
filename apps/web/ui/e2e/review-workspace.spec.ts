@@ -128,6 +128,8 @@ test("三栏通铺：1440 稿件 ≥70%、右栏 320、工具条在画布下方�
   await dock.getByRole("button", { name: /^有错/ }).click();
   await expect.poll(() => decisions(syntheticApi).length).toBe(1);
   await expect(page.getByTestId("review-undo-toast")).toHaveText("已标为有错，撤销");
+  const undoBox = (await page.getByTestId("review-undo-toast").getByRole("button", { name: "撤销" }).boundingBox())!;
+  expect(Math.min(undoBox.width, undoBox.height)).toBeGreaterThanOrEqual(44);
   const reason = page.getByLabel("写原因");
   await reason.fill("需要补齐中文品名");
   await reason.press("Enter");
@@ -294,6 +296,8 @@ test("矢量失败自动切回 PNG 并提示高清没加载出来；两张都坏
   const image = page.locator(".canvas-zoom img");
   await expect.poll(() => image.getAttribute("src")).toBe("/synthetic/review.png");
   await expect(page.getByText("高清没加载出来")).toBeVisible();
+  // 「重试」点击区 ≥44（T14）。
+  expect((await page.locator(".review-media-hint button").boundingBox())!.height).toBeGreaterThanOrEqual(44);
   pngOk = false;
   await page.reload();
   await expect(page.getByText("稿件没加载出来")).toBeVisible();

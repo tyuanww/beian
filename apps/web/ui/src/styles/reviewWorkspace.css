@@ -41,7 +41,7 @@ html[data-theme="dark"] .review-thumbs { background: #1f1a24; }
 .review-keys kbd, .review-verdicts kbd { font: 13px/1 ui-monospace, monospace; border: 1px solid var(--line); border-radius: 4px; padding: 2px 4px; }
 .review-keys button { margin-left: auto; border: 0; background: none; color: var(--accent); cursor: pointer; }
 .review-media-hint { position: absolute; top: 8px; left: 8px; z-index: 3; margin: 0; padding: 2px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--stage, #fff); font-size: 13px; }
-.review-media-hint button { border: 0; background: none; color: var(--accent); cursor: pointer; text-decoration: underline; min-height: 32px; }
+.review-media-hint button { border: 0; background: none; color: var(--accent); cursor: pointer; text-decoration: underline; min-height: 44px; }
 .review-media-status.is-error { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 48px; }
 
 .review-flat .review-sidebar { display: flex; flex-direction: column; min-height: 0; overflow: hidden; border-left: 1px solid var(--line); background: var(--stage, #fff); border-radius: 0; }
@@ -91,7 +91,7 @@ html[data-theme="dark"] .review-miss { color: #F2B44C; background: #43332E; }
 .review-reason { color: var(--muted); }
 .review-extra { display: grid; gap: 4px; font-size: 14px; }
 .review-submit-error { color: #a8071a; font-size: 14px; }
-.review-undo-link { border: 0; background: none; color: var(--accent); cursor: pointer; text-decoration: underline; min-height: 32px; padding: 0 4px; }
+.review-undo-link { border: 0; background: none; color: var(--accent); cursor: pointer; text-decoration: underline; min-height: 44px; min-width: 44px; padding: 0 8px; }
 
 .review-native-evidence { margin-block: 8px; padding: 8px; border: 1px solid var(--line); border-radius: 12px; }
 .review-native-evidence h3 { margin: 0 0 8px; font-size: 1em; }
