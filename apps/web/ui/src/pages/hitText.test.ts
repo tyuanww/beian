@@ -180,12 +180,16 @@ describe("impersonal reviewer copy", () => {
       assert.doesNotMatch(text, /我/);
       assert.doesNotMatch(text, /请对着这一面核对/);
       assert.doesNotMatch(spokenLines(hit, field, located).join(""), /我|请对着这一面核对/);
+      for (const line of [...spokenLines(hit, field, located), ask?.lead || "", ask?.because || "", ask?.ask || ""]) {
+        assert.doesNotMatch(line, /。$/, `一行提示不带句号：${line}`);
+      }
     }
   });
   it("uses 产品哥's wording", () => {
     assert.equal(spokenAsk({ status: "疑点", field_group: "净含量", excel_value: "30ml", bboxes: box })?.because, "这个数字没读到，请核对");
+    assert.equal(spokenAsk({ status: "疑点", field_group: "净含量&条形码", excel_value: "30ml", bboxes: box })?.because, "毫升和条码没读全，请核对");
     assert.equal(spokenAsk({ status: "疑点", coverage: { miss: ["烟酰胺"] }, bboxes: box })?.lead, "这些字没读全，请核对");
     assert.equal(spokenAsk({ status: "疑点", bboxes: box })?.because, "这一面没读全，请核对");
-    assert.equal(spokenAsk({ status: "疑点", doubt_bucket: "ocr_smallprint", excel_value: "FSC", bboxes: box })?.ask, "请对着刀线边缘看这一句。");
+    assert.equal(spokenAsk({ status: "疑点", doubt_bucket: "ocr_smallprint", excel_value: "FSC", bboxes: box })?.ask, "请对着刀线边缘看这一句");
   });
 });

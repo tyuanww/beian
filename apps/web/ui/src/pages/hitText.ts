@@ -49,8 +49,8 @@ export type SpokenAsk = { lead: string; because: string; ask: string };
 function notLocatedLines(h: HitText): string[] {
   return [
     "没找到位置，请看整页",
-    "不是已经判定漏印。",
-    `请对着这一整面看确认单要的「${expectedSnippet(h)}」印了没有。`,
+    "不是已经判定漏印",
+    `请对着这一整面看确认单要的「${expectedSnippet(h)}」印了没有`,
   ];
 }
 
@@ -83,19 +83,19 @@ export function spokenLines(h: HitText, field?: string, located?: boolean): stri
   const name = field || h.field || "";
   const bucket = h.doubt_bucket || "";
   if (bucket === "ocr_smallprint" || /材料来源|良好管理|FSC|防伪/.test(`${name}${excelText(h)}`)) {
-    return ["这条是法规小字，必须印。", "这一面没读全，请核对", "请对着刀线边缘看这一句。"];
+    return ["这条是法规小字，必须印", "这一面没读全，请核对", "请对着刀线边缘看这一句"];
   }
   if (bucket === "ocr_graphic") {
-    return ["这块是大号图形字，轮廓或竖排机器常认不出。", "请你看是不是印了确认单要的那几个字。"];
+    return ["这块是大号图形字，轮廓或竖排机器常认不出", "请你看是不是印了确认单要的那几个字"];
   }
   if (fg === "净含量&条形码" || (/净含量/.test(name) && /条形码|条码/.test(name))) {
-    return ["确认单要毫升和条码。", "毫升和条码没都读全，请核对", "请对着这一面看毫升数字和条码。"];
+    return ["确认单要毫升和条码", "毫升和条码没读全，请核对", "请对着这一面看毫升数字和条码"];
   }
   if (fg === "净含量" || /净含量/.test(name)) {
-    return [`确认单要「${expectedSnippet(h)}」。`, "这个数字没读到，请核对"];
+    return [`确认单要「${expectedSnippet(h)}」`, "这个数字没读到，请核对"];
   }
   if (fg === "二维码" || /二维码|QR/.test(name)) {
-    return ["没读到完整扫码关注引导语。", "钉若在码上，看的是码不是那句话。"];
+    return ["没读到完整扫码关注引导语", "钉若在码上，看的是码不是那句话"];
   }
   const ev = (h.evidence || "").trim();
   if (ev && isAccountingCopy(ev)) {
@@ -121,7 +121,7 @@ export function spokenAsk(h: HitText, field?: string, located?: boolean): Spoken
   if (misses.length) {
     return {
       lead: "这些字没读全，请核对",
-      because: misses.length <= 2 ? misses.join("；") : `有 ${misses.length} 处没读到。`,
+      because: misses.length <= 2 ? misses.join("；") : `有 ${misses.length} 处没读到`,
       ask: "",
     };
   }
@@ -130,7 +130,7 @@ export function spokenAsk(h: HitText, field?: string, located?: boolean): Spoken
   if (ev && !isAccountingCopy(ev)) {
     return { lead: customerCopy(ev).slice(0, 80), because: "这一面没读全，请核对", ask: "" };
   }
-  return { lead: "这条需要你看一眼。", because: "这一面没读全，请核对", ask: "" };
+  return { lead: "这条需要你看一眼", because: "这一面没读全，请核对", ask: "" };
 }
 
 /** 当前项目顶栏。一致且没有未读内容时返回空。 */
@@ -179,7 +179,7 @@ export function pdfText(h: HitText, field?: string): string {
   const direct = (h.pdf || "").trim() || (h.found || "").trim();
   const hits = (h.coverage?.hit || []).map((s) => String(s).trim()).filter(Boolean);
   const found = direct || (hits.length ? hits.join(" ") : "");
-  const imageNote = isImageOnlyField(field) && !found ? "这一块是图片，读不到字。" : "";
+  const imageNote = isImageOnlyField(field) && !found ? "这一块是图片，读不到字" : "";
   const parts: string[] = [];
   if (imageNote) parts.push(imageNote);
   if (found) parts.push(found);
