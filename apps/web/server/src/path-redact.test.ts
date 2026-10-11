@@ -291,3 +291,18 @@ describe("redactLocalPaths: Windows/UNC file names containing a space", () => {
     assert.equal(r("C:\\a\\b.pdf 和 D:\\c\\d.pdf"), "b.pdf 和 d.pdf");
   });
 });
+
+describe("redactLocalPaths: configured dirs inside http(s) URLs keep the leading slash", () => {
+  it("unix configured dir -> /本机路径, rest of the segment dropped up to & # ?", () => {
+    saveSettings({ BLENDER_EXECUTABLE: "/srv/tools/bin/blender" });
+    assert.equal(r("http://x/srv/tools/bin/blender"), "http://x/本机路径");
+    assert.equal(r("http://x/srv/tools/bin/blender/a.pdf"), "http://x/本机路径");
+    assert.equal(r("http://x/open?f=/srv/tools/bin/blender/a.pdf&q=1#h"), "http://x/open?f=/本机路径&q=1#h");
+    const data = String(process.env.WB_DATA_DIR);
+    assert.equal(r(`https://x${data}/a.pdf?v=2`), "https://x/本机路径?v=2");
+  });
+  it("Windows configured dir -> 本机路径 (no slash, same as drive rule)", () => {
+    saveSettings({ BLENDER_EXECUTABLE: "D:\\Tools\\blender.exe" });
+    assert.equal(r("http://x/?p=D:\\Tools\\blender.exe&q=1"), "http://x/?p=本机路径&q=1");
+  });
+});
