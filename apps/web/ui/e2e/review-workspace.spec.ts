@@ -581,3 +581,15 @@ test("「上传新稿」不在看稿工具条，只在退回后出现在页头",
   await expect(page.locator(".review-top").getByRole("button", { name: "上传新稿" })).toBeVisible();
   await expect(page.locator(".review-tbar").getByRole("button", { name: "上传新稿" })).toHaveCount(0);
 });
+
+test("「?」悬停说明写「快捷键」；‹ › 点击区 ≥44px", async ({ page, syntheticApi }) => {
+  const task = reviewTask("e5969b58cd82");
+  syntheticApi.tasks.push(task);
+  await page.goto(`/review/${task.id}`);
+  await expect(page.getByRole("button", { name: "快捷键" })).toHaveAttribute("title", "快捷键");
+  for (const name of ["上一条", "下一条"]) {
+    const b = (await page.getByRole("button", { name, exact: true }).boundingBox())!;
+    expect(b.width).toBeGreaterThanOrEqual(44);
+    expect(b.height).toBeGreaterThanOrEqual(44);
+  }
+});

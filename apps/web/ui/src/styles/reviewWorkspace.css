@@ -15,7 +15,7 @@ html[data-theme="dark"] .shell.is-review-flat .sidebar, html[data-theme="dark"] 
 .review-title { margin: 0; font-size: 20px; font-weight: 650; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 40vw; }
 .review-ver { display: inline-flex; gap: 8px; align-items: center; }
 .review-posn { display: inline-flex; align-items: center; gap: 2px; border: 1px solid var(--line); border-radius: 12px; }
-.review-posn button { border: 0; background: none; font-size: 18px; cursor: pointer; color: var(--ink); }
+.review-posn button { border: 0; background: none; font-size: 18px; cursor: pointer; color: var(--ink); min-width: 44px; min-height: 44px; }
 .review-posn b { min-width: 48px; text-align: center; font-variant-numeric: tabular-nums; font-size: 14px; }
 .review-grow { flex: 1; }
 .review-signhint { color: var(--muted); font-size: 14px; }
