@@ -7,6 +7,7 @@ import {
   type SettingFieldView,
   type SettingsView,
 } from "../api";
+import { initialDraft, normalizeSettings, resolveGroup, secretPlaceholder, valuesToSave } from "./settingsView";
 import { BillingPane } from "../features/billing/BillingPane";
 import { AppearancePane } from "../chrome/AppearancePane";
 import {
@@ -75,14 +76,12 @@ export function SettingsPage({
     setLoading(true);
     void api
       .settings()
-      .then((next) => {
+      .then((raw) => {
         if (cancelled) return;
+        const next = normalizeSettings(raw);
         setView(next);
-        const init: Record<string, string> = {};
-        for (const g of next.groups) {
-          for (const f of g.fields) init[f.key] = f.kind === "secret" ? "" : f.value;
-        }
-        setDraft(init);
+        setGroup((cur) => resolveGroup(cur, next, VIRTUAL));
+        setDraft(initialDraft(next));
       })
       .catch((err: unknown) => {
         if (!cancelled) setError(err instanceof Error ? err.message : "读不到设置");
@@ -139,27 +138,15 @@ export function SettingsPage({
 
   async function save() {
     if (!view || !canWrite) return;
-    const values: Record<string, string> = {};
-    for (const g of view.groups) {
-      for (const f of g.fields) {
-        if (f.kind === "secret") {
-          if ((draft[f.key] || "").trim()) values[f.key] = draft[f.key];
-        } else {
-          values[f.key] = draft[f.key] ?? "";
-        }
-      }
-    }
+    const values = valuesToSave(view, draft);
     setSaving(true);
     setError(null);
     try {
       const next = await api.saveSettings(values);
-      setView(next);
+      const clean = normalizeSettings(next);
+      setView(clean);
       setRestart(Boolean(next.restart));
-      const init: Record<string, string> = {};
-      for (const g of next.groups) {
-        for (const f of g.fields) init[f.key] = f.kind === "secret" ? "" : f.value;
-      }
-      setDraft(init);
+      setDraft(initialDraft(clean));
       message.success(next.restart ? "已保存。改了需要重启的项，请重启服务。" : "已保存到本机。");
       let bounce = "";
       try {
@@ -217,7 +204,7 @@ export function SettingsPage({
         message.success(r.message);
         try {
           const next = await api.settings();
-          setView(next);
+          setView(normalizeSettings(next));
         } catch {
           /* 发送结果已经在行上 */
         }
@@ -286,7 +273,7 @@ export function SettingsPage({
     if (!key) return;
     try {
       const next = await api.saveSettings({ [key]: path });
-      setView(next);
+      setView(normalizeSettings(next));
       setDraft((prev) => ({ ...prev, [key]: path }));
       message.success("已采用路径");
       await probe(kind === "python" ? "python" : kind);
@@ -751,7 +738,7 @@ function FieldItem({
           value={value}
           onChange={(e) => onChange(e.target.value)}
           autoComplete="new-password"
-          placeholder={field.set ? `已填 ${field.last4}，留空不改` : "未填"}
+          placeholder={secretPlaceholder(field)}
           disabled={locked}
         />
       ) : (

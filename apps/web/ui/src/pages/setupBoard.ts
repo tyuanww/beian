@@ -158,7 +158,7 @@ export function rowDetail(
 
 export function foldCatalogReason(
   group: string,
-  fields: { key: string; set: boolean; last4: string; value: string }[],
+  fields: { key: string; set: boolean; last4?: string; value?: string }[],
   probe?: ProbeResult | { pending: true },
 ): string | null {
   const probeOk = Boolean(probe && !("pending" in probe) && probe.ok);
