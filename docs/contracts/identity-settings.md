@@ -20,3 +20,7 @@ MiniMax 未开语义复核是「未用」，不是「可用」；探测是 `GET 
 - `POST /api/settings/probe`（含飞书「发一条测试」`lark_send`）、`GET /api/settings/billing`、`POST /api/settings/billing/refresh`：非管理员 403。`POST /api/settings` 原本即仅管理员，返回的视图按管理员口径。
 - 已接受的低风险：非管理员仍能从 `set` 看出哪些密钥/字段已填，看不到值和末四位。
 - 有意的行为变化：reviewer 不能再自己点飞书「发一条测试」，只能由管理员测。
+- 任务报错按角色脱敏（`apps/web/server/src/pathRedact.ts` 的 `redactLocalPaths`）：
+  - 处理顺序：① 先替换已知本机路径（`DATA_DIR`、`PYTHON`、`pythonBin()`、`blenderBin()`、`illustratorBin()`，按长度从长到短，可含空格）；这类路径末段像文件名（带 1–8 位扩展名）就换成文件名，否则换成「本机路径」，紧跟其后的子路径再只留文件名。② Windows 盘符路径（`X:\` 或 `X:/`）。③ UNC 路径（`\\server\share\...`）。④ 至少含一级目录的 Unix 绝对路径（前面是行首、空白或 `= : ： ( " ' （ [`）。②–④ 同样只留末段文件名，没有文件名的目录写成「本机路径」。例：`C:\supply\data\x\a.pdf` → `a.pdf`，`目录 /home/runner/work 不可写` → `目录 本机路径 不可写`。
+  - 任务详情（各路由经 `publicTask(task, viewerFromSession(s))`，`apps/web/server/src/jobs.ts`）与任务列表（`apps/web/server/src/tasks.ts` 的 `shownError`）里的 `error` / `job_error`：非管理员返回脱敏文本，管理员（`viewerFromSession` 的 `admin: session.role === "admin"`）看原文；`publicTask` 未传 viewer 时按非管理员处理。
+  - 飞书失败通知（对照任务 `fireTaskNotify`、打样 `fireMockupNotify`）里的报错一律脱敏，与收件人角色无关。打样详情/列表的报错仍走原有 `publicMockupError`，不在本项范围。
