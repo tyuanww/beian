@@ -338,7 +338,7 @@ RF-10–RF-13 的原始依赖见 [ADR-007 §20.7](docs/adr-007-packaging-render-
   明确不在本次范围、未审计（可能仍带出本机路径）：
   - `apps/web/server/src/index.ts:424` 全局错误处理对 4xx 原样返回 `err.message` 作 `detail`。
   - `notifyIllustratorWatchdog`（`notify.ts:247`，`jobs.ts:959`、`nativeTextJobs.ts:176` 调用）的飞书告警文案。
-  - `apps/web/server/src/mockup.ts:595` `print_faces_repair.error` 原样返回。
+  - `apps/web/server/src/mockup.ts:595` `print_faces_repair.error` 未接兜底：来源是白名单文案，不含原始报错。
   - 已知规则缺口：斜杠写法只剩末尾一截文件名含空格或中文标点时露出后半截文件名（`/Users/bob/my docs/a b.pdf` → `本机路径 b.pdf`，`/home/bob/a，b.pdf` → `本机路径，b.pdf`）；目录名已不漏。
   - 已知规则缺口：网址里百分号编码的用户名密码（`http://bob%3Apw%40x/`）原样输出，不拦。
   - 已知规则缺口（不拦）：全角斜杠 `／`、`＼`、`∖` 不当分隔符；超长 UTF-8 `%c0%af`、HTML 实体 `&#47;` 不解码；路径被换行断开时只认换行前半截。
@@ -355,7 +355,6 @@ RF-10–RF-13 的原始依赖见 [ADR-007 §20.7](docs/adr-007-packaging-render-
   - 已知规则缺口（不拦）：`postgres://…` 等非 http(s) 连接串输出成 `postgres:本机路径`。
   - 已知取舍：兜底「反斜杠 + 非 ASCII」与「非 ASCII 紧贴反斜杠再接内容」会把中文紧贴的转义（`换行\n`）整条隐藏；`共享盘\\` 这类后面是空白或反斜杠的不算。
   - 已知取舍：`Bearer` / `Basic` 后只拦含数字或符号、不少于 6 字符的值；纯字母值（`Bearer abcdefgh`、`Basic dXNlcjpwYXNz`）不拦，以免误伤「bearer 字段为空」「Basic settings」；`Authorization` 任意大小写都拦。
-  - `apps/web/server/src/mockup.ts` `print_faces_repair.error` 未接兜底：来源是白名单文案，不含原始报错。
   - 已知规则缺口（不拦）：凭据词与前缀无分隔符连写的参数名（`?apikey=1`、`?accesstoken=`）不触发兜底。
   - 已知取舍：网址路径里出现 `/Users/`、`/home/`、`/root/`、`/var/folders/`、`/private/var/` 时，即使是公开网站也会被替换（`https://example.com/Users/list` → `https://example.com/本机路径`），宁可误伤也不漏。
   - `apps/web/backend` worker 输出与其他 HTTP `detail` 未逐一盘点。
