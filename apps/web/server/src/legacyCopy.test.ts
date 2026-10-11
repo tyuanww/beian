@@ -19,6 +19,9 @@ describe("legacy first-person copy", () => {
   it("maps every old sentence to impersonal copy", () => {
     assert.equal(rewriteLegacyCopy(OLD_NET), "确认单要的净含量，这一面没读到，请核对");
     assert.equal(rewriteLegacyCopy(OLD_BAR), "确认单要的毫升和条码，这一面没读全，请核对");
+    assert.equal(rewriteLegacyCopy("净含量和条码都在这一面读到了。"), "净含量和条码都在这一面读到了");
+    assert.equal(rewriteLegacyCopy("净含量和条码没有都读全，请对着这一面看毫升和条码。"), "净含量和条码没有都读全，请对着这一面看毫升和条码");
+    assert.equal(rewriteLegacyCopy("这条是法规小字，必须印。"), "这条是法规小字，必须印。");
     assert.equal(rewriteLegacyCopy(`规格/条码类可能分支 · ${OLD_NET}`), "规格/条码类可能分支 · 确认单要的净含量，这一面没读到，请核对");
     for (const [, to] of LEGACY_FIRST_PERSON_COPY) {
       assert.doesNotMatch(to, /我/);
@@ -46,7 +49,11 @@ describe("legacy first-person copy", () => {
       status: "pending_review",
       owner: "籽烨",
       hits: [{ id: "h1", field: "净含量", status: "疑点", evidence: `规格/条码类可能分支 · ${OLD_NET}` }],
-      hits_v2: [{ id: "h2", field: "净含量&条形码", status: "疑点", evidence: OLD_BAR }],
+      hits_v2: [
+        { id: "h2", field: "净含量&条形码", status: "疑点", evidence: OLD_BAR },
+        { id: "h3", field: "净含量&条形码", status: "疑点", evidence: "净含量和条码没有都读全，请对着这一面看毫升和条码。" },
+        { id: "h4", field: "净含量&条形码", status: "一致", evidence: "净含量和条码都在这一面读到了。" },
+      ],
     } as never);
     const path = join(DATA, "tasks", `${id}.json`);
     const before = readFileSync(path, "utf8");
@@ -56,8 +63,12 @@ describe("legacy first-person copy", () => {
     };
     assert.equal(pub.hits[0].evidence, "规格/条码类可能分支 · 确认单要的净含量，这一面没读到，请核对");
     assert.equal(pub.hits_v2[0].evidence, "确认单要的毫升和条码，这一面没读全，请核对");
+    assert.equal(pub.hits_v2[1].evidence, "净含量和条码没有都读全，请对着这一面看毫升和条码");
+    assert.equal(pub.hits_v2[2].evidence, "净含量和条码都在这一面读到了");
     assert.equal(readFileSync(path, "utf8"), before);
     assert.match(before, /我在这一面没读到/);
+    assert.match(before, /都在这一面读到了。/);
+    assert.match(before, /看毫升和条码。/);
     assert.equal((loadTask(id).hits as Array<{ evidence: string }>)[0].evidence.includes(OLD_NET), true);
   });
 });
