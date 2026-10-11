@@ -507,3 +507,26 @@ test("按住数字键的自动重复不算", async ({ page, syntheticApi }) => {
   await page.waitForTimeout(300);
   expect(syntheticApi.calls.filter((c) => c.path.endsWith("/decision"))).toHaveLength(0);
 });
+
+for (const mode of [{ theme: "dark", scheme: "light" as const }, { theme: "system", scheme: "dark" as const }]) {
+  test(`页头品名/位置/面包屑在深色可读（外观=${mode.theme}，系统=${mode.scheme}）`, async ({ page, syntheticApi }) => {
+    const task = reviewTask("e5969b58cd6" + (mode.theme === "dark" ? "5" : "6"));
+    syntheticApi.tasks.push(task);
+    await page.emulateMedia({ colorScheme: mode.scheme });
+    await page.addInitScript((theme) => localStorage.setItem("wb_appearance", JSON.stringify({ theme })), mode.theme);
+    await page.goto(`/review/${task.id}`);
+    await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+    const ratios = await page.evaluate(() => {
+      const rgb = (s: string) => (s.match(/[\d.]+/g) || []).slice(0, 3).map(Number);
+      const lum = ([r, g, b]: number[]) => { const f = (c: number) => { c /= 255; return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; }; return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b); };
+      const bg = rgb(getComputedStyle(document.querySelector(".review-top")!).backgroundColor);
+      return [".review-title", "[data-testid=review-posn]", ".review-crumb"].map((s) => {
+        const el = document.querySelector(s);
+        if (!el) return 99;
+        const a = lum(rgb(getComputedStyle(el).color)), b = lum(bg);
+        return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+      });
+    });
+    for (const r of ratios) expect(r).toBeGreaterThanOrEqual(4.5);
+  });
+}
