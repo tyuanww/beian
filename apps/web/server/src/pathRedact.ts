@@ -203,7 +203,11 @@ export function redactLocalPaths(message: string | undefined | null): string {
   // ④ 截过就追加「（后面省略）」。未脱敏的尾巴从不输出；被截断的半截路径照常脱敏（如 `C:\Users\bo` → 本机路径）。
   s = s.replace(/%5c/gi, "\\").replace(/%2f/gi, "/");
   const truncated = s.length > REDACT_MAX_CHARS;
-  if (truncated) s = s.slice(0, REDACT_MAX_CHARS);
+  if (truncated) {
+    // 截断点落在代理对（如表情）中间时往前退一位，不留半个字符。
+    const hi = s.charCodeAt(REDACT_MAX_CHARS - 1);
+    s = s.slice(0, hi >= 0xd800 && hi <= 0xdbff ? REDACT_MAX_CHARS - 1 : REDACT_MAX_CHARS);
+  }
   const parts: string[] = [];
   let last = 0;
   for (const m of s.matchAll(URL_RE)) {
