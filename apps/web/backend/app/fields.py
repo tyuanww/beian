@@ -1414,10 +1414,10 @@ def match_field(
         bar_cov = (cov or {}).get("parts", {}).get("barcode") if isinstance((cov or {}).get("parts"), dict) else None
         bar_ok = bool(bar_cov and (bar_cov.get("coverage") or 0) >= 0.99)
         if net_ok and bar_ok:
-            status, ev = "一致", "净含量和条码都在这一面读到了。"
+            status, ev = "一致", "净含量和条码都在这一面读到了"
         elif net_ok or bar_ok:
             status = "疑点"
-            ev = "净含量和条码没有都读全，请对着这一面看毫升和条码。"
+            ev = "净含量和条码没有都读全，请对着这一面看毫升和条码"
         else:
             status = "疑点"
             ev = "确认单要的毫升和条码，这一面没读全，请核对"
