@@ -92,6 +92,9 @@ test("三栏通铺：1440 稿件 ≥70%、右栏 320、工具条在画布下方�
   const tbar = (await page.locator(".review-tbar").boundingBox())!;
   expect(tbar.y).toBeGreaterThanOrEqual(canvas.y + canvas.height - 1);
   await expect(page.locator(".shell")).toHaveClass(/is-review-flat/);
+  // 已批第 39 行：主侧栏实心 #fbfafc，玻璃层不再盖在上面。
+  await expect(page.locator(".shell .sidebar").first()).toHaveCSS("background-color", "rgb(251, 250, 252)");
+  expect(await page.locator(".sidebar-glass").evaluateAll((els) => els.every((el) => getComputedStyle(el).display === "none"))).toBe(true);
   await expect(page.locator(".review-th")).toHaveText(/P1/);
 
   const sign = page.getByRole("button", { name: "签字", exact: true });
