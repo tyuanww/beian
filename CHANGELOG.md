@@ -5,7 +5,7 @@
 ### Security
 - `GET /api/settings` 按角色裁剪：reviewer / viewer 只拿到字段元数据（key、label、kind、help、restart、adminOnly）和 `set`；除开关类字段与 `WB_MAX_UPLOAD_MB` 外，`value`、`last4` 两个键整体省略（不返回空串或 null），不再泄露 tenant_key、open_id、应用 ID、对外网址和本机路径。`derived` 对非管理员去掉 `redirect_uri`、`python`；`health.mockup.detail` 对非管理员不含 Blender 路径。管理员返回不变。
 - `POST /api/settings/probe`、`GET /api/settings/billing`、`POST /api/settings/billing/refresh` 改为仅管理员，非管理员返回 403（含 reviewer 原先可用的飞书推送测试）。
-- 任务报错按角色脱敏：reviewer / viewer 看到的任务报错（`/api/tasks` 的 `job_error` / `error`）和飞书失败通知去掉本机目录、只留文件名，管理员看原文；规则见 `docs/contracts/identity-settings.md`。已知缺口：Unix 目录名含空格；未审计：4xx 报错 `detail`、Illustrator 看门狗告警、`print_faces_repair.error`、worker 输出。
+- 任务报错按角色脱敏：reviewer / viewer 看到的任务报错（`/api/tasks` 的 `job_error` / `error`）和飞书失败通知去掉本机目录、只留文件名，网址原样保留，超过 8000 字符只保留前 8000 字符并标「（后面省略）」，管理员看原文；规则见 `docs/contracts/identity-settings.md`。已知缺口：Unix 目录名含空格；未审计：4xx 报错 `detail`、Illustrator 看门狗告警、`print_faces_repair.error`、worker 输出。
 
 ### Changed
 - 「设置」只给管理员（老板 2026-10-11 批准）：非管理员侧栏不再出现「设置」；直接打开 `/settings` 只显示「这里只有管理员能看」和「回审稿台」，不请求 `/api/settings`、`/api/settings/probe`、`/api/settings/billing`。管理员不变。
