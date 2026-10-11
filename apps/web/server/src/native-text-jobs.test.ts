@@ -57,6 +57,33 @@ it("result JSON alone falls back to OCR but keeps drain fenced and prevents a se
   recoverNativeRequests(); tryStart(); assert.equal(calls, 1);
 });
 
+it("watchdog save_timeout falls back to OCR with a public reason and one Feishu alert", async () => {
+  seed(); const alerts: string[] = [];
+  setJobsTestHooks({ illustratorHostReady: true,
+    runNativeText: async opts => {
+      const config = JSON.parse(readFileSync(opts.configPath, "utf8"));
+      writeFileSync(config.close_json, JSON.stringify({ protocol: config.protocol, request_kind: config.request_kind, attempt_id: config.attempt_id, source_sha256: config.source_sha256, document_closed: true, bridge_exited: true, inflight: false, lock_returnable: true }));
+      return { code: 4, stdout: JSON.stringify({ ok: false, reason: "save_timeout", attempt_id: config.attempt_id, close_confirmed: true, request_kind: "native_text" }), stderr: "", timedOut: false };
+    },
+    nativeAlert: async task => { alerts.push(task.id); },
+    runCompare: async opts => { assert.equal(opts.nativeDir, undefined); assert.equal(opts.nativeAttempted, true); return success; }, notify: async () => ({ ok: false }) as never, bookkeeping: () => ({ compare_ok: true, recorded: false }) });
+  tryStart(); await eventually(() => loadTask(id).job_status === "succeeded");
+  assert.equal(loadTask(id).native_text_request?.status, "fallback");
+  assert.deepEqual(nativePublic(loadTask(id)), { status: "fallback", reason: "save_timeout", message: "Illustrator 保存长时间无进展，已自动重启，本次继续图像识别。" });
+  assert.deepEqual(alerts, [id]);
+  assert.equal(queueSnapshot().illustrator.running, 0);
+});
+
+it("a non-watchdog worker reason stays native_failed and sends no watchdog alert", async () => {
+  seed(); let alerts = 0;
+  setJobsTestHooks({ illustratorHostReady: true,
+    runNativeText: async opts => { nativeFiles(opts.configPath); return { ...success, code: 4, stdout: JSON.stringify({ ok: false, reason: "export_failed" }) }; },
+    nativeAlert: async () => { alerts++; },
+    runCompare: async () => success, notify: async () => ({ ok: false }) as never, bookkeeping: () => ({ compare_ok: true, recorded: false }) });
+  tryStart(); await eventually(() => loadTask(id).job_status === "succeeded");
+  assert.equal(loadTask(id).native_text_request?.reason, "native_failed"); assert.equal(alerts, 0);
+});
+
 it("maps an untrusted persisted native reason to the stable public fallback", () => {
   const task = {
     id,

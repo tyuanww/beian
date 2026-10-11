@@ -206,6 +206,21 @@ export async function notifyTaskComplete(task: TaskLike, actor: string): Promise
   }
 }
 
+/** 看门狗结束卡住的 Illustrator 保存后告警；不含路径、PID 或 hash。 */
+export function illustratorWatchdogText(task: TaskLike): string {
+  return [
+    "【备案审核】Illustrator 保存卡住，已自动结束并重启",
+    `任务：${task.title || task.id || ""}`,
+    "原稿文字提取改为图像识别继续核对；请留意杭州机 Illustrator 状态。",
+    task.id ? `打开：${publicBase()}${jobOpenPath("compare", task.id)}` : "",
+  ].filter(Boolean).join("\n");
+}
+
+export async function notifyIllustratorWatchdog(task: TaskLike): Promise<void> {
+  const r = await sendText(illustratorWatchdogText(task));
+  if (!r.ok && !r.skipped) console.warn("feishu watchdog notify failed:", r.reason);
+}
+
 export function jobOpenPath(kind: "compare" | "rework" | "mockup", tid: string): string {
   return kind === "mockup" ? `/mockup/${tid}` : `/review/${tid}`;
 }

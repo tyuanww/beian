@@ -245,6 +245,7 @@ export type JobsTestHooks = {
   runRelight?: typeof runPackagingBlenderOnly;
   runRaster?: (opts: { source: string; outDir: string }) => Promise<{ ok: boolean; png?: string; message: string }>;
   notify?: typeof notifyJobFinished;
+  nativeAlert?: (task: Task) => Promise<unknown>;
   killTree?: typeof killTree;
   inspectWorker?: typeof inspectWorkerProcess;
   inspectGenerationGroup?: typeof inspectRenderGenerationGroup;
@@ -2746,7 +2747,7 @@ export function tryStart(): void {
       startNative(next.task, hooks.runNativeText || runNativeText, () => {
         if (!nativeQueue().running.some(t => t.id === next.task.id) && live.illustrator === `native:${next.task.id}`) live.illustrator = null;
         tryStart();
-      });
+      }, hooks.nativeAlert);
     }
     else if (next?.kind === "unfolded") claimUnfoldedNative(next.job);
     else if (next) claimAi(next.job);

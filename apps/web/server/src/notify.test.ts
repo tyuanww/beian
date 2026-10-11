@@ -11,7 +11,7 @@ process.env.VITEST = "1";
 after(() => rmSync(dataDir, { recursive: true, force: true }));
 
 const { saveSettings } = await import("./settings.js");
-const { createTextSender, jobOpenPath, sendText, taskCompleteHeadline, taskCompleteText } = await import("./notify.js");
+const { createTextSender, illustratorWatchdogText, jobOpenPath, sendText, taskCompleteHeadline, taskCompleteText } = await import("./notify.js");
 
 function isolatedSender() {
   const calls = { cli: 0, app: 0 };
@@ -132,5 +132,16 @@ describe("taskCompleteText", () => {
     assert.equal(taskCompleteHeadline({}), "已签字");
     assert.equal(taskCompleteHeadline({ hits: [{ decision: "confirm" }] }), "已签字");
     assert.equal(taskCompleteHeadline({ hits: [{ decision: "issue" }] }), "已退回");
+  });
+});
+
+describe("illustratorWatchdogText", () => {
+  it("names the task and OCR fallback without private paths or pids", () => {
+    const text = illustratorWatchdogText({ id: "aabbccddeeff", title: "某精华" });
+    assert.match(text, /Illustrator 保存卡住，已自动结束并重启/);
+    assert.match(text, /任务：某精华/);
+    assert.match(text, /图像识别/);
+    assert.match(text, /\/review\/aabbccddeeff/);
+    assert.equal(/[A-Z]:\\|pid|sha256/i.test(text), false);
   });
 });

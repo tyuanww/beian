@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { DATA_DIR } from "./config.js";
 import { illustratorBin } from "./settings.js";
 import { loadAllTasks, loadTask, loadTaskWithRevision, saveTask, type Task } from "./tasks.js";
+import { notifyIllustratorWatchdog } from "./notify.js";
 import { inspectWorkerProcess, runNativeText } from "./workers.js";
 
 export type NativeRequest = {
@@ -17,7 +18,13 @@ const COPY: Record<string, string> = {
   source_changed: "稿件已变化，旧文字证据不参与本次核对。",
   close_unconfirmed: "Illustrator 尚未确认关闭，本次继续图像识别，原生提取保持等待核实。",
   native_failed: "原稿文字未能可靠提取，本次继续图像识别。",
+  save_timeout: "Illustrator 保存长时间无进展，已自动重启，本次继续图像识别。",
 };
+/** Worker stdout carries a path-free public JSON line; only its reason is read. */
+function workerReason(stdout: string): string | undefined {
+  const line = stdout.trim().split("\n").pop() || "";
+  try { const value = JSON.parse(line) as { reason?: unknown }; return typeof value.reason === "string" ? value.reason : undefined; } catch { return undefined; }
+}
 export type NativeReason = keyof typeof COPY;
 const NATIVE_REASONS = new Set(Object.keys(COPY));
 function safeReason(reason: unknown): NativeReason | undefined {
@@ -165,13 +172,13 @@ export function nativeDirectory(task: Task): string | undefined {
   } catch { /* No stale evidence is passed to OCR. */ }
   return;
 }
-export function startNative(task: Task, run: typeof runNativeText, finished: () => void) {
+export function startNative(task: Task, run: typeof runNativeText, finished: () => void, alert: (task: Task) => Promise<unknown> = notifyIllustratorWatchdog) {
   const req = nativeRequest(task)!;
   req.status = "running";
   saveTask(task); // Persist intent before touching the shared application.
-  void execute(task, req, run).finally(finished);
+  void execute(task, req, run, alert).finally(finished);
 }
-async function execute(task: Task, req: NativeRequest, run: typeof runNativeText) {
+async function execute(task: Task, req: NativeRequest, run: typeof runNativeText, alert: (task: Task) => Promise<unknown>) {
   let dispatched = false;
   try {
     const directory = root(task, req);
@@ -194,6 +201,12 @@ async function execute(task: Task, req: NativeRequest, run: typeof runNativeText
     const current = loadTask(task.id), active = nativeRequest(current);
     if (active?.id !== req.id || active.status !== "running") return;
     if (result.timedOut || !closed(current, active)) { active.reason = "close_unconfirmed"; saveTask(current); return; }
+    if (result.code !== 0 && workerReason(result.stdout) === "save_timeout") {
+      // Agent watchdog ended the identity-matched stalled Illustrator and proved close.
+      fallback(current, "save_timeout");
+      void alert(current).catch(() => undefined);
+      return;
+    }
     if (active.reason === "close_unconfirmed" || current.job_status !== "queued") { fallback(current, "native_failed"); return; }
     if (hash(join(taskRoot(current), active.source_name)) !== active.source_sha256 || hash(copy) !== active.source_sha256) { fallback(current, "source_changed"); return; }
     const payload = json(join(directory, "result.json"));
