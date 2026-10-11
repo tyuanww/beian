@@ -5,7 +5,7 @@ import { makeTestTempDir } from "./testTemp.js";
 process.env.VITEST = "1";
 process.env.WB_DATA_DIR = makeTestTempDir("beian-path-redact-");
 
-const { redactLocalPaths } = await import("./pathRedact.js");
+const { redactLocalPaths, redactLocalPathsUncapped } = await import("./pathRedact.js");
 const { saveSettings } = await import("./settings.js");
 
 const r = redactLocalPaths;
@@ -242,4 +242,28 @@ describe("redactLocalPaths: cap keeps surrogate pairs intact", () => {
     assert.equal(out, "a".repeat(7999) + "（后面省略）");
     assert.ok(!/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/.test(out));
   });
+});
+
+describe("redactLocalPathsUncapped: linear without the length cap", () => {
+  const inputs: [string, string][] = [
+    ["C:\\a b repeated", "C:\\a b ".repeat(43000)],
+    ["\\\\a repeated", "\\\\a ".repeat(75000)],
+    ["spaces+slashes", "/x/" + "a /".repeat(100000)],
+    ["backslash run", "\\".repeat(300000)],
+    ["http urls", "http://x/?p=C:\\a ".repeat(20000)],
+    ["mixed cjk", "打开/a 客 \\b C:\\c ".repeat(20000)],
+  ];
+  for (const [name, input] of inputs) {
+    it(`${name} (${input.length} chars, uncapped) < 300ms`, () => {
+      assert.ok(input.length >= 300000);
+      let ms = Infinity;
+      for (let k = 0; k < 3; k += 1) {
+        const t0 = performance.now();
+        const out = redactLocalPathsUncapped(input);
+        ms = Math.min(ms, performance.now() - t0);
+        assert.ok(!out.includes("（后面省略）"));
+      }
+      assert.ok(ms < 300, `${name}: ${ms.toFixed(1)}ms`);
+    });
+  }
 });
