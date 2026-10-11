@@ -44,8 +44,7 @@ describe("rollout flag", () => {
   it("GLB_WEBP_VARIANT defaults to off and the module does not read env", () => {
     assert.equal(GLB_WEBP_VARIANT, false);
     assert.equal(variant.glbWebpVariantEnabled(), false);
-    const src = readFileSync(new URL("./glbWebpVariant.ts", import.meta.url), "utf8") + readFileSync(new URL("./rolloutFlags.ts", import.meta.url), "utf8");
-    assert.doesNotMatch(src, /process\.env/);
+    assert.doesNotMatch(readFileSync(new URL("./rolloutFlags.ts", import.meta.url), "utf8"), /process\.env/);
   });
 });
 

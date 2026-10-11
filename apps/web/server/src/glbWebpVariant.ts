@@ -8,7 +8,7 @@
  *   每次 unlink/rename 后对目录 fsync（Windows 不支持目录 fsync，best-effort）。
  * - 所有会让 Blender 写这单 job 目录的入口进入时同步调用 dropGlbWebpVariant（jobs.ts，静态测试 A 锁住）。
  *   即使漏删，原件被重写后 source hash 对不上，也只会回退原件，不会把旧旁路发出去。
- * - 本模块不读环境变量；对外返回由 rolloutFlags.GLB_WEBP_VARIANT 控制，默认关。
+ * - 对外返回由 rolloutFlags.GLB_WEBP_VARIANT 控制，默认关，不读环境变量；唯一的环境读取是 *ForTest 的 VITEST 护栏。
  */
 import { createHash } from "node:crypto";
 import { closeSync, fstatSync, fsyncSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
@@ -35,6 +35,14 @@ export type GlbWebpVariantMeta = {
   created_at: string;
 };
 
+/**
+ * 仅测试注入点（*ForTest）的护栏：与 compression* 模块同一约定，非 VITEST 进程调用直接抛错，
+ * 生产代码即使误调也改不了开关、删除函数、目录 fsync 或缓存。开关本身不读环境变量。
+ */
+function assertTestRuntime(name: string): void {
+  if (process.env.VITEST !== "1") throw new Error(`${name} 只能在 VITEST 使用`);
+}
+
 let enabled: boolean = GLB_WEBP_VARIANT;
 
 /** 对外返回旁路的总开关（rolloutFlags.GLB_WEBP_VARIANT，默认关）。 */
@@ -44,6 +52,7 @@ export function glbWebpVariantEnabled(): boolean {
 
 /** 测试注入：不读 env，不提供运行时覆盖。 */
 export function setGlbWebpVariantEnabledForTest(value: boolean): void {
+  assertTestRuntime("setGlbWebpVariantEnabledForTest");
   enabled = value;
 }
 
@@ -51,6 +60,7 @@ let unlinkImpl: (path: string) => void = unlinkSync;
 
 /** 测试用：记录删除顺序（meta 必须先于旁路被删）。传 null 恢复。 */
 export function setGlbWebpVariantUnlinkForTest(fn: ((path: string) => void) | null): void {
+  assertTestRuntime("setGlbWebpVariantUnlinkForTest");
   unlinkImpl = fn ?? unlinkSync;
 }
 
@@ -89,6 +99,7 @@ let dirSyncFs: DirSyncFs = realDirSyncFs;
 
 /** 测试用：模拟目录 open/fsync 报 EISDIR/EPERM（Windows 行为）。传 null 恢复，并重置"只记一次"。 */
 export function setGlbWebpVariantDirSyncForTest(fs: Partial<DirSyncFs> | null): void {
+  assertTestRuntime("setGlbWebpVariantDirSyncForTest");
   dirSyncFs = fs ? { ...realDirSyncFs, ...fs } : realDirSyncFs;
   fsyncDirWarned = false;
 }
@@ -115,12 +126,14 @@ const hashCache = new Map<string, string>();
 let hashComputeCount = 0;
 
 export function resetGlbWebpVariantCacheForTest(): void {
+  assertTestRuntime("resetGlbWebpVariantCacheForTest");
   hashCache.clear();
   hashComputeCount = 0;
 }
 
 /** 测试用：实际流式重算 sha256 的次数（命中缓存不计）。 */
 export function glbWebpVariantHashComputeCountForTest(): number {
+  assertTestRuntime("glbWebpVariantHashComputeCountForTest");
   return hashComputeCount;
 }
 
