@@ -6,6 +6,11 @@
 - `GET /api/settings` 按角色裁剪：reviewer / viewer 只拿到字段元数据（key、label、kind、help、restart、adminOnly）和 `set`；除开关类字段与 `WB_MAX_UPLOAD_MB` 外，`value`、`last4` 两个键整体省略（不返回空串或 null），不再泄露 tenant_key、open_id、应用 ID、对外网址和本机路径。`derived` 对非管理员去掉 `redirect_uri`、`python`；`health.mockup.detail` 对非管理员不含 Blender 路径。管理员返回不变。
 - `POST /api/settings/probe`、`GET /api/settings/billing`、`POST /api/settings/billing/refresh` 改为仅管理员，非管理员返回 403（含 reviewer 原先可用的飞书推送测试）。
 
+### Changed
+- 「设置」只给管理员（老板 2026-10-11 批准）：非管理员侧栏不再出现「设置」；直接打开 `/settings` 只显示「这里只有管理员能看」和「回审稿台」，不请求 `/api/settings`、`/api/settings/probe`、`/api/settings/billing`。管理员不变。
+- 外观（主题、字号等）加进左下头像菜单，所有人可用，改了立即生效，只写本机 `localStorage`；管理员设置页里的「外观」照旧。
+- 设置页兼容后端按角色裁剪：`value` / `last4` 被省略时表单回落为空、密钥占位不露尾号、保存时不把省略的值写成空；整组没字段时不进菜单、不留空框。
+
 ## [0.31.1.13] - 2026-10-11
 
 ### Added
