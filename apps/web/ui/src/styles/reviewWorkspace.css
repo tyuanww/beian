@@ -137,8 +137,8 @@ html[data-theme="dark"] .review-miss { color: #F2B44C; background: #43332E; }
    <1024 再挤时隐藏「还有 N 条没下结论」，改由签字按钮的悬停说明（title）给出（T14 允许悬停说明）。 */
 .review-flat-page:not(.is-phone) .review-top { flex-wrap: nowrap; }
 .review-flat-page:not(.is-phone) .review-top > * { flex-shrink: 0; }
-.review-flat-page:not(.is-phone) .review-top > .review-title { flex: 1 1 auto; min-width: 0; max-width: none; }
-.review-flat-page:not(.is-phone) .review-top > .review-grow { flex: 0 0 0; }
+.review-flat-page:not(.is-phone) .review-top > .review-title { flex: 0 1 auto; min-width: 0; max-width: none; }
+.review-flat-page:not(.is-phone) .review-top > .review-grow { flex: 1 1 0; }
 .review-flat-page:not(.is-phone) .review-actions { margin-left: auto; flex-wrap: nowrap; }
 .review-flat-page:not(.is-phone) .review-actions > button { flex: none; }
 .review-flat-page:not(.is-phone) .review-signhint { white-space: nowrap; }
