@@ -255,8 +255,24 @@ function redactUrlAt(s: string, start: number, known: string[]): [string, number
 const REDACT_MAX_CHARS = 8000;
 const TRUNCATED_MARK = "（后面省略）";
 
-function decodeSeparators(s: string): string {
-  return s.replace(/%5c/gi, "\\").replace(/%2f/gi, "/");
+/** 编码分隔符最多解几层（`%2F` 一层、`%252F` 两层、`%25252F` 三层）。 */
+const MAX_DECODE_LAYERS = 3;
+
+/**
+ * 还原 URL 编码的分隔符：每层先把 `%5C` / `%2F` 还原，再把紧挨分隔符编码的一层 `%25` 剥掉，
+ * 循环到不再变化，最多 MAX_DECODE_LAYERS 层。不挨着 `2F` / `5C` 的 `%25` 原样保留。
+ */
+function decodeSeparators(input: string): string {
+  let s = input;
+  for (let k = 0; k < MAX_DECODE_LAYERS; k += 1) {
+    const next = s
+      .replace(/%5c/gi, "\\")
+      .replace(/%2f/gi, "/")
+      .replace(/%25((?:25)*)(2f|5c)/gi, "%$1$2");
+    if (next === s) break;
+    s = next;
+  }
+  return s;
 }
 
 export function redactLocalPaths(message: string | undefined | null): string {
