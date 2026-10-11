@@ -8,7 +8,7 @@ import { blenderBin, illustratorBin, pythonBin } from "./settings.js";
  * ② 还原后超过 8000 字符只取前 8000 字符，末尾追加「（后面省略）」；③ 对截下的文本脱敏，其中 `http(s)://` 等网址
  * 整段原样保留（`file://` 照常脱敏）。脱敏用手写的线性扫描器（不用回溯正则，避免 ReDoS）。规则：
  * - 路径起点：Windows 盘符 `X:\` / `X:/`（前一个字符不能是 ASCII 字母数字，`abc:\x` 不算）；`file://` 前缀先去掉；UNC `\\`（含 `\\?\`）；Unix 绝对路径 `/`（前一个字符不是 ASCII 字母数字或 `. _ - ~ / \`，
- *   所以紧贴中文也算起点，相对路径 `docs/x.md` 不算）；`~/` 与 `~用户名/`；无盘符的反斜杠根路径 `\\Users\\bob\\a.pdf`（至少一级目录且末段带扩展名才算）。Unix 路径至少要有一级目录（`/tmp` 原样保留）。
+ *   所以紧贴中文也算起点，相对路径 `docs/x.md` 不算）；`~/` 与 `~用户名/`；无盘符的反斜杠根路径 `\\Users\\bob\\a.pdf`（至少一级目录；末段不是文件名时要求有一段目录名不少于 2 个字符，`\\n\\t` 不算）。Unix 路径至少要有一级目录（`/tmp` 原样保留）。
  * - 路径在空白、引号、括号、逗号分号等中英文标点处结束；Windows / UNC 目录名中的空格见 scanPath。
  * - 末段带 1–8 位 ASCII 扩展名的当作文件名保留；扩展名后紧跟非 ASCII 字符（如「失败」）时，文件名到扩展名为止。
  *   堆栈里的 `文件名:行:列` 保留行列号。末段没有扩展名时整段换成「本机路径」；末段是「ASCII 开头 + 中文结尾」时中文部分视为后文保留。
@@ -155,8 +155,9 @@ function scanAndRedact(s: string): string {
     const isUnix = s[i] === "/" || s[i] === "~" || bsRoot;
     const [end, lastSep] = scanPath(s, from, !isUnix);
     const [text, rest] = renderLeaf(s.slice(lastSep + 1, end));
-    // Unix / 反斜杠根路径至少一级目录；反斜杠根路径还要求末段是文件名，避免误伤 `\n\t` 之类转义。
-    if ((isUnix && lastSep <= i) || (bsRoot && text === LOCAL_PLACEHOLDER)) {
+    // Unix / 反斜杠根路径至少一级目录；反斜杠根路径没有文件名时，还要求至少一段目录名不少于 2 个字符，
+    // 避免误伤 `\n\t` 之类单字母转义（`\Users\bob\Desktop` 照常换成「本机路径」）。
+    if ((isUnix && lastSep <= i) || (bsRoot && text === LOCAL_PLACEHOLDER && !/[^\\/]{2}/.test(s.slice(i, end)))) {
       emit(s[i]);
       i += 1;
       continue;
