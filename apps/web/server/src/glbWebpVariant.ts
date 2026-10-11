@@ -83,12 +83,22 @@ export function glbWebpVariantPaths(jobId: string, glbPath: string): GlbWebpVari
 
 let fsyncDirWarned = false;
 
+type DirSyncFs = { open: (path: string, flags: string) => number; fsync: (fd: number) => void; close: (fd: number) => void };
+const realDirSyncFs: DirSyncFs = { open: openSync, fsync: fsyncSync, close: closeSync };
+let dirSyncFs: DirSyncFs = realDirSyncFs;
+
+/** 测试用：模拟目录 open/fsync 报 EISDIR/EPERM（Windows 行为）。传 null 恢复，并重置"只记一次"。 */
+export function setGlbWebpVariantDirSyncForTest(fs: Partial<DirSyncFs> | null): void {
+  dirSyncFs = fs ? { ...realDirSyncFs, ...fs } : realDirSyncFs;
+  fsyncDirWarned = false;
+}
+
 /** unlink/rename 之后让目录项落盘。Windows 打开目录会报 EISDIR/EPERM：best-effort，记一次 debug 后继续。 */
 export function fsyncDir(dir: string): void {
   let fd: number | undefined;
   try {
-    fd = openSync(dir, "r");
-    fsyncSync(fd);
+    fd = dirSyncFs.open(dir, "r");
+    dirSyncFs.fsync(fd);
   } catch (error) {
     if (!fsyncDirWarned) {
       fsyncDirWarned = true;
@@ -96,7 +106,7 @@ export function fsyncDir(dir: string): void {
     }
   } finally {
     if (fd !== undefined) {
-      try { closeSync(fd); } catch { /* ignore */ }
+      try { dirSyncFs.close(fd); } catch { /* ignore */ }
     }
   }
 }
