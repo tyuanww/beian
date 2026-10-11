@@ -73,7 +73,16 @@ export function resetGlbTextureFormatCacheForTest(): void {
 }
 
 /** 把 GLB 内贴图转成 WebP，内存中完成；不写盘。 */
-export async function convertGlbBytesToWebp(input: Uint8Array, quality = GLB_WEBP_QUALITY): Promise<{ bytes: Uint8Array; textures: number }> {
+/**
+ * 必须传 encoder=sharp：@gltf-transform/functions 4.5.1 的 compressTexture 在 encoder 存在时只走
+ * _encodeWithSharp（含 resize 也是 sharp），不调用 ndarray-pixels 的 getPixels/savePixels。
+ * 因此根 overrides 把 ndarray-pixels 的 sharp ^0.35 压到 0.34.4 不影响本路径（glb-webp.test.ts 钉住）。
+ */
+export async function convertGlbBytesToWebp(
+  input: Uint8Array,
+  quality = GLB_WEBP_QUALITY,
+  encoderOverride?: unknown,
+): Promise<{ bytes: Uint8Array; textures: number }> {
   const [{ NodeIO }, { ALL_EXTENSIONS }, { textureCompress }, sharpMod] = await Promise.all([
     import("@gltf-transform/core"),
     import("@gltf-transform/extensions"),
@@ -84,7 +93,7 @@ export async function convertGlbBytesToWebp(input: Uint8Array, quality = GLB_WEB
   const doc = await io.readBinary(input);
   const textures = doc.getRoot().listTextures().length;
   if (textures === 0) return { bytes: input, textures: 0 };
-  await doc.transform(textureCompress({ encoder: sharpMod.default, targetFormat: "webp", quality }));
+  await doc.transform(textureCompress({ encoder: (encoderOverride ?? sharpMod.default) as typeof sharpMod.default, targetFormat: "webp", quality }));
   const bytes = await io.writeBinary(doc);
   return { bytes, textures };
 }

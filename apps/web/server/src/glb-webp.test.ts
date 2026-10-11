@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { createRequire } from "node:module";
+import { dirname, join } from "node:path";
 import { describe, it } from "node:test";
 import { makeTestTempDir } from "./testTemp.js";
 
@@ -10,6 +11,7 @@ process.env.WB_DATA_DIR = makeTestTempDir("beian-glb-webp-");
 const {
   buildPngTexturedGlbForProbe,
   compressGlbTexturesToWebp,
+  convertGlbBytesToWebp,
   glbTextureFormat,
   readGlbJson,
   resetGlbTextureFormatCacheForTest,
@@ -62,6 +64,31 @@ describe("glb webp post-step", () => {
     assert.equal(glbTextureFormat(path), "png");
     await compressGlbTexturesToWebp(path);
     assert.equal(glbTextureFormat(path), "webp");
+  });
+
+  it("encodes every texture through our sharp (not ndarray-pixels)", async () => {
+    const sharp = (await import("sharp")).default;
+    let calls = 0;
+    const spy = ((...args: Parameters<typeof sharp>) => {
+      calls += 1;
+      return sharp(...args);
+    }) as typeof sharp;
+    const { textures } = await convertGlbBytesToWebp(await buildPngTexturedGlbForProbe(64), 90, spy);
+    assert.equal(textures, 1);
+    assert.equal(calls, textures);
+  });
+
+  it("pins @gltf-transform/functions: encoder present => sharp path only, ndarray-pixels never used", () => {
+    const require = createRequire(import.meta.url);
+    const pkgDir = dirname(dirname(require.resolve("@gltf-transform/functions")));
+    const pkg = JSON.parse(readFileSync(join(pkgDir, "package.json"), "utf8")) as { version: string };
+    assert.equal(pkg.version, "4.5.1", "bump requires re-verifying the encoder branch below");
+    const src = readFileSync(join(pkgDir, "dist", "index.js"), "utf8");
+    const body = src.slice(src.indexOf("async function compressTexture("), src.indexOf("async function _encodeWithNdarrayPixels("));
+    assert.match(body, /const dstImage = encoder \? await _encodeWithSharp\(/);
+    const sharpFn = body.slice(body.indexOf("async function _encodeWithSharp("));
+    assert.doesNotMatch(sharpFn, /getPixels|savePixels/);
+    assert.match(sharpFn, /instance\.resize\(/);
   });
 });
 
