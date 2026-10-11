@@ -10,8 +10,15 @@ export type GlbTextureInfo = { [K in typeof GLB_TEXTURE_FORMAT_FIELD]?: GlbTextu
 // 无文档依据，需老板定（见 webp-fallback-basis.md）；句式沿用「3D 预览加载失败…下载仍为原始模型。」
 export const GLB_WEBP_UNSUPPORTED_TEXT = "此设备无法显示 3D 预览，先看效果图。下载仍为原始模型。";
 
-/** 最小合法 1×1 无损 WebP。 */
-const WEBP_PROBE_DATA_URL = "data:image/webp;base64,UklGRhoAAABXRUJQVlA4TA0AAAAvAAAAEAcQERGIiP4HAA==";
+/** 最小合法 1×1 无损 WebP（base64）。本地 atob 成 Blob，不走 fetch，也不用 data: URL，免得被 CSP 误判为不支持。 */
+const WEBP_PROBE_BASE64 = "UklGRhoAAABXRUJQVlA4TA0AAAAvAAAAEAcQERGIiP4HAA==";
+
+export function webpProbeBlob(): Blob {
+  const binary = atob(WEBP_PROBE_BASE64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return new Blob([bytes], { type: "image/webp" });
+}
 
 export function glbTextureFormat(files: Array<{ key: string } & GlbTextureInfo> | undefined): string | undefined {
   return files?.find((file) => file.key === "glb")?.[GLB_TEXTURE_FORMAT_FIELD];
@@ -27,15 +34,15 @@ export function glbTextureGate(format: string | undefined, webpSupported: boolea
 
 export type WebpDecoder = {
   createImageBitmap?: (blob: Blob) => Promise<{ width: number; height: number; close?: () => void }>;
-  fetchBlob?: (url: string) => Promise<Blob>;
-  decodeImage?: (url: string) => Promise<{ width: number; height: number }>;
+  decodeImage?: (blob: Blob) => Promise<{ width: number; height: number }>;
 };
 
-/** 真解码：优先 createImageBitmap，取不到或失败再退 Image.decode()；任何异常都算不支持。 */
+/** 真解码：优先 createImageBitmap(Blob)，取不到或失败再退 Image.decode()（blob: URL）；任何异常都算不支持。 */
 export async function probeWebpDecode(decoder: WebpDecoder): Promise<boolean> {
-  if (decoder.createImageBitmap && decoder.fetchBlob) {
+  const blob = webpProbeBlob();
+  if (decoder.createImageBitmap) {
     try {
-      const bitmap = await decoder.createImageBitmap(await decoder.fetchBlob(WEBP_PROBE_DATA_URL));
+      const bitmap = await decoder.createImageBitmap(blob);
       const ok = bitmap.width === 1 && bitmap.height === 1;
       bitmap.close?.();
       if (ok) return true;
@@ -43,7 +50,7 @@ export async function probeWebpDecode(decoder: WebpDecoder): Promise<boolean> {
   }
   if (!decoder.decodeImage) return false;
   try {
-    const image = await decoder.decodeImage(WEBP_PROBE_DATA_URL);
+    const image = await decoder.decodeImage(blob);
     return image.width === 1 && image.height === 1;
   } catch {
     return false;
@@ -54,12 +61,16 @@ function browserWebpDecoder(): WebpDecoder {
   const scope = globalThis as typeof globalThis & { Image?: typeof Image };
   return {
     createImageBitmap: typeof scope.createImageBitmap === "function" ? (blob) => scope.createImageBitmap(blob) : undefined,
-    fetchBlob: typeof scope.fetch === "function" ? async (url) => (await scope.fetch(url)).blob() : undefined,
-    decodeImage: typeof scope.Image === "function" ? async (url) => {
-      const image = new scope.Image!();
-      image.src = url;
-      await image.decode();
-      return { width: image.naturalWidth, height: image.naturalHeight };
+    decodeImage: typeof scope.Image === "function" && typeof URL.createObjectURL === "function" ? async (blob) => {
+      const url = URL.createObjectURL(blob);
+      try {
+        const image = new scope.Image!();
+        image.src = url;
+        await image.decode();
+        return { width: image.naturalWidth, height: image.naturalHeight };
+      } finally {
+        URL.revokeObjectURL(url);
+      }
     } : undefined,
   };
 }

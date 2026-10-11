@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  GLB_TEXTURE_FORMAT_FIELD, GLB_WEBP_UNSUPPORTED_TEXT, createWebpSupport, glbTextureFormat, glbTextureGate, probeWebpDecode,
+  GLB_TEXTURE_FORMAT_FIELD, GLB_WEBP_UNSUPPORTED_TEXT, createWebpSupport, glbTextureFormat, glbTextureGate, probeWebpDecode, webpProbeBlob,
   type WebpDecoder,
 } from "./mockupGlbTexture";
 
@@ -34,23 +34,42 @@ test("未知取值按旧单处理，只读 glb 文件上的字段", () => {
 });
 
 const bitmap = (w = 1, h = 1) => async () => ({ width: w, height: h, close() {} });
-const blob = async () => new Blob([]);
 
 test("探测真解码：createImageBitmap 成功即支持", async () => {
-  assert.equal(await probeWebpDecode({ createImageBitmap: bitmap(), fetchBlob: blob }), true);
+  assert.equal(await probeWebpDecode({ createImageBitmap: bitmap() }), true);
 });
 
 test("createImageBitmap 失败退 Image.decode", async () => {
   const fail = async () => { throw new Error("decode"); };
-  assert.equal(await probeWebpDecode({ createImageBitmap: fail, fetchBlob: blob, decodeImage: async () => ({ width: 1, height: 1 }) }), true);
-  assert.equal(await probeWebpDecode({ createImageBitmap: fail, fetchBlob: blob, decodeImage: fail }), false);
+  assert.equal(await probeWebpDecode({ createImageBitmap: fail, decodeImage: async () => ({ width: 1, height: 1 }) }), true);
+  assert.equal(await probeWebpDecode({ createImageBitmap: fail, decodeImage: fail }), false);
   assert.equal(await probeWebpDecode({ decodeImage: async () => ({ width: 0, height: 0 }) }), false);
   assert.equal(await probeWebpDecode({}), false);
 });
 
+test("探测不调用 fetch，交给解码器的是本地 image/webp Blob", async () => {
+  const original = globalThis.fetch;
+  let fetched = 0;
+  globalThis.fetch = (async () => { fetched++; throw new Error("no fetch"); }) as typeof fetch;
+  try {
+    const seen: Blob[] = [];
+    const fail = async (b: Blob) => { seen.push(b); throw new Error("decode"); };
+    assert.equal(await probeWebpDecode({ createImageBitmap: fail, decodeImage: fail }), false);
+    assert.equal(await probeWebpDecode({ createImageBitmap: async (b) => { seen.push(b); return bitmap()(); } }), true);
+    assert.equal(fetched, 0);
+    assert.equal(seen.length, 3);
+    for (const b of seen) { assert.equal(b.type, "image/webp"); assert.equal(b.size, 34); }
+    const head = new Uint8Array(await webpProbeBlob().arrayBuffer());
+    assert.equal(String.fromCharCode(...head.slice(0, 4)), "RIFF");
+    assert.equal(String.fromCharCode(...head.slice(8, 12)), "WEBP");
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
 test("每个会话只探测一次", async () => {
   let calls = 0;
-  const support = createWebpSupport((): WebpDecoder => ({ createImageBitmap: async () => { calls++; return bitmap()(); }, fetchBlob: blob }));
+  const support = createWebpSupport((): WebpDecoder => ({ createImageBitmap: async () => { calls++; return bitmap()(); } }));
   assert.equal(support.known(), null);
   const [a, b] = [support.detect(), support.detect()];
   assert.equal(a, b);

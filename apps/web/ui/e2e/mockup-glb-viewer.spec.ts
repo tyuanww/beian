@@ -187,7 +187,7 @@ async function denyWebp(page: Page) {
     const bitmap = window.createImageBitmap.bind(window);
     (window as any).createImageBitmap = (src: any, ...rest: any[]) => isWebp(src) ? Promise.reject(new DOMException('webp','EncodingError')) : (bitmap as any)(src, ...rest);
     const decode = HTMLImageElement.prototype.decode;
-    HTMLImageElement.prototype.decode = function () { return this.src.startsWith('data:image/webp') ? Promise.reject(new DOMException('webp','EncodingError')) : decode.call(this); };
+    HTMLImageElement.prototype.decode = function () { return this.src.startsWith('blob:') ? Promise.reject(new DOMException('webp','EncodingError')) : decode.call(this); };
   });
 }
 
