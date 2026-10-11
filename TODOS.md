@@ -237,7 +237,8 @@ RF-10–RF-13 的原始依赖见 [ADR-007 §20.7](docs/adr-007-packaging-render-
 
   1. 收窄启动临时文件清理：当前在 `reclaimOnBoot` 前同步遍历 `DATA_DIR/mockups`（深度 ≤6）。改为只扫已知打样输出位置（`mockups/<id>/` 与 `.render-generations/.candidate-*`），或挪到服务开始监听之后的后台一次性任务，避免大量历史单拖慢启动。
   2. 串行压缩锁加超时：单次转换卡住（异常大贴图、sharp 挂起）会让后续打样一直排队。给每次压缩设上限，超时按失败处理、保留原 PNG GLB 并释放锁，补“卡住不阻塞下一单”的测试。
-  3. 运维文档：写清在杭州日志里如何找 GLB 转换失败/跳过（关键字 `glb webp failed, keep original PNG GLB`、`glb webp skipped`、`render-generation <job> glb webp`；发版日志的 `GLB WebP conversion` 探针），以及如何用详情 `files[].texture_format` 抽查。只读日志，另获授权后才在杭州执行。**验收：三项各自有代码/文档与测试或现场记录。**
+  3. 运维文档：写清在杭州日志里如何找 GLB 转换失败/跳过（关键字 `glb webp failed, keep original PNG GLB`、`glb webp skipped`、`render-generation <job> glb webp`；发版日志的 `GLB WebP conversion` 探针），以及如何用详情 `files[].texture_format` 抽查。只读日志，另获授权后才在杭州执行。
+  4. 把压缩挪到独立子进程，使其可被中途中止（超时/取消直接杀进程、保留原 GLB）：消除 #13（0.31.1.12）残余风险——单次转换远慢于估算并越过截止时间时，出图仍可能在后续检查点超时失败。**验收：四项各自有代码/文档与测试或现场记录。**
 
 ## P2 — 新增下载与文件压缩（3 项）
 
