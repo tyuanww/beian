@@ -231,3 +231,15 @@ describe("mockup Feishu failure notification is guarded", () => {
     }
   });
 });
+
+describe("leak residue: backslash + letters left after redaction", () => {
+  it("C:\\Documents and Settings\\bob is hidden", () => {
+    assert.equal(guardPublicError("C:\\Documents and Settings\\bob", "0000000d0001").hidden, true);
+    assert.equal(hasLeakResidue("本机路径 and Settings\\bob"), true);
+  });
+  it("one-letter escapes stay visible; tradeoff: literal \\nfoo also hides", () => {
+    assert.equal(guardPublicError("用 \\n 换行", "x").hidden, false);
+    assert.equal(guardPublicError("\\n\\t", "x").hidden, false);
+    assert.equal(hasLeakResidue("a\\nfoo"), true);
+  });
+});
