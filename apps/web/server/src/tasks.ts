@@ -3,6 +3,7 @@ import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameS
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { DATA_DIR } from "./config.js";
+import { redactLocalPaths } from "./pathRedact.js";
 import { cleanCompleteKind, forgetHistory, noteHistoryReview } from "./historyIndex.js";
 import { skipPackSheetField } from "./sheetSkip.js";
 
@@ -278,6 +279,7 @@ export function listTasks(q: string, viewer: Viewer): Record<string, unknown>[] 
   const byTime = (a: Task, b: Task) => String(b.created_at || "").localeCompare(String(a.created_at || ""));
   open.sort(byTime);
   done.sort(byTime);
+  const shownError = (v: string | undefined) => (viewer.admin ? v : v === undefined ? v : redactLocalPaths(v));
   return [...open, ...done].map((t) => ({
     id: t.id,
     title: t.title,
@@ -290,13 +292,13 @@ export function listTasks(q: string, viewer: Viewer): Record<string, unknown>[] 
     complete_kind: t.status === "completed" ? cleanCompleteKind(t.complete_kind) : null,
     round: t.round || 1,
     board: boardColumn(t.status, t.job_status),
-    error: typeof t.error === "string" ? t.error : t.job_error || "",
+    error: shownError(typeof t.error === "string" ? t.error : t.job_error || ""),
     job_kind: t.job_kind,
     job_status: t.job_status,
     job_stage: t.job_stage,
     job_stage_label: t.job_stage_label,
     job_eta_s: t.job_eta_s,
-    job_error: t.job_error,
+    job_error: shownError(t.job_error),
     job_started_at: t.job_started_at,
     job_finished_at: t.job_finished_at,
   }));

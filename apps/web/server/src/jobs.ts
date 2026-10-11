@@ -80,6 +80,7 @@ import {
 } from "./workers.js";
 import { inspectRenderGenerationGroup, recoverWindowsRenderGeneration, signalRenderGenerationGroup } from "./renderGenerationProcess.js";
 import { illustratorBin } from "./settings.js";
+import { redactLocalPaths } from "./pathRedact.js";
 import { rasterAiFile } from "./aiRaster.js";
 import { readIllustratorAgentStatus } from "./illustratorAgent.js";
 import {
@@ -408,8 +409,12 @@ export function publicTask(task: Task, viewer?: Viewer): Record<string, unknown>
     source_receipt: _sourceReceipt,
     ...rest
   } = task;
+  // 非管理员（含没带 viewer 的调用）看到的报错去掉本机目录，只留文件名；管理员看原文。
+  const redact = !viewer?.admin;
   return {
     ...rest,
+    ...(redact && typeof rest.job_error === "string" ? { job_error: redactLocalPaths(rest.job_error) } : {}),
+    ...(redact && typeof rest.error === "string" ? { error: redactLocalPaths(rest.error) } : {}),
     ...(nativePublic(task) ? { native_text: nativePublic(task) } : {}),
     queue_ahead: queueAheadFrom(queueRanks(), task.id, task.job_kind, task.job_status),
   };
