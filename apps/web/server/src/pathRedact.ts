@@ -214,11 +214,42 @@ function urlPathAt(s: string, j: number, known: string[]): string | null {
   return null;
 }
 
-/** 网址内路径的结束位置：到 `& # ?`、空白、引号、反引号、尖括号或中文标点为止。 */
-function urlPathEnd(s: string, from: number): number {
+/**
+ * 网址内路径的结束位置：到 `& # ?`、空白、引号、反引号、尖括号或中文标点为止（中文、emoji 不算终点）。
+ * Windows 写法（盘符、反斜杠）的空格与网址外 scanPath 同一规则：空格后的词在空白、终点字符或新路径起点之前
+ * 出现分隔符才续接；空格前末段无扩展名、空格后的词以扩展名结尾（`a b.pdf`）时把这个词算进来。单趟扫描，线性。
+ */
+function urlPathEnd(s: string, from: number, allowSpaces: boolean): number {
+  const stop = (ch: string) => isSpace(ch) || URL_PATH_STOP.has(ch);
   let j = from;
-  while (j < s.length && !isSpace(s[j]) && !URL_PATH_STOP.has(s[j])) j += 1;
-  return j;
+  let lastSep = from - 1;
+  let pending = -1;
+  let newPath = false;
+  while (j < s.length) {
+    const ch = s[j];
+    if (ch === " " && allowSpaces) {
+      if (pending >= 0) break;
+      pending = j;
+      j += 1;
+      continue;
+    }
+    if (stop(ch)) break;
+    if (isSep(ch)) {
+      if (pending >= 0 && j === pending + 1) {
+        newPath = true;
+        break;
+      }
+      lastSep = j;
+      pending = -1;
+    } else if (pending >= 0 && pathStart(s, j) >= 0) {
+      newPath = true;
+      break;
+    }
+    j += 1;
+  }
+  if (pending < 0) return j;
+  if (!newPath && !EXT_AT_END.test(s.slice(lastSep + 1, pending)) && EXT_AT_END.test(s.slice(pending + 1, j))) return j;
+  return pending;
 }
 
 /**
@@ -241,7 +272,7 @@ function redactUrlAt(s: string, start: number, known: string[]): [string, number
     const repl = urlPathAt(s, j, known);
     if (repl !== null) {
       out.push(repl);
-      j = urlPathEnd(s, j);
+      j = urlPathEnd(s, j, !repl.startsWith("/"));
       continue;
     }
     if (!isUrlChar(s[j])) break;
