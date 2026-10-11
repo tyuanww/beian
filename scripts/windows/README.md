@@ -58,7 +58,7 @@ Start-ScheduledTask -TaskName "beian-illustrator-agent"
 
 等 10 秒，确认任务变为 `Running`、心跳 PID 已更新且进程仍活，再跑只读 probe。永久修复不能只靠这一次手工启动。
 
-Agent 只做会话桥：UTF-8 JSON 命名管道 `beian.illustrator.v1` → 现有 `cscript run_export.vbs` → 唯一 `export_structure.jsx`。结构 exporter 引用的固定 `curve_flatten.js` 与 `unattended_host.jsx` 会由 Agent 在 job 目录生成 runtime JSX 时确定性内联。COM 仍留在 VBS；PowerShell 不加载 `Illustrator.Application`。完工信号是本代 `illustrator_result.json`，不是墙钟 Kill；`saving_full_pdf` / `saving_artwork_pdf` / `writing_result` 期间禁止 Kill cscript。围栏 `illustrator-fault.json` 只在进程重启后仍有不明文档时落下。管道 ACL 只允许 LocalSystem 与注册的管理员，心跳绑定 SID、脚本哈希、版本、checkout、管道和 PID；客户端再核对实际管道服务 PID。协议只接受固定的 `probe` / `run` / `smoke`，不执行调用方传来的任意命令或脚本。PS5/cscript 的 GBK 输出由 Agent 在边界内按系统代码页解码，再编码为 UTF-8 JSON。
+Agent 只做会话桥：UTF-8 JSON 命名管道 `beian.illustrator.v1` → 现有 `cscript run_export.vbs` → 唯一 `export_structure.jsx`。结构 exporter 引用的固定 `curve_flatten.js` 与 `unattended_host.jsx` 会由 Agent 在 job 目录生成 runtime JSX 时确定性内联。COM 仍留在 VBS；PowerShell 不加载 `Illustrator.Application`。完工信号是本代 `illustrator_result.json`，不是墙钟 Kill；`saving_full_pdf` / `saving_artwork_pdf` / `writing_result` 期间不按墙钟 Kill cscript，唯一例外是保存阶段看门狗（任务目录连续 300 秒无变化时，按 pid+启动时间结束本任务的 Illustrator 并重启，见下文「Illustrator 看门狗」）。围栏 `illustrator-fault.json` 只在进程重启后仍有不明文档时落下。管道 ACL 只允许 LocalSystem 与注册的管理员，心跳绑定 SID、脚本哈希、版本、checkout、管道和 PID；客户端再核对实际管道服务 PID。协议只接受固定的 `probe` / `run` / `smoke`，不执行调用方传来的任意命令或脚本。PS5/cscript 的 GBK 输出由 Agent 在边界内按系统代码页解码，再编码为 UTF-8 JSON。
 
 运行证据写到 `$env:WB_DATA_DIR\runtime\illustrator-agent.json`，日志在 `$env:WB_DATA_DIR\logs\illustrator-agent.jsonl`。从 `D:\beian` 只读探测：
 
@@ -66,7 +66,7 @@ Agent 只做会话桥：UTF-8 JSON 命名管道 `beian.illustrator.v1` → 现�
 & $env:WB_PYTHON workers\packaging\illustrator\illustrator_agent.py probe --timeout 120
 ```
 
-返回必须包含 `ok=true`、`session_id>0`、可见窗口、Illustrator PID 与空文档名列表。Session 0、无窗口、心跳过期或未知已开稿都不能继续打样。每次执行在 cscript/COM 前把 `$env:WB_DATA_DIR\runtime\illustrator-fault.json` 写成 `active` 作业围栏，正常完成或已证明清理完成才删除。心跳 `busy` 只表示正在干活，新打样单排队，不是离线，也不要把 busy 清成围栏。`faulted` 只在进程重启后仍有不明文档、或 Illustrator 无法再启动时落下；saving 超时不得因此锁死全厂。不能编辑心跳把它改回 idle，也不能靠重启/升版自动清 `faulted`。
+返回必须包含 `ok=true`、`session_id>0`、可见窗口、Illustrator PID 与空文档名列表。Session 0、无窗口、心跳过期或未知已开稿都不能继续打样。每次执行在 cscript/COM 前把 `$env:WB_DATA_DIR\runtime\illustrator-fault.json` 写成 `active` 作业围栏，正常完成或已证明清理完成才删除。心跳 `busy` 只表示正在干活，新打样单排队，不是离线，也不要把 busy 清成围栏。`faulted` 只在进程重启后仍有不明文档、Illustrator 无法再启动、看门狗无法证实进程身份、或看门狗 1 小时内重启已达 2 次上限时落下；saving 超时不得因此锁死全厂。不能编辑心跳把它改回 idle，也不能靠重启/升版自动清 `faulted`。
 
 管理员确认桌面无稿，并确认 Illustrator、AIRobin、cscript、wscript 及其他临时 Agent 都已退出后，在**交互式、已提升权限**的 PowerShell 运行下列显式恢复；脚本会再次核对会话、管理员身份、任务和进程，随后清围栏并重装登录任务。LocalSystem、Session 0、仍有桌面自动化进程或普通卸载都不能清除：
 
@@ -86,6 +86,41 @@ node_modules\.bin\tsx.cmd apps\web\server\src\recoverNativeText.ts --task <任�
 ```
 
 只有输出 `"outcome":"recovered"`（退出码 0）才算完成；`worker_not_proven_gone` 表示记录的执行者仍在或无法证明已退出，`attempt_mismatch` / `not_stuck` 表示参数或状态不符，均不改文件；`changed_during_check` 表示核对期间任务文件被改动，本命令未写入：确认 8787 已停后重跑。`overwritten_concurrently` 表示已写入但写后检测到并发修改，需人工核对这条任务。任务 JSON 没有文件锁，8787 在线时服务端写入可能与本命令交错，所以不支持在 8787 运行时执行。使用 `D:\beian` 已装的 tsx（发版以 `--include=dev` 安装，与 8787 同一启动器），不要用 `npx`（可能联网）。之后启动 8787，确认 health 的 `illustrator.running` 为 0，再按发布合同重跑同一条 push run。
+
+### Illustrator 看门狗：save_source_changed / watchdog_restart_cap 恢复
+
+从 0.31.1.9 起，Agent 在保存阶段（`saving_full_pdf` / `saving_artwork_pdf`）任务目录连续 300 秒无任何变化时，只结束 pid+启动时间与本任务一致的 Illustrator 并在 Session 1 重启、跑 smoke；无窗口（没有任何可见顶层窗口）且启动超过 120 秒的 Illustrator 走同一身份核对路径。正常情况（`save_timeout`）自动回退图像识别并发飞书，无需值班处理。下面两种情况会**锁住 Illustrator 槽**，需要人工：
+
+| 公开原因 | 触发 | 锁住什么 |
+| --- | --- | --- |
+| `save_source_changed` | 看门狗结束 Illustrator 后，原稿 SHA-256 与任务开始时不一致 | 原生文字：任务 `native_text_request` 保持 `running` + `save_source_changed`，不写 `close.json`，**该任务 OCR 也不放行**；净版展开：`unfolded_print_request` 保持 `running` + `close_unconfirmed`。`/api/health` 的 `illustrator.running` 保持 1 |
+| `watchdog_restart_cap` | 滚动 1 小时内看门狗已结束/重启 2 次（记录在 `$env:WB_DATA_DIR\runtime\watchdog-restarts.json`），第 3 次被拒 | Agent 写 `runtime\illustrator-fault.json` = `faulted`（`illustrator_recovery_failed`），心跳 `faulted`；卡住的 Illustrator **不会再被结束**。触发该次的任务记为 `close_unconfirmed` |
+
+后果：其后所有原生文字 / 净版展开 / 打样 Illustrator 作业排队不动；发版前置检查会因 `jobs_active` 或 Agent `faulted` 拒绝，发版里的 Illustrator smoke 也会失败。两者都会发飞书告警（`原稿可能被改动` / `1 小时内已自动重启 2 次`）。
+
+值班步骤（杭州机，交互式、已提升权限的 PowerShell，`D:\beian`）：
+
+1. **先看日志定位**：`C:\supply\data\logs\illustrator-agent.jsonl` 中 `save_stalled`、`watchdog_end_illustrator`、`save_watchdog_recovered`（含 `source_sha256_before/after`、`removed`、`smoke_ok`）、`windowless_zombie`、`watchdog_restart_cap` 事件。
+2. **核对原稿（save_source_changed）**：记录的哈希在任务 JSON `C:\supply\data\tasks\<任务 id>.json` 的 `native_text_request.source_sha256`（原稿文件名在 `source_name`，位于 `C:\supply\data\uploads\<任务 id>\`）；净版展开在打样记录 `unfolded_print_request.native_source_sha256`。只读计算并比较：
+   ```powershell
+   (Get-FileHash -Algorithm SHA256 -LiteralPath "C:\supply\data\uploads\<任务 id>\<source_name>").Hash.ToLowerInvariant()
+   ```
+   不一致时先找出谁改了原稿（重新上传、人工打开另存等），由业务确认以哪个版本为准；不要手改任务 JSON、不要伪造 `close.json`。
+3. **释放原生文字请求**：按上节「原生文字请求卡在 close_unconfirmed」执行——**必须先** `Stop-Service beian-server-8787`，管理员确认桌面 Illustrator 无客户稿、cscript/wscript 已退出，然后：
+   ```powershell
+   $env:WB_DATA_DIR = "C:\supply\data"
+   node_modules\.bin\tsx.cmd apps\web\server\src\recoverNativeText.ts --task <任务 id> --attempt <native_text_request.id> --confirm-no-open-documents
+   ```
+   该命令同时接受 `close_unconfirmed` 与 `save_source_changed`；只有 `"outcome":"recovered"`（退出码 0）才算完成，请求变为 `fallback/native_failed`，之后该任务按图像识别继续。净版展开没有对应 CLI，`save_source_changed` 的净版请求需开发处理，不要手改打样记录。
+4. **清 fault fence（watchdog_restart_cap）**：先处理根因（登录/授权弹窗、插件、字体、默认网络打印机、IMS 等），确认 Illustrator 在 Session 1 有可见窗口、无客户稿，且 Illustrator、AIRobin、cscript、wscript 都已退出后，按上文运行 `install-illustrator-agent.ps1 -ClearFaultFence`。重启/升版不会自动清 `faulted`。
+5. **清重启计数（仅在根因已处理且 Illustrator 健康有窗口后）**：`watchdog-restarts.json` 跨 Agent 重启保留，1 小时滚动窗口内会自然过期。只有确认根因已解决、Illustrator 有窗口且 probe 正常、又不能等窗口过期时，才可删除：
+   ```powershell
+   Remove-Item -LiteralPath "C:\supply\data\runtime\watchdog-restarts.json"
+   ```
+   不要为了"让看门狗再试一次"而清计数；文件损坏也按已达上限处理（失败关闭）。
+6. **确认离开故障围栏**：`Test-Path C:\supply\data\runtime\illustrator-fault.json` 为 `False`；`C:\supply\data\runtime\illustrator-agent.json` 心跳为 `idle` 且 PID 存活；只读 probe `& $env:WB_PYTHON workers\packaging\illustrator\illustrator_agent.py probe --timeout 120` 返回 `ok=true`、可见窗口、空文档列表；启动 8787 后 `curl -sS http://127.0.0.1:8787/api/health` 中 `illustrator.running` 为 0。再按发布合同重跑同一条 push run（如需）。
+
+已知限制：重启上限的飞书告警只在经 Illustrator worker 的作业（原生文字、净版展开）里发出。发版 smoke 或 probe 请求触发无窗口处理并撞上限时，Agent 同样进入 `faulted`，但**不发飞书**；此时表现为 hangzhou-release 的 Illustrator smoke 失败/回滚，按上面第 4–6 步处理。
 
 不要安装 PowerShell 7、.NET SDK 或 pywin32，也不要手工在 Session 0 启动 Illustrator。
 
