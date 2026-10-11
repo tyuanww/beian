@@ -200,8 +200,17 @@ function redactUrl(url: string, known: string[]): string {
   let hostEnd = hostStart;
   while (hostEnd < url.length && !"/?#\\".includes(url[hostEnd])) hostEnd += 1;
   let tail = url.slice(hostEnd);
+  // 已配置目录：以 `/` 开头的换成 `/本机路径`（与 `/home/` 规则一致），其他（Windows）换成 `本机路径`；
+  // 两种都连同其后到 `& # ?` 或网址结尾为止的部分一起替换。
   for (const k of known) {
-    if (tail.includes(k)) tail = tail.split(k).join(LOCAL_PLACEHOLDER);
+    let at = tail.indexOf(k);
+    while (at >= 0) {
+      let stop = at + k.length;
+      while (stop < tail.length && !"&#?".includes(tail[stop])) stop += 1;
+      const repl = k.startsWith("/") ? `/${LOCAL_PLACEHOLDER}` : LOCAL_PLACEHOLDER;
+      tail = tail.slice(0, at) + repl + tail.slice(stop);
+      at = tail.indexOf(k, at + repl.length);
+    }
   }
   tail = tail.replace(URL_EMBEDDED_PATH, LOCAL_PLACEHOLDER);
   return url.slice(0, hostEnd) + tail;
