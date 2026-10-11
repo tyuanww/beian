@@ -4,7 +4,7 @@
  * 纯 JS（@gltf-transform）+ 已有的 sharp。任何失败都保留原 PNG GLB，
  * 只记日志，绝不让打样失败。只处理本次新生成的文件，不回头转换旧文件。
  */
-import { closeSync, existsSync, openSync, readFileSync, readSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, lstatSync, openSync, readdirSync, readFileSync, readSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, basename, join } from "node:path";
 
 const GLB_WEBP_QUALITY = 90;
@@ -150,6 +150,11 @@ async function readGlbStructure(bytes: Uint8Array): Promise<GlbStructure> {
 /**
  * 原地转换一个新生成的 GLB。成功才原子替换；失败、无贴图、已是 WebP 或没变小都保留原文件。
  */
+/** 压缩临时文件路径（与 cleanupStaleGlbWebpTemps 的匹配规则成对）。 */
+export function glbWebpTempPath(path: string): string {
+  return join(dirname(path), `.${basename(path)}.webp-${process.pid}-${Date.now()}.tmp`);
+}
+
 /** 进程内串行锁：同一时刻只跑一个 GLB 压缩，限制服务进程的解码内存峰值。 */
 let compressionTail: Promise<unknown> = Promise.resolve();
 
@@ -166,7 +171,7 @@ async function compressGlbTexturesToWebpUnlocked(
   path: string,
   opts: { quality?: number; convert?: typeof convertGlbBytesToWebp },
 ): Promise<GlbWebpResult> {
-  const tmp = join(dirname(path), `.${basename(path)}.webp-${process.pid}-${Date.now()}.tmp`);
+  const tmp = glbWebpTempPath(path);
   try {
     if (!existsSync(path)) return { status: "failed", reason: "missing" };
     const json = readGlbJson(path);
@@ -239,4 +244,45 @@ export async function buildPngTexturedGlbForProbe(size = 64): Promise<Uint8Array
   const mesh = doc.createMesh("probe").addPrimitive(prim);
   doc.createScene().addChild(doc.createNode("probe").setMesh(mesh));
   return new NodeIO().writeBinary(doc);
+}
+
+/** 只匹配 compressGlbTexturesToWebp 自己的临时文件名：.<name>.glb.webp-<pid>-<ms>.tmp */
+const STALE_TEMP_RE = /^\.(?:[^/\\]*\.)?glb\.webp-\d+-\d+\.tmp$/i;
+const GLB_WEBP_STALE_TEMP_MAX_AGE_MS = 10 * 60 * 1000;
+
+/**
+ * 启动时清理被中断的压缩留下的临时文件。只删名字完全匹配且 mtime 早于 maxAgeMs 的普通文件；
+ * 不跟随符号链接，限制目录深度。返回删除个数。
+ */
+export function cleanupStaleGlbWebpTemps(root: string, opts: { maxAgeMs?: number; now?: number; maxDepth?: number } = {}): number {
+  const maxAge = opts.maxAgeMs ?? GLB_WEBP_STALE_TEMP_MAX_AGE_MS;
+  const now = opts.now ?? Date.now();
+  const maxDepth = opts.maxDepth ?? 6;
+  let removed = 0;
+  const walk = (dir: string, depth: number) => {
+    let entries;
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      const full = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        if (depth < maxDepth) walk(full, depth + 1);
+        continue;
+      }
+      if (!entry.isFile() || !STALE_TEMP_RE.test(entry.name)) continue;
+      try {
+        const st = lstatSync(full);
+        if (!st.isFile() || now - st.mtimeMs < maxAge) continue;
+        unlinkSync(full);
+        removed += 1;
+      } catch {
+        // 另一进程刚处理过或无权限：跳过，下次启动再试。
+      }
+    }
+  };
+  walk(root, 0);
+  return removed;
 }

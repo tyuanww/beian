@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { describe, it } from "node:test";
@@ -10,6 +10,8 @@ process.env.WB_DATA_DIR = makeTestTempDir("beian-glb-webp-");
 
 const {
   buildPngTexturedGlbForProbe,
+  cleanupStaleGlbWebpTemps,
+  glbWebpTempPath,
   compressGlbTexturesToWebp,
   convertGlbBytesToWebp,
   glbTextureFormat,
@@ -141,6 +143,47 @@ describe("glb webp post-step", () => {
     const next = compressGlbTexturesToWebp(path);
     assert.equal((await failed).status, "failed");
     assert.equal((await next).status, "converted");
+  });
+
+  it("startup cleanup removes only our stale temp files", () => {
+    const root = makeTestTempDir("beian-glb-webp-clean-");
+    const job = join(root, "abcdef000009");
+    const cand = join(job, ".render-generations", ".candidate-x");
+    mkdirSync(cand, { recursive: true });
+    const old = Date.now() - 11 * 60 * 1000;
+    const files: Record<string, { at: string; age: number }> = {
+      ".box.glb.webp-123-1700000000000.tmp": { at: job, age: old },
+      ".glb.webp-9-1700000000001.tmp": { at: cand, age: old },
+      ".box.glb.webp-123-1700000000002.tmp ": { at: job, age: old },
+      "box.glb.webp-123-1700000000003.tmp": { at: job, age: old },
+      ".box.png.webp-1-2.tmp": { at: job, age: old },
+      ".box.glb.webp-x-1.tmp": { at: job, age: old },
+      "box.glb": { at: job, age: old },
+      ".fresh.glb.webp-1-2.tmp": { at: job, age: Date.now() },
+    };
+    for (const [name, { at, age }] of Object.entries(files)) {
+      const p = join(at, name);
+      writeFileSync(p, "x");
+      utimesSync(p, new Date(age), new Date(age));
+    }
+    assert.equal(cleanupStaleGlbWebpTemps(root), 2);
+    const left = (at: string, name: string) => existsSync(join(at, name));
+    assert.equal(left(job, ".box.glb.webp-123-1700000000000.tmp"), false);
+    assert.equal(left(cand, ".glb.webp-9-1700000000001.tmp"), false);
+    for (const name of [".box.glb.webp-123-1700000000002.tmp ", "box.glb.webp-123-1700000000003.tmp", ".box.png.webp-1-2.tmp", ".box.glb.webp-x-1.tmp", "box.glb", ".fresh.glb.webp-1-2.tmp"]) {
+      assert.equal(left(name === ".glb.webp-9-1700000000001.tmp" ? cand : job, name), true, name);
+    }
+    assert.equal(cleanupStaleGlbWebpTemps(join(root, "missing")), 0);
+  });
+
+  it("temp names produced by compression match the cleanup pattern", () => {
+    const root = makeTestTempDir("beian-glb-webp-name-");
+    for (const [index, name] of ["box.glb", "BOX.GLB", "glb"].entries()) {
+      mkdirSync(join(root, String(index)));
+      const tmp = glbWebpTempPath(join(root, String(index), name));
+      writeFileSync(tmp, "x");
+    }
+    assert.equal(cleanupStaleGlbWebpTemps(root, { now: Date.now() + 11 * 60 * 1000 }), 3);
   });
 
   it("encodes every texture through our sharp (not ndarray-pixels)", async () => {
