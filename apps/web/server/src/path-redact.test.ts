@@ -348,3 +348,16 @@ describe("redactLocalPaths: URL-embedded Windows paths with spaces", () => {
     assert.equal(r("http://x/?f=C:\\a\\b.pdf D:\\c\\d.pdf"), "http://x/?f=本机路径 d.pdf");
   });
 });
+
+describe("redactLocalPaths: slash paths with spaces in directory names", () => {
+  it("continues when the part after the space still has a / before the next whitespace", () => {
+    assert.equal(r("http://x/?p=/Users/bob/my docs/secret/a.pdf"), "http://x/?p=/本机路径");
+    assert.equal(r("/Users/bob/my docs/secret/a.pdf"), "a.pdf");
+    assert.equal(r("/home/bob/客户 资料/a.pdf 打不开"), "a.pdf 打不开");
+  });
+  it("plain words after a path are not swallowed", () => {
+    assert.equal(r("/Users/bob/a.pdf step 2/3"), "a.pdf step 2/3");
+    assert.equal(r("/home/a/b.pdf failed at step 2/3"), "b.pdf failed at step 2/3");
+    assert.equal(r("http://x/?p=/Users/bob/a.pdf step 2/3"), "http://x/?p=/本机路径 step 2/3");
+  });
+});
