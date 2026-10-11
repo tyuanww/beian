@@ -4,7 +4,8 @@
  * 纯 JS（@gltf-transform）+ 已有的 sharp。任何失败都保留原 PNG GLB，
  * 只记日志，绝不让打样失败。只处理本次新生成的文件，不回头转换旧文件。
  */
-import { closeSync, existsSync, lstatSync, openSync, readdirSync, readFileSync, readSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { closeSync, existsSync, fsyncSync, lstatSync, openSync, readdirSync, readFileSync, readSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, basename, join } from "node:path";
 
 const GLB_WEBP_QUALITY = 90;
@@ -13,7 +14,7 @@ const EXT_TEXTURE_WEBP = "EXT_texture_webp";
 export type GlbTextureFormat = "webp" | "png";
 
 export type GlbWebpResult =
-  | { status: "converted"; beforeBytes: number; afterBytes: number; textures: number }
+  | { status: "converted"; beforeBytes: number; afterBytes: number; textures: number; inputSha256: string; outputSha256: string }
   | { status: "skipped"; reason: "no_textures" | "already_webp" | "not_smaller"; beforeBytes: number; afterBytes?: number }
   | { status: "skipped"; reason: "deadline_insufficient" | "lock_wait_timeout" }
   | { status: "failed"; reason: string };
@@ -166,7 +167,21 @@ export type GlbWebpOptions = {
   lockWaitMs?: number;
   /** 改名替换前最后一问；返回 false 则丢弃临时文件、保留原文件，记 skipped/deadline_insufficient。 */
   beforeCommit?: () => boolean;
+  /**
+   * 结果写到这里而不是原地替换（旁路用）。tmp 放在 outPath 同目录：`.<outPath 名>.<pid>-<ms>.tmp`，
+   * 与原地压缩的 `.<name>.glb.webp-<pid>-<ms>.tmp` 不同名；原文件不动。
+   */
+  outPath?: string;
 };
+
+function sha256Hex(bytes: Uint8Array): string {
+  return createHash("sha256").update(bytes).digest("hex");
+}
+
+/** 旁路 tmp 路径（与 glbWebpVariant 启动清理的 *.tmp 规则成对）。 */
+export function glbWebpOutTempPath(outPath: string): string {
+  return join(dirname(outPath), `.${basename(outPath)}.${process.pid}-${Date.now()}.tmp`);
+}
 
 export function compressGlbTexturesToWebp(path: string, opts: GlbWebpOptions = {}): Promise<GlbWebpResult> {
   // 状态机：waiting → started（拿到锁，结果只由本次执行给出）或 abandoned（等锁超时，排到也不执行）。
@@ -192,7 +207,8 @@ export function compressGlbTexturesToWebp(path: string, opts: GlbWebpOptions = {
 }
 
 async function compressGlbTexturesToWebpUnlocked(path: string, opts: GlbWebpOptions): Promise<GlbWebpResult> {
-  const tmp = glbWebpTempPath(path);
+  const dest = opts.outPath ?? path;
+  const tmp = opts.outPath ? glbWebpOutTempPath(opts.outPath) : glbWebpTempPath(path);
   try {
     if (!existsSync(path)) return { status: "failed", reason: "missing" };
     const json = readGlbJson(path);
@@ -204,6 +220,8 @@ async function compressGlbTexturesToWebpUnlocked(path: string, opts: GlbWebpOpti
     if (textures === 0) return { status: "skipped", reason: "no_textures", beforeBytes };
     if (bytes.length >= beforeBytes) return { status: "skipped", reason: "not_smaller", beforeBytes, afterBytes: bytes.length };
     writeFileSync(tmp, bytes);
+    const tmpFd = openSync(tmp, "r+");
+    try { fsyncSync(tmpFd); } finally { closeSync(tmpFd); }
     const check = readGlbJson(tmp);
     if (!check || textureFormatOfGlbJson(check) !== "webp") {
       rmSync(tmp, { force: true });
@@ -225,8 +243,8 @@ async function compressGlbTexturesToWebpUnlocked(path: string, opts: GlbWebpOpti
       rmSync(tmp, { force: true });
       return { status: "skipped", reason: "deadline_insufficient" };
     }
-    renameSync(tmp, path);
-    return { status: "converted", beforeBytes, afterBytes: bytes.length, textures };
+    renameSync(tmp, dest);
+    return { status: "converted", beforeBytes, afterBytes: bytes.length, textures, inputSha256: sha256Hex(input), outputSha256: sha256Hex(bytes) };
   } catch (err) {
     rmSync(tmp, { force: true });
     return { status: "failed", reason: (err instanceof Error ? err.message : String(err)).slice(0, 200) };
