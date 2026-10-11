@@ -859,7 +859,8 @@ export type MockupJob = {
   error?: string;
   created_at?: string;
   owner?: string;
-  files: { key: string; name: string }[];
+  /** 仅 key="glb" 可能带 texture_format：GLB 贴图为 EXT_texture_webp 时 "webp"，否则 "png"；服务端读不出时省略。 */
+  files: { key: string; name: string; texture_format?: "webp" | "png" }[];
   can_repair_print_faces?: boolean;
   print_faces_repair?: { status: "queued" | "running" | "succeeded" | "failed"; error?: string };
   can_relight_studio?: boolean;
