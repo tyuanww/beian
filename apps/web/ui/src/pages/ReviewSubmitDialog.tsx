@@ -33,6 +33,7 @@ export function ReviewSubmitDialog({ kind, rows, pending = 0, busy, failed, onCa
       destroyOnHidden={false}
       className="review-submit-dialog"
     >
+      {reject && blocked ? <p id="review-reject-blocked" className="review-submit-error review-reject-blocked" role="status">{REVIEW_COPY.rejectBlockedByPending(pending)}</p> : null}
       <p>{reject ? REVIEW_COPY.rejectBody(rows.length) : REVIEW_COPY.signBody}</p>
       {reject ? (
         <>
@@ -50,7 +51,6 @@ export function ReviewSubmitDialog({ kind, rows, pending = 0, busy, failed, onCa
           </label>
         </>
       ) : null}
-      {blocked ? <p id="review-reject-blocked" className="review-submit-error" role="status">{REVIEW_COPY.pendingHint(pending)}</p> : null}
       {failed ? <p className="review-submit-error" role="alert">{REVIEW_COPY.submitFailed}</p> : null}
     </Modal>
   );

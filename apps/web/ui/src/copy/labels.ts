@@ -110,6 +110,7 @@ export const REVIEW_COPY = {
   lowResFailed: "稿件没加载出来",
   zeroIssues: "✓ 没发现问题",
   allDecided: "全部已下结论",
+  rejectBlockedByPending: (n: number) => `还有 ${n} 条待确认，处理完才能退回`,
   collapse: "收起",
   expand: (n: number) => `展开疑点 · 待确认 ${n}`,
   tabs: { pending: "待确认", issue: "有错", all: "全部" },
