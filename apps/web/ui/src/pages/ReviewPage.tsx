@@ -84,6 +84,8 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
   const [seenPages, setSeenPages] = useState<Set<number>>(() => new Set());
   const [dialog, setDialog] = useState<"sign" | "reject" | null>(null);
   const [submitFailed, setSubmitFailed] = useState(false);
+  /** 同步置位，防连点：await 队列之前就挡住第二次提交。 */
+  const submittingRef = useRef(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [mediaRetry, setMediaRetry] = useState(0);
   const [phoneListOpen, setPhoneListOpen] = useState(false);
@@ -590,13 +592,14 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
   }
 
   async function submit(kind: "sign" | "reject", extra: string) {
-    if (!task || !reviewable || hasUnsavedNotes || locked) return;
-    if (!(await decisionQueueRef.current)) {
-      setSubmitFailed(true);
-      return;
-    }
+    if (!task || !reviewable || hasUnsavedNotes || locked || submittingRef.current) return;
+    submittingRef.current = true;
     beginBusy();
     try {
+      if (!(await decisionQueueRef.current)) {
+        setSubmitFailed(true);
+        return;
+      }
       const next = await api.complete(task.id, { conclusion: conclusionFor(kind, extra, rejectRows(hits, notes)) });
       setTask(next);
       setDialog(null);
@@ -609,6 +612,7 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
         if (fresh.status === "completed") { setTask(fresh); setDialog(null); }
       }).catch(() => undefined);
     } finally {
+      submittingRef.current = false;
       endBusy();
     }
   }

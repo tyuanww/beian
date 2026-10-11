@@ -436,3 +436,16 @@ test("768 宽页头不折行，退回/签字靠右（design F-002）", async ({ 
   expect((await page.locator(".review-title").boundingBox())!.height).toBeLessThan(40);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
+
+test("连点确认签字只发一次 /complete（同步防重入）", async ({ page, syntheticApi }) => {
+  const task = reviewTask("e5969b58cd60");
+  task.hits![0].decision = "confirm";
+  syntheticApi.tasks.push(task);
+  syntheticApi.completeDelayMs = 600;
+  await page.goto(`/review/${task.id}`);
+  await page.getByRole("button", { name: "签字", exact: true }).click();
+  const ok = page.getByRole("dialog").getByRole("button", { name: "确认签字" });
+  await ok.evaluate((el: HTMLElement) => { el.click(); el.click(); el.click(); });
+  await expect(page.locator(".ant-alert").getByText("已签字。", { exact: true })).toBeVisible();
+  expect(syntheticApi.calls.filter((c) => c.path.endsWith("/complete"))).toHaveLength(1);
+});
