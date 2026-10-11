@@ -56,35 +56,34 @@ function pathStart(s: string, i: number): number {
 
 /**
  * 从起点扫描路径结束位置，返回 [结束位置, 最后一个分隔符位置]。
- * Windows / UNC 路径的目录名可含空格：遇到空格时向后看下一个词，只有它在碰到空白、标点或新路径起点之前
- * 出现分隔符，才把空格当作目录名的一部分继续；否则路径在空格处结束。Unix 路径遇空格即结束。
- * 每个字符最多被扫描两次（一次预读、一次正式），整体线性。
+ * Windows / UNC 路径的目录名可含空格：遇到空格先记下「暂定结束位置」继续往后扫；在碰到空白、标点或
+ * 新路径起点之前出现分隔符，就确认空格属于目录名；否则路径在暂定位置结束。Unix 路径遇空格即结束。
+ * 单趟扫描不回看；回退的那一段最多再被外层逐字扫一次，整体线性。
  */
 function scanPath(s: string, from: number, allowSpaces: boolean): [number, number] {
   let j = from;
   let lastSep = from - 1;
+  let pending = -1;
   while (j < s.length) {
     const ch = s[j];
-    if (ch === " " && allowSpaces && continuesAcrossSpace(s, j + 1)) {
+    if (ch === " " && allowSpaces) {
+      if (pending >= 0) break;
+      pending = j;
       j += 1;
       continue;
     }
     if (isStop(ch)) break;
-    if (isSep(ch)) lastSep = j;
+    if (isSep(ch)) {
+      // 空格后紧跟分隔符（`\\`、`/` 开头）视为新路径，不续接。
+      if (pending >= 0 && j === pending + 1) break;
+      lastSep = j;
+      pending = -1;
+    } else if (pending >= 0 && pathStart(s, j) >= 0) {
+      break;
+    }
     j += 1;
   }
-  return [j, lastSep];
-}
-
-function continuesAcrossSpace(s: string, k: number): boolean {
-  if (k >= s.length || pathStart(s, k) >= 0) return false;
-  for (let m = k; m < s.length; m += 1) {
-    const ch = s[m];
-    if (isStop(ch)) return false;
-    if (isSep(ch)) return m > k;
-    if (m > k && pathStart(s, m) >= 0) return false;
-  }
-  return false;
+  return [pending >= 0 ? pending : j, lastSep];
 }
 
 /** 末段渲染：返回 [替换文本, 留给后文的部分]。 */
@@ -134,12 +133,19 @@ function knownLocalPaths(): string[] {
 }
 
 function scanAndRedact(s: string): string {
-  let out = "";
+  const out: string[] = [];
+  let lastOut = "";
+  const emit = (t: string) => {
+    if (t) {
+      out.push(t);
+      lastOut = t[t.length - 1];
+    }
+  };
   let i = 0;
   while (i < s.length) {
     const from = pathStart(s, i);
     if (from < 0) {
-      out += s[i];
+      emit(s[i]);
       i += 1;
       continue;
     }
@@ -149,18 +155,18 @@ function scanAndRedact(s: string): string {
     const [text, rest] = renderLeaf(s.slice(lastSep + 1, end));
     // Unix / 反斜杠根路径至少一级目录；反斜杠根路径还要求末段是文件名，避免误伤 `\n\t` 之类转义。
     if ((isUnix && lastSep <= i) || (bsRoot && text === LOCAL_PLACEHOLDER)) {
-      out += s[i];
+      emit(s[i]);
       i += 1;
       continue;
     }
-    if (isCjkText(out[out.length - 1])) out += " ";
-    out += text;
+    if (isCjkText(lastOut)) emit(" ");
+    emit(text);
     const after = rest || s[end];
-    if (isCjkText(after?.[0])) out += " ";
-    out += rest;
+    if (isCjkText(after?.[0])) emit(" ");
+    emit(rest);
     i = end;
   }
-  return out;
+  return out.join("");
 }
 
 // 网址（`http://`、`https://` 等，`file://` 除外）整段原样保留：到空白、引号、尖括号或非 ASCII 字符为止。
