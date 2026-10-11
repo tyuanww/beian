@@ -206,6 +206,49 @@ export async function notifyTaskComplete(task: TaskLike, actor: string): Promise
   }
 }
 
+export type WatchdogEvent = "save_timeout" | "save_source_changed" | "watchdog_restart_cap";
+const WATCHDOG_EVENTS = new Set<string>(["save_timeout", "save_source_changed", "watchdog_restart_cap"]);
+
+/** Illustrator worker 的 stdout 末行是无路径的公开 JSON；只取看门狗 reason。 */
+export function watchdogEventFromStdout(stdout: string): WatchdogEvent | undefined {
+  const line = stdout.trim().split("\n").pop() || "";
+  try {
+    const reason = (JSON.parse(line) as { reason?: unknown }).reason;
+    return typeof reason === "string" && WATCHDOG_EVENTS.has(reason) ? (reason as WatchdogEvent) : undefined;
+  } catch { return undefined; }
+}
+
+const WATCHDOG_COPY: Record<WatchdogEvent, { title: string; detail: Record<"compare" | "mockup", string> }> = {
+  save_timeout: {
+    title: "Illustrator 保存卡住，已自动结束并重启",
+    detail: { compare: "原稿文字提取改为图像识别继续核对；请留意杭州机 Illustrator 状态。", mockup: "净版展开本次未完成，可稍后重试；请留意杭州机 Illustrator 状态。" },
+  },
+  save_source_changed: {
+    title: "Illustrator 保存卡住，原稿可能被改动",
+    detail: { compare: "已结束卡住的 Illustrator，但原稿 hash 与任务开始时不一致：本次不回退图像识别，已暂停等待人工核实原稿。", mockup: "已结束卡住的 Illustrator，但原稿 hash 与任务开始时不一致：净版已暂停等待人工核实原稿。" },
+  },
+  watchdog_restart_cap: {
+    title: "Illustrator 1 小时内已自动重启 2 次，已停止自动处理",
+    detail: { compare: "Illustrator Agent 已进入故障保护，需人工登录杭州机检查（登录/授权弹窗、插件、打印机）后由管理员恢复。", mockup: "Illustrator Agent 已进入故障保护，需人工登录杭州机检查（登录/授权弹窗、插件、打印机）后由管理员恢复。" },
+  },
+};
+
+/** 看门狗告警；不含路径、PID 或 hash 值。 */
+export function illustratorWatchdogText(task: TaskLike, event: WatchdogEvent = "save_timeout", kind: "compare" | "mockup" = "compare"): string {
+  const copy = WATCHDOG_COPY[event];
+  return [
+    `【备案审核】${copy.title}`,
+    `任务：${task.title || task.id || ""}`,
+    copy.detail[kind],
+    task.id ? `打开：${publicBase()}${jobOpenPath(kind, task.id)}` : "",
+  ].filter(Boolean).join("\n");
+}
+
+export async function notifyIllustratorWatchdog(task: TaskLike, event: WatchdogEvent = "save_timeout", kind: "compare" | "mockup" = "compare"): Promise<void> {
+  const r = await sendText(illustratorWatchdogText(task, event, kind));
+  if (!r.ok && !r.skipped) console.warn("feishu watchdog notify failed:", r.reason);
+}
+
 export function jobOpenPath(kind: "compare" | "rework" | "mockup", tid: string): string {
   return kind === "mockup" ? `/mockup/${tid}` : `/review/${tid}`;
 }

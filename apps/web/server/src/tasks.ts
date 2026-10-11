@@ -163,7 +163,7 @@ export function saveTask(task: Task): void {
 const TASK_STATUSES = new Set(["comparing", "compare_failed", "pending_review", "in_review", "completed"]);
 const TASK_JOB_KINDS = new Set(["compare", "rework"]);
 const TASK_JOB_STATUSES = new Set(["queued", "running", "succeeded", "failed"]);
-const NATIVE_REASONS = new Set(["native_busy", "native_offline", "source_changed", "close_unconfirmed", "native_failed"]);
+const NATIVE_REASONS = new Set(["native_busy", "native_offline", "source_changed", "close_unconfirmed", "native_failed", "save_timeout", "save_source_changed"]);
 
 /**
  * Durable job state is a release-safety contract, not just a TypeScript hint.

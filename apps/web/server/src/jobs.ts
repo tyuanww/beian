@@ -5,7 +5,7 @@ import { closeSync, copyFileSync, existsSync, lstatSync, mkdirSync, openSync, re
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { DATA_DIR, PACKAGING, PYTHON } from "./config.js";
 import { compareBookkeeping } from "./billing.js";
-import { notifyJobFinished } from "./notify.js";
+import { notifyIllustratorWatchdog, notifyJobFinished, watchdogEventFromStdout, type WatchdogEvent } from "./notify.js";
 import {
   applyRenderGenerationPatch,
   assertCanManageMockup,
@@ -245,6 +245,7 @@ export type JobsTestHooks = {
   runRelight?: typeof runPackagingBlenderOnly;
   runRaster?: (opts: { source: string; outDir: string }) => Promise<{ ok: boolean; png?: string; message: string }>;
   notify?: typeof notifyJobFinished;
+  watchdogAlert?: (task: { id: string; title?: string }, event: WatchdogEvent, kind: "compare" | "mockup") => Promise<unknown>;
   killTree?: typeof killTree;
   inspectWorker?: typeof inspectWorkerProcess;
   inspectGenerationGroup?: typeof inspectRenderGenerationGroup;
@@ -944,6 +945,11 @@ async function executeUnfoldedNative(job: MockupJob, requestId: string): Promise
     const fresh = readMockupFromDisk(job.id);
     if (!fresh?.unfolded_print_request || fresh.unfolded_print_request.id !== requestId || fresh.unfolded_print_request.status !== "running") return;
     const closed = !result.timedOut && unfoldedCloseConfirmed(closeJson, requestId, request.native_source_sha256);
+    const watchdog = result.code !== 0 ? watchdogEventFromStdout(result.stdout) : undefined;
+    if (watchdog) {
+      // save_source_changed never writes close, so it stays fenced below (await human).
+      void (hooks.watchdogAlert || notifyIllustratorWatchdog)({ id: fresh.id, title: fresh.title }, watchdog, "mockup").catch(() => undefined);
+    }
     if (!closed) {
       holdUnconfirmedUnfolded(fresh, requestId);
       return;
@@ -2746,7 +2752,7 @@ export function tryStart(): void {
       startNative(next.task, hooks.runNativeText || runNativeText, () => {
         if (!nativeQueue().running.some(t => t.id === next.task.id) && live.illustrator === `native:${next.task.id}`) live.illustrator = null;
         tryStart();
-      });
+      }, hooks.watchdogAlert ? (t, e) => hooks.watchdogAlert!(t, e, "compare") : undefined);
     }
     else if (next?.kind === "unfolded") claimUnfoldedNative(next.job);
     else if (next) claimAi(next.job);

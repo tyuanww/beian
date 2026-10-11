@@ -16,7 +16,7 @@
 
 `native-text/1` 当前保守接受范围：原稿/导出 PDF 页数与物理尺寸一致，受限分辨率的可见稿面渲染逐字节相同；文字对象可见、无遮挡/剪裁、字体可用，且导出 PDF 在同位置含相同文字；OCR 与原生框唯一对应。bbox 相交不能单独构成证明。坐标/页面旋转、字体替换、遮挡或渲染差异不确定时不采用。纠正后的读法进入既有业务规则，不直接写“一致”或人工 confirm。
 
-详情新增安全投影 `native_text`：status 为 queued/running/ready/fallback，reason/message 仅有原因时出现。ready 仅表示候选提取已完成且宿主关闭，不代表字段已通过验证。公开稳定原因 native_busy/native_offline/source_changed/close_unconfirmed/native_failed；不暴露私有 request、hash、PID、路径。
+详情新增安全投影 `native_text`：status 为 queued/running/ready/fallback，reason/message 仅有原因时出现。ready 仅表示候选提取已完成且宿主关闭，不代表字段已通过验证。公开稳定原因 native_busy/native_offline/source_changed/close_unconfirmed/native_failed/save_timeout；`save_timeout` 表示 Illustrator 处于保存阶段且任务目录（含部分 PDF、debug.log、进度 sidecar）连续 300 秒无大小/mtime 变化，Agent 仅结束 pid+启动时间与本任务一致的 Illustrator、删除本次 attempt 的部分输出、核对原稿 hash 未变、在 Session 1 干净重启并 smoke，证实新宿主 0 文档后才写 close 并回退 OCR，同时发飞书告警；无法证实身份或关闭时不结束进程并保持 close_unconfirmed/故障栅栏。若看门狗结束后原稿 hash 与任务开始时不一致，原因为 `save_source_changed`：status 保持 running，不写 close、**不回退 OCR**、Illustrator 槽保持栅栏，飞书告警明确写“原稿可能被改动”，须人工核实后由管理员恢复（`recover-native-text`）。看门狗结束/重启（含无窗口僵死）每滚动 1 小时最多 2 次，记录持久化在 Agent `runtime\watchdog-restarts.json`；超限不再结束进程，Agent 进入故障栅栏并经 worker 公开原因 `watchdog_restart_cap` 发飞书告警（详情仍为 close_unconfirmed）。无窗口判定看该 pid 是否拥有任何可见顶层窗口（EnumWindows），不只看 MainWindowHandle，因此仍在加载或停在登录/授权对话框的 Illustrator 不算僵死；窗口枚举失败也不算。净版展开（unfolded_print）同样发看门狗告警；其 save_source_changed 沿用 close_unconfirmed 栅栏。不暴露私有 request、hash、PID、路径。
 
 字段可选 `native_text_evidence`：version=1；status=used/conflict/not_used；native_text/ocr_text 为 string 或 null（各最多 8192 字符），message 为简短中文（最多 500 字符）。原生覆盖完整而跳过 OCR 时 `ocr_text` 可以为 null。仅传属于当前字段的证据，隐藏/不可信候选正文不投影。UI 只展示，不覆盖 hit.status、decision、原有定位、hits_v2 或签字/对红门；旧单缺该字段不显示来源卡片。
 

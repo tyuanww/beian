@@ -40,3 +40,4 @@
 - `release.ps1` 起停 `:8787` 只走 WinSW 服务 `beian-server-8787`（`Restart-Service`），不要 `schtasks /Create ONLOGON`。cloudflared 是官方 Windows 服务（token），发版不动隧道。
 - Deploy status: [hangzhou-release](https://github.com/tyuanww/beian/actions/workflows/hangzhou-release.yml) 绿 → 约 20 秒 → 公网 health 的 version 等于 VERSION。公网再用 `/canary https://www.jianghua.site` 前，先确认 Mac 没有 cloudflared。
 - Health check: `https://www.jianghua.site/api/health` 必须打到杭州。细节见 `scripts/windows/README.md`。
+- Illustrator 看门狗：Agent `faulted`（含 `watchdog_restart_cap`）或任务停在 `save_source_changed` / `close_unconfirmed` 时 Illustrator 槽被锁，发版前置检查会因 `jobs_active` / Agent faulted 拒绝，发版 Illustrator smoke 也会失败；发版 smoke 撞重启上限不发飞书。恢复见 `scripts/windows/README.md`「Illustrator 看门狗」。

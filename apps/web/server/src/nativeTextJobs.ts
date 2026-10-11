@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { DATA_DIR } from "./config.js";
 import { illustratorBin } from "./settings.js";
 import { loadAllTasks, loadTask, loadTaskWithRevision, saveTask, type Task } from "./tasks.js";
+import { notifyIllustratorWatchdog, watchdogEventFromStdout, type WatchdogEvent } from "./notify.js";
 import { inspectWorkerProcess, runNativeText } from "./workers.js";
 
 export type NativeRequest = {
@@ -17,7 +18,12 @@ const COPY: Record<string, string> = {
   source_changed: "稿件已变化，旧文字证据不参与本次核对。",
   close_unconfirmed: "Illustrator 尚未确认关闭，本次继续图像识别，原生提取保持等待核实。",
   native_failed: "原稿文字未能可靠提取，本次继续图像识别。",
+  save_timeout: "Illustrator 保存长时间无进展，已自动重启，本次继续图像识别。",
+  save_source_changed: "Illustrator 保存卡住期间原稿可能被改动，已暂停，等待人工核实。",
 };
+/** Fenced reasons: the attempt is not proven closed; await human/admin recovery. */
+function awaitingClose(reason: unknown): boolean { return reason === "close_unconfirmed" || reason === "save_source_changed"; }
+export type WatchdogAlert = (task: Task, event: WatchdogEvent) => Promise<unknown>;
 export type NativeReason = keyof typeof COPY;
 const NATIVE_REASONS = new Set(Object.keys(COPY));
 function safeReason(reason: unknown): NativeReason | undefined {
@@ -78,6 +84,8 @@ export function prepareNativeRun(task: Task) {
 }
 export function nativeBlocksOcr(task: Task) {
   const req = nativeRequest(task);
+  // close_unconfirmed lets OCR continue while Illustrator stays fenced;
+  // save_source_changed blocks OCR too until a human has checked the source.
   return req?.status === "queued" || (req?.status === "running" && req.reason !== "close_unconfirmed");
 }
 export function nativeQueue() {
@@ -121,7 +129,7 @@ export function recoverNativeRequests(mode: "boot" | "late" = "boot") {
     if (gone && closed(task, req)) fallback(task, "native_failed");
     // Re-saving an unchanged fence would race an out-of-process admin
     // recovery (read-before, write-after) and silently restore the fence.
-    else if (req.reason !== "close_unconfirmed") { req.reason = "close_unconfirmed"; saveTask(task); }
+    else if (!awaitingClose(req.reason)) { req.reason = "close_unconfirmed"; saveTask(task); }
   }
 }
 export type AdminNativeRecovery = "recovered" | "not_stuck" | "attempt_mismatch" | "worker_not_proven_gone" | "changed_during_check";
@@ -140,7 +148,7 @@ export function adminRecoveryMessage(outcome: string): string | undefined {
 export function adminRecoverNativeRequest(
   taskId: string, attemptId: string, inspect: typeof inspectWorkerProcess = inspectWorkerProcess,
 ): AdminNativeRecovery {
-  const stuck = (req: NativeRequest | undefined) => !!req && req.status === "running" && req.reason === "close_unconfirmed";
+  const stuck = (req: NativeRequest | undefined) => !!req && req.status === "running" && awaitingClose(req.reason);
   const before = loadTaskWithRevision(taskId);
   const req = nativeRequest(before.task);
   if (!stuck(req)) return "not_stuck";
@@ -165,13 +173,13 @@ export function nativeDirectory(task: Task): string | undefined {
   } catch { /* No stale evidence is passed to OCR. */ }
   return;
 }
-export function startNative(task: Task, run: typeof runNativeText, finished: () => void) {
+export function startNative(task: Task, run: typeof runNativeText, finished: () => void, alert: WatchdogAlert = (t, e) => notifyIllustratorWatchdog(t, e, "compare")) {
   const req = nativeRequest(task)!;
   req.status = "running";
   saveTask(task); // Persist intent before touching the shared application.
-  void execute(task, req, run).finally(finished);
+  void execute(task, req, run, alert).finally(finished);
 }
-async function execute(task: Task, req: NativeRequest, run: typeof runNativeText) {
+async function execute(task: Task, req: NativeRequest, run: typeof runNativeText, alert: WatchdogAlert) {
   let dispatched = false;
   try {
     const directory = root(task, req);
@@ -193,7 +201,18 @@ async function execute(task: Task, req: NativeRequest, run: typeof runNativeText
     } });
     const current = loadTask(task.id), active = nativeRequest(current);
     if (active?.id !== req.id || active.status !== "running") return;
-    if (result.timedOut || !closed(current, active)) { active.reason = "close_unconfirmed"; saveTask(current); return; }
+    const event = result.code !== 0 ? watchdogEventFromStdout(result.stdout) : undefined;
+    if (event) void alert(current, event).catch(() => undefined);
+    if (result.timedOut || !closed(current, active)) {
+      // Source hash changed during a stalled save: never fall back to OCR.
+      active.reason = event === "save_source_changed" ? "save_source_changed" : "close_unconfirmed";
+      saveTask(current); return;
+    }
+    if (event === "save_timeout") {
+      // Agent watchdog ended the identity-matched stalled Illustrator and proved close.
+      fallback(current, "save_timeout");
+      return;
+    }
     if (active.reason === "close_unconfirmed" || current.job_status !== "queued") { fallback(current, "native_failed"); return; }
     if (hash(join(taskRoot(current), active.source_name)) !== active.source_sha256 || hash(copy) !== active.source_sha256) { fallback(current, "source_changed"); return; }
     const payload = json(join(directory, "result.json"));

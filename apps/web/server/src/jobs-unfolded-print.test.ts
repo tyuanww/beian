@@ -279,6 +279,37 @@ for (const failure of [8, 2, "throw"] as const) it(`holds the illustrator slot a
   assert.equal(calls, 1);
 });
 
+for (const event of ["save_timeout", "save_source_changed"] as const) it(`unfolded ${event} sends the watchdog Feishu alert for the mockup`, async () => {
+  seed(id, { ...net, assembly: "attested-pdf", export: "native", separation: undefined, attestation: {
+    schema: "unfolded-separation-attestation/1", method: "semantic-identity",
+    hidden_roles: ["cut", "crease", "dimension", "production"], covers_blank_structure: true,
+  } });
+  const alerts: string[] = [];
+  setJobsTestHooks({
+    illustratorHostReady: true,
+    watchdogAlert: async (task, kind, open) => { alerts.push(`${task.id}:${kind}:${open}`); },
+    runUnfoldedNative: async (opts) => {
+      const config = JSON.parse(readFileSync(opts.configPath, "utf8"));
+      if (event === "save_timeout") writeFileSync(join(dirname(opts.configPath), "close.json"), JSON.stringify({
+        protocol: "beian.illustrator.export/2", request_kind: "unfolded_print", attempt_id: opts.executionId, source_sha256: config.source_sha256,
+        document_closed: true, bridge_exited: true, inflight: false, lock_returnable: true,
+      }));
+      return { code: event === "save_timeout" ? 4 : 8, stdout: JSON.stringify({ ok: false, reason: event }), stderr: "", timedOut: false };
+    },
+  });
+  await requestUnfoldedPrint(id, viewer);
+  for (let n = 0; n < 100 && alerts.length === 0; n += 1) await new Promise((resolve) => setTimeout(resolve, 5));
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.deepEqual(alerts, [`${id}:${event}:mockup`]);
+  const pub = publicMockup(readMockupFromDisk(id)!).unfolded_print;
+  assert.equal(pub.file_key, undefined);
+  if (event === "save_source_changed") {
+    assert.equal(pub.status, "running"); assert.equal(queueSnapshot().illustrator.running, 1);
+  } else {
+    assert.notEqual(pub.status, "running"); assert.equal(queueSnapshot().illustrator.running, 0);
+  }
+});
+
 it("drops a ready file when the generation changes", async () => {
   const dir = seed();
   const job = readMockupFromDisk(id)!;
