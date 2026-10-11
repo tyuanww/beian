@@ -173,9 +173,18 @@ function scanAndRedact(s: string): string {
 // 后顾断言保证只在词首尝试匹配，整体线性。
 const URL_RE = /(?<![A-Za-z0-9+.-])(?!file:)[A-Za-z][A-Za-z0-9+.-]*:\/\/[^\s"'`<>\u0080-\uffff]*/gi;
 
+/** 处理上限：URL 解码后超过这个长度只处理前这么多字符，后面不输出，改为追加 TRUNCATED_MARK。 */
+const REDACT_MAX_CHARS = 8000;
+const TRUNCATED_MARK = "（后面省略）";
+
 export function redactLocalPaths(message: string | undefined | null): string {
-  const s = String(message ?? "");
+  let s = String(message ?? "");
   if (!s) return s;
+  // ① URL 编码的分隔符（%5C、%2F，大小写不限）整条还原；② 超长截到前 REDACT_MAX_CHARS 字符；③ 对截下的部分脱敏；
+  // ④ 截过就追加「（后面省略）」。未脱敏的尾巴从不输出；被截断的半截路径照常脱敏（如 `C:\Users\bo` → 本机路径）。
+  s = s.replace(/%5c/gi, "\\").replace(/%2f/gi, "/");
+  const truncated = s.length > REDACT_MAX_CHARS;
+  if (truncated) s = s.slice(0, REDACT_MAX_CHARS);
   const parts: string[] = [];
   let last = 0;
   for (const m of s.matchAll(URL_RE)) {
@@ -183,14 +192,13 @@ export function redactLocalPaths(message: string | undefined | null): string {
     last = m.index! + m[0].length;
   }
   parts.push(redactPlain(s.slice(last)));
+  if (truncated) parts.push(TRUNCATED_MARK);
   return parts.join("");
 }
 
 function redactPlain(input: string): string {
   let s = input;
   if (!s) return s;
-  // URL 编码的分隔符（%5C、%2F，大小写不限）先还原，再按普通路径处理。
-  s = s.replace(/%5c/gi, "\\").replace(/%2f/gi, "/");
   // file:// 前缀去掉，后面按普通路径处理（file:///Users/... → /Users/...，file:///C:/... → C:/...）。
   s = s.replace(/file:\/\/\/?(?=[A-Za-z]:[\\/])/gi, "").replace(/file:\/\/(?=\/)/gi, "");
   // 先处理已知目录（可能含空格，如 C:\Program Files\...）：整段是文件就换成文件名，是目录就换占位，其下文件再留文件名。

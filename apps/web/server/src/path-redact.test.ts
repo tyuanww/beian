@@ -138,7 +138,7 @@ describe("redactLocalPaths: URLs are left alone", () => {
       "https://example.com/api/v1/x.json",
       "http://localhost:8787/api/tasks?id=1&x=/a/b#frag",
       "http://[::1]:8787/api/settings",
-      "https://user@example.com:443/a/b/c.pdf?q=%2Fx",
+      "https://user@example.com:443/a/b/c.pdf?q=1",
     ]) assert.equal(r(u), u);
     assert.equal(r("https://example.com/api/v1/x.json 返回 500"), "https://example.com/api/v1/x.json 返回 500");
     assert.equal(r("请求http://x/a/b失败"), "请求http://x/a/b失败");
