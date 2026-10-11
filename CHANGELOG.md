@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Security
+- `GET /api/settings` 按角色裁剪：reviewer / viewer 只拿到字段元数据（key、label、kind、help、restart、adminOnly）和 `set`；除开关类字段与 `WB_MAX_UPLOAD_MB` 外，`value`、`last4` 两个键整体省略（不返回空串或 null），不再泄露 tenant_key、open_id、应用 ID、对外网址和本机路径。`derived` 对非管理员去掉 `redirect_uri`、`python`；`health.mockup.detail` 对非管理员不含 Blender 路径。管理员返回不变。
+- `POST /api/settings/probe`、`GET /api/settings/billing`、`POST /api/settings/billing/refresh` 改为仅管理员，非管理员返回 403（含 reviewer 原先可用的飞书推送测试）。
+
 ## [0.31.1.13] - 2026-10-11
 
 ### Added
