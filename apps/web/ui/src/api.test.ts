@@ -36,7 +36,7 @@ describe("brokenApiMessage", () => {
 
   it("does not treat a 413 as a dead review service", () => {
     const err = new ApiError(413, UPLOAD_TOO_LARGE, false);
-    assert.equal(err.message, "文件太大，请压到 100MB 以内再传（多份合计）");
+    assert.equal(err.message, "文件太大，请压到 99MB 以内再传（多份合计）");
     assert.equal(brokenApiMessage(err, "www.jianghua.site"), null);
   });
 });

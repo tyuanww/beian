@@ -543,7 +543,7 @@ export type Me = {
   role: string | null;
   open_id?: string;
   perms: string[];
-  /** 可选：服务端给这个账号的上传上限（字节）；前端取它和公网 100MB 里小的。 */
+  /** 可选：服务端给这个账号的上传上限（字节）；前端取它和公网 99,000,000 字节（100MB 十进制留 1MB 余量）里小的。 */
   upload_limit_bytes?: number;
 };
 

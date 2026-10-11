@@ -1,7 +1,7 @@
 /** Cloudflare 免费/Pro 橙云主机上传上限约 100MB。我们自己的 400 文案是 200MB，公网会先被 413 HTML 拦掉。 */
-const PUBLIC_UPLOAD_MB = 100;
-export const PUBLIC_UPLOAD_BYTES = PUBLIC_UPLOAD_MB * 1024 * 1024;
-const MB = 1024 * 1024;
+// 十进制 MB（Cloudflare 按 1e6 算），再给 multipart 边界/表单字段留 1MB 余量：99,000,000 字节。
+const MB = 1000 * 1000;
+export const PUBLIC_UPLOAD_BYTES = 100 * MB - 1 * MB;
 
 /** /api/auth/me 可选下发 upload_limit_bytes；是正数就取它和公网上限里小的那个，缺或不合法就用公网上限。 */
 export function uploadLimitBytes(me?: { upload_limit_bytes?: unknown } | null): number {
@@ -19,11 +19,14 @@ export function currentUploadLimitBytes(): number {
   return currentLimit;
 }
 
-/** 产品哥 2026-10-11 定稿；MB 数取自当前上限并向下取整，不写死。 */
-export function uploadTooLargeText(limitBytes: number = currentLimit): string {
-  return `文件太大，请压到 ${Math.floor(limitBytes / MB)}MB 以内再传（多份合计）`;
+/** 产品哥 2026-10-11 定稿；MB 数 = floor(字节/1e6)，最小显示 1（不写 KB）。 */
+export function uploadLimitMb(limitBytes: number = currentLimit): number {
+  return Math.max(1, Math.floor(limitBytes / MB));
 }
-/** 公网默认上限（100MB）下的文案。 */
+export function uploadTooLargeText(limitBytes: number = currentLimit): string {
+  return `文件太大，请压到 ${uploadLimitMb(limitBytes)}MB 以内再传（多份合计）`;
+}
+/** 公网默认上限（99MB）下的文案。 */
 export const UPLOAD_TOO_LARGE = uploadTooLargeText(PUBLIC_UPLOAD_BYTES);
 
 export function bytesTooLarge(...sizes: number[]): boolean {

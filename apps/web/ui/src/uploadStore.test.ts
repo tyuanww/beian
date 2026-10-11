@@ -395,7 +395,7 @@ describe("uploadStore", () => {
     assert.equal(fake.calls.length, 0);
     assert.equal(store.get("mockup")?.phase, "failed");
     assert.equal(store.get("mockup")?.error, UPLOAD_TOO_LARGE);
-    assert.equal(store.get("mockup")?.error, "文件太大，请压到 100MB 以内再传（多份合计）");
+    assert.equal(store.get("mockup")?.error, "文件太大，请压到 99MB 以内再传（多份合计）");
 
     const restored = createUploadStore(controlledTransport().transport, async () => undefined, storage, "ou_oversize_owner");
     assert.equal(restored.get("mockup")?.phase, "failed");
