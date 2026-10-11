@@ -54,3 +54,17 @@ describe("redactLocalPaths: path glued to CJK", () => {
     assert.equal(r("见：/home/bob/a.pdf，请检查"), "见：a.pdf，请检查");
   });
 });
+
+describe("redactLocalPaths: spaces in directory names", () => {
+  it("Windows directories with spaces are consumed up to the last separator", () => {
+    assert.equal(r("C:\\Program Files\\客户 新品\\a.ai 打不开"), "a.ai 打不开");
+    assert.equal(r("读不到 D:\\My Work\\Q4 稿\\b.pdf"), "读不到 b.pdf");
+    assert.equal(r("\\\\nas\\共享 盘\\c.pdf 打不开"), "c.pdf 打不开");
+  });
+  it("paths do not run into each other or swallow relative paths", () => {
+    assert.equal(r("C:\\a\\b.pdf 和 D:\\c\\d.pdf"), "b.pdf 和 d.pdf");
+    assert.equal(r("C:\\a\\b c\\d.pdf D:\\e\\f.pdf"), "d.pdf f.pdf");
+    assert.equal(r("目录 /a/b 不可写，见 docs/x.md"), "目录 本机路径 不可写，见 docs/x.md");
+    assert.equal(r("/home/a/b.pdf failed at step 2/3"), "b.pdf failed at step 2/3");
+  });
+});
