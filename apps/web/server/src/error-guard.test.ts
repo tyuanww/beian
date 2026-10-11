@@ -243,3 +243,24 @@ describe("leak residue: backslash + letters left after redaction", () => {
     assert.equal(hasLeakResidue("a\\nfoo"), true);
   });
 });
+
+describe("leak residue: secret-looking query parameter names", () => {
+  it("password/passwd/pwd/pw/token/secret/key (and *_key, *_token ...) hide", () => {
+    for (const s of [
+      "http://u@h/?password=pw",
+      "http://h/?pw=secretpw",
+      "http://h/?id=1&api_key=abc",
+      "http://h/?access_token=t",
+      "http://h/?PASSWD=1",
+      "http://h/?client_secret=s",
+      "?pwd=1 失败",
+      "http://h/?key=1",
+      "http://h/?x-token=1",
+    ]) assert.equal(guardPublicError(s, "0000000d0002").hidden, true, s);
+  });
+  it("ordinary parameter names do not", () => {
+    for (const s of ["http://h/?monkey=1", "http://h/?keyword=x", "http://h/?tokens_left=3", "http://h/?id=1&page=2"]) {
+      assert.equal(guardPublicError(s, "x").hidden, false, s);
+    }
+  });
+});
