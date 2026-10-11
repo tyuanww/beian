@@ -138,4 +138,14 @@ describe("mockup list/detail errors go through redact + guard for non-admins", (
       for (const obj of [v.row, v.detail]) assert.equal(obj.job_error, input);
     }
   });
+
+  it("drive letter left before 本机稿件 with more text after hides (D:/客户 张三/报价)", async () => {
+    const id = "0000000e0600";
+    save(id, "job_error", "读取 D:/客户 张三/报价 失败");
+    const v = await views(id, auth("reviewer", "ou_mg_rv"));
+    for (const obj of [v.row, v.detail]) {
+      assert.equal(obj.job_error, `任务失败，请联系管理员（单号 ${id}）`, String(obj.job_error));
+      assert.equal(obj.error_hidden, true);
+    }
+  });
 });

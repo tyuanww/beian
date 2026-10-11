@@ -370,3 +370,12 @@ describe("Basic + base64 token", () => {
     }
   });
 });
+
+describe("leak residue: drive letter + placeholder + more text", () => {
+  it("hits X:本机稿件 / X:本机路径 followed by content; a word before the colon does not", () => {
+    assert.equal(hasLeakResidue("读取 D:本机稿件 张三/报价 失败"), true);
+    assert.equal(hasLeakResidue("D:本机路径 x"), true);
+    assert.equal(hasLeakResidue("open:本机稿件 失败"), false);
+    assert.equal(hasLeakResidue("读取 本机稿件 失败"), false);
+  });
+});
