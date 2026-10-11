@@ -106,3 +106,27 @@ describe("redactLocalPaths: home-relative paths", () => {
     assert.equal(r("约 ~3 秒"), "约 ~3 秒");
   });
 });
+
+describe("redactLocalPaths: ReDoS / performance", () => {
+  const inputs: Record<string, string> = {
+    "spaces+backslashes": "C:\\" + "a \\".repeat(3000),
+    "spaces+slashes": "/x/" + "a /".repeat(3000),
+    "space-continuation miss": "C:\\" + "a b ".repeat(3000) + "c",
+    "many drive starts": "C:\\a ".repeat(2000),
+    "slashes only": "/".repeat(8000),
+    "backslashes only": "\\".repeat(8000),
+    "tilde names": "~" + "a".repeat(6000) + " ~",
+    "encoded": "%5C a%2F".repeat(1000),
+    "mixed cjk": "打开/a 客 \\b C:\\c ".repeat(500),
+  };
+  for (const [name, input] of Object.entries(inputs)) {
+    it(`${name} (${input.length} chars) < 50ms`, () => {
+      assert.ok(input.length >= 5000);
+      r(input); // warm-up
+      const t0 = performance.now();
+      r(input);
+      const ms = performance.now() - t0;
+      assert.ok(ms < 50, `${name}: ${ms.toFixed(1)}ms`);
+    });
+  }
+});
