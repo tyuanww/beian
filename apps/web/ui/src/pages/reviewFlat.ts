@@ -6,7 +6,7 @@ import type { Decision, FieldHit, TaskDetail, TaskPage } from "../api";
 import { REVIEW_COPY } from "../copy/labels";
 import { isPendingDecision } from "./reviewNav";
 import { partitionReviewHits } from "./reviewEvidence";
-import { UPLOAD_TOO_LARGE, bytesTooLarge } from "../uploadLimit";
+import { bytesTooLarge, uploadTooLargeText } from "../uploadLimit";
 
 export const FLAT_PANEL_WIDTH = 320;
 export const FLAT_THUMB_WIDTH = 52;
@@ -265,7 +265,7 @@ export function submitFailureText(
   return REVIEW_COPY.submitFailed;
 }
 
-/** 核对页「上传新稿」发请求前的大小预检：超限返回提示文案（沿用 UPLOAD_TOO_LARGE），不超返回 null。 */
+/** 核对页「上传新稿」发请求前的大小预检：超限返回按当前账号上限生成的统一提示，不超返回 null。 */
 export function reworkUploadBlocked(file: Pick<File, "size"> | null | undefined): string | null {
-  return file && bytesTooLarge(file.size) ? UPLOAD_TOO_LARGE : null;
+  return file && bytesTooLarge(file.size) ? uploadTooLargeText() : null;
 }
