@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.31.1.10] - 2026-10-11
+
+### Added
+- 新生成的打样 GLB 贴图自动转为 WebP（`EXT_texture_webp`，quality 90），实测 3.37 MiB → 1.25 MiB、小字无可见损失。转换失败时保留原 PNG GLB、只记日志，打样不受影响；旧文件不转换，托管代际 GLB 不在范围内。
+- 打样详情与列表的 `files[]` 中 `key: "glb"` 条目新增 `texture_format`（`"webp"` / `"png"`），由 GLB `extensionsUsed` 判定并缓存，只增不改；前端可据此决定是否做 WebP 解码检查。
+
+### Changed
+- 新增依赖 `@gltf-transform/core` / `extensions` / `functions` 4.5.1（纯 JS，复用 sharp 0.34.4，根 `overrides` 固定 sharp 防止重复原生包），走 `release.ps1` 停服前 staged `npm ci` 离线交接；staged/live 离线探针与 Windows CI 新增真实 GLB WebP 转换检查。
+
 ## [0.31.1.9] - 2026-10-11
 
 ### Fixed
