@@ -357,8 +357,20 @@ function redactDecoded(s: string, known: string[]): string {
   return parts.join("");
 }
 
+const HOME_USER_RE = /(^|[^A-Za-z0-9_.~-])\/(Users|home)\/([^/\r\n]*)/g;
+
+/**
+ * `/Users/`、`/home/` 后面的用户名段：只要这一段含空白，空格不算结束，一直并到下一个 `/` 或行尾，
+ * 换成占位用户名（`/Users/bob smith` → `/Users/u`，`/Users/bob smith/a.pdf` → `/Users/u/a.pdf`）。
+ * 取舍：没有下一个 `/` 时，同一行用户名后面的文字也一起并掉（`/Users/bob smith 失败` → `本机路径`）。
+ * 网址外文字与打样链（publicMockupError 之前）共用。线性：单个非回溯字符类。
+ */
+export function collapseHomeUser(input: string): string {
+  return input.replace(HOME_USER_RE, (m, pre: string, root: string, seg: string) => (/\s/.test(seg) ? `${pre}/${root}/u` : m));
+}
+
 function redactPlain(input: string, knownPaths: string[]): string {
-  let s = input;
+  let s = collapseHomeUser(input);
   if (!s) return s;
   // file:// 前缀去掉，后面按普通路径处理（file:///Users/... → /Users/...，file:///C:/... → C:/...）。
   s = s.replace(/file:\/\/\/?(?=[A-Za-z]:[\\/])/gi, "").replace(/file:\/\/(?=\/)/gi, "");

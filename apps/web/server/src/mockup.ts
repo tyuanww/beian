@@ -23,7 +23,7 @@ import { blenderBin } from "./settings.js";
 import { forgetHistory, noteHistoryMockup } from "./historyIndex.js";
 import { canAccessOwner, isTid, replaceFile, type Viewer } from "./tasks.js";
 import { atomicReplaceJobJson } from "./mockupAtomicWrite.js";
-import { guardErrorFields } from "./pathRedact.js";
+import { collapseHomeUser, guardErrorFields } from "./pathRedact.js";
 import { isRenderGenerationOutputKey, type RenderActivationFact } from "./renderGenerations.js";
 import {
   PRINT_FACE_NAMES,
@@ -539,7 +539,7 @@ function capMockupError(value: unknown): string | undefined {
 
 function guardedMockupErrors(job: Pick<MockupJob, "id" | "error" | "job_error" | "render_mutation">) {
   // 先走原来的打样脱敏（客户稿件名、网址/凭据整条替换、80 字），再叠加通用脱敏 + 兜底。
-  const str = (v: unknown) => publicMockupError(v) || "";
+  const str = (v: unknown) => publicMockupError(typeof v === "string" ? collapseHomeUser(v) : v) || "";
   const g = guardErrorFields(job.id, {
     error: str(job.error),
     job_error: str(job.job_error),
