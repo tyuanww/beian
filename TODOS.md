@@ -331,9 +331,16 @@ RF-10–RF-13 的原始依赖见 [ADR-007 §20.7](docs/adr-007-packaging-render-
   2. 接收人为空时，在按钮旁提示「接收人还没填，测试后会设成你自己」，或禁用按钮。
   3. **验收：已配置接收人时测试消息到达该接收人且 `FEISHU_OPEN_ID` 不变；为空时界面有提示或按钮禁用，并有测试覆盖。**
 
-- [x] **F10 — 任务/作业失败报错是否向非管理员带出本机路径（待查）**
+- [ ] **F10 — 任务/作业失败报错是否向非管理员带出本机路径（部分解决）**
 
-  已解决（0.31.1.14，`fix/settings-admin-only`）：`/api/tasks` 列表与详情的 `job_error` / `error` 对非管理员去目录留文件名，管理员看原文；飞书失败通知同样脱敏（`apps/web/server/src/pathRedact.ts`，测试 `job-error-redact.test.ts`）。打样 `publicMockupError` 原本已脱敏，未改。
+  已做（0.31.1.14，`fix/settings-admin-only`）：`/api/tasks` 列表与详情的 `job_error` / `error` 对非管理员去目录留文件名，管理员看原文；飞书完成/失败通知（`fireTaskNotify`、`fireMockupNotify`）同样脱敏。规则见 `docs/contracts/identity-settings.md`（`apps/web/server/src/pathRedact.ts`，测试 `path-redact.test.ts`、`job-error-redact.test.ts`）。打样 `publicMockupError` 原本已脱敏，未改。
+
+  明确不在本次范围、未审计（可能仍带出本机路径）：
+  - `apps/web/server/src/index.ts:424` 全局错误处理对 4xx 原样返回 `err.message` 作 `detail`。
+  - `notifyIllustratorWatchdog`（`notify.ts:247`，`jobs.ts:959`、`nativeTextJobs.ts:176` 调用）的飞书告警文案。
+  - `apps/web/server/src/mockup.ts:595` `print_faces_repair.error` 原样返回。
+  - 已知规则缺口：Unix 目录名含空格时空格后的片段会留下（`/Users/bob/My Docs/a.pdf` → `本机路径 Docs/a.pdf`）。
+  - `apps/web/backend` worker 输出与其他 HTTP `detail` 未逐一盘点。
 
   原状态：2026-10-11 设置接口按角色收紧（`fix/settings-role-trim`）自查时发现，不在该 PR 范围内，未审计。`/api/settings` 已对非管理员去掉本机路径，但审稿任务、打样、出图、压缩等作业失败时返回给前端的报错文案（HTTP `detail`、任务/作业的 error/reason 字段、worker stderr 摘要）可能原样带出 `C:\`、`/Users/`、`/home/`、数据目录（`WB_DATA_DIR`）、Python 或 Blender/Illustrator 路径。
 
