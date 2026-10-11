@@ -148,3 +148,15 @@ describe("redactLocalPaths: URLs are left alone", () => {
     assert.equal(r("file:///Users/bob/a.pdf"), "a.pdf");
   });
 });
+
+describe("redactLocalPaths: root-relative backslash paths", () => {
+  it("\\Users\\bob\\a.pdf (incl. decoded %5C) keeps only the file name", () => {
+    assert.equal(r("%5CUsers%5Cbob%5Ca.pdf"), "a.pdf");
+    assert.equal(r("读取\\Users\\bob\\a.pdf失败"), "读取 a.pdf 失败");
+    assert.equal(r("at \\app\\src\\x.ts:3:1"), "at x.ts:3:1");
+  });
+  it("escape-like backslash runs without a file name stay", () => {
+    assert.equal(r("ratio:\\n\\t"), "ratio:\\n\\t");
+    assert.equal(r("\\a.pdf"), "\\a.pdf");
+  });
+});
