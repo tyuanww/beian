@@ -130,7 +130,9 @@ describe("rename-while-open (platform semantics)", () => {
     variant.cleanupGlbWebpVariantsOnBoot();
     const left = readdirSync(vdir).filter((n) => n.endsWith(".webpv"));
     assert.deepEqual(left, [basename(variant.glbWebpVariantPaths(id, glbPath)!.variant)], "boot cleanup keeps only the meta-referenced variant");
-    assert.equal(variant.openGlbForServe(id, glbPath).kind, "variant");
+    const after = variant.openGlbForServe(id, glbPath);
+    closeSync(after.fd); // 句柄不关的话 Windows 上删除会挂起，文件仍列在目录里
+    assert.equal(after.kind, "variant");
     variant.dropGlbWebpVariant(id);
     assert.deepEqual(readdirSync(vdir), [], "drop removes every hashed variant and the meta");
   });
