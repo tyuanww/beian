@@ -151,7 +151,7 @@ export function ReviewDockPanel({
           {spoken ? (
             <section className="review-spoken" aria-label="嘱咐">
               <p>{spoken.lead}</p>
-              <p>{spoken.because}</p>
+              {spoken.because ? <p>{spoken.because}</p> : null}
               {spoken.ask ? <p className="is-ask">{spoken.ask}</p> : null}
             </section>
           ) : null}

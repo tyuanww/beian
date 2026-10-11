@@ -193,7 +193,6 @@ describe("impersonal reviewer copy", () => {
     assert.equal(spokenAsk({ status: "疑点", excel_value: "海葡萄", bboxes: [] }, "文案", false)?.lead, "没找到位置，请看整页");
     assert.equal(spokenAsk({ status: "疑点", doubt_bucket: "ocr_smallprint", excel_value: "FSC", bboxes: box })?.because, "这一面没读全，请核对");
     assert.deepEqual(spokenLines({ status: "疑点", evidence: "score=10", bboxes: box }), ["这些字没读全，请核对"]);
-    assert.equal(spokenAsk({ status: "疑点", evidence: "score=10", bboxes: box })?.because, "这一面没读全，请核对");
     assert.equal(spokenAsk({ status: "疑点", evidence: "稿上少了净含量", bboxes: box })?.because, "这一面没读全，请核对");
     assert.equal(spokenAsk({ status: "疑点", doubt_bucket: "ocr_smallprint", excel_value: "FSC", bboxes: box })?.ask, "请对着刀线边缘看这一句");
   });
@@ -213,3 +212,23 @@ describe("empty last line", () => {
     }
   });
 });
+
+describe("single-line 这些字没读全", () => {
+  const box = [{ left: 1, top: 1, width: 8, height: 8 }];
+  it("shows 这些字没读全，请核对 exactly once and omits 这一面没读全", () => {
+    const ask = spokenAsk({ status: "疑点", evidence: "score=10", bboxes: box });
+    assert.ok(ask);
+    assert.equal(ask.lead, "这些字没读全，请核对");
+    assert.equal(ask.because, "");
+    assert.equal(ask.ask, "");
+    const text = `${ask.lead}${ask.because}${ask.ask}`;
+    assert.equal(text.split("这些字没读全，请核对").length - 1, 1);
+    assert.doesNotMatch(text, /这一面没读全/);
+  });
+  it("keeps the miss list as the reason when there are several misses", () => {
+    const ask = spokenAsk({ status: "疑点", coverage: { miss: ["烟酰胺", "甘油"] }, bboxes: box });
+    assert.equal(ask?.lead, "这些字没读全，请核对");
+    assert.equal(ask?.because, "烟酰胺；甘油");
+  });
+});
+

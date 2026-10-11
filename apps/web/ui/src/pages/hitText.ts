@@ -43,7 +43,7 @@ function expectedSnippet(h: HitText): string {
   return raw.length > 18 ? `${raw.slice(0, 18)}…` : raw;
 }
 
-/** ask 为空串表示没有比 lead/because 更具体的指引，界面不渲染这一行。 */
+/** because / ask 为空串表示没有比 lead/because 更具体的指引，界面不渲染这一行。 */
 export type SpokenAsk = { lead: string; because: string; ask: string };
 
 function notLocatedLines(h: HitText): string[] {
@@ -113,7 +113,8 @@ export function spokenAsk(h: HitText, field?: string, located?: boolean): Spoken
   if (lines.length) {
     return {
       lead: lines[0],
-      because: lines[1] || misses.filter((m) => m !== lines[0]).join("；") || "这一面没读全，请核对",
+      // 只有一行（「这些字没读全，请核对」）时不再补「这一面没读全，请核对」，避免同义重复。
+      because: lines[1] || misses.filter((m) => m !== lines[0]).join("；") || "",
       ask: lines[2] || "",
     };
   }
