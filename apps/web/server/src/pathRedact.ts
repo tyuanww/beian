@@ -394,6 +394,9 @@ const LEAK_RESIDUE = [
   // 反斜杠 + 至少 2 个字母（`\Settings`、`\bob`）：脱敏后仍残留的 Windows 目录片段。单字母转义（`\n`、`\t`）不算；
   // 取舍：字面写出的 `\nfoo` 这类也会整条隐藏。
   /\\[A-Za-z]{2,}/,
+  // 查询参数名像凭据：password / passwd / pwd / pw / token / secret / key，或以 `_` `-` `.` 接这些词结尾
+  //（`api_key`、`access_token`、`client_secret`）。大小写不限；`monkey`、`keyword`、`tokens_left` 不算。
+  /[?&](?:[A-Za-z0-9_.-]*[_.-])?(?:password|passwd|pwd|pw|token|secret|key)=/i,
   /\\users\\/i,
   /(?<![A-Za-z])[A-Za-z]:[\\/]/,
   /%2f/i,
