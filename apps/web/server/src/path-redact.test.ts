@@ -235,3 +235,11 @@ describe("redactLocalPaths: local paths embedded in http(s) URLs", () => {
     assert.equal(r("http://[::1]:8787/api/settings?id=1#f"), "http://[::1]:8787/api/settings?id=1#f");
   });
 });
+
+describe("redactLocalPaths: cap keeps surrogate pairs intact", () => {
+  it("does not split an emoji at position 8000", () => {
+    const out = r("a".repeat(7999) + "😀" + "b");
+    assert.equal(out, "a".repeat(7999) + "（后面省略）");
+    assert.ok(!/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/.test(out));
+  });
+});
