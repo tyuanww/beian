@@ -281,6 +281,12 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
 
   const pageNo = Number(page?.page || pageIdx + 1);
   const locked = lockedBy(task, displayName);
+  const lockedRef = useRef(locked);
+  lockedRef.current = locked;
+  // 锁页后撤销已无意义（服务端不再收结论），收起撤销提示。
+  useEffect(() => {
+    if (locked) message.destroy("review-undo");
+  }, [locked]);
   const gate = submitGate(hits, reviewable, Boolean(locked));
   const counts = verdictCounts(hits);
   const tabList = tabIndices(hits, tab, active);
@@ -535,6 +541,7 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
             className="review-undo-link"
             onClick={() => {
               message.destroy(key);
+              if (lockedRef.current) return;
               if (fromIndex >= 0) goToHit(fromIndex);
               if (previous === "confirm" || previous === "issue" || previous === "ignore") {
                 void decide({ ...hit, decision }, previous, hit.note || "", { undoable: false });

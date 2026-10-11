@@ -719,3 +719,17 @@ test("退回后「上传新稿」选了超过公网上限的 PDF：直接提示�
   expect(reworkRequests).toBe(0);
   expect(syntheticApi.calls.filter((c) => c.path.endsWith("/rework"))).toHaveLength(0);
 });
+
+test("锁页后收起撤销提示", async ({ page, syntheticApi }) => {
+  const task = reviewTask("e5969b58cda7");
+  task.hits!.push({ ...task.hits![0], id: "hit-second", field: "第二条" });
+  syntheticApi.tasks.push(task);
+  await page.goto(`/review/${task.id}`);
+  await page.getByTestId("review-dock").getByRole("button", { name: /^有错/ }).first().click();
+  await expect(page.getByTestId("review-undo-toast")).toBeVisible();
+  syntheticApi.otherCompletesNext = { by: "天元", kind: "signed" };
+  await page.getByTestId("review-dock").getByRole("button", { name: /^一致/ }).first().click();
+  await expect(page.locator(".review-lock")).toBeVisible();
+  // 撤销提示本身 5 秒才自动消失；这里 1 秒内就得没了。
+  await expect(page.getByTestId("review-undo-toast")).toHaveCount(0, { timeout: 1000 });
+});
