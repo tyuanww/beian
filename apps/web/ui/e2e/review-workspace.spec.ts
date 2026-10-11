@@ -654,7 +654,7 @@ for (const theme of ["light", "dark"]) {
         const rgb = (s: string) => (s.match(/[\d.]+/g) || []).slice(0, 3).map(Number);
         const lum = ([r, g, b]: number[]) => { const f = (c: number) => { c /= 255; return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; }; return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b); };
         const c = getComputedStyle(el); const a = lum(rgb(c.color)), d = lum(rgb(c.backgroundColor));
-        return { ratio: (Math.max(a, d) + 0.05) / (Math.min(a, d) + 0.05), key: `${c.color}|${c.backgroundColor}` };
+        return { ratio: (Math.max(a, d) + 0.05) / (Math.min(a, d) + 0.05), key: [c.color, c.backgroundColor, c.borderTopColor, c.borderTopWidth, c.borderTopStyle, c.borderRadius, c.boxShadow, c.opacity].join("|") };
       });
       expect(r.ratio).toBeGreaterThanOrEqual(4.5);
       styles.push(r.key);

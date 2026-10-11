@@ -21,7 +21,7 @@ html[data-theme="dark"] .shell.is-review-flat .sidebar, html[data-theme="dark"] 
 .review-signhint { color: var(--muted); font-size: 14px; }
 /* 禁用的「签字」「退回」一套样式：--accent-mist 底 + --muted 字 + --line 描边；
    覆盖 app.css `.btn-primary:disabled { opacity: .55 }`，不再整体半透明（对比度 ≥4.5）。 */
-.review-flat-page .review-sign:disabled, .review-flat-page .review-reject:disabled { opacity: 1; background: var(--accent-mist); color: var(--muted); border-color: var(--line); cursor: not-allowed; box-shadow: none; }
+.review-flat-page .review-sign:disabled, .review-flat-page .review-reject:disabled { opacity: 1; background: var(--accent-mist); color: var(--muted); border: 1px solid var(--line); cursor: not-allowed; box-shadow: none; }
 .review-lock, .review-flat-page > .ant-alert { margin: 8px 16px 0; }
 
 .review-workspace.review-flat { display: grid; flex: 1; min-height: 0; position: relative; gap: 0; height: auto; }
