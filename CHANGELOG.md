@@ -5,6 +5,7 @@
 ### Security
 - `GET /api/settings` 按角色裁剪：reviewer / viewer 只拿到字段元数据（key、label、kind、help、restart、adminOnly）和 `set`；除开关类字段与 `WB_MAX_UPLOAD_MB` 外，`value`、`last4` 两个键整体省略（不返回空串或 null），不再泄露 tenant_key、open_id、应用 ID、对外网址和本机路径。`derived` 对非管理员去掉 `redirect_uri`、`python`；`health.mockup.detail` 对非管理员不含 Blender 路径。管理员返回不变。
 - `POST /api/settings/probe`、`GET /api/settings/billing`、`POST /api/settings/billing/refresh` 改为仅管理员，非管理员返回 403（含 reviewer 原先可用的飞书推送测试）。
+- 任务报错按角色脱敏：`/api/tasks` 列表与任务详情里的 `job_error` / `error`，对 reviewer / viewer 去掉本机目录（`C:\`、UNC、`/Users/`、`/home/`、`/var/folders`、数据目录、Python / Blender / Illustrator 路径），只保留文件名（如 `C:\supply\data\x\a.pdf` → `a.pdf`），无文件名的目录写成「本机路径」；管理员看原文。飞书失败通知里的报错同样脱敏。
 
 ### Changed
 - 「设置」只给管理员（老板 2026-10-11 批准）：非管理员侧栏不再出现「设置」；直接打开 `/settings` 只显示「这里只有管理员能看」和「回审稿台」，不请求 `/api/settings`、`/api/settings/probe`、`/api/settings/billing`。管理员不变。
