@@ -20,7 +20,10 @@ describe("legacy first-person copy", () => {
     assert.equal(rewriteLegacyCopy(OLD_NET), "确认单要的净含量，这一面没读到，请核对");
     assert.equal(rewriteLegacyCopy(OLD_BAR), "确认单要的毫升和条码，这一面没读全，请核对");
     assert.equal(rewriteLegacyCopy(`规格/条码类可能分支 · ${OLD_NET}`), "规格/条码类可能分支 · 确认单要的净含量，这一面没读到，请核对");
-    for (const [, to] of LEGACY_FIRST_PERSON_COPY) assert.doesNotMatch(to, /我/);
+    for (const [, to] of LEGACY_FIRST_PERSON_COPY) {
+      assert.doesNotMatch(to, /我/);
+      assert.doesNotMatch(to, /。$/);
+    }
   });
 
   it("leaves other text and input objects untouched", () => {
