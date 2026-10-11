@@ -73,3 +73,33 @@ describe("API rows straight from /api/tasks", () => {
     assert.deepEqual(rows.map((row) => historyTaskRow(row).status), ["已签字", "已退回", "已提交", "已提交"]);
   });
 });
+
+describe("REVIEW_COPY（老板 2026-10-11 已批文案）", () => {
+  it("确认框标题、正文、按钮一字不差", async () => {
+    const { REVIEW_COPY } = await import("./labels");
+    assert.equal(REVIEW_COPY.rejectTitle, "退回这份稿？");
+    assert.equal(REVIEW_COPY.rejectBody(2), "有错的 2 条会随退回一起发出，并通知「已退回」。提交后不能撤回。");
+    assert.equal(REVIEW_COPY.rejectConfirm, "确认退回");
+    assert.equal(REVIEW_COPY.signConclusion, "无改稿项");
+    assert.equal(REVIEW_COPY.rejectBlockedByPending(4), "还有 4 条待确认，处理完才能退回");
+    assert.equal(REVIEW_COPY.noBox, "没找到位置，请看整页");
+    assert.equal(REVIEW_COPY.pendingEmpty, "没有待确认的了");
+    assert.equal(REVIEW_COPY.rejectConclusion(3), "退回：3 条有错，见清单");
+    assert.equal(REVIEW_COPY.signTitle, "签字这份稿？");
+    assert.equal(REVIEW_COPY.signBody, "签字后会通知「已签字」，不能撤回。");
+    assert.equal(REVIEW_COPY.signConfirm, "确认签字");
+    assert.equal(REVIEW_COPY.cancel, "再看看");
+    assert.equal(REVIEW_COPY.missingReason, "没写原因");
+    assert.equal(REVIEW_COPY.extraNote, "补充说明（选填）");
+  });
+  it("命名：核对要点 / 标记 / 忽略 / 收起 / 撤销提示", async () => {
+    const { REVIEW_COPY } = await import("./labels");
+    assert.equal(REVIEW_COPY.lead, "核对要点");
+    assert.equal(REVIEW_COPY.marker, "标记");
+    assert.equal(REVIEW_COPY.verdict.ignore, "忽略");
+    assert.equal(REVIEW_COPY.collapse, "收起");
+    assert.equal(REVIEW_COPY.undoToast("有错") + REVIEW_COPY.undo, "已标为有错，撤销");
+    assert.equal(REVIEW_COPY.pendingHint(3), "还有 3 条没下结论");
+    assert.equal(REVIEW_COPY.offline, "没连上网，这条没存上");
+  });
+});

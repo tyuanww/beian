@@ -1,9 +1,10 @@
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { Alert, App, Button, Empty, Input, Tag } from "antd";
+import { Alert, App, Button, Empty, Tag } from "antd";
+import { REVIEW_COPY, NAV_LABEL } from "../copy/labels";
 import { ApiError, api, type Decision, type FieldHit, type TaskDetail, type TaskPage } from "../api";
 import { WaitCard } from "../chrome/WaitCard";
 import { forgetReviewHandoff, reviewHandoffFor } from "../jobHandoff";
-import { fittedPage, panBy, resetZoom, zoomAt, zoomCss, zoomToBox } from "./canvasZoom";
+import { fittedPage, panBy, panToBoxAt, resetZoom, zoomAt, zoomCss } from "./canvasZoom";
 import { locateBoxesForHit, locationPageForHit, overlayFromBox, overlaysForHit, pickHitBox, pinHitGroupsForPage, resolvePageMetrics, visiblePinGroups } from "./pinBox";
 import {
   enterElementFullscreen,
@@ -12,20 +13,28 @@ import {
   isElementFullscreen,
 } from "./mockupFullscreen";
 import { readBoxesOn, readPinsOn, skipPackSheetField, writeBoxesOn, writePinsOn } from "./reviewDock";
+import { ReviewSubmitDialog } from "./ReviewSubmitDialog";
+import {
+  conclusionFor, decisionFailureText, reworkUploadBlocked, submitFailureText, flatLayout, isTypingTarget, lockedBy, markShortcutsSeen, markerOutsideCorner, nextPendingAfter,
+  panToClearPanel, positionLabel, rejectRows, shouldShowShortcutsOnOpen, submitGate, tabIndices, thumbMarks, verdictCounts, verdictForKey,
+  type FlatLayout, type FlatTab,
+} from "./reviewFlat";
 import { ReviewWorkspace } from "./ReviewWorkspace";
 import { useReviewSession } from "./useReviewSession";
 import { detailLoadState, shouldShowWaitCard } from "./waitCard";
 import { reviewHits, shouldUseReworkView } from "./reviewVersion";
 import { ReviewDockPanel } from "./ReviewDockPanel";
-import { firstPendingIssueIndex, issueOrdinal, pageIndexForHit } from "./reviewNav";
+import { firstPendingIssueIndex, pageIndexForHit } from "./reviewNav";
 import { customerCopy } from "./customerCopy";
-import { reviewVersionToggle, statusLead } from "./reviewStatus";
+import { reviewVersionToggle } from "./reviewStatus";
 import { buildRevisionList, partitionReviewHits, withLocalNotes } from "./reviewEvidence";
 import {
   prepareReviewMedia,
   prepareReviewMediaAfterFailure,
   type PreparedReviewMedia,
 } from "./reviewMedia";
+
+const REVIEW_COPY_DONE = { sign: "已签字", reject: "已退回" } as const;
 
 function browserStore(): Storage | null {
   return typeof localStorage === "undefined" ? null : localStorage;
@@ -34,7 +43,11 @@ function browserStore(): Storage | null {
 type Props = {
   taskId: string | null;
   userId: string | null;
+  /** 当前登录人显示名；只用来判断「已被别人签字」。 */
+  displayName?: string | null;
   onBack: () => void;
+  /** 手机底部导航「历史」。 */
+  onHistory?: () => void;
 };
 
 function isReviewable(status?: string) {
@@ -55,13 +68,28 @@ function pageList(task: TaskDetail | null): TaskPage[] {
 }
 
 
-export function ReviewPage({ taskId, userId, onBack }: Props) {
+function viewportLayout(): FlatLayout {
+  return typeof window === "undefined" ? "wide" : flatLayout(window.innerWidth);
+}
+
+export function ReviewPage({ taskId, userId, displayName = null, onBack, onHistory }: Props) {
   const { message } = App.useApp();
   const [task, setTask] = useState<TaskDetail | null>(() => reviewHandoffFor(taskId));
   const [error, setError] = useState<string | null>(null);
   const [pageIdx, setPageIdx] = useState(0);
   const [active, setActive] = useState(0);
-  const [conclusion, setConclusion] = useState("");
+  const [layout, setLayout] = useState<FlatLayout>(viewportLayout);
+  const [panelOpen, setPanelOpen] = useState(() => viewportLayout() === "wide");
+  const [tab, setTab] = useState<FlatTab>("pending");
+  const [seenPages, setSeenPages] = useState<Set<number>>(() => new Set());
+  const [dialog, setDialog] = useState<"sign" | "reject" | null>(null);
+  /** 签字/退回失败的提示文案；null = 没失败。 */
+  const [submitFailed, setSubmitFailed] = useState<string | null>(null);
+  /** 同步置位，防连点：await 队列之前就挡住第二次提交。 */
+  const submittingRef = useRef(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [mediaRetry, setMediaRetry] = useState(0);
+  const [phoneListOpen, setPhoneListOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [useV2, setUseV2] = useState(false);
   const { notes, setNote, clearNote, savedHitId, rememberHit } = useReviewSession(userId, taskId, useV2);
@@ -73,7 +101,6 @@ export function ReviewPage({ taskId, userId, onBack }: Props) {
   const [zoom, setZoom] = useState(resetZoom);
   const [pinsOn, setPinsOn] = useState(() => readPinsOn(browserStore()));
   const [boxesOn, setBoxesOn] = useState(() => readBoxesOn(browserStore()));
-  const [toolsOpen, setToolsOpen] = useState(true);
   const [reviewFullscreen, setReviewFullscreen] = useState(false);
   const viewRef = useRef<HTMLDivElement>(null);
   const pageRef = useRef<HTMLElement>(null);
@@ -143,11 +170,16 @@ export function ReviewPage({ taskId, userId, onBack }: Props) {
   }, []);
 
   useEffect(() => {
-    const phone = window.matchMedia("(max-width: 720px)");
-    const compactTools = () => { if (phone.matches) setToolsOpen(false); };
-    compactTools();
-    phone.addEventListener("change", compactTools);
-    return () => phone.removeEventListener("change", compactTools);
+    let last = viewportLayout();
+    const onResize = () => {
+      const next = viewportLayout();
+      if (next === last) return;
+      last = next;
+      setLayout(next);
+      setPanelOpen(next === "wide");
+    };
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
   }, []);
 
   function endPan(target?: EventTarget | null) {
@@ -178,7 +210,6 @@ export function ReviewPage({ taskId, userId, onBack }: Props) {
         forgetReviewHandoff(taskId);
         setTask(t);
         setUseV2(shouldUseReworkView(t));
-        if (t.conclusion) setConclusion(t.conclusion);
       })
       .catch((err: unknown) => {
         if (cancelled) return;
@@ -202,7 +233,6 @@ export function ReviewPage({ taskId, userId, onBack }: Props) {
           setError(null);
           setTask(next);
           if (shouldShowWaitCard(next)) return;
-          if (next.conclusion) setConclusion((cur) => cur || next.conclusion || "");
           if (next.job_kind !== "rework" || next.job_status === "failed") return;
           if (shouldUseReworkView(next)) setUseV2(true);
         message.success("新稿已上传，请复核上一轮的问题。");
@@ -250,6 +280,18 @@ export function ReviewPage({ taskId, userId, onBack }: Props) {
   }, [task?.id, task?.status, useV2, hits.length]);
 
   const pageNo = Number(page?.page || pageIdx + 1);
+  const locked = lockedBy(task, displayName);
+  const lockedRef = useRef(locked);
+  lockedRef.current = locked;
+  // 锁页后撤销已无意义（服务端不再收结论），收起撤销提示。
+  useEffect(() => {
+    if (locked) message.destroy("review-undo");
+  }, [locked]);
+  const gate = submitGate(hits, reviewable, Boolean(locked));
+  const counts = verdictCounts(hits);
+  const tabList = tabIndices(hits, tab, active);
+  /** 有 SVG 却只显示了 PNG：高清（矢量）没加载出来，保留 PNG 并给重试。 */
+  const hiResFailed = Boolean(reviewMedia && reviewMedia.source === "raster" && page?.url && page.raster_url && page.url !== page.raster_url);
   const metrics = resolvePageMetrics(page, nat);
   const laid = metrics && viewSize ? fittedPage(metrics, viewSize) : { imgW: 0, imgH: 0, offsetX: 0, offsetY: 0 };
   laidRef.current = laid;
@@ -293,7 +335,7 @@ export function ReviewPage({ taskId, userId, onBack }: Props) {
       reviewMediaLoad.current?.abort();
       reviewMediaLoad.current = null;
     };
-  }, [page?.url, page?.raster_url, page?.width, page?.height]);
+  }, [page?.url, page?.raster_url, page?.width, page?.height, mediaRetry]);
 
   function recoverDisplayedReviewMedia(failedMedia: PreparedReviewMedia) {
     if (!page) return;
@@ -382,6 +424,38 @@ export function ReviewPage({ taskId, userId, onBack }: Props) {
     };
   }, [page?.url, waiting]);
 
+  useEffect(() => {
+    setSeenPages((prev) => (prev.has(pageNo) ? prev : new Set(prev).add(pageNo)));
+  }, [pageNo]);
+
+  useEffect(() => {
+    if (layout === "phone") return;
+    if (shouldShowShortcutsOnOpen(browserStore())) {
+      setShortcutsOpen(true);
+      markShortcutsSeen(browserStore());
+    }
+  }, []);
+
+  /** <1440 浮层展开后，当前标记若被右栏盖住就平移画布（第 7 行）。 */
+  useEffect(() => {
+    if (layout !== "overlay" || !panelOpen) return;
+    const id = window.requestAnimationFrame(() => {
+      const pin = viewRef.current?.querySelector(".pin.is-on") || viewRef.current?.querySelector(".hit-box.is-on");
+      const aside = pageRef.current?.querySelector(".review-sidebar.is-overlay");
+      if (!pin || !aside) return;
+      const dx = panToClearPanel(pin.getBoundingClientRect().right, aside.getBoundingClientRect().left);
+      if (dx < 0) commitZoom(panBy(zoomRef.current, dx, 0));
+    });
+    return () => window.cancelAnimationFrame(id);
+  }, [layout, panelOpen, active, reviewMedia?.url, zoom.scale]);
+
+  const keyHandlerRef = useRef<(e: KeyboardEvent) => void>(() => undefined);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => keyHandlerRef.current(e);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   if (!taskId) {
     return (
       <Empty description="还没有打开审稿单">
@@ -390,45 +464,58 @@ export function ReviewPage({ taskId, userId, onBack }: Props) {
     );
   }
 
-  function decide(hit: FieldHit, decision: Decision, note = ""): Promise<boolean> {
+  function goToHit(i: number) {
+    setActive(i);
+    rememberHit(hits[i]?.id);
+    const pIdx = pageIndexForHit(pages, hits[i]);
+    if (pIdx != null && pIdx !== pageIdxRef.current) {
+      pendingFit.current = i;
+      setPageIdx(pIdx);
+    } else {
+      pendingFit.current = null;
+      window.requestAnimationFrame(() => fitHitRef.current(i));
+    }
+  }
+
+  function decide(hit: FieldHit, decision: Decision, note = "", opts: { undoable?: boolean } = {}): Promise<boolean> {
     const targetTaskId = task?.id;
-    if (!targetTaskId || !hit.id || !reviewable) return Promise.resolve(false);
+    if (!targetTaskId || !hit.id || !reviewable || locked) return Promise.resolve(false);
     const hitId = hit.id;
+    const previous = hit.decision;
+    const fromIndex = hits.findIndex((h) => h.id === hitId);
     const operation = decisionQueueRef.current.then(async () => {
       beginBusy();
       try {
-        const next = await api.decide(targetTaskId, {
-          hit_id: hitId,
-          decision,
-          note,
-        });
+        const next = await api.decide(targetTaskId, { hit_id: hitId, decision, note });
         setTask((currentTask) => (currentTask?.id === targetTaskId ? next : currentTask));
         if (taskIdRef.current !== targetTaskId) return true;
         clearNote(hitId, note);
         setDecisionError(null);
-        if (decision === "confirm" || decision === "ignore") {
-          const nextUseV2 = useV2Ref.current;
-          const nextHits = reviewHits(next, nextUseV2).filter((h) => !skipPackSheetField(h.field));
-          const nextPages = pageList(nextUseV2 ? { ...next, pages: next.pages_v2 } : next);
-          const nextPending = firstPendingIssueIndex(nextHits);
-          if (nextPending != null) {
-            setActive(nextPending);
-            rememberHit(nextHits[nextPending]?.id);
-            const pIdx = pageIndexForHit(nextPages, nextHits[nextPending]);
-            if (pIdx != null && pIdx !== pageIdxRef.current) {
-              pendingFit.current = nextPending;
-              setPageIdx(pIdx);
-            } else {
-              pendingFit.current = null;
-              window.requestAnimationFrame(() => fitHitRef.current(nextPending));
-            }
+        const nextUseV2 = useV2Ref.current;
+        const nextHits = reviewHits(next, nextUseV2).filter((h) => !skipPackSheetField(h.field));
+        const nextPages = pageList(nextUseV2 ? { ...next, pages: next.pages_v2 } : next);
+        const nextPending = previous === decision ? null : nextPendingAfter(nextHits, fromIndex, decision);
+        if (nextPending != null) {
+          setActive(nextPending);
+          rememberHit(nextHits[nextPending]?.id);
+          const pIdx = pageIndexForHit(nextPages, nextHits[nextPending]);
+          if (pIdx != null && pIdx !== pageIdxRef.current) {
+            pendingFit.current = nextPending;
+            setPageIdx(pIdx);
+          } else {
+            pendingFit.current = null;
+            window.requestAnimationFrame(() => fitHitRef.current(nextPending));
           }
         }
+        if (nextPending == null) rememberHit(hitId);
+        if (opts.undoable !== false && previous !== decision) showUndo(hit, decision, previous, fromIndex);
         return true;
       } catch (err) {
-        const detail = err instanceof Error ? err.message : "记录失败";
+        // 已被别人签字/退回：服务端 /decision 回 400，重读后按 completed_by 锁页，不再报「没存上」。
+        if (err instanceof ApiError && err.status === 400 && (await refreshIfCompleted(targetTaskId))) return false;
+        const detail = decisionFailureText(err, typeof navigator === "undefined" ? true : navigator.onLine !== false);
         if (taskIdRef.current === targetTaskId) setDecisionError(detail);
-        message.error(detail);
+        message.error({ content: detail, key: "review-decision-error" });
         return false;
       } finally {
         endBusy();
@@ -436,6 +523,36 @@ export function ReviewPage({ taskId, userId, onBack }: Props) {
     });
     decisionQueueRef.current = operation;
     return operation;
+  }
+
+  /** 撤销提示（第 32 行）。服务端不接受改回「待确认」，没有旧结论时撤销只回到该条，等人重新下结论。 */
+  function showUndo(hit: FieldHit, decision: Decision, previous: string | undefined, fromIndex: number) {
+    const key = "review-undo";
+    const label = REVIEW_COPY.verdict[decision as "confirm" | "issue" | "ignore"] || "";
+    message.open({
+      key,
+      type: "success",
+      duration: 5,
+      content: (
+        <span className="review-undo-toast" data-testid="review-undo-toast">
+          {REVIEW_COPY.undoToast(label)}
+          <button
+            type="button"
+            className="review-undo-link"
+            onClick={() => {
+              message.destroy(key);
+              if (lockedRef.current) return;
+              if (fromIndex >= 0) goToHit(fromIndex);
+              if (previous === "confirm" || previous === "issue" || previous === "ignore") {
+                void decide({ ...hit, decision }, previous, hit.note || "", { undoable: false });
+              }
+            }}
+          >
+            {REVIEW_COPY.undo}
+          </button>
+        </span>
+      ),
+    });
   }
 
   async function copyList() {
@@ -464,6 +581,12 @@ export function ReviewPage({ taskId, userId, onBack }: Props) {
 
   async function uploadRework(file: File) {
     if (!task || !reworkable || hasUnsavedNotes) return;
+    // 公网上传上限预检：超了就直接提示，不发请求（否则会先被 413 HTML 拦掉）。
+    const tooLarge = reworkUploadBlocked(file);
+    if (tooLarge) {
+      message.error({ content: tooLarge, key: "review-rework-too-large" });
+      return;
+    }
     if (!(await decisionQueueRef.current)) {
       message.error("先保存备注，再继续。");
       return;
@@ -484,21 +607,52 @@ export function ReviewPage({ taskId, userId, onBack }: Props) {
     }
   }
 
-  async function signOff() {
-    if (!task || !reviewable || hasUnsavedNotes) return;
-    if (!(await decisionQueueRef.current)) {
-      message.error("先保存备注，再提交结果。");
-      return;
-    }
+  async function submit(kind: "sign" | "reject", extra: string) {
+    if (!task || !reviewable || hasUnsavedNotes || locked || submittingRef.current) return;
+    submittingRef.current = true;
     beginBusy();
     try {
-      const next = await api.complete(task.id, { conclusion });
+      if (!(await decisionQueueRef.current)) {
+        setSubmitFailed(REVIEW_COPY.submitFailed);
+        return;
+      }
+      const next = await api.complete(task.id, { conclusion: conclusionFor(kind, extra, rejectRows(hits, notes)) });
       setTask(next);
-      message.success("结果已提交。");
+      setDialog(null);
+      setSubmitFailed(null);
+      message.success(REVIEW_COPY_DONE[kind]);
     } catch (err) {
-      message.error(err instanceof Error ? err.message : "暂时不能提交结果");
+      const status = err instanceof ApiError ? err.status : null;
+      let fresh: TaskDetail | null = null;
+      if (status === 400) fresh = await api.task(task.id).catch(() => null);
+      const freshPending = fresh ? verdictCounts(reviewHits(fresh, useV2Ref.current).filter((h) => !skipPackSheetField(h.field))).pending : 0;
+      const text = submitFailureText(status, fresh, freshPending);
+      if (text === REVIEW_COPY.submitFailed) console.error("[review] 提交失败", err);
+      if (fresh) setTask((cur) => (cur?.id === fresh!.id ? fresh : cur));
+      if (fresh?.status === "completed") {
+        // 已被别人签字/退回：关框，页面按 completed_by 锁定只读。
+        setDialog(null);
+        setSubmitFailed(null);
+        message.warning({ content: text, key: "review-submit-locked" });
+      } else {
+        setSubmitFailed(text);
+      }
     } finally {
+      submittingRef.current = false;
       endBusy();
+    }
+  }
+
+  /** 重读任务；已被别人完成就换上新任务（页面按 completed_by 锁定），返回是否已完成。 */
+  async function refreshIfCompleted(id: string, onCompleted?: (by: string) => void): Promise<boolean> {
+    try {
+      const fresh = await api.task(id);
+      if (fresh.status !== "completed") return false;
+      setTask((cur) => (cur?.id === id ? fresh : cur));
+      onCompleted?.(fresh.completed_by || "别人");
+      return true;
+    } catch {
+      return false;
     }
   }
 
@@ -522,7 +676,8 @@ export function ReviewPage({ taskId, userId, onBack }: Props) {
       commitZoom(resetZoom());
       return;
     }
-    commitZoom(zoomToBox(box, metrics, { width: el.clientWidth, height: el.clientHeight }));
+    // 产品哥：默认整页适配进画布，切条时不自动放大；用户自己放大过才保持倍数、平移到这条的框。
+    commitZoom(panToBoxAt(box, metrics, { width: el.clientWidth, height: el.clientHeight }, zoomRef.current.scale));
   }
   fitHitRef.current = fitHit;
 
@@ -537,6 +692,29 @@ export function ReviewPage({ taskId, userId, onBack }: Props) {
       return;
     }
     window.requestAnimationFrame(() => fitHitRef.current(i));
+  }
+
+  keyHandlerRef.current = (e: KeyboardEvent) => {
+    // 按住不放的自动重复不算（避免一路连标）。
+    if (e.repeat) return;
+    if (e.metaKey || e.ctrlKey || e.altKey || dialog || isTypingTarget(e.target) || layout === "phone") return;
+    if (e.key === "?") { e.preventDefault(); setShortcutsOpen((v) => !v); return; }
+    if (e.key === "Escape") { setShortcutsOpen(false); return; }
+    if (e.key === "[") { setPanelOpen((v) => !v); return; }
+    if (e.key === "j" || e.key === "k") { step(e.key === "j" ? 1 : -1); return; }
+    const verdict = verdictForKey(e.key);
+    if (verdict && current && reviewable && !busy && !locked) {
+      e.preventDefault();
+      void decide(current, verdict, current.id ? notes[current.id] ?? current.note ?? "" : "");
+    }
+  };
+
+  function step(dir: 1 | -1) {
+    const k = tabList.indexOf(active);
+    const target = tabList[k < 0 ? (dir > 0 ? 0 : tabList.length - 1) : k + dir];
+    if (target == null) return;
+    if (layout === "overlay") setPanelOpen(true);
+    pickHit(target);
   }
 
   if (loadState === "error") {
@@ -572,134 +750,128 @@ export function ReviewPage({ taskId, userId, onBack }: Props) {
     );
   }
 
+  const thumbs = thumbMarks(pages, hits, seenPages);
+  const issueRows = rejectRows(hits, notes);
+  const phone = layout === "phone";
+  const noteFor = (h?: FieldHit) => (h?.id ? notes[h.id] ?? h.note ?? "" : "");
+  const zoomBy = (factor: number) => {
+    const el = viewRef.current;
+    if (!el) return;
+    const parked = laidRef.current;
+    commitZoom(zoomAt(zoomRef.current, zoomRef.current.scale * factor, el.clientWidth / 2 - parked.offsetX, el.clientHeight / 2 - parked.offsetY));
+  };
+  const pinSize = metrics && laid.imgW > 1 ? { w: (28 / laid.imgW) * 100, h: (28 / laid.imgH) * 100 } : { w: 4, h: 4 };
+
   return (
     <section
-      className={reviewFullscreen ? "review-page is-fullscreen" : "review-page"}
+      className={`review-page review-flat-page is-${layout}${reviewFullscreen ? " is-fullscreen" : ""}`}
       data-testid="review-root"
       ref={pageRef}
     >
-      <header className="page-head">
-        <div>
-          <h1 className="page-title">{task?.product_name || task?.title || "审核页"}</h1>
-          <p className="page-lead">{statusLead(task, pageIdx, pages)}</p>
-        </div>
-        <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-          <button type="button" className="btn-ghost" onClick={onBack}>
-            返回列表
-          </button>
-          <button
-            type="button"
-            className="btn-ghost review-fullscreen-toggle"
-            aria-pressed={reviewFullscreen}
-            onClick={() => void toggleReviewFullscreen()}
-          >
-            {reviewFullscreen ? "退出" : "全屏"}
-          </button>
-          {Array.isArray(task?.pages_v2) && task.pages_v2.length > 0 ? (
-            <>
-            <Tag className="review-version-current" color={useV2 ? "processing" : "default"} style={{ alignSelf: "center", marginInlineEnd: 0 }}>
-              {reviewVersionToggle(useV2).current}
-            </Tag>
-            <button
-              type="button"
-              className="btn-ghost"
-              disabled={busy}
-              onClick={() => {
-                setUseV2((v) => !v);
-                setPageIdx(0);
-                setActive(0);
-                commitZoom(resetZoom());
-              }}
-            >
+      <header className="review-top">
+        {/* 手机 <720 不显示「审稿台 /」面包屑（底部导航已有「审稿台」）。 */}
+        {!phone ? <button type="button" className="review-crumb" onClick={onBack}>审稿台 /</button> : null}
+        <h1 className="review-title">{task?.product_name || task?.title || "审核页"}</h1>
+        {Array.isArray(task?.pages_v2) && task.pages_v2.length > 0 ? (
+          <span className="review-ver">
+            <Tag className="review-version-current" color={useV2 ? "processing" : "default"}>{reviewVersionToggle(useV2).current}</Tag>
+            <button type="button" className="btn-ghost" disabled={busy} onClick={() => { setUseV2((v) => !v); setPageIdx(0); setActive(0); commitZoom(resetZoom()); }}>
               {reviewVersionToggle(useV2).button}
             </button>
-            </>
-          ) : (
-            <button
-              type="button"
-              className="btn-ghost"
-              disabled={!reworkable || busy || hasUnsavedNotes}
-              onClick={() => {
-                const input = document.createElement("input");
-                input.type = "file";
-                input.accept = ".pdf";
-                input.onchange = () => {
-                  const f = input.files?.[0];
-                  if (f) void uploadRework(f);
-                };
-                input.click();
-              }}
-            >
-              上传新稿
-            </button>
-          )}
-          {hasUnsavedNotes ? <span className="review-draft-status" role="status">先保存备注，再继续。</span> : null}
-          {pages.length > 1
-            ? pages.map((p, i) => (
-                <button
-                  key={p.url || i}
-                  type="button"
-                  className={i === pageIdx ? "btn-primary" : "btn-ghost"}
-                  disabled={busy}
-                  onClick={() => setPageIdx(i)}
-                >
-                  第 {p.page || i + 1} 页
-                </button>
-              ))
-            : null}
-          {reviewable ? (
-            <label className="review-conclusion review-sign-layer">
-              <Input
-                aria-label="结论"
-                placeholder="写下审核结果"
-                value={conclusion}
-                disabled={busy}
-                onChange={(e) => setConclusion(e.target.value)}
-              />
-            </label>
-          ) : signed && conclusion ? (
-            <span className="review-conclusion-done review-sign-layer">{conclusion}</span>
-          ) : null}
+          </span>
+        ) : null}
+        {!phone ? (
+          <span className="review-posn" role="group" aria-label="当前位置">
+            <button type="button" aria-label="上一条" onClick={() => step(-1)}>‹</button>
+            <b data-testid="review-posn">{locked ? positionLabel(tabIndices(hits, "all", active), active) : positionLabel(tabList, active, tab === "pending" ? counts.pending : undefined)}</b>
+            <button type="button" aria-label="下一条" onClick={() => step(1)}>›</button>
+          </span>
+        ) : null}
+        <span className="review-grow" />
+        {hasUnsavedNotes ? <span className="review-draft-status" role="status">先保存备注，再继续。</span> : null}
+        <span className="review-actions">
+        {/* 产品哥：「上传新稿」不放看稿工具条，只在退回后出现在页头。 */}
+          {!phone && reworkable && task?.status === "completed" ? (
           <button
             type="button"
-            className="btn-primary review-sign-layer"
-            disabled={!reviewable || busy || hasUnsavedNotes || !conclusion.trim()}
-            onClick={() => void signOff()}
+            className="btn-ghost review-upload-new"
+            disabled={busy || hasUnsavedNotes}
+            onClick={() => {
+              const input = document.createElement("input");
+              input.type = "file";
+              input.accept = ".pdf";
+              input.onchange = () => { const f = input.files?.[0]; if (f) void uploadRework(f); };
+              input.click();
+            }}
           >
-            {hits.some((h) => h.decision === "issue") ? "提交并等新稿" : "提交结果"}
+            上传新稿
           </button>
-        </div>
+        ) : null}
+        {gate.hint ? <span className="review-signhint" id="review-sign-hint" title={gate.title} aria-live="polite">{gate.hint}</span> : null}
+        <button type="button" className="btn-ghost review-reject" disabled={!gate.canReject || busy || hasUnsavedNotes} title={gate.title || undefined} onClick={() => { setSubmitFailed(null); setDialog("reject"); }}>
+          {REVIEW_COPY.reject}
+        </button>
+        <button type="button" className="btn-primary review-sign" disabled={!gate.canSign || busy || hasUnsavedNotes} title={gate.title || undefined} aria-describedby={gate.hint ? "review-sign-hint" : undefined} onClick={() => { setSubmitFailed(null); setDialog("sign"); }}>
+          {REVIEW_COPY.sign}
+        </button>
+        </span>
       </header>
 
-      {error ? <Alert type="error" title={error} style={{ marginBottom: 16 }} /> : null}
+      {locked ? <Alert className="review-lock" type="warning" title={`🔒 ${locked}`} description={REVIEW_COPY.lockedNote} /> : null}
+      {error ? <Alert type="error" title={error} /> : null}
       {task?.error || task?.job_error ? (
-        <Alert type="error" showIcon style={{ marginBottom: 16 }} title={customerCopy(task.error || task.job_error || "") || "检查失败。"} />
+        <Alert type="error" showIcon title={customerCopy(task.error || task.job_error || "") || "检查失败。"} />
       ) : null}
-      {task && reviewable && hits.length === 0 ? (
-        <Alert type="info" showIcon style={{ marginBottom: 16 }} title="没有发现疑点，请快速看一遍。" />
-      ) : null}
-      {signed ? (
-        <Alert type="success" showIcon style={{ marginBottom: 16 }} title="结果已提交。" />
+      {signed && !locked ? <Alert type="success" showIcon title={task?.complete_kind === "rework" ? "已退回。" : "已签字。"} /> : null}
+      {decisionError ? <Alert type="error" showIcon title={`未保存：${decisionError}`} /> : null}
+
+      {phone ? (
+        <section className="review-phone-sum">
+          <p className="review-phone-note">{REVIEW_COPY.phoneOnly}</p>
+          {counts.total === 0 ? <p className="review-zero">{REVIEW_COPY.zeroIssues}</p> : (
+            <details open={phoneListOpen} onToggle={(e) => setPhoneListOpen((e.currentTarget as HTMLDetailsElement).open)}>
+              <summary>{REVIEW_COPY.phoneIssues(counts.issue)} · 待确认 {counts.pending}</summary>
+              <ul>{issueRows.map((r) => <li key={r.index}><b>#{r.no} {r.field}</b> {r.missingReason ? <span className="review-miss">{REVIEW_COPY.missingReason}</span> : r.reason}</li>)}</ul>
+            </details>
+          )}
+        </section>
       ) : null}
 
-      <ReviewWorkspace key={userId || "session-only"} userId={userId} panel={
-        <>
-          {decisionError ? <Alert type="error" showIcon title={`未保存：${decisionError}`} /> : null}
+      <ReviewWorkspace
+        layout={layout}
+        panelOpen={panelOpen}
+        pending={counts.pending}
+        onPanelOpen={setPanelOpen}
+        thumbs={thumbs.map((t) => (
+          <button key={pages[t.index]?.url || t.index} type="button" className={`review-th s-${t.state}${t.index === pageIdx ? " is-on" : ""}`}
+            aria-label={t.label} aria-current={t.index === pageIdx ? "page" : undefined} title={t.label} disabled={busy} onClick={() => setPageIdx(t.index)}>
+            <span className="review-th-p">P{t.page}</span>
+            <span className="review-th-s" aria-hidden="true">{t.symbol}</span>
+            <span className="review-th-w" aria-hidden="true">{t.word}</span>
+          </button>
+        ))}
+        panel={
           <ReviewDockPanel
             key={`${taskId}:${useV2 ? "v2" : "v1"}`}
-            hits={hits} active={active} current={current} fullscreen={reviewFullscreen}
-            currentHasBox={currentHasBox} pageNo={pageNo} reviewable={reviewable} busy={busy}
-            note={current?.id ? notes[current.id] ?? current.note ?? "" : ""}
-            emptyMessage={task?.status === "compare_failed" || task?.job_status === "failed" ? "检查未完成，暂时没有结果。" : "暂时没有检查结果，请翻页查看。"}
+            hits={hits} active={active} current={current} tab={tab} onTab={setTab}
+            onCollapse={() => setPanelOpen(false)}
+            currentHasBox={currentHasBox} pageNo={pageNo} reviewable={reviewable && !locked} busy={busy}
+            note={noteFor(current)}
+            emptyMessage={task?.status === "compare_failed" || task?.job_status === "failed" ? "检查未完成，暂时没有结果" : "暂时没有检查结果，请翻页查看"}
             nativeTaskEvidence={task?.native_text} ocrMeta={task?.ocr_meta} reworkCheck={task?.rework_check} onPick={pickHit}
             onDecide={(hit, decision, note) => void decide(hit, decision, note)}
-            onNoteCommit={(hit, decision, note) => void decide(hit, decision, note)}
+            onNoteCommit={(hit, decision, note) => void decide(hit, decision, note, { undoable: false })}
             onCopy={() => void copyList()}
             onNoteChange={(value) => { if (current?.id) setNote(current.id, value); }}
           />
-        </>
-      }>
-        <div className="canvas glass-pane">
+        }
+      >
+        <div className="canvas">
+          {hiResFailed ? (
+            <p className="review-media-hint" role="status">
+              {REVIEW_COPY.hiResFailed} · <button type="button" onClick={() => setMediaRetry((n) => n + 1)}>{REVIEW_COPY.retry}</button>
+            </p>
+          ) : null}
           {page?.url ? (
             <div
               className="canvas-view"
@@ -753,25 +925,33 @@ export function ReviewPage({ taskId, userId, onBack }: Props) {
                     onError={() => recoverDisplayedReviewMedia(reviewMedia)}
                   />
                 ) : (
-                  <div className={reviewMediaError ? "review-media-status is-error" : "review-media-status"}>
-                    {reviewMediaError || "正在载入页面…"}
+                  <div className={reviewMediaError ? "review-media-status is-error" : "review-media-status"} role={reviewMediaError ? "alert" : undefined}>
+                    {reviewMediaError ? (
+                      <>
+                        {REVIEW_COPY.lowResFailed}
+                        <button type="button" className="btn-ghost" onPointerDown={(e) => e.stopPropagation()} onClick={() => setMediaRetry((n) => n + 1)}>{REVIEW_COPY.retry}</button>
+                      </>
+                    ) : "正在载入页面…"}
                   </div>
                 )}
                 {(reviewMedia ? pinHits : []).map(({ h, i, indices }) => {
                   const locateBoxes = locateBoxesForHit(h);
                   const overlays = overlaysForHit(locateBoxes, pageNo, metrics);
                   const preferred = pickHitBox(locateBoxes, pageNo, metrics);
-                  const pin = preferred && metrics ? overlayFromBox(preferred, metrics) : null;
+                  const ov = preferred && metrics ? overlayFromBox(preferred, metrics) : null;
+                  const pin = ov
+                    ? markerOutsideCorner({ left: parseFloat(ov.left), top: parseFloat(ov.top), width: parseFloat(ov.width), height: parseFloat(ov.height) }, pinSize)
+                    : null;
                   const pairActive = indices.includes(active);
-                  const pinNo = issueOrdinal(hits, pairActive ? active : i) || i + 1;
+                  const pinNo = (pairActive ? active : i) + 1;
                   return (
                     <Fragment key={h.id || i}>
                       {boxesOn
-                        ? overlays.map((ov, k) => (
+                        ? overlays.map((box, k) => (
                             <span
                               key={`${h.id || i}-box-${k}`}
-                              className={`hit-box ${ov.kind === "warn" ? "is-warn" : ""} ${pairActive ? "is-on" : "is-dim"}`.trim()}
-                              style={{ left: ov.left, top: ov.top, width: ov.width, height: ov.height }}
+                              className={`hit-box ${box.kind === "warn" ? "is-warn" : ""} ${pairActive ? "is-on" : "is-dim"}`.trim()}
+                              style={{ left: box.left, top: box.top, width: box.width, height: box.height }}
                             />
                           ))
                         : null}
@@ -779,9 +959,10 @@ export function ReviewPage({ taskId, userId, onBack }: Props) {
                         <button
                           type="button"
                           className={pairActive ? "pin is-on" : "pin is-dim"}
-                          style={{ left: pin.pinLeft, top: pin.pinTop }}
+                          aria-label={`${REVIEW_COPY.marker} ${pinNo}`}
+                          style={{ left: `${pin.left}%`, top: `${pin.top}%` }}
                           onPointerDown={(e) => e.stopPropagation()}
-                          onClick={() => pickHit(pairActive ? active : i)}
+                          onClick={() => { if (layout === "overlay") setPanelOpen(true); pickHit(pairActive ? active : i); }}
                         >
                           {pinNo}
                         </button>
@@ -789,82 +970,6 @@ export function ReviewPage({ taskId, userId, onBack }: Props) {
                     </Fragment>
                   );
                 })}
-              </div>
-              <div className="canvas-tools" onPointerDown={(e) => e.stopPropagation()}>
-                {toolsOpen ? (
-                  <>
-                    <button
-                      type="button"
-                      className="btn-ghost"
-                      onClick={() => {
-                        const el = viewRef.current;
-                        if (!el) return;
-                        const parked = laidRef.current;
-                        commitZoom(
-                          zoomAt(
-                            zoomRef.current,
-                            zoomRef.current.scale * 1.2,
-                            el.clientWidth / 2 - parked.offsetX,
-                            el.clientHeight / 2 - parked.offsetY,
-                          ),
-                        );
-                      }}
-                    >
-                      放大
-                    </button>
-                    <button
-                      type="button"
-                      className="btn-ghost"
-                      onClick={() => {
-                        const el = viewRef.current;
-                        if (!el) return;
-                        const parked = laidRef.current;
-                        commitZoom(
-                          zoomAt(
-                            zoomRef.current,
-                            zoomRef.current.scale / 1.2,
-                            el.clientWidth / 2 - parked.offsetX,
-                            el.clientHeight / 2 - parked.offsetY,
-                          ),
-                        );
-                      }}
-                    >
-                      缩小
-                    </button>
-                    <button type="button" className="btn-ghost" onClick={() => commitZoom(resetZoom())}>
-                      复位
-                    </button>
-                    <button
-                      type="button"
-                      className="btn-ghost"
-                      onClick={() => {
-                        const next = !pinsOn;
-                        setPinsOn(next);
-                        writePinsOn(browserStore(), next);
-                      }}
-                    >
-                      {pinsOn ? "隐藏本项目钉" : "显示本项目钉"}
-                    </button>
-                    <button
-                      type="button"
-                      className="btn-ghost"
-                      onClick={() => {
-                        const next = !boxesOn;
-                        setBoxesOn(next);
-                        writeBoxesOn(browserStore(), next);
-                      }}
-                    >
-                      {boxesOn ? "隐藏本项目框" : "显示本项目框"}
-                    </button>
-                    <button type="button" className="btn-ghost" onClick={() => setToolsOpen(false)}>
-                      收缩
-                    </button>
-                  </>
-                ) : (
-                  <button type="button" className="btn-ghost" onClick={() => setToolsOpen(true)}>
-                    标记
-                  </button>
-                )}
               </div>
             </div>
           ) : (
@@ -878,12 +983,47 @@ export function ReviewPage({ taskId, userId, onBack }: Props) {
               style={{ padding: 48 }}
             />
           )}
-          <p className="page-lead" style={{ padding: "0 16px 12px" }}>
-只标当前项目。拖动时暂时隐藏。
-          </p>
         </div>
-
+        <div className="review-tbar" role="toolbar" aria-label="稿件工具">
+          <button type="button" aria-label="缩小" title="缩小 −" onClick={() => zoomBy(1 / 1.25)}>−</button>
+          <button type="button" aria-label="回到 100%" title="回到 100%" onClick={() => commitZoom(resetZoom())}>{Math.round(zoom.scale * 100)}%</button>
+          <button type="button" aria-label="放大" title="放大 +" onClick={() => zoomBy(1.25)}>+</button>
+          <button type="button" aria-pressed={boxesOn} title={boxesOn ? "隐藏本项目框" : "显示本项目框"} onClick={() => { const next = !boxesOn; setBoxesOn(next); writeBoxesOn(browserStore(), next); }}>
+            {boxesOn ? "隐藏框" : "显示框"}
+          </button>
+          <button type="button" aria-pressed={pinsOn} title={pinsOn ? `隐藏本项目${REVIEW_COPY.marker}` : `显示本项目${REVIEW_COPY.marker}`} onClick={() => { const next = !pinsOn; setPinsOn(next); writePinsOn(browserStore(), next); }}>
+            {pinsOn ? `隐藏${REVIEW_COPY.marker}` : `显示${REVIEW_COPY.marker}`}
+          </button>
+          <button type="button" className="review-fullscreen-toggle" aria-pressed={reviewFullscreen} onClick={() => void toggleReviewFullscreen()}>
+            {reviewFullscreen ? "退出" : "全屏"}
+          </button>
+          {!phone ? <button type="button" aria-label="快捷键" aria-expanded={shortcutsOpen} title="快捷键" onClick={() => setShortcutsOpen((v) => !v)}>?</button> : null}
+          {shortcutsOpen && !phone ? (
+            <div className="review-keys" role="note">
+              <b>{REVIEW_COPY.shortcutsTitle}</b> 读要点 → 按 <kbd>1</kbd>一致 <kbd>2</kbd>有错 <kbd>3</kbd>忽略，自动跳下一条 · <kbd>J</kbd>/<kbd>K</kbd> 上下条 · <kbd>[</kbd> 右栏 · <kbd>?</kbd> 再看
+              <button type="button" onClick={() => setShortcutsOpen(false)}>{REVIEW_COPY.shortcutsGotIt}</button>
+            </div>
+          ) : null}
+        </div>
       </ReviewWorkspace>
+
+      <ReviewSubmitDialog
+        key={dialog || "closed"}
+        kind={dialog}
+        rows={issueRows}
+        pending={counts.pending}
+        busy={busy}
+        failed={submitFailed}
+        onCancel={() => { if (!busy) { setDialog(null); setSubmitFailed(null); } }}
+        onConfirm={(extra) => { if (dialog) void submit(dialog, extra); }}
+      />
+      {phone ? (
+        // visual-check #7（第 33 行）：手机 <720 主侧栏不显示，底部给「审稿台 / 历史」导航，签字/退回在它上面。
+        <nav className="review-bottom-nav" aria-label="主导航">
+          <button type="button" aria-current="page" onClick={onBack}>{NAV_LABEL.review}</button>
+          <button type="button" onClick={onHistory} disabled={!onHistory}>{NAV_LABEL.history}</button>
+        </nav>
+      ) : null}
     </section>
   );
 }

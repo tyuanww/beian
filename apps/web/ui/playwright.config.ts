@@ -19,7 +19,8 @@ export default defineConfig({
   webServer: process.env.PLAYWRIGHT_ARTIFACT_ONLY === "1" ? undefined : {
     command: "npm run dev -- --host 127.0.0.1 --port 5173",
     url: "http://127.0.0.1:5173",
-    reuseExistingServer: !process.env.CI,
+    // 总是起自己的 dev server，不复用别人留在 5173 的进程（CI 本来就是 false，语义不变；本地 5173 被占用时会直接报错）。
+    reuseExistingServer: false,
     timeout: 30_000,
   },
   projects: [

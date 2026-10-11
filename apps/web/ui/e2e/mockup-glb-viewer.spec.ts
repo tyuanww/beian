@@ -45,9 +45,13 @@ async function serve(page: Page, fail = false, white = false, textureFormat?: st
     return json([]);
   });
 }
+// GLB 解析 + 软件 WebGL 首帧在满负载下会超过默认 5s（全量跑时「复位」按钮 5s 内仍 disabled）；
+// 这里等的是真实加载完成事件，不是固定帧数，所以放宽到 15s，并把本文件用例总时长放到 60s。
+const GLB_LOAD_MS = 15_000;
+test.describe.configure({ timeout: 60_000 });
 async function loaded(page: Page) {
-  await expect(page.getByRole('button',{name:'复位模型视角'})).toBeEnabled();
-  await expect.poll(() => page.locator('model-viewer').evaluate((el:any) => el.loaded)).toBe(true);
+  await expect(page.getByRole('button',{name:'复位模型视角'})).toBeEnabled({ timeout: GLB_LOAD_MS });
+  await expect.poll(() => page.locator('model-viewer').evaluate((el:any) => el.loaded), { timeout: GLB_LOAD_MS }).toBe(true);
 }
 async function orbit(page: Page) {
   return page.locator('model-viewer').evaluate((el:any) => { const o=el.getCameraOrbit(); return {theta:o.theta*180/Math.PI,phi:o.phi*180/Math.PI,radius:o.radius,fov:el.getFieldOfView()}; });
@@ -194,7 +198,7 @@ async function denyWebp(page: Page) {
 test('WebP 贴图在不能解码的设备上只显示效果图和说明，不请求模型',async({page})=>{
   let glbRequests=0;page.on('request',r=>{if(r.url().includes('/files/glb')&&!r.url().includes('download=1'))glbRequests++;});
   await denyWebp(page);await serve(page,false,false,'webp');await page.goto(`/mockup/${ID}`);
-  await expect(page.getByRole('status').filter({hasText:'此设备无法显示 3D 预览'})).toHaveText('此设备无法显示 3D 预览，先看效果图。');
+  await expect(page.getByRole('status').filter({hasText:'这台设备显示不了 3D'})).toHaveText('这台设备显示不了 3D，已换成效果图');
   await expect(page.locator('.mockup-sheet-glb img.mockup-glb-poster')).toBeVisible();
   await expect(page.locator('model-viewer')).toHaveCount(0);
   await expect(page.locator('.mockup-sheet-glb .ant-progress, .mockup-sheet-glb .ant-spin')).toHaveCount(0);
@@ -206,7 +210,7 @@ test('WebP 贴图在不能解码的设备上只显示效果图和说明，不请
 
 test('WebP 贴图在能解码的设备上照常加载 3D',async({page})=>{
   await serve(page,false,false,'webp');await page.goto(`/mockup/${ID}`);await loaded(page);
-  await expect(page.getByText('此设备无法显示 3D 预览')).toHaveCount(0);
+  await expect(page.getByText('这台设备显示不了 3D')).toHaveCount(0);
 });
 
 test('PNG 贴图即使设备不能解码 WebP 也照常加载 3D',async({page})=>{

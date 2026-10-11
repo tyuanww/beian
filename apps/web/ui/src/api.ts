@@ -564,6 +564,7 @@ export type TaskSummary = {
   summary?: unknown;
   owner?: string;
   completed_by?: string;
+  completed_at?: string;
   /** 审稿完成方式：signed 签字通过 / rework 退回改稿。老记录可能没有。 */
   complete_kind?: string;
   board?: "comparing" | "failed" | "review" | "done";

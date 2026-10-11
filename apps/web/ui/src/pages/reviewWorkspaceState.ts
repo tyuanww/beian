@@ -2,10 +2,10 @@ import type { FieldHit } from "../api";
 import { isPendingDecision } from "./reviewNav";
 import { partitionReviewHits } from "./reviewEvidence";
 
-export const SIDEBAR_DEFAULT = 448;
-export const SIDEBAR_MIN = 320;
+const SIDEBAR_DEFAULT = 448;
+const SIDEBAR_MIN = 320;
 const SIDEBAR_MAX = 560;
-export const SIDEBAR_BREAKPOINT = 808;
+
 export type SidebarPreference = { width: number; open: boolean };
 export type ReviewSession = { activeId?: string; drafts: Record<string, string> };
 type Store = Pick<Storage, "getItem" | "setItem"> | null;

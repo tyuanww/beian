@@ -64,6 +64,13 @@
 
 DESIGN、界面/作业/结构/资产/架构合同已随本地实现同步；历史发布记录未改，不代表本批已上线。
 
+## 2026-10-11 核对页 A 通铺随发版的跟进
+
+- [ ] **外观「侧栏样式：毛玻璃 / 液态玻璃」随 A 通铺上线删除。** A 通铺（`feat/review-page-a-flat`，deviations.md 第 6、10、39 行）把核对页主侧栏改为实心 `#fbfafc` 并不画 `.sidebar-glass`。本 PR 只在核对页关掉玻璃层，其他页仍在用玻璃侧栏，`AppearancePane.tsx` 的选项此时删除会改动别页，不算顺手改，所以没删。上线 A 通铺的同一版需决定：全站侧栏改实心后删掉该选项及 `data-glass-sidebar` / `liquid` 分支与对应测试；PR 描述要写这条。
+- [ ] **核对页 console：React 不认识 `fetchPriority` 属性（改版前就有，不在本 PR）。** `ReviewPage.tsx` 的稿件 `<img fetchPriority="high">` 在当前 React 版本会报「React does not recognize the `fetchPriority` prop on a DOM element」，每次进核对页都出现（/qa-only 2026-10-11 checkpoint 011 重放确认）；`e9a9f8a`（main）已有。修法候选：改小写 `fetchpriority` 属性或升级 React 后再用驼峰。
+- [ ] **一次性 404 = `GET /favicon.ico`（开发服务器，改版前就有，不在本 PR）。** /qa-only 首屏看到的「Failed to load resource: 404」已定位：浏览器打开非 HTML 页面（`/api/health` JSON）时自动请求 `/favicon.ico`，Vite :5173 返回 404（`curl` 复现：`/favicon.ico 404`；SPA 页面自己声明了 `<link rel="icon" href="/brand/logo-mark.png">`，所以只有非 HTML 页面会触发）；同一浏览器配置只请求一次，之后走缓存，所以看起来是「首次一次」。重试记录：新上下文进 `/review/a1` ×3、`/review/a2`、`/`、reload、未登录各一次都没有 4xx（未登录只有预期的 `/api/auth/feishu/login` 503，本地没配飞书）；新上下文直接开 `/api/health` ×3，第一次出现该 404，后两次没有。证据 `review-a-impl/net404.log`、`net404b.log`。生产是否同样缺 favicon 未查。
+- [ ] **全局侧栏版本号 `.sidebar-version` 是 11px，低于全站最小 13px（改版前就有，不在本 PR）。** 核对页 52px 窄条里也能看到「v0.31.1.12」（/design-review F-001）。
+
 ## 推荐执行顺序
 
 | 顺序 | 执行包 | 交付与依赖 |
@@ -449,3 +456,7 @@ RF-10–RF-13 的原始依赖见 [ADR-007 §20.7](docs/adr-007-packaging-render-
 - 打样宿主/结构：[结构合同](docs/contracts/packaging-structure.md)；成片/下载：[成片合同](docs/contracts/packaging-presentation.md)。
 - 身份/设置/推送：[身份与设置合同](docs/contracts/identity-settings.md)；模块边界：[架构合同](docs/contracts/architecture.md)。
 - 2026-09-02 现场数据：[历史诊断](docs/diagnoses/2026-09-02-mockup-illustrator.md)，不代表持续监控或当前验收。
+- 核对页提交失败提示目前只按 HTTP 状态 + 重读任务判断（`reviewFlat.ts` `submitFailureText`），服务端 `/complete` 只回 status + detail 文本。等后端第 1 项（结构化错误码）和第 6 项（退回至少一条有错的校验/错误码）上线后，改成按错误码映射，并补「至少标一条有错才能退回」文案与 e2e（第 6 项未批，本 PR 不做）。
+- 核对页 `reviewWorkspace.css` 还有一批硬编码色在 tokens.css / DESIGN.md 里没有对应变量，本 PR 不自造变量，等设计哥定 token 名后替换：主侧栏/缩略图条 `#fbfafc`（深色 `#1f1a24`，已批第 39 行）；状态标签浅色字 `#8a5a00` / `#a8071a` / `#237804`、底 `#fff7e6` / `#fff1f0` / `#f6ffed`、描边 `#ffd591` / `#ffa39e` / `#b7eb8f`（已批第 13 行）；深色标签 `#F2B44C`/`#43332E`、`#FF7A7F`/`#452A36`、`#7BC86C`/`#303733` 及描边 `#654c34` / `#693944` / `#3e523e`（dark-tags.md，已批第 38 行）。
+- 打样页（MockupPage）改版前就有的两处问题，等核对页 A 通铺与上传上限两个 PR 合入后单开小 PR 修：（1）失败提示 Alert 在深色主题下仍是浅粉底 `rgb(255,243,240)`，应改用深色 error 底 token；（2）打样失败后提示下方仍显示「正在确认当前版本资源。」，失败态应不再显示该进行中文案。另：工单「复制」按钮排在错误等级/错误码那批工作里一起做。
+- e2e「产品灯变化保留桌墙背景亮度并改变盒身」偶发失败，根因未确认：曾在满负载全量跑时 GLB 加载超过默认 5s（「复位模型视角」仍 disabled），已把等待放宽到 15s（`6e9ef07`）；加负载后单独重跑 110 次加载均未复现。若再失败，先测量实际 GLB 加载耗时，不要再继续放宽等待。

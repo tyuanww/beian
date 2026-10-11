@@ -1,6 +1,5 @@
 const PINS_KEY = "wb_review_pins";
 const BOXES_KEY = "wb_review_boxes";
-export const REVIEW_DOCK_POPUP_LAYER = 960;
 
 export function readPinsOn(storage: Pick<Storage, "getItem"> | null): boolean {
   try {
