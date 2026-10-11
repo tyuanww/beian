@@ -3,7 +3,7 @@ import type { NativeTextEvidence } from "./pages/nativeTextEvidence";
 import type { GlbTextureInfo } from "./pages/mockupGlbTexture";
 import { API_DOWN_LOCAL } from "./apiHint";
 import { describeBrokenApi } from "./authGate";
-import { UPLOAD_TOO_LARGE } from "./uploadLimit";
+import { uploadTooLargeText } from "./uploadLimit";
 
 function apiHost(): string {
   return typeof window === "undefined" ? "" : window.location.host;
@@ -104,7 +104,7 @@ async function fetchJson<T>(path: string, opts: RequestOptions): Promise<T> {
   }
   const ct = res.headers.get("content-type") || "";
   if (res.status === 413) {
-    throw new ApiError(413, UPLOAD_TOO_LARGE, false);
+    throw new ApiError(413, uploadTooLargeText(), false);
   }
   const hint = describeBrokenApi(res.status, ct, apiHost());
   if (!res.ok) {
@@ -252,7 +252,7 @@ export function uploadWithProgress<T>(
     xhr.onload = () => {
       const ct = xhr.getResponseHeader("content-type") || "";
       if (xhr.status === 413) {
-        fail(new ApiError(413, UPLOAD_TOO_LARGE, false));
+        fail(new ApiError(413, uploadTooLargeText(), false));
         return;
       }
       let detail = xhr.statusText;
@@ -543,6 +543,8 @@ export type Me = {
   role: string | null;
   open_id?: string;
   perms: string[];
+  /** 可选：服务端给这个账号的上传上限（字节）；前端取它和公网 100MB 里小的。 */
+  upload_limit_bytes?: number;
 };
 
 export type HealthView = {

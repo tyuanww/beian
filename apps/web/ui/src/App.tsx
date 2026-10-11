@@ -1,5 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useState, type ReactNode } from "react";
 import { api, brokenApiMessage, type Me } from "./api";
+import { setUploadLimitFromMe } from "./uploadLimit";
 import { authFailureAction, feishuLoginHref, shouldAutoRedirectToFeishu } from "./authGate";
 import { Sidebar, type NavKey } from "./chrome/Sidebar";
 import { isAdmin } from "./authRole";
@@ -138,6 +139,7 @@ export function App() {
   const refreshMe = useCallback(async () => {
     try {
       const next = await api.me();
+      setUploadLimitFromMe(next);
       setMe(next);
       setApiBroken(null);
       if (next.logged_in) {

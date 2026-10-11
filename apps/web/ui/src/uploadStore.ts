@@ -7,7 +7,7 @@ import {
   type UploadProgress,
   type UploadReceipt,
 } from "./api";
-import { UPLOAD_TOO_LARGE, bytesTooLarge } from "./uploadLimit";
+import { bytesTooLarge, uploadTooLargeText } from "./uploadLimit";
 
 export type UploadKind = "compare" | "mockup";
 export type UploadField = "excel" | "pdf" | "ai";
@@ -447,7 +447,7 @@ export function createUploadStore(
     };
 
     if (bytesTooLarge(...files.map((selected) => selected.bytes))) {
-      const failed = { ...base, phase: "failed" as const, error: UPLOAD_TOO_LARGE };
+      const failed = { ...base, phase: "failed" as const, error: uploadTooLargeText() };
       publish(kind, failed);
       return failed;
     }
