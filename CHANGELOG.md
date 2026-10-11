@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [0.31.1.13] - 2026-10-11
 
 ### Added
 - 3D 打样单：GLB 贴图为 WebP（`texture_format=webp`）且本机无法解码 WebP 时，不再加载出坏模型，改为显示效果图并在框底提示「此设备无法显示 3D 预览，先看效果图。」，下载按钮不变。缺字段或 PNG 贴图的旧单照常加载 3D。
