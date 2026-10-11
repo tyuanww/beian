@@ -1,6 +1,6 @@
 /**
  * GLB 贴图格式降级：后端在 mockup 文件信息上标出贴图格式，网页真解码一张 1×1 WebP 判断本机能否显示。
- * 字段名和取值未定稿，只在这里改：GLB_TEXTURE_FORMAT_FIELD / GlbTextureFormat。
+ * 字段名为后端约定的 texture_format；集中在这里改：GLB_TEXTURE_FORMAT_FIELD / GlbTextureFormat。
  */
 export const GLB_TEXTURE_FORMAT_FIELD = "texture_format" as const;
 type GlbTextureFormat = "webp" | "png";
