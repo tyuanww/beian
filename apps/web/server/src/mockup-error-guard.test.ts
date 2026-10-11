@@ -148,4 +148,31 @@ describe("mockup list/detail errors go through redact + guard for non-admins", (
       assert.equal(obj.error_hidden, true);
     }
   });
+
+  it("找茬哥 0b337a7 复测四条：真实 /api/mockups 与 /api/mockups/:id，reviewer + viewer 三个字段都不漏；管理员照旧", async () => {
+    const cases: Array<[string, string]> = [
+      ["读取 /Users/bob smith 失败", "读取 本机稿件 smith 失败"],
+      ["/Users/bob smith/a.pdf", "本机稿件 smith/稿件文件"],
+      ["/home/bob smith/a.pdf", "本机稿件 smith/稿件文件"],
+      ["/home/张 三/a.pdf", "本机稿件 三/稿件文件"],
+      ["/Users/bob  smith jr/a.pdf", "本机稿件  smith jr/稿件文件"],
+    ];
+    let k = 0;
+    for (const [input, adminSees] of cases) {
+      for (const field of ["error", "job_error", "render_mutation"] as const) {
+        k += 1;
+        const id = `0000000e07${String(k).padStart(2, "0")}`;
+        save(id, field, input);
+        for (const [role, openId] of [["reviewer", "ou_mg_rv"], ["viewer", "ou_mg_vw"]] as const) {
+          const v = await views(id, auth(role, openId));
+          for (const obj of [v.row, v.detail]) {
+            const shown = String(pick(obj, field));
+            assert.doesNotMatch(shown, /bob|smith|jr|张|三|Users|home/, `${role} ${field} ${input} -> ${shown}`);
+          }
+        }
+        const a = await views(id, auth("admin", "ou_mg_ad"));
+        for (const obj of [a.row, a.detail]) assert.equal(pick(obj, field), adminSees, `admin ${field} ${input}`);
+      }
+    }
+  });
 });
