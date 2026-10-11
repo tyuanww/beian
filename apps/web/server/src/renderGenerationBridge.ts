@@ -7,6 +7,7 @@ import { inspectRenderGenerationGroup, renderGenerationProcessSupported, signalR
 import { contentFingerprint, type QualityVerifier } from "./renderGenerations.js";
 import { isRenderLifecycle, RenderBudgetError, type RenderLifecycle } from "./renderGenerationBudget.js";
 import type { IsolatedUpgradeCandidate } from "./renderGenerationUpgradeCandidate.js";
+import { compressGlbTexturesToWebp, logGlbWebpResult, type GlbWebpResult } from "./glbWebp.js";
 
 export const RENDER_GENERATION_OUTPUT_KEYS: Readonly<Record<string, string>> = Object.freeze({
   front_right: "white_a", back_left: "white_b", glb: "glb",
@@ -57,6 +58,8 @@ export type RenderBridgeOptions = {
   timeoutMs?: number;
   terminationGraceMs?: number;
   upgradeCandidate?: IsolatedUpgradeCandidate;
+  /** 候选 GLB 贴图转 WebP q90；测试可注入。默认 compressGlbTexturesToWebp。 */
+  compressGlb?: (path: string) => Promise<GlbWebpResult>;
 };
 
 type ResolvedBridgeOptions = {
@@ -66,6 +69,7 @@ type ResolvedBridgeOptions = {
   timeoutMs: number;
   terminationGraceMs: number;
   upgradeCandidate?: IsolatedUpgradeCandidate;
+  compressGlb?: (path: string) => Promise<GlbWebpResult>;
 };
 
 export type RenderBridgeValidation = {
@@ -336,6 +340,30 @@ function command(options: ResolvedBridgeOptions, request: Json, observer: Render
 }
 
 /** Async RF-02 validation + isolated execution; jobs wiring requires explicit local runtime registration. */
+/**
+ * 在捕获封存凭证之前把候选 GLB 贴图转 WebP q90，使 seal proof / content_fingerprint 绑定的就是转换后的字节。
+ * 失败、跳过都保留 worker 原 GLB 与其原凭证，只记日志，不让出图失败。
+ * 注意：worker 的 artifact_checks.glb 针对转换前字节；转换后由 glbWebp 复核 GLB 结构与 EXT_texture_webp。
+ */
+async function compressCandidateGlb(
+  candidateDir: string,
+  original: OutputEvidence,
+  check: () => void,
+  compress: ((path: string) => Promise<GlbWebpResult>) | undefined,
+  jobId: string | undefined,
+): Promise<OutputEvidence> {
+  let result: GlbWebpResult;
+  try {
+    result = await (compress || compressGlbTexturesToWebp)(original.path);
+  } catch (error) {
+    result = { status: "failed", reason: (error instanceof Error ? error.message : String(error)).slice(0, 200) };
+  }
+  logGlbWebpResult(`render-generation ${jobId || "candidate"}`, result);
+  check();
+  if (result.status !== "converted") return original;
+  return fileIdentity(candidateDir, original.path, FILE_LIMIT, check);
+}
+
 export function createRenderGenerationBridge(config: RenderBridgeOptions) {
   const options: ResolvedBridgeOptions = {
     pythonExecutable: absolute(config.pythonExecutable),
@@ -344,6 +372,7 @@ export function createRenderGenerationBridge(config: RenderBridgeOptions) {
     timeoutMs: config.timeoutMs ?? 1_260_000,
     terminationGraceMs: config.terminationGraceMs ?? 5000,
     upgradeCandidate: config.upgradeCandidate,
+    compressGlb: config.compressGlb,
   };
   for (const [value, ceiling] of [[options.timeoutMs, 1_260_000], [options.terminationGraceMs, 5000]]) {
     if (!Number.isSafeInteger(value) || value <= 0 || value > ceiling) invalid("time_budget");
@@ -503,6 +532,7 @@ export function createRenderGenerationBridge(config: RenderBridgeOptions) {
           if (evidence.sha256 !== row.sha256 || evidence.bytes !== row.bytes) invalid("output_identity");
           outputs[key] = evidence;
         }
+        if (outputs.glb) outputs.glb = await compressCandidateGlb(candidateDir, outputs.glb, check, options.compressGlb, observer.context?.jobId);
         if (!Array.isArray(result.optional_warnings) || result.optional_warnings.length > OUTPUT_KEYS.size) {
           invalid("optional_warnings");
         }
