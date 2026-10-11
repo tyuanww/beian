@@ -111,4 +111,13 @@ describe("mockup list/detail errors go through redact + guard for non-admins", (
       }
     }
   });
+
+  it("home user segment with spaces leaks neither bob nor smith", async () => {
+    for (const [i, input] of ["读取 /Users/bob smith", "读取 /Users/bob smith/a.pdf 失败"].entries()) {
+      const id = `0000000e03${String(i).padStart(2, "0")}`;
+      save(id, "job_error", input);
+      const v = await views(id, auth("reviewer", "ou_mg_rv"));
+      for (const obj of [v.row, v.detail]) assert.doesNotMatch(String(obj.job_error), /bob|smith/, `${input} -> ${String(obj.job_error)}`);
+    }
+  });
 });

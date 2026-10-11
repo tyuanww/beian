@@ -339,3 +339,11 @@ describe("leak residue: Authorization / Bearer / Basic", () => {
     }
   });
 });
+
+describe("home user segment with spaces (/Users/bob smith)", () => {
+  it("task list, detail and Feishu leak neither bob nor smith", async () => {
+    for (const input of ["读取 /Users/bob smith", "读取 /Users/bob smith/a.pdf 失败", "读取 /home/bob smith/a.pdf 失败"]) {
+      await assertTaskChainNoLeak(input, /bob|smith/);
+    }
+  });
+});
