@@ -146,7 +146,7 @@ describe("reviewEvidence", () => {
       bboxes: [{ left: 0, top: 0, width: 900, height: 900 }],
     };
     const result = buildRevisionList("海葡萄喷雾", [hit], { located: () => false });
-    assert.match(result.text, /没在图上圈到/);
+    assert.match(result.text, /没找到位置，请看整页/);
     assert.match(result.text, /整面/);
   });
 });

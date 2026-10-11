@@ -119,7 +119,7 @@ describe("spokenAsk", () => {
   it("asks a person to look at the whole face when the box is missing", () => {
     const ask = spokenAsk({ status: "疑点", excel_value: "海葡萄", bboxes: [] }, "文案", false);
     assert.ok(ask);
-    assert.match(ask.lead, /没在图上圈到/);
+    assert.match(ask.lead, /没找到位置，请看整页/);
     assert.match(ask.ask, /整面/);
   });
 
@@ -156,5 +156,36 @@ describe("spokenAsk", () => {
     assert.ok(ask);
     assert.match(`${ask.lead}${ask.because}${ask.ask}`, /引导语|码/);
     assert.doesNotMatch(`${ask.lead}${ask.because}${ask.ask}`, /score=/);
+  });
+});
+
+describe("impersonal reviewer copy", () => {
+  const box = [{ left: 1, top: 1, width: 8, height: 8 }];
+  const cases: Array<[Parameters<typeof spokenAsk>[0], string?, boolean?]> = [
+    [{ status: "疑点", excel_value: "海葡萄", bboxes: [] }, "文案", false],
+    [{ status: "疑点", doubt_bucket: "ocr_smallprint", excel_value: "FSC", bboxes: box }],
+    [{ status: "疑点", doubt_bucket: "ocr_graphic", excel_value: "09", bboxes: box }],
+    [{ status: "疑点", field_group: "净含量&条形码", excel_value: "30ml", bboxes: box }],
+    [{ status: "疑点", field_group: "净含量", excel_value: "30ml", bboxes: box }],
+    [{ status: "疑点", field_group: "二维码", excel_value: "扫码关注", bboxes: box }],
+    [{ status: "疑点", evidence: "score=10", bboxes: box }],
+    [{ status: "疑点", coverage: { miss: ["烟酰胺"] }, bboxes: box }],
+    [{ status: "疑点", evidence: "稿上少了净含量", bboxes: box }],
+    [{ status: "疑点", bboxes: box }],
+  ];
+  it("never speaks as 我 and drops the redundant 请对着这一面核对", () => {
+    for (const [hit, field, located] of cases) {
+      const ask = spokenAsk(hit, field, located);
+      const text = ask ? `${ask.lead}${ask.because}${ask.ask}` : "";
+      assert.doesNotMatch(text, /我/);
+      assert.doesNotMatch(text, /请对着这一面核对/);
+      assert.doesNotMatch(spokenLines(hit, field, located).join(""), /我|请对着这一面核对/);
+    }
+  });
+  it("uses 产品哥's wording", () => {
+    assert.equal(spokenAsk({ status: "疑点", field_group: "净含量", excel_value: "30ml", bboxes: box })?.because, "这个数字没读到，请核对");
+    assert.equal(spokenAsk({ status: "疑点", coverage: { miss: ["烟酰胺"] }, bboxes: box })?.lead, "这些字没读全，请核对");
+    assert.equal(spokenAsk({ status: "疑点", bboxes: box })?.because, "这一面没读全，请核对");
+    assert.equal(spokenAsk({ status: "疑点", doubt_bucket: "ocr_smallprint", excel_value: "FSC", bboxes: box })?.ask, "请对着刀线边缘看这一句。");
   });
 });
