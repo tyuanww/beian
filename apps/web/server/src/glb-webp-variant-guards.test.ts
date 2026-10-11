@@ -101,8 +101,7 @@ const WRITE_SITES: WriteSite[] = [
   { file: "workers/packaging/pipeline.py", code: "shutil.copyfile(backup, temp_path)", glb: true }, // _restore_file_from_backup：回滚
   { file: "workers/packaging/pipeline.py", code: "os.replace(temp_path, dest)", glb: true },
   // ---- 旁路 meta（JSON，不是 GLB） ----
-  { file: "apps/web/server/src/glbWebpVariant.ts", code: "writeFileSync(tmp, JSON.stringify(meta));", glb: false },
-  { file: "apps/web/server/src/glbWebpVariant.ts", code: "renameSync(tmp, metaPath);", glb: false },
+  { file: "apps/web/server/src/glbWebpVariant.ts", code: "writeFileSync(metaTmp, JSON.stringify(meta));", glb: false },
   // ---- 其他（非 GLB） ----
   { file: "apps/web/server/src/aiRaster.ts", code: "fs.writeFileSync(png, Buffer.from('89504e470d0a1a0a', 'hex'));", glb: false },
   { file: "apps/web/server/src/aiRaster.ts", code: "writeFileSync(png, Buffer.from(\"89504e470d0a1a0a\", \"hex\"));", glb: false },

@@ -26,6 +26,7 @@ describe("glb webp variant *ForTest hooks are test-only", () => {
       "resetGlbWebpVariantCacheForTest",
       "setGlbWebpVariantDirSyncForTest",
       "setGlbWebpVariantEnabledForTest",
+      "setGlbWebpVariantRenameForTest",
       "setGlbWebpVariantUnlinkForTest",
     ]);
   });
@@ -33,6 +34,7 @@ describe("glb webp variant *ForTest hooks are test-only", () => {
   it("every hook throws outside VITEST and changes nothing", () => {
     const calls: Record<string, () => unknown> = {
       setGlbWebpVariantEnabledForTest: () => variant.setGlbWebpVariantEnabledForTest(true),
+      setGlbWebpVariantRenameForTest: () => variant.setGlbWebpVariantRenameForTest(() => undefined),
       setGlbWebpVariantUnlinkForTest: () => variant.setGlbWebpVariantUnlinkForTest(() => undefined),
       setGlbWebpVariantDirSyncForTest: () => variant.setGlbWebpVariantDirSyncForTest({ fsync: () => undefined }),
       resetGlbWebpVariantCacheForTest: () => variant.resetGlbWebpVariantCacheForTest(),

@@ -1,11 +1,14 @@
 /**
- * 旧打样 GLB 的 WebP 旁路（方案 v2.1 PR-a）。原件一字不改，旁路放在
- * `<jobDir>/.webp-variant/<原文件名>.webpv`，旁边是 `<原文件名>.webpv.json` 元数据。
+ * 旧打样 GLB 的 WebP 旁路（方案 v2.1 PR-a）。原件一字不改，旁路按内容哈希命名放在
+ * `<jobDir>/.webp-variant/<原文件名>.<旁路 sha256 前 16 位>.webpv`，旁边是 `<原文件名>.webpv.json` 元数据，
+ * 元数据的 variant.file 指向当前文件。Windows 上被打开的文件不能删除或被改名覆盖（EPERM），所以替换时
+ * 写新文件名、元数据原子改指向；旧文件尽力删，删不掉留给下次写入和启动清理；绝不删元数据当前指向的文件。
  *
  * - 隐藏目录 + 非 .glb 后缀：collectOutputs 不进 "." 目录、只认 .glb/.png/.pptx/.pdf，两层都挡住。
  * - 完成的定义：meta 存在、source hash 与原件一致、variant hash 与旁路一致。缺一项就回退原件。
- * - 写入顺序：删旧 meta → 删旧旁路 → 旁路 tmp(fsync) → rename → meta tmp(fsync) → rename；
- *   每次 unlink/rename 后对目录 fsync（Windows 不支持目录 fsync，best-effort）。
+ * - 写入顺序：旁路 tmp(fsync) → staging → 改名为哈希文件名 → meta tmp(fsync) → rename 覆盖 meta → 尽力删旧哈希文件；
+ *   每次 unlink/rename 后对目录 fsync（Windows 不支持目录 fsync，best-effort）。meta 只用 readFileSync 一次性读完即关，
+ *   meta 改名失败（如 Windows 上有人正打开它）时返回 failed、旧 meta 不动，服务照旧按旧 meta 校验或回退原件。
  * - 所有会让 Blender 写这单 job 目录的入口进入时同步调用 dropGlbWebpVariant（jobs.ts，静态测试 A 锁住）。
  *   即使漏删，原件被重写后 source hash 对不上，也只会回退原件，不会把旧旁路发出去。
  * - 对外返回由 rolloutFlags.GLB_WEBP_VARIANT 控制，默认关，不读环境变量；唯一的环境读取是 *ForTest 的 VITEST 护栏。
@@ -18,7 +21,7 @@ import { compressGlbTexturesToWebp, type GlbWebpOptions, type GlbWebpResult } fr
 import { GLB_WEBP_VARIANT } from "./rolloutFlags.js";
 
 const GLB_WEBP_VARIANT_DIR = ".webp-variant";
-const GLB_WEBP_VARIANT_SCHEMA = "glb-webp-variant/1";
+const GLB_WEBP_VARIANT_SCHEMA = "glb-webp-variant/2";
 const VARIANT_SUFFIX = ".webpv";
 const META_SUFFIX = ".webpv.json";
 const GLB_WEBP_VARIANT_QUALITY = 90;
@@ -29,7 +32,7 @@ const HASH_CHUNK = 1024 * 1024;
 export type GlbWebpVariantMeta = {
   schema: typeof GLB_WEBP_VARIANT_SCHEMA;
   source: { name: string; sha256: string; bytes: number };
-  variant: { sha256: string; bytes: number };
+  variant: { file: string; sha256: string; bytes: number };
   quality: number;
   tool_version: string;
   created_at: string;
@@ -64,6 +67,14 @@ export function setGlbWebpVariantUnlinkForTest(fn: ((path: string) => void) | nu
   unlinkImpl = fn ?? unlinkSync;
 }
 
+let renameImpl: (from: string, to: string) => void = renameSync;
+
+/** 测试用：模拟 Windows 上改名覆盖被打开文件时的 EPERM。传 null 恢复。 */
+export function setGlbWebpVariantRenameForTest(fn: ((from: string, to: string) => void) | null): void {
+  assertTestRuntime("setGlbWebpVariantRenameForTest");
+  renameImpl = fn ?? renameSync;
+}
+
 function mockupsRoot(): string {
   return join(DATA_DIR, "mockups");
 }
@@ -88,7 +99,19 @@ export function glbWebpVariantPaths(jobId: string, glbPath: string): GlbWebpVari
   if (sourceName.split("/").some((part) => part.startsWith("."))) return null;
   const dir = join(jobDir, GLB_WEBP_VARIANT_DIR);
   const name = basename(glbPath);
-  return { jobDir, dir, sourceName, variant: join(dir, `${name}${VARIANT_SUFFIX}`), meta: join(dir, `${name}${META_SUFFIX}`) };
+  const meta = join(dir, `${name}${META_SUFFIX}`);
+  const current = readGlbWebpVariantMeta(meta);
+  const file = current && variantFileBelongsTo(current.variant.file, name) ? current.variant.file : `${name}${VARIANT_SUFFIX}`;
+  return { jobDir, dir, sourceName, variant: join(dir, file), meta };
+}
+
+/** 内容哈希文件名：`<原文件名>.<sha256 前 16 位>.webpv`。 */
+function hashedVariantName(sourceBase: string, sha256: string): string {
+  return `${sourceBase}.${sha256.slice(0, 16)}${VARIANT_SUFFIX}`;
+}
+
+function variantFileBelongsTo(file: string, sourceBase: string): boolean {
+  return file.startsWith(`${sourceBase}.`) && /^[^.\\/][^\\/]*\.[0-9a-f]{16}\.webpv$/.test(file);
 }
 
 let fsyncDirWarned = false;
@@ -188,6 +211,7 @@ export function readGlbWebpVariantMeta(path: string): GlbWebpVariantMeta | null 
     const { source, variant } = value;
     if (!source || typeof source.name !== "string" || !SHA_RE.test(source.sha256 || "") || !Number.isSafeInteger(source.bytes)) return null;
     if (!variant || !SHA_RE.test(variant.sha256 || "") || !Number.isSafeInteger(variant.bytes)) return null;
+    if (typeof variant.file !== "string" || variant.file !== hashedVariantName(basename(source.name), variant.sha256)) return null;
     return value as GlbWebpVariantMeta;
   } catch {
     return null;
@@ -244,10 +268,11 @@ export function openGlbForServe(jobId: string, glbPath: string): OpenedGlb {
     if (meta.source.name !== paths.sourceName) return original("source_name_mismatch");
     const source = sha256OfFd(fdS);
     if (source.sha256 !== meta.source.sha256 || source.bytes !== meta.source.bytes) return original("source_hash_mismatch");
-    if (!isRegularFile(paths.variant)) return original("variant_missing");
+    const variantPath = join(paths.dir, meta.variant.file);
+    if (!isRegularFile(variantPath)) return original("variant_missing");
     let fdV: number;
     try {
-      fdV = openSync(paths.variant, "r");
+      fdV = openSync(variantPath, "r");
     } catch {
       return original("variant_missing");
     }
@@ -364,8 +389,12 @@ export type WriteGlbWebpVariantOptions = Pick<GlbWebpOptions, "quality" | "conve
 export async function writeGlbWebpVariant(jobId: string, glbPath: string, opts: WriteGlbWebpVariantOptions = {}): Promise<GlbWebpResult> {
   const paths = glbWebpVariantPaths(jobId, glbPath);
   if (!paths) return { status: "failed", reason: "not_job_glb" };
+  const name = basename(glbPath);
   const epoch = epochOf(jobId);
   const stillValid = () => epochOf(jobId) === epoch && (!opts.beforeCommit || opts.beforeCommit());
+  const staging = join(paths.dir, `.${name}.${process.pid}-${Date.now()}.staging${VARIANT_SUFFIX}`);
+  let final: string | null = null;
+  let metaTmp: string | null = null;
   try {
     try {
       const st = lstatSync(paths.dir);
@@ -375,43 +404,93 @@ export async function writeGlbWebpVariant(jobId: string, glbPath: string, opts: 
       mkdirSync(paths.dir);
       fsyncDir(paths.jobDir);
     }
-    if (unlinkIgnoringMissing(paths.meta)) fsyncDir(paths.dir);
-    if (unlinkIgnoringMissing(paths.variant)) fsyncDir(paths.dir);
     const result = await compressGlbTexturesToWebp(glbPath, {
       quality: opts.quality ?? GLB_WEBP_VARIANT_QUALITY,
       convert: opts.convert,
       lockWaitMs: opts.lockWaitMs,
       beforeCommit: stillValid,
-      outPath: paths.variant,
+      outPath: staging,
     });
     if (result.status !== "converted") return result;
+    const file = hashedVariantName(name, result.outputSha256);
+    final = join(paths.dir, file);
+    // 同内容的哈希文件已存在（可能正被读取）：不覆盖，直接复用。
+    if (isRegularFile(final)) tryUnlink(staging);
+    else renameImpl(staging, final);
     fsyncDir(paths.dir);
     const meta: GlbWebpVariantMeta = {
       schema: GLB_WEBP_VARIANT_SCHEMA,
       source: { name: paths.sourceName, sha256: result.inputSha256, bytes: result.beforeBytes },
-      variant: { sha256: result.outputSha256, bytes: result.afterBytes },
+      variant: { file, sha256: result.outputSha256, bytes: result.afterBytes },
       quality: opts.quality ?? GLB_WEBP_VARIANT_QUALITY,
       tool_version: GLB_WEBP_TOOL_VERSION,
       created_at: (opts.now?.() ?? new Date()).toISOString(),
     };
-    const tmp = join(paths.dir, `.${basename(paths.meta)}.${process.pid}-${Date.now()}.tmp`);
-    writeFileSync(tmp, JSON.stringify(meta));
-    const fd = openSync(tmp, "r+");
+    metaTmp = join(paths.dir, `.${basename(paths.meta)}.${process.pid}-${Date.now()}.tmp`);
+    writeFileSync(metaTmp, JSON.stringify(meta));
+    const fd = openSync(metaTmp, "r+");
     try { fsyncSync(fd); } finally { closeSync(fd); }
     if (!stillValid()) {
-      unlinkIgnoringMissing(tmp);
-      unlinkIgnoringMissing(paths.variant);
-      fsyncDir(paths.dir);
+      abandon(paths, metaTmp, final);
       return { status: "skipped", reason: "deadline_insufficient" };
     }
-    const metaPath = paths.meta;
-    renameSync(tmp, metaPath);
+    try {
+      renameImpl(metaTmp, paths.meta);
+    } catch (error) {
+      // 例如 Windows 上 meta 正被打开：旧 meta 不动，服务照旧校验旧 meta 或回退原件。
+      abandon(paths, metaTmp, final);
+      return { status: "failed", reason: `meta_update_failed: ${(error as NodeJS.ErrnoException).code || "unknown"}` };
+    }
+    metaTmp = null;
     fsyncDir(paths.dir);
+    sweepStaleVariants(paths.dir, name, file);
     return result;
   } catch (error) {
-    try { unlinkIgnoringMissing(paths.meta); unlinkIgnoringMissing(paths.variant); } catch { /* ignore */ }
+    abandon(paths, metaTmp, final, staging);
     return { status: "failed", reason: (error instanceof Error ? error.message : String(error)).slice(0, 200) };
   }
+}
+
+function tryUnlink(path: string): boolean {
+  try {
+    return unlinkIgnoringMissing(path);
+  } catch {
+    return false; // EPERM/EBUSY 等：留给下次写入和启动清理。
+  }
+}
+
+/** 当前 meta 指向的文件名（读不出则 null）。 */
+function referencedVariantFile(metaPath: string): string | null {
+  return readGlbWebpVariantMeta(metaPath)?.variant.file ?? null;
+}
+
+/** 放弃本次写入：删 tmp/staging；新哈希文件只有不被当前 meta 指向时才删。 */
+function abandon(paths: GlbWebpVariantPaths, metaTmp: string | null, final: string | null, staging?: string): void {
+  if (metaTmp) tryUnlink(metaTmp);
+  if (staging) tryUnlink(staging);
+  if (final && basename(final) !== referencedVariantFile(paths.meta)) tryUnlink(final);
+  fsyncDir(paths.dir);
+}
+
+/**
+ * 删同一原件的旧哈希文件（和旧版无哈希的 `<原名>.webpv`）。keep 与当前 meta 指向的文件永不删；
+ * 删除失败（EPERM/EBUSY，Windows 上正被读取）跳过，下次写入或启动清理再删。
+ */
+function sweepStaleVariants(dir: string, sourceBase: string, keep: string): void {
+  let names: string[];
+  try {
+    names = readdirSync(dir);
+  } catch {
+    return;
+  }
+  const referenced = referencedVariantFile(join(dir, `${sourceBase}${META_SUFFIX}`));
+  let removed = false;
+  for (const n of names) {
+    if (n === keep || n === referenced) continue;
+    if (n !== `${sourceBase}${VARIANT_SUFFIX}` && !variantFileBelongsTo(n, sourceBase)) continue;
+    removed = tryUnlink(join(dir, n)) || removed;
+  }
+  if (removed) fsyncDir(dir);
 }
 
 /**
@@ -452,20 +531,21 @@ export function cleanupGlbWebpVariantsOnBoot(root: string = mockupsRoot()): numb
     } catch {
       continue;
     }
-    for (const name of names.filter((n) => n.endsWith(".tmp"))) drop(name);
-    const metas = new Set(names.filter((n) => n.endsWith(META_SUFFIX)).map((n) => n.slice(0, -META_SUFFIX.length)));
-    const variants = new Set(names.filter((n) => n.endsWith(VARIANT_SUFFIX)).map((n) => n.slice(0, -VARIANT_SUFFIX.length)));
-    for (const base of metas) {
-      const meta = readGlbWebpVariantMeta(join(dir, `${base}${META_SUFFIX}`));
+    for (const name of names.filter((n) => n.endsWith(".tmp") || n.endsWith(`.staging${VARIANT_SUFFIX}`))) drop(name);
+    const keep = new Set<string>();
+    for (const metaName of names.filter((n) => n.endsWith(META_SUFFIX))) {
+      const base = metaName.slice(0, -META_SUFFIX.length);
+      const meta = readGlbWebpVariantMeta(join(dir, metaName));
       const sourceOk = Boolean(meta) && basename(meta!.source.name) === base
         && !meta!.source.name.split("/").some((part) => part === ".." || part.startsWith("."))
         && isRegularFile(join(jobDir, ...meta!.source.name.split("/")));
-      if (!variants.has(base) || !sourceOk) {
-        drop(`${base}${META_SUFFIX}`);
-        if (variants.has(base)) drop(`${base}${VARIANT_SUFFIX}`);
-      }
+      if (meta && sourceOk && isRegularFile(join(dir, meta.variant.file))) keep.add(meta.variant.file);
+      else drop(metaName);
     }
-    for (const base of variants) if (!metas.has(base)) drop(`${base}${VARIANT_SUFFIX}`);
+    // 没被任何有效 meta 指向的旁路（孤儿、旧哈希、旧版无哈希名）都删；删不掉下次启动再试。
+    for (const name of names.filter((n) => n.endsWith(VARIANT_SUFFIX) && !n.endsWith(`.staging${VARIANT_SUFFIX}`))) {
+      if (!keep.has(name)) drop(name);
+    }
     if (changed) fsyncDir(dir);
   }
   return removed;

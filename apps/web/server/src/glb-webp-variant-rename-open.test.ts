@@ -1,12 +1,13 @@
 /**
  * 替换旁路时正在读旧版本的请求（方案 v2.1 §3）。在 quality.yml 的 windows-2022 job 实跑（Node 20），
- * Mac/Linux 的 L0 里同样运行。验证：已打开的旧句柄在 unlink/rename 之后仍读出完整旧内容；
- * 新请求看到新文件；走真实写入路径（writeGlbWebpVariant）替换时也成立。
+ * Mac/Linux 的 L0 里同样运行。底层：Windows 上删除/覆盖被打开的文件报 EPERM，POSIX 上成功。
+ * 真实写入路径：旁路按内容哈希命名，替换写新文件名、元数据原子指向新文件，旧文件删不掉就留给后续清理；
+ * 旧句柄读完整旧内容，新请求拿到新内容。
  */
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { closeSync, mkdirSync, openSync, readFileSync, readSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, it } from "node:test";
 import { makeTestTempDir } from "./testTemp.js";
@@ -31,61 +32,106 @@ function readAll(fd: number, bytes: number): Buffer {
   return buf.subarray(0, offset);
 }
 
+const WIN = process.platform === "win32";
+const LOCKED = new Set(["EPERM", "EACCES", "EBUSY"]);
+
+/** Windows 上替换/删除被打开的文件会报 EPERM（CI 38156418007 实测）；POSIX 上成功且旧句柄读旧内容。 */
+function expectPlatform(action: () => void, fd: number, oldBytes: Buffer): boolean {
+  if (WIN) {
+    assert.throws(action, (error: NodeJS.ErrnoException) => LOCKED.has(String(error.code)));
+    return false;
+  }
+  action();
+  assert.equal(sha(readAll(fd, oldBytes.length)), sha(oldBytes));
+  return true;
+}
+
 describe("rename-while-open (platform semantics)", () => {
-  it("unlink then rename onto the same name while the old file is open", () => {
+  it("unlink of an open file: POSIX succeeds, Windows refuses", () => {
     const dir = makeTestTempDir("beian-winfs-unlink-");
     const path = join(dir, "box.glb.webpv");
     const oldBytes = Buffer.alloc(256 * 1024, 1);
     writeFileSync(path, oldBytes);
     const fd = openSync(path, "r");
     try {
-      unlinkSync(path);
-      writeFileSync(`${path}.tmp`, Buffer.alloc(1000, 2));
-      renameSync(`${path}.tmp`, path);
-      assert.equal(sha(readAll(fd, oldBytes.length)), sha(oldBytes));
+      if (expectPlatform(() => unlinkSync(path), fd, oldBytes)) {
+        writeFileSync(`${path}.tmp`, Buffer.alloc(1000, 2));
+        renameSync(`${path}.tmp`, path);
+        assert.equal(readFileSync(path).length, 1000);
+      }
     } finally {
       closeSync(fd);
     }
-    assert.equal(readFileSync(path).length, 1000);
   });
 
-  it("rename over an existing file while it is open", () => {
+  it("rename over an open file: POSIX succeeds, Windows refuses", () => {
     const dir = makeTestTempDir("beian-winfs-replace-");
     const path = join(dir, "box.glb.webpv");
     const oldBytes = Buffer.alloc(128 * 1024, 3);
     writeFileSync(path, oldBytes);
+    writeFileSync(`${path}.tmp`, Buffer.alloc(10, 4));
     const fd = openSync(path, "r");
     try {
-      writeFileSync(`${path}.tmp`, Buffer.alloc(10, 4));
-      renameSync(`${path}.tmp`, path);
-      assert.equal(sha(readAll(fd, oldBytes.length)), sha(oldBytes));
+      if (expectPlatform(() => renameSync(`${path}.tmp`, path), fd, oldBytes)) assert.equal(readFileSync(path).length, 10);
     } finally {
       closeSync(fd);
     }
-    assert.equal(readFileSync(path).length, 10);
   });
 
-  it("real write path: replacing a variant while a request holds the old fd", async () => {
+  it("real write path: replacing a variant while a request holds the old fd (content-hashed names)", async () => {
     const id = "ac12ac12ac01";
     const jobDir = join(DATA_DIR, "mockups", id);
     mkdirSync(jobDir, { recursive: true });
     const glbPath = join(jobDir, "box.glb");
     writeFileSync(glbPath, await buildPngTexturedGlbForProbe(128));
     assert.equal((await variant.writeGlbWebpVariant(id, glbPath)).status, "converted");
+    const oldPath = variant.glbWebpVariantPaths(id, glbPath)!.variant;
     const held = variant.openGlbForServe(id, glbPath);
     assert.equal(held.kind, "variant");
     const oldSha = held.kind === "variant" ? held.sha256 : "";
+    const oldBytes = readFileSync(oldPath);
+    // POSIX 上模拟 Windows：被打开的旧旁路 unlink/rename 报 EPERM。Windows 上就是真实行为。
+    let open = true;
+    if (!WIN) {
+      variant.setGlbWebpVariantUnlinkForTest((path) => {
+        if (open && path === oldPath) throw Object.assign(new Error("EPERM: operation not permitted"), { code: "EPERM" });
+        unlinkSync(path);
+      });
+    }
     try {
       const again = await variant.writeGlbWebpVariant(id, glbPath, { quality: 70 });
       assert.equal(again.status, "converted", `replacement failed while old fd open: ${JSON.stringify(again)}`);
-      assert.equal(sha(readAll(held.fd, held.bytes)), oldSha, "old fd must keep reading the complete old variant");
+      const full = readAll(held.fd, held.bytes);
+      assert.equal(full.length, oldBytes.length);
+      assert.equal(sha(full), oldSha, "old fd must keep reading the complete old variant");
+      const fresh = variant.openGlbForServe(id, glbPath);
+      try {
+        assert.equal(fresh.kind, "variant");
+        assert.notEqual(fresh.sha256, oldSha, "new request gets the new variant");
+        assert.equal(sha(readAll(fresh.fd, fresh.bytes)), fresh.sha256);
+      } finally {
+        closeSync(fresh.fd);
+      }
+      const newPath = variant.glbWebpVariantPaths(id, glbPath)!.variant;
+      assert.notEqual(newPath, oldPath, "new variant is written under a new content-hashed name");
+      assert.match(newPath, /box\.glb\.[0-9a-f]{16}\.webpv$/);
+      assert.ok(existsSync(oldPath), "old file is still held open, left for later cleanup");
     } finally {
+      open = false;
       closeSync(held.fd);
+      variant.setGlbWebpVariantUnlinkForTest(null);
     }
-    const fresh = variant.openGlbForServe(id, glbPath);
-    closeSync(fresh.fd);
-    assert.equal(fresh.kind, "variant");
-    assert.notEqual(fresh.kind === "variant" && fresh.sha256, oldSha);
+    // 后续清理：下次写入清掉残留旧文件；启动清理也会清。
+    assert.equal((await variant.writeGlbWebpVariant(id, glbPath, { quality: 70 })).status, "converted");
+    assert.equal(existsSync(oldPath), false, "stale variant removed by the next write");
+    const vdir = variant.glbWebpVariantDir(id);
+    writeFileSync(join(vdir, "box.glb.0123456789abcdef.webpv"), Buffer.from("stale"));
+    variant.cleanupGlbWebpVariantsOnBoot();
+    const left = readdirSync(vdir).filter((n) => n.endsWith(".webpv"));
+    assert.deepEqual(left, [basename(variant.glbWebpVariantPaths(id, glbPath)!.variant)], "boot cleanup keeps only the meta-referenced variant");
+    assert.equal(variant.openGlbForServe(id, glbPath).kind, "variant");
+    variant.dropGlbWebpVariant(id);
+    assert.deepEqual(readdirSync(vdir), [], "drop removes every hashed variant and the meta");
   });
 });
 

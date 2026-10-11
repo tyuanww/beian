@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { closeSync, existsSync, mkdirSync, readdirSync, readFileSync, readSync, renameSync, unlinkSync, utimesSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { describe, it } from "node:test";
 import { makeTestTempDir } from "./testTemp.js";
 
@@ -72,12 +72,13 @@ describe("write order and meta", () => {
     const { path, glb, paths, variantBytes } = await seedWithVariant("bb22bb22bb22");
     assert.deepEqual(readFileSync(path), glb);
     const meta = variant.readGlbWebpVariantMeta(paths.meta)!;
-    assert.equal(meta.schema, "glb-webp-variant/1");
+    assert.equal(meta.schema, "glb-webp-variant/2");
+    assert.match(meta.variant.file, /^box\.glb\.[0-9a-f]{16}\.webpv$/);
     assert.deepEqual(meta.source, { name: "box.glb", sha256: sha(glb), bytes: glb.length });
-    assert.deepEqual(meta.variant, { sha256: sha(variantBytes), bytes: variantBytes.length });
+    assert.deepEqual(meta.variant, { file: `box.glb.${sha(variantBytes).slice(0, 16)}.webpv`, sha256: sha(variantBytes), bytes: variantBytes.length });
     assert.equal(meta.quality, 90);
     assert.ok(((readGlbJson(paths.variant)!.extensionsUsed) as string[]).includes("EXT_texture_webp"));
-    assert.deepEqual(readdirSync(paths.dir).sort(), ["box.glb.webpv", "box.glb.webpv.json"]);
+    assert.deepEqual(readdirSync(paths.dir).sort(), [basename(paths.variant), "box.glb.webpv.json"].sort());
   });
 
   it("a drop during conversion discards the result (no meta, no variant)", async () => {
@@ -185,7 +186,12 @@ describe("boot cleanup", () => {
     unlinkSync(gone.path);
     const removed = variant.cleanupGlbWebpVariantsOnBoot();
     assert.ok(removed >= 6, `removed=${removed}`);
-    assert.deepEqual(readdirSync(keep.paths.dir).sort(), ["box.glb.webpv", "box.glb.webpv.json"]);
+    writeFileSync(join(keep.paths.dir, "box.glb.webpv"), "legacy");
+    writeFileSync(join(keep.paths.dir, "box.glb.0123456789abcdef.webpv"), "stale");
+    writeFileSync(join(keep.paths.dir, ".box.glb.1-2.staging.webpv"), "x");
+    const removedLater = variant.cleanupGlbWebpVariantsOnBoot();
+    assert.equal(removedLater, 3);
+    assert.deepEqual(readdirSync(keep.paths.dir).sort(), [basename(keep.paths.variant), "box.glb.webpv.json"].sort());
     assert.deepEqual(readdirSync(gone.paths.dir), []);
   });
 });
