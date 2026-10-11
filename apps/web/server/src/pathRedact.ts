@@ -59,13 +59,15 @@ function pathStart(s: string, i: number): number {
 /**
  * 从起点扫描路径结束位置，返回 [结束位置, 最后一个分隔符位置]。
  * Windows / UNC 路径的目录名可含空格：遇到空格先记下「暂定结束位置」继续往后扫；在碰到空白、标点或
- * 新路径起点之前出现分隔符，就确认空格属于目录名；否则路径在暂定位置结束。Unix 路径遇空格即结束。
+ * 新路径起点之前出现分隔符，就确认空格属于目录名；否则路径在暂定位置结束——除非空格前的末段没有扩展名、
+ * 空格后的词以扩展名结尾（`a b.pdf`），这时把这个词算进文件名。Unix 路径遇空格即结束。
  * 单趟扫描不回看；回退的那一段最多再被外层逐字扫一次，整体线性。
  */
 function scanPath(s: string, from: number, allowSpaces: boolean): [number, number] {
   let j = from;
   let lastSep = from - 1;
   let pending = -1;
+  let newPath = false;
   while (j < s.length) {
     const ch = s[j];
     if (ch === " " && allowSpaces) {
@@ -77,15 +79,24 @@ function scanPath(s: string, from: number, allowSpaces: boolean): [number, numbe
     if (isStop(ch)) break;
     if (isSep(ch)) {
       // 空格后紧跟分隔符（`\\`、`/` 开头）视为新路径，不续接。
-      if (pending >= 0 && j === pending + 1) break;
+      if (pending >= 0 && j === pending + 1) {
+        newPath = true;
+        break;
+      }
       lastSep = j;
       pending = -1;
     } else if (pending >= 0 && pathStart(s, j) >= 0) {
+      newPath = true;
       break;
     }
     j += 1;
   }
-  return [pending >= 0 ? pending : j, lastSep];
+  if (pending < 0) return [j, lastSep];
+  // 文件名含一个空格（`a b.pdf`）：空格前的末段没有扩展名、空格后的词以扩展名结尾时，把这个词算进文件名。
+  if (!newPath && !EXT_AT_END.test(s.slice(lastSep + 1, pending)) && EXT_AT_END.test(s.slice(pending + 1, j))) {
+    return [j, lastSep];
+  }
+  return [pending, lastSep];
 }
 
 /** 末段渲染：返回 [替换文本, 留给后文的部分]。 */
