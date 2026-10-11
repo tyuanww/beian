@@ -339,8 +339,8 @@ RF-10–RF-13 的原始依赖见 [ADR-007 §20.7](docs/adr-007-packaging-render-
   - `apps/web/server/src/index.ts:424` 全局错误处理对 4xx 原样返回 `err.message` 作 `detail`。
   - `notifyIllustratorWatchdog`（`notify.ts:247`，`jobs.ts:959`、`nativeTextJobs.ts:176` 调用）的飞书告警文案。
   - `apps/web/server/src/mockup.ts:595` `print_faces_repair.error` 原样返回。
-  - 已知规则缺口：Unix 目录名含空格时空格后的片段会留下（`/Users/bob/My Docs/a.pdf` → `本机路径 Docs/a.pdf`）。
-  - 已知规则缺口：编码分隔符最多解 3 层（`%2F`、`%252F`、`%25252F`），更多层的不当分隔符。
+  - 已知规则缺口：斜杠写法只剩末尾一截文件名含空格或中文标点时露出后半截文件名（`/Users/bob/my docs/a b.pdf` → `本机路径 b.pdf`，`/home/bob/a，b.pdf` → `本机路径，b.pdf`）；目录名已不漏。
+  - 已知规则缺口：网址里百分号编码的用户名密码（`http://bob%3Apw%40x/`）原样输出，不拦。
   - 已知规则缺口：全角斜杠 `／`、`＼` 不当分隔符。
   - 已知副作用：`%2F` / `%5C`（含 `%252F` 等多重编码）整条报错一起解码，非路径文字也会变（如 `进度 50%2F100` → `进度 50/100`，网址里的 `%2F` 同样被解开）。
   - 已知取舍：Windows/UNC 末段无扩展名、空格后的词以扩展名结尾时合成一个文件名（`C:\x\dir see.log` → `dir see.log`），只认一个空格。
