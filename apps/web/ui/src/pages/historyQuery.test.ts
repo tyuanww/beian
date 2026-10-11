@@ -3,6 +3,7 @@ import { it } from "node:test";
 import { emptyHistoryFilters, historyQuery, historyStatusColor, historyTimeFilters } from "./historyQuery.js";
 import { hrefOf, parsePath, isSpaPath } from "../appRoute.js";
 import { displayBytes, validateCompressionFiles } from "./CompressionPage.js";
+import { setUploadLimitFromMe } from "../uploadLimit.js";
 it("sends timezone-aware date bounds and omits an empty cursor", () => {
   const query = new URLSearchParams(historyQuery({ ...emptyHistoryFilters, q: " 海葡萄 ", date_from: "2026-10-01", date_to: "2026-10-09" }, "", -480));
   assert.equal(query.get("tz"), "+08:00");
@@ -43,4 +44,16 @@ it("does not invent output sizes and rejects oversized or unsupported batches", 
   assert.equal(validateCompressionFiles([new File(["pdf"], "seal.pdf")]), null);
   assert.ok(validateCompressionFiles([new File(["html"], "unsafe.html")]));
   assert.ok(validateCompressionFiles(Array.from({ length: 21 }, () => new File(["x"], "x.pdf"))));
+  assert.equal(validateCompressionFiles([new File([], "empty.pdf")]), "文件不能为空。");
+  const big = new File(["x"], "big.pdf");
+  Object.defineProperty(big, "size", { value: 99_000_001 });
+  assert.equal(validateCompressionFiles([big]), "文件太大，请压到 99MB 以内再传（多份合计）");
+  setUploadLimitFromMe({ upload_limit_bytes: 10_000_000 });
+  try {
+    const mid = new File(["x"], "mid.pdf");
+    Object.defineProperty(mid, "size", { value: 10_000_001 });
+    assert.equal(validateCompressionFiles([mid]), "文件太大，请压到 10MB 以内再传（多份合计）");
+  } finally {
+    setUploadLimitFromMe(null);
+  }
 });
