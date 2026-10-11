@@ -20,7 +20,7 @@ test.beforeAll(() => {
 test.afterAll(() => { if (dist) rmSync(dist, { recursive: true }); });
 
 const source = carton();
-async function serve(page: Page, fail = false, white = false) {
+async function serve(page: Page, fail = false, white = false, textureFormat?: string) {
   await page.addInitScript(() => {
     const audit = { created: [] as string[], revoked: [] as string[] };
     Object.assign(window, { __blobAudit: audit });
@@ -40,7 +40,7 @@ async function serve(page: Page, fail = false, white = false) {
     if (path.endsWith('/files/glb')) return route.fulfill({status:fail?500:200,contentType:'model/gltf-binary',body:fail?'failed':white?carton(true):source});
     if (path.includes('/files/')) return route.fulfill({contentType:'image/svg+xml',body:'<svg xmlns="http://www.w3.org/2000/svg" width="80" height="96"><rect width="80" height="96" fill="white"/></svg>'});
     if (path === `/api/mockups/${ID}`) return json({id:ID,title:'SYNTHETIC GLB',status:'done',owner:'synthetic',current_render_generation_id:GENERATION,
-      files:['glb','white_a','white_b','white_a_ground','white_b_ground','white_a_set','white_b_set'].map(key=>({key,name:key}))});
+      files:['glb','white_a','white_b','white_a_ground','white_b_ground','white_a_set','white_b_set'].map(key=>({key,name:key,...(key==='glb'&&textureFormat?{texture_format:textureFormat}:{})}))});
     if (path.endsWith('/render-generations')) return json({items:[],next_cursor:null});
     return json([]);
   });
@@ -178,4 +178,37 @@ test('近墙在八个方位不遮挡包装，背面可查看', async ({page}) =>
       await page.locator('.mockup-sheet-glb').screenshot({path:join(process.env.GLB_EVIDENCE_DIR,'close-wall-rear.png')});
     }
   }
+});
+
+// 模拟不能解码 WebP 的设备：探针的 createImageBitmap 与 Image.decode 都失败。
+async function denyWebp(page: Page) {
+  await page.addInitScript(() => {
+    const isWebp = (v: unknown) => (v instanceof Blob && v.type === 'image/webp');
+    const bitmap = window.createImageBitmap.bind(window);
+    (window as any).createImageBitmap = (src: any, ...rest: any[]) => isWebp(src) ? Promise.reject(new DOMException('webp','EncodingError')) : (bitmap as any)(src, ...rest);
+    const decode = HTMLImageElement.prototype.decode;
+    HTMLImageElement.prototype.decode = function () { return this.src.startsWith('data:image/webp') ? Promise.reject(new DOMException('webp','EncodingError')) : decode.call(this); };
+  });
+}
+
+test('WebP 贴图在不能解码的设备上只显示效果图和说明，不请求模型',async({page})=>{
+  let glbRequests=0;page.on('request',r=>{if(r.url().includes('/files/glb')&&!r.url().includes('download=1'))glbRequests++;});
+  await denyWebp(page);await serve(page,false,false,'webp');await page.goto(`/mockup/${ID}`);
+  await expect(page.getByRole('status').filter({hasText:'此设备无法显示 3D 预览'})).toBeVisible();
+  await expect(page.locator('.mockup-sheet-glb img.mockup-glb-poster')).toBeVisible();
+  await expect(page.locator('model-viewer')).toHaveCount(0);
+  await expect(page.locator('.mockup-sheet-glb .ant-progress, .mockup-sheet-glb .ant-spin')).toHaveCount(0);
+  await expect(page.getByRole('button',{name:/重试|再试/})).toHaveCount(0);
+  await expect(page.getByRole('link',{name:'下载模型',exact:true})).toHaveAttribute('href',new RegExp(`generation_id=${GENERATION}`));
+  await page.locator('.mockup-sheet-glb').screenshot({path:test.info().outputPath('webp-unsupported-fallback.png')});
+  expect(glbRequests).toBe(0);
+});
+
+test('WebP 贴图在能解码的设备上照常加载 3D',async({page})=>{
+  await serve(page,false,false,'webp');await page.goto(`/mockup/${ID}`);await loaded(page);
+  await expect(page.getByText('此设备无法显示 3D 预览')).toHaveCount(0);
+});
+
+test('PNG 贴图即使设备不能解码 WebP 也照常加载 3D',async({page})=>{
+  await denyWebp(page);await serve(page,false,false,'png');await page.goto(`/mockup/${ID}`);await loaded(page);
 });
