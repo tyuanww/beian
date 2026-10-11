@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { afterEach, describe, it } from "node:test";
 import { makeTestTempDir } from "./testTemp.js";
@@ -2119,5 +2119,74 @@ describe("replaceFile", () => {
     replaceFile(p, "{\"a\":1}");
     replaceFile(p, "{\"a\":2}");
     assert.equal(JSON.parse(readFileSync(p, "utf8")).a, 2);
+  });
+});
+
+// ---- WebP 旁路：入口删旁路的行为测试（方案 v2.1 §4.2）----
+const glbVariant = await import("./glbWebpVariant.js");
+
+function plantGlbVariant(jobId: string): string {
+  const dir = glbVariant.glbWebpVariantDir(jobId);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "box.glb.webpv"), "variant");
+  writeFileSync(join(dir, "box.glb.webpv.json"), "{}");
+  return dir;
+}
+
+const GLB_VARIANT_ENTRIES = new Set(["claimMockup", "retryMockup", "repairMockupPrintFaces", "claimPrintFaceRepair", "recoverPrintFaceRepairsOnBoot",
+  "claimUnfoldedPublish", "relightMockupStudio", "claimGenerationMutation", "runGenerationMutation", "occupyUnconfirmedGenerationBlenderFence",
+  "recoverInterruptedMutation", "recoverRenderGenerationsOnBoot", "tryStart"]);
+
+/** dropGlbWebpVariant 之上最近的登记入口函数（跳过锁回调等匿名帧）。 */
+function dropCaller(): string {
+  const frames = (new Error().stack || "").split("\n");
+  const at = frames.findIndex((line) => /\bdropGlbWebpVariant\b/.test(line));
+  for (const line of frames.slice(at + 1)) {
+    const name = (/at (?:async )?([\w$.<>]+)/.exec(line)?.[1] || "").split(".").pop()!;
+    if (GLB_VARIANT_ENTRIES.has(name)) return name;
+  }
+  return "?";
+}
+
+/**
+ * 只放行 target 直接调用的删旁路；其他入口的删除模拟 EPERM（文件留着）。
+ * 结束时旁路目录为空，就证明是 target 自己删的，且记录 meta 先于旁路。
+ */
+async function expectEntryDropsVariant(jobId: string, target: string, action: () => unknown | Promise<unknown>): Promise<void> {
+  const dir = plantGlbVariant(jobId);
+  const order: string[] = [];
+  const callers: string[] = [];
+  glbVariant.setGlbWebpVariantUnlinkForTest((path) => {
+    const caller = dropCaller();
+    callers.push(caller);
+    if (caller !== target) throw Object.assign(new Error(`EPERM simulated for ${caller}`), { code: "EPERM" });
+    order.push(path.slice(dir.length + 1));
+    unlinkSync(path);
+  });
+  try {
+    await action();
+  } finally {
+    glbVariant.setGlbWebpVariantUnlinkForTest(null);
+  }
+  assert.deepEqual(readdirSync(dir), [], `${target} 没有删旁路；删旁路调用者：${callers.join(",") || "无"}`);
+  assert.deepEqual(order, ["box.glb.webpv.json", "box.glb.webpv"], "meta 必须先于旁路被删");
+}
+
+describe("glb webp variant: retry entry", () => {
+  it("retryMockup drops meta then variant on entry", async () => {
+    const { saveMockup, loadMockup } = await import("./mockup.js");
+    const id = tid(0x9e01);
+    const dir = join(process.env.WB_DATA_DIR || "", "mockups", id);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "art.ai"), "%PDF-1.4\n");
+    setJobsTestHooks({ runPack: async () => ({ code: 1, stdout: "", stderr: "stop", timedOut: false }) });
+    saveMockup({ id, status: "failed", created_at: "2026-10-11T00:00:00.000Z", files: [], owner: "籽烨", source_path: join(dir, "art.ai"),
+      job_kind: "mockup", job_status: "failed", job_error: "打样中断", error: "打样中断" });
+    try {
+      await expectEntryDropsVariant(id, "retryMockup", () => retryMockup(id, { id: "籽烨", name: "籽烨", admin: false }));
+      for (let i = 0; i < 100 && ["queued", "running"].includes(loadMockup(id)?.job_status || ""); i++) await new Promise((r) => setTimeout(r, 10));
+    } finally {
+      resetJobsTestHooks();
+    }
   });
 });

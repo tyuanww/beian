@@ -42,7 +42,19 @@
 
 - 旧管线（`runPackaging` → `finishMockup`）每次新生成的打样 GLB，在登记文件前做一次后处理：用 `@gltf-transform/core` + `@gltf-transform/functions`（`textureCompress`，编码器为已有 `sharp`）把贴图转为 `EXT_texture_webp`，quality 90。实现在 `apps/web/server/src/glbWebp.ts`。
 - 转换失败、无贴图、已是 WebP 或结果不比原文件小时，保留原 PNG GLB 原样不动，只写服务日志（`glb webp failed, keep original PNG GLB` / `glb webp skipped`），打样照常成功。成功时先写同目录临时文件（`.<name>.glb.webp-<pid>-<ms>.tmp`），复核 `extensionsUsed`，再把临时文件完整读回、核对结构计数与原文件一致，不一致记 `output_structure_mismatch` 并保留原文件，全部通过才原子改名替换。同一服务进程内压缩串行执行，一次只跑一个 GLB，限制解码内存峰值；旧管线调用不设等锁上限和替换前复查（不传 `lockWaitMs` / `beforeCommit`）。服务启动时清理 `DATA_DIR/mockups` 下被中断压缩遗留、名字完全匹配且超过 10 分钟的临时文件（不跟随符号链接），失败只记日志。
-- 不转换旧文件。
+- 不在原位转换旧文件；旧文件只走下面的 WebP 旁路，原件不动。
+
+### 旧 GLB 的 WebP 旁路（0.31.1.19，开关默认关）
+
+- 开关在已提交的 `apps/web/server/src/rolloutFlags.ts`，不读环境变量：`GLB_WEBP_VARIANT = false`（是否对外返回旁路），`GLB_WEBP_BACKFILL_LIMIT = 0`（0 表示不回填）。改值或回滚都是发一个只改这个文件的 PR，经老板批准后合并发版。回填本身不在本版，本版只有旁路的存储和读取。
+- 旁路存在打样目录下隐藏的 `.webp-variant/`，原件不改，按内容哈希命名：`<原名>.<旁路 sha256 前 16 位>.webpv`；元数据 `<原名>.webpv.json`（schema `glb-webp-variant/2`）记原件和旁路两边的 sha256，`variant.file` 指向当前文件，只认它指向且校验通过的文件。替换时写新文件名、元数据 tmp 改名原子覆盖，不覆盖旧旁路（Windows 上被打开的文件不能删或覆盖）；元数据只一次性读完即关，更新失败返回 failed、旧元数据不动、照旧服务旧旁路或原件。旧哈希文件尽力删，删不掉（EPERM/EBUSY）跳过，下次写入或启动清理再删，绝不删元数据当前指向的文件。服务启动时清理临时/staging 文件、读不出或原件已不在或指向文件缺失的元数据，以及没有被有效元数据指向的所有旁路。会改 GLB 的 10 个入口都先删旁路，有静态测试锁住。
+- 开关关着时（当前线上）：行为和 0.31.1.17 一样。两个地址都返回原件，`?v=` 被忽略，`files[]` 里不出现 `glb_version` / `glb_original_version`。
+- 开关打开后：
+  - `GET /api/mockups/:id/files/glb` 默认返回校验通过的旁路，校验不过就返回原件；加 `?variant=original` 总是返回原件。`download=1` 仍下载原件。
+  - `files[]` 里 `key: "glb"` 的条目（列表和详情都有）多两个字段：`glb_version` 是默认地址实际返回内容的 sha256 前 16 位，`glb_original_version` 是原件的。没有有效旁路时两个值相等。`texture_format` 按默认地址实际返回的内容报。
+  - `?v=<16 位十六进制>` 和实际返回内容对得上，缓存头才是 `private, max-age=31536000, immutable`；对不上或不带，都是 `private, no-cache`，仍返回 200 和当前内容。ETag 是 `"sha256-…"`，`If-None-Match` 对上返回 304。
+  - 未登录 401，任务或文件不存在 404。
+- 前端：字段缺失就不加 `?v=`；老设备 WebP 解码失败时改请求 `?variant=original`（老设备兜底分支实现）。
 - 托管代际（render generation）：`renderGenerationBridge.render()` 在校验 worker 输出凭证之后、生成 seal proof / `content_fingerprint` 所用文件凭证之前，由 `compressCandidateGlb` 对候选 GLB 做同一转换（`compressGlbTexturesToWebp`，与上条同一流程：复核 `EXT_texture_webp`、完整读回核对结构计数），成功后重新计算 sha256/bytes，因此封存、hash 门与质量证明绑定的都是转换后的字节。worker 的 `artifact_checks.glb` 针对转换前字节。转换跑在 8787 服务进程内，与旧管线共用同一串行锁，不受 worker 子进程的进程/内存限制。时间预算（截止时间取本次出图 binding 与资源生命周期两者中较早者）：转换前估算所需 `required = max(GLB_WEBP_MIN_BUDGET_MS（2 分钟）, estimateGlbWebpMs = 10s + 5s × 向上取整的 MiB 数)`；剩余不足 `required` 直接跳过，记 `skipped: deadline_insufficient`。等锁上限为 `lockWaitMs = 剩余 − required`，超时放弃排队并记 `skipped: lock_wait_timeout`，之后即使排到锁也不再转换。改名替换前由 `beforeCommit` 再查一次：用户已取消或剩余不足 1 分钟（`GLB_WEBP_MIN_BUDGET_MS / 2`）则丢弃临时文件、保留原文件，记 `skipped: deadline_insufficient`。跳过或失败都保留 worker 原 GLB 与原凭证，只记日志（`render-generation <job> glb webp ...`）。`compressCandidateGlb` 结束后只在用户取消时让本次出图失败（`render_generation_cancelled`），自身不判超时；超时仍由其后正常检查点按原截止时间判定。已接受的残余风险：转换一旦开始不能中途中止，若单次转换远慢于估算并越过截止时间，结果会被丢弃，但本次出图仍可能在后续检查点按 `render_generation_timeout` 失败。已封存的历史代不回头转换。
 - `GET /api/mockups/:id` 的 `files[]` 和列表摘要 `files[]` 中，仅 `key: "glb"` 的条目带 `texture_format: "webp" | "png"`：GLB JSON `extensionsUsed` 含 `EXT_texture_webp` 为 `"webp"`，否则 `"png"`。按文件路径+大小+mtime 缓存，不在每次请求重解析整个 GLB（只读文件头与 JSON chunk）。读不出合法 GLB 时省略该字段。其他 key 不带此字段。前端据此决定是否先跑 WebP 解码检查。
 - 前端加载（对后端 PR-a `aff0608` 定稿合同编码，合入前用测试 mock）：默认 `GET /api/mockups/:id/files/glb` 在开关打开且有校验过的 WebP 版时返回 WebP 版，否则原始；`?variant=original` 永远原始。文件信息 `glb` 条目带 `glb_version`（默认地址内容 sha256 前 16 位）与 `glb_original_version`（原始）；两字段相等表示没有有效 WebP 版；开关关着时两字段都不出现、两个地址都给原始、`v` 被忽略。`?v=` 匹配时 `private, max-age=31536000, immutable`，不匹配或缺省 `private, no-cache`（仍 200 当前内容），ETag `"sha256-…"`，`If-None-Match` 命中 304；未登录 401，缺文件 404；`download=1` 仍给原始。前端：有版本字段才给两个地址各带 `?v=`；两版本不同时本机解码不了 WebP 直接拉原始，否则默认地址失败/解码错/model-viewer error 自动改拉原始一次；无字段或相等只拉默认地址（保持原行为）。查看器先显示效果图，空闲时后台拉；都失败只留效果图和「这台设备显示不了 3D，已换成效果图」。实现：`apps/web/ui/src/pages/mockupGlbSource.ts`、`MockupGlbViewer.tsx`。

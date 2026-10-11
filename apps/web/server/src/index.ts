@@ -1,4 +1,5 @@
 import { cleanupStaleGlbWebpTemps } from "./glbWebp.js";
+import { cleanupGlbWebpVariantsOnBoot, glbWebpVariantEnabled, glbVersionOf, openGlbForServe, openGlbOriginalForServe } from "./glbWebpVariant.js";
 import {
   closeSync,
   copyFileSync,
@@ -111,6 +112,7 @@ import {
   structureConfirmationFailureStatus,
   type StructureAnchorDecision,
   type StructureConfirmationDecision,
+  isGenerationManagedMockup,
 } from "./mockup.js";
 import { isRenderGenerationError, type HeldGenerationFile } from "./renderGenerations.js";
 import { assertIllustratorReady } from "./aiRaster.js";
@@ -177,7 +179,7 @@ type NodeBindings = HttpBindings | Http2Bindings;
 type Env = { Bindings: NodeBindings; Variables: { session: Session } };
 
 const app = new Hono<Env>();
-const VERSION = "0.31.1.18";
+const VERSION = "0.31.1.19";
 
 const STRUCTURE_INPUT_BODY_BYTES = 16 * 1024;
 
@@ -364,6 +366,40 @@ function boom(err: unknown): never {
 function fileEtag(path: string): string {
   const st = statSync(path);
   return `W/"${st.size.toString(16)}-${Math.trunc(st.mtimeMs).toString(16)}"`;
+}
+
+/**
+ * 旧打样 GLB（开关打开、非下载、非代际托管单）。默认端点返回校验通过的 WebP 旁路，核不过用已打开的原件 fd；
+ * ?variant=original 总是原件。核验、hash 和输出用同一个 fd。
+ * ETag "sha256-<实际返回字节的 sha>"；?v= 等于其前 16 位（= 文件信息里的 glb_version / glb_original_version）
+ * 才给 immutable，不匹配或缺省 no-cache；304 头与 200 相同。
+ */
+function glbVariantResponse(c: Context, jobId: string, path: string, name: string, wantOriginal: boolean): Response {
+  const opened = wantOriginal ? openGlbOriginalForServe(path) : openGlbForServe(jobId, path);
+  const etag = `"sha256-${opened.sha256}"`;
+  const immutable = c.req.query("v") === glbVersionOf(opened.sha256);
+  const headers = {
+    ETag: etag,
+    "Cache-Control": immutable ? "private, max-age=31536000, immutable" : "private, no-cache",
+    "X-Content-Type-Options": "nosniff",
+  };
+  if (c.req.header("if-none-match") === etag) {
+    closeSync(opened.fd);
+    return new Response(null, { status: 304, headers });
+  }
+  const ascii = name.replace(/[^\x20-\x7E]/g, "_").replace(/"/g, "");
+  const size = opened.bytes;
+  const body = size === 0 || c.req.raw.method === "HEAD"
+    ? (closeSync(opened.fd), null)
+    : (Readable.toWeb(createReadStream("", { fd: opened.fd, autoClose: true, start: 0, end: size - 1 })) as ReadableStream);
+  return new Response(body, {
+    headers: {
+      ...headers,
+      "Content-Type": "model/gltf-binary",
+      "Content-Length": String(size),
+      "Content-Disposition": `inline; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(name)}`,
+    },
+  });
 }
 
 function pdfHeaderAt(path: string): boolean {
@@ -1598,6 +1634,9 @@ app.get("/api/mockups/:id/files/:key", (c) => {
   const ascii = f.name.replace(/[^\x20-\x7E]/g, "_").replace(/"/g, "");
   const encoded = encodeURIComponent(f.name);
   const forceAttach = c.req.query("download") === "1";
+  if (key === "glb" && !forceAttach && glbWebpVariantEnabled() && !isGenerationManagedMockup(job)) {
+    return glbVariantResponse(c, job.id, f.path, f.name, c.req.query("variant") === "original");
+  }
   const disposition =
     forceAttach || !(type.startsWith("image/") || type.startsWith("model/") || key === "unfolded_print") ? "attachment" : "inline";
   const etag = fileEtag(f.path);
@@ -1794,6 +1833,8 @@ if (process.env.VITEST !== "1") {
   try {
     const staleGlbTemps = cleanupStaleGlbWebpTemps(join(DATA_DIR, "mockups"));
     if (staleGlbTemps) console.info(`removed ${staleGlbTemps} stale glb webp temp file(s)`);
+    const staleVariants = cleanupGlbWebpVariantsOnBoot(join(DATA_DIR, "mockups"));
+    if (staleVariants) console.info(`removed ${staleVariants} stale glb webp variant file(s)`);
   } catch (err) {
     console.warn("glb webp temp cleanup failed:", err instanceof Error ? err.message : err);
   }

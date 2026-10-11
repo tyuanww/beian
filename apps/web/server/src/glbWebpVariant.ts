@@ -1,0 +1,552 @@
+/**
+ * 旧打样 GLB 的 WebP 旁路（方案 v2.1 PR-a）。原件一字不改，旁路按内容哈希命名放在
+ * `<jobDir>/.webp-variant/<原文件名>.<旁路 sha256 前 16 位>.webpv`，旁边是 `<原文件名>.webpv.json` 元数据，
+ * 元数据的 variant.file 指向当前文件。Windows 上被打开的文件不能删除或被改名覆盖（EPERM），所以替换时
+ * 写新文件名、元数据原子改指向；旧文件尽力删，删不掉留给下次写入和启动清理；绝不删元数据当前指向的文件。
+ *
+ * - 隐藏目录 + 非 .glb 后缀：collectOutputs 不进 "." 目录、只认 .glb/.png/.pptx/.pdf，两层都挡住。
+ * - 完成的定义：meta 存在、source hash 与原件一致、variant hash 与旁路一致。缺一项就回退原件。
+ * - 写入顺序：旁路 tmp(fsync) → staging → 改名为哈希文件名 → meta tmp(fsync) → rename 覆盖 meta → 尽力删旧哈希文件；
+ *   每次 unlink/rename 后对目录 fsync（Windows 不支持目录 fsync，best-effort）。meta 只用 readFileSync 一次性读完即关，
+ *   meta 改名失败（如 Windows 上有人正打开它）时返回 failed、旧 meta 不动，服务照旧按旧 meta 校验或回退原件。
+ * - 所有会让 Blender 写这单 job 目录的入口进入时同步调用 dropGlbWebpVariant（jobs.ts，静态测试 A 锁住）。
+ *   即使漏删，原件被重写后 source hash 对不上，也只会回退原件，不会把旧旁路发出去。
+ * - 对外返回由 rolloutFlags.GLB_WEBP_VARIANT 控制，默认关，不读环境变量；唯一的环境读取是 *ForTest 的 VITEST 护栏。
+ */
+import { createHash } from "node:crypto";
+import { closeSync, fstatSync, fsyncSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { basename, isAbsolute, join, relative, sep } from "node:path";
+import { DATA_DIR } from "./config.js";
+import { compressGlbTexturesToWebp, type GlbWebpOptions, type GlbWebpResult } from "./glbWebp.js";
+import { GLB_WEBP_VARIANT } from "./rolloutFlags.js";
+
+const GLB_WEBP_VARIANT_DIR = ".webp-variant";
+const GLB_WEBP_VARIANT_SCHEMA = "glb-webp-variant/2";
+const VARIANT_SUFFIX = ".webpv";
+const META_SUFFIX = ".webpv.json";
+const GLB_WEBP_VARIANT_QUALITY = 90;
+const GLB_WEBP_TOOL_VERSION = "gltf-transform@4.5.1+sharp@0.34.4";
+const HASH_CACHE_MAX = 512;
+const HASH_CHUNK = 1024 * 1024;
+
+export type GlbWebpVariantMeta = {
+  schema: typeof GLB_WEBP_VARIANT_SCHEMA;
+  source: { name: string; sha256: string; bytes: number };
+  variant: { file: string; sha256: string; bytes: number };
+  quality: number;
+  tool_version: string;
+  created_at: string;
+};
+
+/**
+ * 仅测试注入点（*ForTest）的护栏：与 compression* 模块同一约定，非 VITEST 进程调用直接抛错，
+ * 生产代码即使误调也改不了开关、删除函数、目录 fsync 或缓存。开关本身不读环境变量。
+ */
+function assertTestRuntime(name: string): void {
+  if (process.env.VITEST !== "1") throw new Error(`${name} 只能在 VITEST 使用`);
+}
+
+let enabled: boolean = GLB_WEBP_VARIANT;
+
+/** 对外返回旁路的总开关（rolloutFlags.GLB_WEBP_VARIANT，默认关）。 */
+export function glbWebpVariantEnabled(): boolean {
+  return enabled;
+}
+
+/** 测试注入：不读 env，不提供运行时覆盖。 */
+export function setGlbWebpVariantEnabledForTest(value: boolean): void {
+  assertTestRuntime("setGlbWebpVariantEnabledForTest");
+  enabled = value;
+}
+
+let unlinkImpl: (path: string) => void = unlinkSync;
+
+/** 测试用：记录删除顺序（meta 必须先于旁路被删）。传 null 恢复。 */
+export function setGlbWebpVariantUnlinkForTest(fn: ((path: string) => void) | null): void {
+  assertTestRuntime("setGlbWebpVariantUnlinkForTest");
+  unlinkImpl = fn ?? unlinkSync;
+}
+
+let renameImpl: (from: string, to: string) => void = renameSync;
+
+/** 测试用：模拟 Windows 上改名覆盖被打开文件时的 EPERM。传 null 恢复。 */
+export function setGlbWebpVariantRenameForTest(fn: ((from: string, to: string) => void) | null): void {
+  assertTestRuntime("setGlbWebpVariantRenameForTest");
+  renameImpl = fn ?? renameSync;
+}
+
+function mockupsRoot(): string {
+  return join(DATA_DIR, "mockups");
+}
+
+function safeJobId(jobId: string): boolean {
+  return Boolean(jobId) && !jobId.startsWith(".") && !/[\\/]/.test(jobId) && !jobId.includes("..");
+}
+
+export function glbWebpVariantDir(jobId: string): string {
+  return join(mockupsRoot(), jobId, GLB_WEBP_VARIANT_DIR);
+}
+
+export type GlbWebpVariantPaths = { jobDir: string; dir: string; sourceName: string; variant: string; meta: string };
+
+/** 原件必须是这单 job 目录内的 .glb；否则没有旁路。 */
+export function glbWebpVariantPaths(jobId: string, glbPath: string): GlbWebpVariantPaths | null {
+  if (!safeJobId(jobId) || !/\.glb$/i.test(glbPath)) return null;
+  const jobDir = join(mockupsRoot(), jobId);
+  const rel = relative(jobDir, glbPath);
+  if (!rel || rel.startsWith("..") || isAbsolute(rel)) return null;
+  const sourceName = rel.split(sep).join("/");
+  if (sourceName.split("/").some((part) => part.startsWith("."))) return null;
+  const dir = join(jobDir, GLB_WEBP_VARIANT_DIR);
+  const name = basename(glbPath);
+  const meta = join(dir, `${name}${META_SUFFIX}`);
+  const current = readGlbWebpVariantMeta(meta);
+  const file = current && variantFileBelongsTo(current.variant.file, name) ? current.variant.file : `${name}${VARIANT_SUFFIX}`;
+  return { jobDir, dir, sourceName, variant: join(dir, file), meta };
+}
+
+/** 内容哈希文件名：`<原文件名>.<sha256 前 16 位>.webpv`。 */
+function hashedVariantName(sourceBase: string, sha256: string): string {
+  return `${sourceBase}.${sha256.slice(0, 16)}${VARIANT_SUFFIX}`;
+}
+
+function variantFileBelongsTo(file: string, sourceBase: string): boolean {
+  return file.startsWith(`${sourceBase}.`) && /^[^.\\/][^\\/]*\.[0-9a-f]{16}\.webpv$/.test(file);
+}
+
+let fsyncDirWarned = false;
+
+type DirSyncFs = { open: (path: string, flags: string) => number; fsync: (fd: number) => void; close: (fd: number) => void };
+const realDirSyncFs: DirSyncFs = { open: openSync, fsync: fsyncSync, close: closeSync };
+let dirSyncFs: DirSyncFs = realDirSyncFs;
+
+/** 测试用：模拟目录 open/fsync 报 EISDIR/EPERM（Windows 行为）。传 null 恢复，并重置"只记一次"。 */
+export function setGlbWebpVariantDirSyncForTest(fs: Partial<DirSyncFs> | null): void {
+  assertTestRuntime("setGlbWebpVariantDirSyncForTest");
+  dirSyncFs = fs ? { ...realDirSyncFs, ...fs } : realDirSyncFs;
+  fsyncDirWarned = false;
+}
+
+/** unlink/rename 之后让目录项落盘。Windows 打开目录会报 EISDIR/EPERM：best-effort，记一次 debug 后继续。 */
+export function fsyncDir(dir: string): void {
+  let fd: number | undefined;
+  try {
+    fd = dirSyncFs.open(dir, "r");
+    dirSyncFs.fsync(fd);
+  } catch (error) {
+    if (!fsyncDirWarned) {
+      fsyncDirWarned = true;
+      console.debug(`glb webp variant: directory fsync unsupported (${(error as NodeJS.ErrnoException).code || "unknown"}), relying on meta-last + hash checks`);
+    }
+  } finally {
+    if (fd !== undefined) {
+      try { dirSyncFs.close(fd); } catch { /* ignore */ }
+    }
+  }
+}
+
+const hashCache = new Map<string, string>();
+let hashComputeCount = 0;
+
+export function resetGlbWebpVariantCacheForTest(): void {
+  assertTestRuntime("resetGlbWebpVariantCacheForTest");
+  hashCache.clear();
+  hashComputeCount = 0;
+}
+
+/** 测试用：实际流式重算 sha256 的次数（命中缓存不计）。 */
+export function glbWebpVariantHashComputeCountForTest(): number {
+  assertTestRuntime("glbWebpVariantHashComputeCountForTest");
+  return hashComputeCount;
+}
+
+/**
+ * 同一 fd 上算 sha256。缓存键 = dev+ino+mtimeNs+size（bigint fstat）：原地同大小覆盖会改 mtimeNs，
+ * rename 替换会换 inode；不命中就从这个 fd 流式重算。
+ */
+function sha256OfFd(fd: number): { sha256: string; bytes: number } {
+  const st = fstatSync(fd, { bigint: true });
+  const bytes = Number(st.size);
+  const key = `${st.dev}:${st.ino}:${st.mtimeNs}:${st.size}`;
+  const cached = hashCache.get(key);
+  if (cached) {
+    hashCache.delete(key);
+    hashCache.set(key, cached);
+    return { sha256: cached, bytes };
+  }
+  hashComputeCount += 1;
+  const hash = createHash("sha256");
+  const buf = Buffer.alloc(Math.min(HASH_CHUNK, Math.max(1, bytes)));
+  let position = 0;
+  while (position < bytes) {
+    const n = readSync(fd, buf, 0, Math.min(buf.length, bytes - position), position);
+    if (n <= 0) break;
+    hash.update(buf.subarray(0, n));
+    position += n;
+  }
+  const sha256 = hash.digest("hex");
+  if (hashCache.size >= HASH_CACHE_MAX) {
+    const oldest = hashCache.keys().next().value;
+    if (oldest !== undefined) hashCache.delete(oldest);
+  }
+  hashCache.set(key, sha256);
+  return { sha256, bytes };
+}
+
+const SHA_RE = /^[a-f0-9]{64}$/;
+
+function isRegularFile(path: string): boolean {
+  try {
+    return lstatSync(path).isFile();
+  } catch {
+    return false;
+  }
+}
+
+export function readGlbWebpVariantMeta(path: string): GlbWebpVariantMeta | null {
+  if (!isRegularFile(path)) return null;
+  try {
+    const value = JSON.parse(readFileSync(path, "utf8")) as Partial<GlbWebpVariantMeta>;
+    if (value?.schema !== GLB_WEBP_VARIANT_SCHEMA) return null;
+    const { source, variant } = value;
+    if (!source || typeof source.name !== "string" || !SHA_RE.test(source.sha256 || "") || !Number.isSafeInteger(source.bytes)) return null;
+    if (!variant || !SHA_RE.test(variant.sha256 || "") || !Number.isSafeInteger(variant.bytes)) return null;
+    if (typeof variant.file !== "string" || variant.file !== hashedVariantName(basename(source.name), variant.sha256)) return null;
+    return value as GlbWebpVariantMeta;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * sha256 是本次实际返回字节的 hex，sourceSha256 是原件的 hex（两者在原件分支相同）。
+ * 对外版本号 glb_version / glb_original_version 取各自前 16 位。
+ */
+export type OpenedGlb =
+  | { kind: "variant"; fd: number; bytes: number; sha256: string; sourceSha256: string }
+  | { kind: "original"; fd: number; bytes: number; sha256: string; sourceSha256: string; reason: string };
+
+const GLB_VERSION_HEX_CHARS = 16;
+
+export function glbVersionOf(sha256: string): string {
+  return sha256.slice(0, GLB_VERSION_HEX_CHARS);
+}
+
+const warnedMismatch = new Set<string>();
+
+function warnMismatch(jobId: string, reason: string): void {
+  const key = `${jobId}:${reason}`;
+  if (warnedMismatch.has(key)) return;
+  if (warnedMismatch.size > 1000) warnedMismatch.clear();
+  warnedMismatch.add(key);
+  console.warn(`glb webp variant ${jobId}: problem=旁路失效 cause=${reason} fix=回退原件，等回填重做`);
+}
+
+/**
+ * 打开原件 fd_s；核 meta、原件 hash、旁路 hash。全部通过返回旁路 fd（fd_s 已关）；
+ * 任一不符返回原件 fd_s（不重开路径），调用方负责关闭返回的 fd。
+ */
+export function openGlbForServe(jobId: string, glbPath: string): OpenedGlb {
+  const fdS = openSync(glbPath, "r");
+  let bytesS: number;
+  try {
+    bytesS = fstatSync(fdS).size;
+  } catch (error) {
+    closeSync(fdS);
+    throw error;
+  }
+  const original = (reason: string): OpenedGlb => {
+    if (reason !== "no_meta" && reason !== "no_paths") warnMismatch(jobId, reason);
+    const own = sha256OfFd(fdS).sha256;
+    return { kind: "original", fd: fdS, bytes: bytesS, sha256: own, sourceSha256: own, reason };
+  };
+  try {
+    const paths = glbWebpVariantPaths(jobId, glbPath);
+    if (!paths) return original("no_paths");
+    const meta = readGlbWebpVariantMeta(paths.meta);
+    if (!meta) return original("no_meta");
+    if (meta.source.name !== paths.sourceName) return original("source_name_mismatch");
+    const source = sha256OfFd(fdS);
+    if (source.sha256 !== meta.source.sha256 || source.bytes !== meta.source.bytes) return original("source_hash_mismatch");
+    const variantPath = join(paths.dir, meta.variant.file);
+    if (!isRegularFile(variantPath)) return original("variant_missing");
+    let fdV: number;
+    try {
+      fdV = openSync(variantPath, "r");
+    } catch {
+      return original("variant_missing");
+    }
+    try {
+      const variant = sha256OfFd(fdV);
+      if (variant.sha256 !== meta.variant.sha256 || variant.bytes !== meta.variant.bytes) {
+        closeSync(fdV);
+        return original("variant_hash_mismatch");
+      }
+      closeSync(fdS);
+      return { kind: "variant", fd: fdV, bytes: variant.bytes, sha256: variant.sha256, sourceSha256: source.sha256 };
+    } catch (error) {
+      try { closeSync(fdV); } catch { /* ignore */ }
+      throw error;
+    }
+  } catch (error) {
+    try { closeSync(fdS); } catch { /* ignore */ }
+    throw error;
+  }
+}
+
+/** ?variant=original：总是原件，带原件 sha256（同一 hash 缓存）。调用方负责关闭 fd。 */
+export function openGlbOriginalForServe(glbPath: string): OpenedGlb {
+  const fd = openSync(glbPath, "r");
+  try {
+    const own = sha256OfFd(fd);
+    return { kind: "original", fd, bytes: own.bytes, sha256: own.sha256, sourceSha256: own.sha256, reason: "requested" };
+  } catch (error) {
+    try { closeSync(fd); } catch { /* ignore */ }
+    throw error;
+  }
+}
+
+export type GlbWebpVariantVersions = { variantVerified: boolean; glb_version: string; glb_original_version: string };
+
+/**
+ * 文件信息用：与文件路由同一校验、同一缓存。glb_version = 默认端点实际返回内容的 sha256 前 16 位，
+ * glb_original_version = 原件的。读不了原件返回 null（调用方不输出版本字段）。
+ */
+export function glbWebpVariantVersions(jobId: string, glbPath: string | undefined): GlbWebpVariantVersions | null {
+  if (!glbPath) return null;
+  let opened: OpenedGlb;
+  try {
+    opened = openGlbForServe(jobId, glbPath);
+  } catch {
+    return null;
+  }
+  closeSync(opened.fd);
+  return { variantVerified: opened.kind === "variant", glb_version: glbVersionOf(opened.sha256), glb_original_version: glbVersionOf(opened.sourceSha256) };
+}
+
+const dropEpoch = new Map<string, number>();
+
+function epochOf(jobId: string): number {
+  return dropEpoch.get(jobId) ?? 0;
+}
+
+function unlinkIgnoringMissing(path: string): boolean {
+  try {
+    unlinkImpl(path);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return false;
+    throw error;
+  }
+}
+
+function isMetaName(name: string): boolean {
+  return name.endsWith(META_SUFFIX) || /\.webpv\.json\.\d+-\d+\.tmp$/.test(name);
+}
+
+/**
+ * 会改 GLB 的入口进入时同步调用：先删全部 meta（让"完成"标记先失效），再删旁路和 tmp，各做一次目录 fsync。
+ * ENOENT 忽略；其他错误只记日志不抛（服务时的 hash 核对兜底）。同时让正在进行的旁路写入作废。
+ */
+export function dropGlbWebpVariant(jobId: string): void {
+  if (!safeJobId(jobId)) return;
+  dropEpoch.set(jobId, epochOf(jobId) + 1);
+  const dir = glbWebpVariantDir(jobId);
+  try {
+    let st;
+    try {
+      st = lstatSync(dir);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+      throw error;
+    }
+    if (!st.isDirectory()) {
+      unlinkIgnoringMissing(dir);
+      fsyncDir(join(mockupsRoot(), jobId));
+      return;
+    }
+    const names = readdirSync(dir);
+    let removed = false;
+    for (const name of names.filter(isMetaName)) removed = unlinkIgnoringMissing(join(dir, name)) || removed;
+    if (removed) fsyncDir(dir);
+    removed = false;
+    for (const name of names.filter((n) => !isMetaName(n))) {
+      if (!isRegularFile(join(dir, name))) continue;
+      removed = unlinkIgnoringMissing(join(dir, name)) || removed;
+    }
+    if (removed) fsyncDir(dir);
+  } catch (error) {
+    console.warn(`glb webp variant ${jobId}: problem=删旁路失败 cause=${error instanceof Error ? error.message : String(error)} fix=服务时 hash 核对会回退原件`);
+  }
+}
+
+export type WriteGlbWebpVariantOptions = Pick<GlbWebpOptions, "quality" | "convert" | "lockWaitMs" | "beforeCommit"> & { now?: () => Date };
+
+/**
+ * 生成一单的旁路（回填任务 PR-b 调用）。原件不动。写入顺序见文件头；
+ * 期间若有入口调用了 dropGlbWebpVariant，本次结果作废。
+ */
+export async function writeGlbWebpVariant(jobId: string, glbPath: string, opts: WriteGlbWebpVariantOptions = {}): Promise<GlbWebpResult> {
+  const paths = glbWebpVariantPaths(jobId, glbPath);
+  if (!paths) return { status: "failed", reason: "not_job_glb" };
+  const name = basename(glbPath);
+  const epoch = epochOf(jobId);
+  const stillValid = () => epochOf(jobId) === epoch && (!opts.beforeCommit || opts.beforeCommit());
+  const staging = join(paths.dir, `.${name}.${process.pid}-${Date.now()}.staging${VARIANT_SUFFIX}`);
+  let final: string | null = null;
+  let metaTmp: string | null = null;
+  try {
+    try {
+      const st = lstatSync(paths.dir);
+      if (!st.isDirectory()) return { status: "failed", reason: "variant_dir_not_directory" };
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      mkdirSync(paths.dir);
+      fsyncDir(paths.jobDir);
+    }
+    const result = await compressGlbTexturesToWebp(glbPath, {
+      quality: opts.quality ?? GLB_WEBP_VARIANT_QUALITY,
+      convert: opts.convert,
+      lockWaitMs: opts.lockWaitMs,
+      beforeCommit: stillValid,
+      outPath: staging,
+    });
+    if (result.status !== "converted") return result;
+    const file = hashedVariantName(name, result.outputSha256);
+    final = join(paths.dir, file);
+    // 同内容的哈希文件已存在（可能正被读取）：不覆盖，直接复用。
+    if (isRegularFile(final)) tryUnlink(staging);
+    else renameImpl(staging, final);
+    fsyncDir(paths.dir);
+    const meta: GlbWebpVariantMeta = {
+      schema: GLB_WEBP_VARIANT_SCHEMA,
+      source: { name: paths.sourceName, sha256: result.inputSha256, bytes: result.beforeBytes },
+      variant: { file, sha256: result.outputSha256, bytes: result.afterBytes },
+      quality: opts.quality ?? GLB_WEBP_VARIANT_QUALITY,
+      tool_version: GLB_WEBP_TOOL_VERSION,
+      created_at: (opts.now?.() ?? new Date()).toISOString(),
+    };
+    metaTmp = join(paths.dir, `.${basename(paths.meta)}.${process.pid}-${Date.now()}.tmp`);
+    writeFileSync(metaTmp, JSON.stringify(meta));
+    const fd = openSync(metaTmp, "r+");
+    try { fsyncSync(fd); } finally { closeSync(fd); }
+    if (!stillValid()) {
+      abandon(paths, metaTmp, final);
+      return { status: "skipped", reason: "deadline_insufficient" };
+    }
+    try {
+      renameImpl(metaTmp, paths.meta);
+    } catch (error) {
+      // 例如 Windows 上 meta 正被打开：旧 meta 不动，服务照旧校验旧 meta 或回退原件。
+      abandon(paths, metaTmp, final);
+      return { status: "failed", reason: `meta_update_failed: ${(error as NodeJS.ErrnoException).code || "unknown"}` };
+    }
+    metaTmp = null;
+    fsyncDir(paths.dir);
+    sweepStaleVariants(paths.dir, name, file);
+    return result;
+  } catch (error) {
+    abandon(paths, metaTmp, final, staging);
+    return { status: "failed", reason: (error instanceof Error ? error.message : String(error)).slice(0, 200) };
+  }
+}
+
+function tryUnlink(path: string): boolean {
+  try {
+    return unlinkIgnoringMissing(path);
+  } catch {
+    return false; // EPERM/EBUSY 等：留给下次写入和启动清理。
+  }
+}
+
+/** 当前 meta 指向的文件名（读不出则 null）。 */
+function referencedVariantFile(metaPath: string): string | null {
+  return readGlbWebpVariantMeta(metaPath)?.variant.file ?? null;
+}
+
+/** 放弃本次写入：删 tmp/staging；新哈希文件只有不被当前 meta 指向时才删。 */
+function abandon(paths: GlbWebpVariantPaths, metaTmp: string | null, final: string | null, staging?: string): void {
+  if (metaTmp) tryUnlink(metaTmp);
+  if (staging) tryUnlink(staging);
+  if (final && basename(final) !== referencedVariantFile(paths.meta)) tryUnlink(final);
+  fsyncDir(paths.dir);
+}
+
+/**
+ * 删同一原件的旧哈希文件（和旧版无哈希的 `<原名>.webpv`）。keep 与当前 meta 指向的文件永不删；
+ * 删除失败（EPERM/EBUSY，Windows 上正被读取）跳过，下次写入或启动清理再删。
+ */
+function sweepStaleVariants(dir: string, sourceBase: string, keep: string): void {
+  let names: string[];
+  try {
+    names = readdirSync(dir);
+  } catch {
+    return;
+  }
+  const referenced = referencedVariantFile(join(dir, `${sourceBase}${META_SUFFIX}`));
+  let removed = false;
+  for (const n of names) {
+    if (n === keep || n === referenced) continue;
+    if (n !== `${sourceBase}${VARIANT_SUFFIX}` && !variantFileBelongsTo(n, sourceBase)) continue;
+    removed = tryUnlink(join(dir, n)) || removed;
+  }
+  if (removed) fsyncDir(dir);
+}
+
+/**
+ * 启动清理（在任何旁路写入之前调用）：删 `.webp-variant` 下所有 *.tmp；删没有 meta 的旁路（孤儿）；
+ * 删没有旁路的 meta；meta 读不出或 source 已不存在的整对删除（先 meta 后旁路）。不跟随符号链接。返回删除个数。
+ */
+export function cleanupGlbWebpVariantsOnBoot(root: string = mockupsRoot()): number {
+  let removed = 0;
+  let jobs;
+  try {
+    jobs = readdirSync(root, { withFileTypes: true });
+  } catch {
+    return 0;
+  }
+  for (const job of jobs) {
+    if (!job.isDirectory() || job.name.startsWith(".")) continue;
+    const jobDir = join(root, job.name);
+    const dir = join(jobDir, GLB_WEBP_VARIANT_DIR);
+    try {
+      if (!lstatSync(dir).isDirectory()) continue;
+    } catch {
+      continue;
+    }
+    let changed = false;
+    const drop = (name: string) => {
+      try {
+        if (unlinkIgnoringMissing(join(dir, name))) {
+          removed += 1;
+          changed = true;
+        }
+      } catch {
+        // 无权限等：下次启动再试。
+      }
+    };
+    let names: string[];
+    try {
+      names = readdirSync(dir).filter((name) => isRegularFile(join(dir, name)));
+    } catch {
+      continue;
+    }
+    for (const name of names.filter((n) => n.endsWith(".tmp") || n.endsWith(`.staging${VARIANT_SUFFIX}`))) drop(name);
+    const keep = new Set<string>();
+    for (const metaName of names.filter((n) => n.endsWith(META_SUFFIX))) {
+      const base = metaName.slice(0, -META_SUFFIX.length);
+      const meta = readGlbWebpVariantMeta(join(dir, metaName));
+      const sourceOk = Boolean(meta) && basename(meta!.source.name) === base
+        && !meta!.source.name.split("/").some((part) => part === ".." || part.startsWith("."))
+        && isRegularFile(join(jobDir, ...meta!.source.name.split("/")));
+      if (meta && sourceOk && isRegularFile(join(dir, meta.variant.file))) keep.add(meta.variant.file);
+      else drop(metaName);
+    }
+    // 没被任何有效 meta 指向的旁路（孤儿、旧哈希、旧版无哈希名）都删；删不掉下次启动再试。
+    for (const name of names.filter((n) => n.endsWith(VARIANT_SUFFIX) && !n.endsWith(`.staging${VARIANT_SUFFIX}`))) {
+      if (!keep.has(name)) drop(name);
+    }
+    if (changed) fsyncDir(dir);
+  }
+  return removed;
+}

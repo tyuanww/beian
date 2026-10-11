@@ -8,6 +8,7 @@ import { DATA_DIR, PACKAGING, PYTHON } from "./config.js";
 import { compareBookkeeping } from "./billing.js";
 import { notifyIllustratorWatchdog, notifyJobFinished, watchdogEventFromStdout, type WatchdogEvent } from "./notify.js";
 import { compressGlbTexturesToWebp, logGlbWebpResult } from "./glbWebp.js";
+import { dropGlbWebpVariant } from "./glbWebpVariant.js";
 import {
   applyRenderGenerationPatch,
   assertCanManageMockup,
@@ -453,6 +454,7 @@ export function retryMockup(id: string, viewer: Viewer): MockupJob {
     throw Object.assign(new Error("打样还在启动，请稍后再试"), { status: 409 });
   }
   activeMockupRetries.add(id);
+  dropGlbWebpVariant(id);
   try {
     if (pid) {
       if (!clearPersistedWorker(pid, { kind: "mockup", id })) {
@@ -536,6 +538,7 @@ export async function repairMockupPrintFaces(id: string, viewer: Viewer): Promis
   if (requiredPrintFacesReady(id) && !job.print_faces_request) return persistPrintFaceFiles(job);
   if (requiredPrintFacesReady(id) && job.print_faces_request?.status === "succeeded") return job;
   if (!printFaceRepairSource(job)) throw Object.assign(new Error("这单没有可用底稿，无法补生成。请重新打样。"), { status: 409 });
+  dropGlbWebpVariant(id);
   job.print_faces_request = { id: randomBytes(16).toString("hex"), status: "queued", created_at: nowIso(),
     actor_id: viewer.id, source_sha256: printFaceSourceHash(job) };
   saveMockup(job);
@@ -582,6 +585,7 @@ function publishPrintFaceRepair(job: MockupJob, assets: string): void {
 }
 
 function claimPrintFaceRepair(job: MockupJob): void {
+  dropGlbWebpVariant(job.id);
   const request = job.print_faces_request!;
   request.status = "running";
   request.started_at = nowIso();
@@ -637,6 +641,7 @@ function recoverPrintFaceRepairsOnBoot(): void {
     if (request?.status !== "running") continue;
     if (!request.worker_pid) continue; // Spawn/persist gap: no PID is not proof that the worker exited.
     if (!clearPersistedWorker(request.worker_pid, { kind: "print_faces", id: job.id, executionId: request.id })) continue;
+    dropGlbWebpVariant(job.id);
     // New identity fences callbacks and staging left by the interrupted attempt.
     request.id = randomBytes(16).toString("hex");
     request.status = "queued";
@@ -988,6 +993,7 @@ async function executeUnfoldedNative(job: MockupJob, requestId: string): Promise
 function claimUnfoldedPublish(job: MockupJob): void {
   const request = job.unfolded_print_request;
   if (!request || request.mode !== "publish_existing") return;
+  dropGlbWebpVariant(job.id);
   request.status = "running";
   request.started_at = nowIso();
   saveMockup(job);
@@ -1150,6 +1156,7 @@ export async function relightMockupStudio(id: string, viewer: Viewer, studioAdju
     const job = readMockupFromDisk(id);
     if (!job) throw Object.assign(new Error("没有这单打样"),{status:404});
     assertCanManageMockup(job,viewer);
+    dropGlbWebpVariant(id);
     const adjustment = canonicalizeStudioAdjustment(studioAdjustment ?? {});
     const inflight = job.render_mutation?.status === "queued" || job.render_mutation?.status === "running";
     if (!inflight && !generationAdaptersReady()) throw adaptersUnavailableError();
@@ -2166,6 +2173,7 @@ function claimGenerationMutation(job: MockupJob): boolean {
   next.job_status = "succeeded";
   next.render_mutation = { ...disk.render_mutation, status: "running", stage: "导入原图" };
   persistGenerationJob(next);
+  dropGlbWebpVariant(job.id);
   live.blender = job.id;
   void runGenerationMutation(job.id, mutationId);
   return true;
@@ -2260,6 +2268,7 @@ function assertOutputInsideCandidate(candidateDir: string, jobRoot: string, path
 }
 
 async function runGenerationMutation(id: string, mutationId: string): Promise<void> {
+  dropGlbWebpVariant(id);
   let lifecycle: import("./renderGenerationBudget.js").RenderLifecycle | undefined;
   const release = (): void => {
     // A failed close-persistence callback must not silently free the shared slot.
@@ -2504,6 +2513,7 @@ function occupyUnconfirmedGenerationBlenderFence(): void {
       Number.isSafeInteger(pid) &&
       pid > 0
     ) {
+      dropGlbWebpVariant(job.id);
       live.blender = job.id;
       return;
     }
@@ -2578,6 +2588,7 @@ function recoverInterruptedMutation(job: MockupJob): void {
   const mutation = job.render_mutation;
   if (!mutation || (mutation.status !== "queued" && mutation.status !== "running"
     && !job.render_generation_request?.worker_pid)) return;
+  dropGlbWebpVariant(job.id);
   if (mutation.status === "queued" && !job.render_generation_request?.worker_pid) {
     if (!generationAdaptersReady()) {
       failPersistedMutation(job.id, mutation.id, "渲染代际执行器尚未接线，不能保留假排队");
@@ -2628,6 +2639,7 @@ function recoverRenderGenerationsOnBoot(): void {
         `jobs ${job.id}: problem=generation_recover cause=${isRenderGenerationError(err) ? err.cause : err instanceof Error ? err.message : String(err)} fix=只补索引，不自动激活`,
       );
     }
+    dropGlbWebpVariant(job.id);
     recoverInterruptedMutation(job);
     // The prior routine either confirmed all owned processes gone or retained
     // worker_pid. Never release credit from a mere failed mutation status.
@@ -2770,11 +2782,17 @@ export function tryStart(): void {
   }
   if (!live.blender) {
     const interrupted = loadAllMockups().find(job => job.print_faces_request?.status === "running");
-    if (interrupted) live.blender = interrupted.id;
+    if (interrupted) {
+      dropGlbWebpVariant(interrupted.id);
+      live.blender = interrupted.id;
+    }
   }
   if (!live.blender) {
     const interrupted = loadAllMockups().find((job) => job.unfolded_print_request?.status === "running" && job.unfolded_print_request.mode === "publish_existing");
-    if (interrupted) live.blender = interrupted.id;
+    if (interrupted) {
+      dropGlbWebpVariant(interrupted.id);
+      live.blender = interrupted.id;
+    }
   }
   if (!live.blender) occupyUnconfirmedGenerationBlenderFence();
   if (!live.blender) {
@@ -2926,6 +2944,7 @@ function claimOcr(task: Task): void {
 }
 
 function claimMockup(job: MockupJob): void {
+  dropGlbWebpVariant(job.id);
   job.job_status = "running";
   job.status = "running";
   job.job_started_at = nowIso();

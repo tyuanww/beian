@@ -468,3 +468,4 @@ RF-10–RF-13 的原始依赖见 [ADR-007 §20.7](docs/adr-007-packaging-render-
 - 工具链：干净环境首次构建缺 `@rollup/rollup-linux-x64-gnu`（npm 可选依赖的已知问题），需在 lockfile/CI 里显式装上或文档写明 `npm i @rollup/rollup-linux-x64-gnu`。
 - 后端下发 `upload_limit_bytes`（`/api/auth/me`）暂缓：前端已支持该可选字段，线上目前不返回，统一用 99MB（99,000,000 字节）默认上限。
 - 3D 打样 GLB 两地址（默认 WebP 版 / `?variant=original`）与 `glb_version` / `glb_original_version` 依赖后端 PR-a（开发哥 `aff0608`，未合入；当前开关关着，线上两字段不出现）；前端已按合同实现并用测试 mock，PR-a 合入后用真后端复验缓存头（匹配 `?v=` 为 immutable，不匹配 no-cache + ETag）并定版本号。
+- 上传上限跟进（0.31.1.17 遗留）：（1）后端 `/api/auth/me` 还不下发 `upload_limit_bytes`，之后单开小 PR 加；前端 `uploadLimit.ts` 现在只认 ≥1,000,000 的整数——小于 1MB 时提示写成「1MB」（MB 数最少显示 1），带小数时预检会拒掉全部文件，后端下发前要先定好取值规则再一起改。（2）文件压缩页上限由 100MiB 改为 99MB（十进制 99,000,000 字节）后没有对应的 e2e，只有单测覆盖。

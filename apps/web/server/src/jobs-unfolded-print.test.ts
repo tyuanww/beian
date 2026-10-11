@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { afterEach, it } from "node:test";
 import { makeTestTempDir } from "./testTemp.js";
@@ -9,7 +9,7 @@ import { makeTestTempDir } from "./testTemp.js";
 process.env.VITEST = "1";
 process.env.WB_DATA_DIR = makeTestTempDir("beian-unfolded-print-");
 const { DATA_DIR, PYTHON } = await import("./config.js");
-const { queueSnapshot, reclaimOnBoot, requestUnfoldedPrint, resetJobsTestHooks, setJobsTestHooks, tryStart } = await import("./jobs.js");
+const { queueSnapshot, reclaimOnBoot, requestUnfoldedPrint, resetJobsTestHooks, setJobsLiveForTest, setJobsTestHooks, tryStart } = await import("./jobs.js");
 const { beginStructureConfirmation, deleteMockup, publicMockup, publicMockupSummary, readMockupFromDisk, saveMockup } = await import("./mockup.js");
 const { runUnfoldedPublish, workerCommandMatches } = await import("./workers.js");
 
@@ -361,4 +361,77 @@ it("adopts a normal preflight net and rejects a source mismatch before native di
   writeFileSync(join(project2, "resolved_job.json"), "{}");
   writeFileSync(join(project2, "unfolded-source.json"), JSON.stringify({ ...net, source_ai_sha256: "wrong" }));
   await assert.rejects(requestUnfoldedPrint(otherId, viewer), (error: unknown) => (error as { reason?: string }).reason === "source_changed");
+});
+
+// ---- WebP 旁路：入口删旁路的行为测试（方案 v2.1 §4.2）----
+const glbVariant = await import("./glbWebpVariant.js");
+
+function plantGlbVariant(jobId: string): string {
+  const dir = glbVariant.glbWebpVariantDir(jobId);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "box.glb.webpv"), "variant");
+  writeFileSync(join(dir, "box.glb.webpv.json"), "{}");
+  return dir;
+}
+
+const GLB_VARIANT_ENTRIES = new Set(["claimMockup", "retryMockup", "repairMockupPrintFaces", "claimPrintFaceRepair", "recoverPrintFaceRepairsOnBoot",
+  "claimUnfoldedPublish", "relightMockupStudio", "claimGenerationMutation", "runGenerationMutation", "occupyUnconfirmedGenerationBlenderFence",
+  "recoverInterruptedMutation", "recoverRenderGenerationsOnBoot", "tryStart"]);
+
+/** dropGlbWebpVariant 之上最近的登记入口函数（跳过锁回调等匿名帧）。 */
+function dropCaller(): string {
+  const frames = (new Error().stack || "").split("\n");
+  const at = frames.findIndex((line) => /\bdropGlbWebpVariant\b/.test(line));
+  for (const line of frames.slice(at + 1)) {
+    const name = (/at (?:async )?([\w$.<>]+)/.exec(line)?.[1] || "").split(".").pop()!;
+    if (GLB_VARIANT_ENTRIES.has(name)) return name;
+  }
+  return "?";
+}
+
+/**
+ * 只放行 target 直接调用的删旁路；其他入口的删除模拟 EPERM（文件留着）。
+ * 结束时旁路目录为空，就证明是 target 自己删的，且记录 meta 先于旁路。
+ */
+async function expectEntryDropsVariant(jobId: string, target: string, action: () => unknown | Promise<unknown>): Promise<void> {
+  const dir = plantGlbVariant(jobId);
+  const order: string[] = [];
+  const callers: string[] = [];
+  glbVariant.setGlbWebpVariantUnlinkForTest((path) => {
+    const caller = dropCaller();
+    callers.push(caller);
+    if (caller !== target) throw Object.assign(new Error(`EPERM simulated for ${caller}`), { code: "EPERM" });
+    order.push(path.slice(dir.length + 1));
+    unlinkSync(path);
+  });
+  try {
+    await action();
+  } finally {
+    glbVariant.setGlbWebpVariantUnlinkForTest(null);
+  }
+  assert.deepEqual(readdirSync(dir), [], `${target} 没有删旁路；删旁路调用者：${callers.join(",") || "无"}`);
+  assert.deepEqual(order, ["box.glb.webpv.json", "box.glb.webpv"], "meta 必须先于旁路被删");
+}
+
+it("glb webp variant: claimUnfoldedPublish drops the variant when it takes the Blender slot", async () => {
+  seed();
+  setJobsTestHooks({
+    runUnfoldedPublish: async () => ({ code: 1, stdout: "", stderr: "", timedOut: false }),
+    runUnfoldedNative: async () => ({ code: 1, stdout: "", stderr: "", timedOut: false }),
+  });
+  await expectEntryDropsVariant(id, "claimUnfoldedPublish", async () => { await requestUnfoldedPrint(id, viewer); await settled(); });
+});
+
+it("glb webp variant: tryStart re-occupying an interrupted publish drops the variant", async () => {
+  seed();
+  setJobsLiveForTest("blender", "another-job");
+  try {
+    await requestUnfoldedPrint(id, viewer);
+    const job = readMockupFromDisk(id)!;
+    assert.equal(job.unfolded_print_request?.mode, "publish_existing");
+    job.unfolded_print_request!.status = "running";
+    saveMockup(job);
+    await expectEntryDropsVariant(id, "tryStart", () => { setJobsLiveForTest("blender", null); tryStart(); });
+    assert.equal(queueSnapshot().blender.running, 1);
+  } finally { setJobsLiveForTest("blender", null); }
 });

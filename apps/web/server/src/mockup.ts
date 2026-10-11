@@ -1,4 +1,5 @@
 import { glbTextureFormat, type GlbTextureFormat } from "./glbWebp.js";
+import { glbWebpVariantEnabled, glbWebpVariantVersions } from "./glbWebpVariant.js";
 import {
   closeSync,
   copyFileSync,
@@ -1792,13 +1793,32 @@ function liveReadPanelFiles(jobId: string): MockupJob["files"] {
   return files;
 }
 
-type PublicMockupFile = { key: string; name: string; texture_format?: GlbTextureFormat };
+type PublicMockupFile = {
+  key: string;
+  name: string;
+  texture_format?: GlbTextureFormat;
+  glb_version?: string;
+  glb_original_version?: string;
+};
 
-/** GLB 才带 texture_format（"webp" | "png"），由 extensionsUsed 判定并按文件缓存；读不出则不输出。 */
+/**
+ * GLB 才带 texture_format（"webp" | "png"），由 extensionsUsed 判定并按文件缓存；读不出则不输出。
+ * 旁路开关打开（且非代际托管单）时：与文件路由同一校验、同一缓存，
+ * texture_format 报默认端点实际返回内容的格式，并带 glb_version（默认端点内容 sha256 前 16 位）
+ * 与 glb_original_version（原件 sha256 前 16 位，即 ?variant=original 的内容）。开关关时不输出版本字段。
+ */
 function publicMockupFile(job: MockupJob, file: { key: string; name: string; path?: string }): PublicMockupFile {
   if (file.key !== "glb") return { key: file.key, name: file.name };
-  const format = glbTextureFormat(fileOf(job, "glb")?.path);
-  return format ? { key: file.key, name: file.name, texture_format: format } : { key: file.key, name: file.name };
+  const path = fileOf(job, "glb")?.path;
+  const versions = glbWebpVariantEnabled() && !isGenerationManagedMockup(job) ? glbWebpVariantVersions(job.id, path) : null;
+  const format = versions?.variantVerified ? "webp" : glbTextureFormat(path);
+  const out: PublicMockupFile = { key: file.key, name: file.name };
+  if (format) out.texture_format = format;
+  if (versions) {
+    out.glb_version = versions.glb_version;
+    out.glb_original_version = versions.glb_original_version;
+  }
+  return out;
 }
 
 function visibleMockupFiles(job: MockupJob): PublicMockupFile[] {
