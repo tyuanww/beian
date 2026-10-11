@@ -317,7 +317,15 @@ RF-10–RF-13 的原始依赖见 [ADR-007 §20.7](docs/adr-007-packaging-render-
   2. 由用户确认组织仓迁移或第二管理员方案；具体设置变更、邀请人员或迁移仓库按对应授权落实，不重复启用已生效的 main 保护。
   3. 保护设置已完成只读回读；后续如获准变更，再只读复核有效设置与权限，不用破坏性 push 试验。**验收：归属/移交、管理人员、有效保护证据齐全；套餐不支持时保留明确缺口，脚本不冒充不可绕过保护。**
 
-## P3 — 独立后续（7 项）
+## P3 — 独立后续（8 项）
+
+- [ ] **F09 — Node 20 下的测试 glob 兼容与 CI 覆盖**
+
+  状态：生产 Windows 跑 Node 20 LTS，但 `.github/workflows/quality.yml` 里完整 L0（`npm test`、`npm run test:quality`、`npm run typecheck`）只在 ubuntu + Node 22 上跑；Node 20 只用于 Windows 的 GLB WebP probe。2026-10-11 在 Mac 上用 `npx -p node@20`（v20.20.2）手动跑过一次 server `tsx --test src/*.test.ts`：900 项，通过 898，失败 0，跳过 2。`src/*.test.ts` 由 `sh` 展开，没有依赖 Node 22 的 `--test` 内置 glob；UI vitest、pytest、quality 没有在 Node 20 下验证过。
+
+  1. 在 CI 加一条 Node 20 的 server L0 job（或 matrix），至少跑 `npm test -w beian-server`。
+  2. 约定测试脚本不要用依赖 Node 22 的 `node --test` 引号 glob（Windows `cmd` 不会展开 `*`），新增脚本要在 Windows + Node 20 上跑一次。
+  3. **验收：CI 上同一 SHA 的 Node 20 与 Node 22 server 测试数量和结果一致。**
 
 - [ ] **F01 — 退役核对原型清理（独立 PR）**
 
