@@ -336,3 +336,20 @@ test("忽略悬停有说明；写原因只在选了有错后出现，刷新保�
   await expect(page.getByLabel("写原因")).toHaveValue("未提交的长原因，刷新后继续");
   await expect(page.getByText("先保存备注，再继续。")).toBeVisible();
 });
+
+test("手机 <720：只看稿和签字/退回，注明逐条下结论仅电脑端，不横向溢出", async ({ page, syntheticApi }, testInfo) => {
+  const task = reviewTask("e5969b58cd56");
+  task.hits![0].decision = "issue";
+  syntheticApi.tasks.push(task);
+  await page.addInitScript(() => localStorage.setItem("wb_appearance", JSON.stringify({ theme: "dark", fontPx: 20 })));
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(`/review/${task.id}`);
+  await expect(page.getByText("逐条下结论仅电脑端")).toBeVisible();
+  await expect(page.locator(".review-flat-list")).toHaveCount(0);
+  await expect(page.getByText(/有错 1 条/)).toBeVisible();
+  const reject = page.getByRole("button", { name: "退回", exact: true });
+  await expect(reject).toBeEnabled();
+  expect((await reject.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.screenshot({ path: testInfo.outputPath("review-mobile-dark.png") });
+});

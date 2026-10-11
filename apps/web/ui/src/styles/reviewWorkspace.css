@@ -89,9 +89,27 @@ html[data-theme="dark"] .review-thumbs { background: #1f1a24; }
 .review-native-readings { display: grid; gap: 12px; margin-top: 8px; }
 .review-draft-status { margin: 0; font-size: 13px; color: var(--muted); }
 
+/* 手机 <720：只看稿 + 签字/退回（第 16 行）。 */
+.review-flat-page.is-phone .review-top { padding: 4px 12px; gap: 6px; min-height: 52px; }
+.review-flat-page.is-phone .review-title { max-width: 100%; flex-basis: 100%; font-size: 16px; white-space: normal; order: -1; }
+.review-flat-page.is-phone .review-signhint { flex-basis: 100%; order: 3; }
+.review-flat-page.is-phone .review-reject, .review-flat-page.is-phone .review-sign { flex: 1; }
+.review-flat-page.is-phone .review-tbar { position: sticky; bottom: 0; background: var(--stage, #fff); }
+.review-phone-sum { padding: 8px 12px; border-bottom: 1px solid var(--line); font-size: 14px; }
+.review-phone-sum summary { min-height: 44px; display: flex; align-items: center; cursor: pointer; font-weight: 600; }
+.review-phone-note { margin: 0; color: var(--muted); font-size: 13px; }
+.review-flat-page.is-phone .review-ccol { min-height: 60dvh; }
+
 @media (prefers-reduced-motion: no-preference) {
   .review-flat .review-sidebar.is-overlay { animation: review-slide-in 280ms ease-in-out; }
   .review-flat-page button, .review-th { transition: background-color 150ms ease-in-out, border-color 150ms ease-in-out, color 150ms ease-in-out; }
 }
 @keyframes review-slide-in { from { transform: translateX(24px); opacity: 0; } to { transform: none; opacity: 1; } }
+.shell.is-review-flat .stage:has(.review-flat-page.is-phone) { overflow: auto; }
+.review-flat-page.is-phone { height: auto; }
 .review-actions { display: inline-flex; align-items: center; gap: 10px; }
+@media (max-width: 719px) {
+  .shell.is-review-flat .sidebar { display: none; }
+  .review-flat-page.is-phone { padding-bottom: 76px; }
+  .review-flat-page.is-phone .review-actions { position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; padding: 8px 12px calc(8px + env(safe-area-inset-bottom, 0px)); background: var(--stage, #fff); border-top: 1px solid var(--line); flex-wrap: wrap; }
+}

@@ -84,6 +84,7 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack }: Props
   const [submitFailed, setSubmitFailed] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [mediaRetry, setMediaRetry] = useState(0);
+  const [phoneListOpen, setPhoneListOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [useV2, setUseV2] = useState(false);
   const { notes, setNote, clearNote, savedHitId, rememberHit } = useReviewSession(userId, taskId, useV2);
@@ -757,6 +758,18 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack }: Props
       ) : null}
       {signed && !locked ? <Alert type="success" showIcon title={task?.complete_kind === "rework" ? "已退回。" : "已签字。"} /> : null}
       {decisionError ? <Alert type="error" showIcon title={`未保存：${decisionError}`} /> : null}
+
+      {phone ? (
+        <section className="review-phone-sum">
+          <p className="review-phone-note">{REVIEW_COPY.phoneOnly}</p>
+          {counts.total === 0 ? <p className="review-zero">{REVIEW_COPY.zeroIssues}</p> : (
+            <details open={phoneListOpen} onToggle={(e) => setPhoneListOpen((e.currentTarget as HTMLDetailsElement).open)}>
+              <summary>{REVIEW_COPY.phoneIssues(counts.issue)} · 待确认 {counts.pending}</summary>
+              <ul>{issueRows.map((r) => <li key={r.index}><b>#{r.no} {r.field}</b> {r.missingReason ? <span className="review-miss">{REVIEW_COPY.missingReason}</span> : r.reason}</li>)}</ul>
+            </details>
+          )}
+        </section>
+      ) : null}
 
       <ReviewWorkspace
         layout={layout}
