@@ -127,6 +127,8 @@ export const REVIEW_COPY = {
   lockedRework: (who: string) => `这一单已被${who}退回，等新稿`,
   lockedOther: (who: string) => `这一单已被${who}处理`,
   lockedUnknown: "这份稿已经提交过了",
+  /** 锁页横幅第二行（只留 🔒 一个图标）。 */
+  lockedNote: "只能查看，不能再改",
   footer: (left: number, page: number) => `这单还剩 ${left} 条待确认 · 本页还有 ${page} 条`,
   noBox: "没找到位置，请看整页",
 } as const;

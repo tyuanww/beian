@@ -803,7 +803,7 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
         </span>
       </header>
 
-      {locked ? <Alert className="review-lock" type="warning" showIcon title={`🔒 ${locked}`} description="只读，结论和签字/退回已锁。" /> : null}
+      {locked ? <Alert className="review-lock" type="warning" title={`🔒 ${locked}`} description={REVIEW_COPY.lockedNote} /> : null}
       {error ? <Alert type="error" title={error} /> : null}
       {task?.error || task?.job_error ? (
         <Alert type="error" showIcon title={customerCopy(task.error || task.job_error || "") || "检查失败。"} />

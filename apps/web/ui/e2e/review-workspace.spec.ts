@@ -663,3 +663,14 @@ for (const theme of ["light", "dark"]) {
     expect(styles[0]).toBe(styles[1]);
   });
 }
+
+test("锁页横幅：只留 🔒 一个图标，第二行写「只能查看，不能再改」", async ({ page, syntheticApi }) => {
+  const task = reviewTask("e5969b58cda2");
+  Object.assign(task, { status: "completed", board: "done", completed_by: "天元", complete_kind: "signed" });
+  syntheticApi.tasks.push(task);
+  await page.goto(`/review/${task.id}`);
+  const lock = page.locator(".review-lock");
+  await expect(lock.locator(".ant-alert-description")).toHaveText("只能查看，不能再改");
+  await expect(lock.locator(".ant-alert-icon")).toHaveCount(0);
+  await expect(lock.locator(".ant-alert-title")).toHaveText("🔒 这一单已被天元签字");
+});
