@@ -7,7 +7,7 @@ import { GLB_LOADING_TEXT, GLB_PREPARING_TEXT, type GlbProgress, glbInteractive,
 import { GLB_ENVIRONMENT, glbViewerExposure, glbRoomEmission } from "./mockupGlbLighting";
 import { type BackdropPreset, studioBackdrop } from "./mockupStudio";
 import { GLB_WEBP_UNSUPPORTED_TEXT, glbTextureGate, webpSupport } from "./mockupGlbTexture";
-import { glbAttempts, whenIdle } from "./mockupGlbSource";
+import { type GlbVersionInfo, glbAttempts, whenIdle } from "./mockupGlbSource";
 
 type Bounds = { center: number[]; sphereRadius: number };
 type View = { theta: number; phi: number; zoom: number };
@@ -25,7 +25,7 @@ type SceneProps = Omit<ViewerProps, "onSourceError"> & { onFail: () => void };
  * 下载失败、贴图解码失败或 model-viewer 报错时自动改拉原始一次，文字始终是「正在加载 3D」，不另提示。
  * 原始也失败才显示效果图 +「这台设备显示不了 3D，已换成效果图」。
  */
-export function MockupGlbViewer({ textureFormat, originalSource, onSourceError, ...props }: ViewerProps & { textureFormat?: string; originalSource: string }) {
+export function MockupGlbViewer({ textureFormat, originalSource, versions, onSourceError, ...props }: ViewerProps & { textureFormat?: string; originalSource: string; versions: GlbVersionInfo }) {
   const [webp, setWebp] = useState<boolean | null>(() => webpSupport.known());
   const gate = glbTextureGate(textureFormat, webp);
   useEffect(() => {
@@ -34,18 +34,20 @@ export function MockupGlbViewer({ textureFormat, originalSource, onSourceError, 
     void webpSupport.detect().then((ok) => { if (active) setWebp(ok); });
     return () => { active = false; };
   }, [gate]);
-  const attempts = glbAttempts(gate, { primary: props.source, original: originalSource });
-  const plan = attempts.join("\n");
+  const attempts = glbAttempts(gate, { primary: props.source, original: originalSource }, versions);
+  const plan = attempts ? attempts.join("\n") : "detecting";
   const [failed, setFailed] = useState<{ plan: string; count: number }>({ plan, count: 0 });
   const count = failed.plan === plan ? failed.count : 0;
   const errorRef = useRef(onSourceError);
   errorRef.current = onSourceError;
-  const exhausted = attempts.length > 0 && count >= attempts.length;
-  useEffect(() => { if (exhausted) errorRef.current(); }, [exhausted, plan]);
+  const exhausted = attempts !== null && count >= attempts.length;
+  const tried = Boolean(attempts?.length);
+  // 真拉过且都失败才通知外层刷新版本；本机解码不了 WebP 而直接降级时不算失败。
+  useEffect(() => { if (exhausted && tried) errorRef.current(); }, [exhausted, tried, plan]);
   // 先只放效果图，浏览器空闲时才开始在后台拉 GLB。
   const [idle, setIdle] = useState(false);
   useEffect(() => whenIdle(() => setIdle(true)), []);
-  const source = attempts[count];
+  const source = attempts?.[count];
   if (!source || !idle) return <GlbPosterOnly poster={props.poster} note={exhausted} loading={!exhausted} />;
   return <GlbScene key={source} {...props} source={source}
     onFail={() => setFailed((prev) => ({ plan, count: (prev.plan === plan ? prev.count : 0) + 1 }))} />;

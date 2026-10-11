@@ -91,7 +91,7 @@ test('桌墙显示资源保持原始下载并可复位，离页释放 blob', asy
 
 test('默认与原始 GLB 都失败时显示效果图和说明，保留原始下载',async ({page}) => {
   const urls: string[] = [];page.on('request',r=>{if(r.url().includes('/files/glb')&&!r.url().includes('download=1'))urls.push(r.url());});
-  await serve(page,true);await page.goto(`/mockup/${ID}`);
+  await serve(page,true,false,'webp',{versions:true});await page.goto(`/mockup/${ID}`);
   await expect(page.getByRole('status').filter({hasText:'这台设备显示不了 3D'})).toHaveText('这台设备显示不了 3D，已换成效果图');
   await expect(page.locator('.mockup-sheet-glb .mockup-glb-poster')).toBeVisible();
   await expect(page.locator('model-viewer')).toHaveCount(0);
@@ -119,7 +119,7 @@ test('用户旋转缩放后切背景保持轨道',async ({page})=>{
 });
 
 test('已加载显示场景报错立即释放blob',async({page})=>{
-  await serve(page);await page.goto(`/mockup/${ID}`);await loaded(page);
+  await serve(page,false,false,'webp',{versions:true});await page.goto(`/mockup/${ID}`);await loaded(page);
   await page.locator('.mockup-backdrop-switch').getByText('白桌白墙',{exact:true}).click();await loaded(page);
   const sceneUrl=await page.locator('model-viewer').getAttribute('src');expect(sceneUrl).toMatch(/^blob:/);
   await page.locator('model-viewer').dispatchEvent('error');
@@ -212,6 +212,22 @@ async function denyWebp(page: Page) {
     HTMLImageElement.prototype.decode = function () { return this.src.startsWith('blob:') ? Promise.reject(new DOMException('webp','EncodingError')) : decode.call(this); };
   });
 }
+
+test('开关关着（无版本字段）GLB 失败：只拉默认地址一次，不带 v 也不退原始，显示效果图和说明',async({page})=>{
+  const urls: string[] = [];page.on('request',r=>{if(r.url().includes('/files/glb')&&!r.url().includes('download=1'))urls.push(r.url());});
+  await serve(page,true);await page.goto(`/mockup/${ID}`);
+  await expect(page.getByRole('status').filter({hasText:'这台设备显示不了 3D'})).toBeVisible();
+  expect(urls.length).toBeGreaterThan(0);
+  for (const u of urls) { expect(u).not.toContain('variant=original'); expect(new URL(u).searchParams.has('v')).toBe(false); }
+});
+
+test('开关关着（无版本字段）且本机解码不了 WebP 贴图：照旧只显示效果图和说明，不请求模型',async({page})=>{
+  let glbRequests=0;page.on('request',r=>{if(r.url().includes('/files/glb')&&!r.url().includes('download=1'))glbRequests++;});
+  await denyWebp(page);await serve(page,false,false,'webp');await page.goto(`/mockup/${ID}`);
+  await expect(page.getByRole('status').filter({hasText:'这台设备显示不了 3D'})).toHaveText('这台设备显示不了 3D，已换成效果图');
+  await expect(page.locator('model-viewer')).toHaveCount(0);
+  await page.waitForTimeout(500);expect(glbRequests).toBe(0);
+});
 
 test('WebP 贴图在不能解码的设备上直接拉原始 GLB，不先拉默认地址',async({page})=>{
   const urls: string[] = [];page.on('request',r=>{if(r.url().includes('/files/glb')&&!r.url().includes('download=1'))urls.push(r.url());});

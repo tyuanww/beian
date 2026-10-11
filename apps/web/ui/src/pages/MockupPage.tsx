@@ -1531,7 +1531,8 @@ function GlbShot({
 }) {
   const fill = glbBackdrop(backgroundLight, backdrop);
   const posterKey = glbPosterKey(files, backdrop);
-  const glbUrls = glbSourceUrls(fileHref(jobId, "glb", false, generation), glbVersions(files));
+  const glbVersionInfo = glbVersions(files);
+  const glbUrls = glbSourceUrls(fileHref(jobId, "glb", false, generation), glbVersionInfo);
   return (
     <figure className="mockup-sheet-photo">
       <div
@@ -1542,6 +1543,7 @@ function GlbShot({
         <MockupGlbViewer
           source={glbUrls.primary}
           originalSource={glbUrls.original}
+          versions={glbVersionInfo}
           poster={posterKey ? fileHref(jobId, posterKey, false, generation) : undefined}
           textureFormat={glbTextureFormat(files)}
           backdrop={backdrop}

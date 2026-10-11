@@ -34,13 +34,18 @@ export function glbSourceUrls(defaultHref: string, versions: GlbVersionInfo): { 
 }
 
 /**
- * 依次尝试的地址：贴图是 WebP 而本机解码不了 → 只拉原始；否则先默认地址、失败自动退原始一次。
- * 探测中返回空数组（先不拉）。全部失败由调用方显示效果图降级。
+ * 依次尝试的地址（探测中返回 null，先不拉）：
+ * - 文件信息没有版本字段（后端开关关着，两个地址都是原始）或两版本相同（没有有效 WebP 版）：
+ *   只拉默认地址，保持原有行为（本机解码不了 WebP 贴图时不拉、直接效果图）；
+ * - 两版本不同：本机解码不了 WebP → 只拉原始；否则先默认（WebP 版）、失败自动退原始一次。
+ * 返回空数组表示不拉模型、直接显示效果图降级。
  */
-export function glbAttempts(gate: GlbTextureGate, urls: { primary: string; original: string }): string[] {
-  if (gate === "detecting") return [];
-  if (gate === "fallback") return [urls.original];
-  return urls.primary === urls.original ? [urls.primary] : [urls.primary, urls.original];
+export function glbAttempts(gate: GlbTextureGate, urls: { primary: string; original: string }, versions: GlbVersionInfo): string[] | null {
+  if (gate === "detecting") return null;
+  const split = Boolean(versions[GLB_VERSION_FIELD] && versions[GLB_ORIGINAL_VERSION_FIELD]
+    && versions[GLB_VERSION_FIELD] !== versions[GLB_ORIGINAL_VERSION_FIELD]);
+  if (!split) return gate === "fallback" ? [] : [urls.primary];
+  return gate === "fallback" ? [urls.original] : [urls.primary, urls.original];
 }
 
 type IdleScope = {

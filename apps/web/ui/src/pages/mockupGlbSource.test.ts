@@ -20,11 +20,20 @@ test("没有版本字段时不带 v，原始地址仍带 variant=original", () =
   assert.deepEqual(glbVersions([{ key: "glb", glb_version: " ", glb_original_version: 3 } as never]), { glb_version: undefined, glb_original_version: undefined });
 });
 
-test("WebP 本机解码不了直接拉原始；能解码先默认再退原始；探测中先不拉", () => {
-  const urls = glbSourceUrls(base, glbVersions(files));
-  assert.deepEqual(glbAttempts("fallback", urls), [urls.original]);
-  assert.deepEqual(glbAttempts("load", urls), [urls.primary, urls.original]);
-  assert.deepEqual(glbAttempts("detecting", urls), []);
+test("两版本不同：WebP 本机解码不了直接拉原始；能解码先默认再退原始；探测中先不拉", () => {
+  const v = glbVersions(files); const urls = glbSourceUrls(base, v);
+  assert.deepEqual(glbAttempts("fallback", urls, v), [urls.original]);
+  assert.deepEqual(glbAttempts("load", urls, v), [urls.primary, urls.original]);
+  assert.equal(glbAttempts("detecting", urls, v), null);
+});
+
+test("开关关着（没有版本字段）或两版本相同：只拉默认地址，不做 WebP 版退原始", () => {
+  for (const v of [glbVersions([{ key: "glb" }]), glbVersions([{ key: "glb", glb_version: "eeee", glb_original_version: "eeee" } as never])]) {
+    const urls = glbSourceUrls(base, v);
+    assert.deepEqual(glbAttempts("load", urls, v), [urls.primary]);
+    assert.deepEqual(glbAttempts("fallback", urls, v), []);
+  }
+  assert.equal(glbSourceUrls(base, glbVersions([{ key: "glb" }])).primary, base);
 });
 
 test("whenIdle 优先 requestIdleCallback（带 timeout），没有时退 setTimeout，且可取消", () => {
