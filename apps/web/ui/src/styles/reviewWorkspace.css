@@ -20,6 +20,8 @@ html[data-theme="dark"] .shell.is-review-flat .sidebar, html[data-theme="dark"] 
 .review-grow { flex: 1; }
 .review-signhint { color: var(--muted); font-size: 14px; }
 .review-sign:disabled, .review-reject:disabled { background: var(--accent-mist); color: var(--muted); border-color: transparent; cursor: not-allowed; box-shadow: none; }
+/* 覆盖 app.css `.btn-primary:disabled { opacity: .55 }`：变灰靠 --accent-mist 底 + --muted 字，不再整体半透明（对比度 ≥4.5）。 */
+.review-flat-page .review-actions .review-sign:disabled { opacity: 1; border-color: var(--line); }
 .review-lock, .review-flat-page > .ant-alert { margin: 8px 16px 0; }
 
 .review-workspace.review-flat { display: grid; flex: 1; min-height: 0; position: relative; gap: 0; height: auto; }

@@ -530,3 +530,23 @@ for (const mode of [{ theme: "dark", scheme: "light" as const }, { theme: "syste
     for (const r of ratios) expect(r).toBeGreaterThanOrEqual(4.5);
   });
 }
+
+for (const theme of ["light", "dark"]) {
+  test(`禁用的「签字」文字对比度 ≥4.5（${theme}）`, async ({ page, syntheticApi }) => {
+    const task = reviewTask(theme === "light" ? "e5969b58cd67" : "e5969b58cd68");
+    syntheticApi.tasks.push(task);
+    await page.addInitScript((t) => localStorage.setItem("wb_appearance", JSON.stringify({ theme: t })), theme);
+    await page.goto(`/review/${task.id}`);
+    const sign = page.getByRole("button", { name: "签字", exact: true });
+    await expect(sign).toBeDisabled();
+    await expect(sign).toHaveCSS("opacity", "1");
+    const ratio = await sign.evaluate((el) => {
+      const rgb = (s: string) => (s.match(/[\d.]+/g) || []).slice(0, 3).map(Number);
+      const lum = ([r, g, b]: number[]) => { const f = (c: number) => { c /= 255; return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; }; return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b); };
+      const c = getComputedStyle(el);
+      const a = lum(rgb(c.color)), b = lum(rgb(c.backgroundColor));
+      return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+    });
+    expect(ratio).toBeGreaterThanOrEqual(4.5);
+  });
+}
