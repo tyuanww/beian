@@ -150,3 +150,13 @@ describe("reviewEvidence", () => {
     assert.match(result.text, /整面/);
   });
 });
+
+describe("revision list with empty ask", () => {
+  it("does not emit an empty 疑点 item", () => {
+    const hit = { id: "net", field: "净含量", field_group: "净含量", status: "疑点", decision: "issue", excel_value: "30ml", bboxes: [{ left: 1, top: 1, width: 8, height: 8 }] };
+    const result = buildRevisionList("海葡萄喷雾", [hit]);
+    assert.match(result.text, /疑点：确认单要「30ml」$/m);
+    assert.doesNotMatch(result.text, /；；|；\s*\/|疑点：\s*\//);
+  });
+});
+

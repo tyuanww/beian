@@ -190,6 +190,26 @@ describe("impersonal reviewer copy", () => {
     assert.equal(spokenAsk({ status: "疑点", field_group: "净含量&条形码", excel_value: "30ml", bboxes: box })?.because, "毫升和条码没读全，请核对");
     assert.equal(spokenAsk({ status: "疑点", coverage: { miss: ["烟酰胺"] }, bboxes: box })?.lead, "这些字没读全，请核对");
     assert.equal(spokenAsk({ status: "疑点", bboxes: box })?.because, "这一面没读全，请核对");
+    assert.equal(spokenAsk({ status: "疑点", excel_value: "海葡萄", bboxes: [] }, "文案", false)?.lead, "没找到位置，请看整页");
+    assert.equal(spokenAsk({ status: "疑点", doubt_bucket: "ocr_smallprint", excel_value: "FSC", bboxes: box })?.because, "这一面没读全，请核对");
+    assert.deepEqual(spokenLines({ status: "疑点", evidence: "score=10", bboxes: box }), ["这些字没读全，请核对"]);
+    assert.equal(spokenAsk({ status: "疑点", evidence: "score=10", bboxes: box })?.because, "这一面没读全，请核对");
+    assert.equal(spokenAsk({ status: "疑点", evidence: "稿上少了净含量", bboxes: box })?.because, "这一面没读全，请核对");
     assert.equal(spokenAsk({ status: "疑点", doubt_bucket: "ocr_smallprint", excel_value: "FSC", bboxes: box })?.ask, "请对着刀线边缘看这一句");
+  });
+});
+
+describe("empty last line", () => {
+  const box = [{ left: 1, top: 1, width: 8, height: 8 }];
+  it("returns ask \"\" when the redundant 请对着这一面核对 was dropped", () => {
+    for (const hit of [
+      { status: "疑点", field_group: "净含量", excel_value: "30ml", bboxes: box },
+      { status: "疑点", field_group: "二维码", excel_value: "扫码关注", bboxes: box },
+      { status: "疑点", doubt_bucket: "ocr_graphic", excel_value: "09", bboxes: box },
+      { status: "疑点", coverage: { miss: ["烟酰胺"] }, bboxes: box },
+      { status: "疑点", bboxes: box },
+    ]) {
+      assert.equal(spokenAsk(hit)?.ask, "");
+    }
   });
 });
