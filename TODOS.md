@@ -340,9 +340,9 @@ RF-10–RF-13 的原始依赖见 [ADR-007 §20.7](docs/adr-007-packaging-render-
   - `notifyIllustratorWatchdog`（`notify.ts:247`，`jobs.ts:959`、`nativeTextJobs.ts:176` 调用）的飞书告警文案。
   - `apps/web/server/src/mockup.ts:595` `print_faces_repair.error` 原样返回。
   - 已知规则缺口：Unix 目录名含空格时空格后的片段会留下（`/Users/bob/My Docs/a.pdf` → `本机路径 Docs/a.pdf`）。
-  - 已知规则缺口：双重编码（`%255C`、`%252F`）只解一层，不当分隔符。
+  - 已知规则缺口：编码分隔符最多解 3 层（`%2F`、`%252F`、`%25252F`），更多层的不当分隔符。
   - 已知规则缺口：全角斜杠 `／`、`＼` 不当分隔符。
-  - 已知副作用：`%2F` / `%5C` 整条报错一起解码，非路径文字也会变（如 `进度 50%2F100` → `进度 50/100`，网址里的 `%2F` 同样被解开）。
+  - 已知副作用：`%2F` / `%5C`（含 `%252F` 等多重编码）整条报错一起解码，非路径文字也会变（如 `进度 50%2F100` → `进度 50/100`，网址里的 `%2F` 同样被解开）。
   - 已知取舍：Windows/UNC 末段无扩展名、空格后的词以扩展名结尾时合成一个文件名（`C:\x\dir see.log` → `dir see.log`），只认一个空格。
   - 已知取舍：反斜杠根路径只要有一段目录名不少于 2 个字符就脱敏，报错里字面的 `\nfoo\nbar` 这类转义串也会被换成「本机路径」。
   - 已知取舍：网址路径里出现 `/Users/`、`/home/`、`/root/`、`/var/folders/`、`/private/var/` 时，即使是公开网站也会被替换（`https://example.com/Users/list` → `https://example.com/本机路径`），宁可误伤也不漏。
