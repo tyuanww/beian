@@ -180,13 +180,13 @@ const URL_EMBEDDED_PATH =
   /(?<![A-Za-z0-9])[A-Za-z]:[\\/][^&#?]*|\\[^&#?]*|(?<=\/)(?:Users|home|root|var\/folders|private\/var)\/[^&#?]*/g;
 
 /** 网址：协议 + 主机原样保留；后面夹带的本机路径（含已配置的数据 / 工具目录）整段换成「本机路径」。 */
-function redactUrl(url: string): string {
+function redactUrl(url: string, known: string[]): string {
   const hostStart = url.indexOf("://") + 3;
   let hostEnd = hostStart;
   while (hostEnd < url.length && !"/?#\\".includes(url[hostEnd])) hostEnd += 1;
   let tail = url.slice(hostEnd);
-  for (const known of knownLocalPaths()) {
-    if (tail.includes(known)) tail = tail.split(known).join(LOCAL_PLACEHOLDER);
+  for (const k of known) {
+    if (tail.includes(k)) tail = tail.split(k).join(LOCAL_PLACEHOLDER);
   }
   tail = tail.replace(URL_EMBEDDED_PATH, LOCAL_PLACEHOLDER);
   return url.slice(0, hostEnd) + tail;
@@ -196,36 +196,51 @@ function redactUrl(url: string): string {
 const REDACT_MAX_CHARS = 8000;
 const TRUNCATED_MARK = "（后面省略）";
 
+function decodeSeparators(s: string): string {
+  return s.replace(/%5c/gi, "\\").replace(/%2f/gi, "/");
+}
+
 export function redactLocalPaths(message: string | undefined | null): string {
   let s = String(message ?? "");
   if (!s) return s;
   // ① URL 编码的分隔符（%5C、%2F，大小写不限）整条还原；② 超长截到前 REDACT_MAX_CHARS 字符；③ 对截下的部分脱敏；
   // ④ 截过就追加「（后面省略）」。未脱敏的尾巴从不输出；被截断的半截路径照常脱敏（如 `C:\Users\bo` → 本机路径）。
-  s = s.replace(/%5c/gi, "\\").replace(/%2f/gi, "/");
+  s = decodeSeparators(s);
   const truncated = s.length > REDACT_MAX_CHARS;
   if (truncated) {
     // 截断点落在代理对（如表情）中间时往前退一位，不留半个字符。
     const hi = s.charCodeAt(REDACT_MAX_CHARS - 1);
     s = s.slice(0, hi >= 0xd800 && hi <= 0xdbff ? REDACT_MAX_CHARS - 1 : REDACT_MAX_CHARS);
   }
+  return redactDecoded(s) + (truncated ? TRUNCATED_MARK : "");
+}
+
+/** 不截断的完整脱敏（解码 + 网址处理 + 路径扫描）。供性能测试单独验证扫描器线性；业务代码请用 redactLocalPaths。 */
+export function redactLocalPathsUncapped(message: string | undefined | null): string {
+  const s = String(message ?? "");
+  return s ? redactDecoded(decodeSeparators(s)) : s;
+}
+
+function redactDecoded(s: string): string {
+  // 已配置路径每条报错只读一次（读设置有开销，不能按片段反复读）。
+  const known = knownLocalPaths();
   const parts: string[] = [];
   let last = 0;
   for (const m of s.matchAll(URL_RE)) {
-    parts.push(redactPlain(s.slice(last, m.index)), redactUrl(m[0]));
+    parts.push(redactPlain(s.slice(last, m.index), known), redactUrl(m[0], known));
     last = m.index! + m[0].length;
   }
-  parts.push(redactPlain(s.slice(last)));
-  if (truncated) parts.push(TRUNCATED_MARK);
+  parts.push(redactPlain(s.slice(last), known));
   return parts.join("");
 }
 
-function redactPlain(input: string): string {
+function redactPlain(input: string, knownPaths: string[]): string {
   let s = input;
   if (!s) return s;
   // file:// 前缀去掉，后面按普通路径处理（file:///Users/... → /Users/...，file:///C:/... → C:/...）。
   s = s.replace(/file:\/\/\/?(?=[A-Za-z]:[\\/])/gi, "").replace(/file:\/\/(?=\/)/gi, "");
   // 先处理已知目录（可能含空格，如 C:\Program Files\...）：整段是文件就换成文件名，是目录就换占位，其下文件再留文件名。
-  for (const known of knownLocalPaths()) {
+  for (const known of knownPaths) {
     if (!s.includes(known)) continue;
     const [leaf] = renderLeaf(known.split(/[\\/]+/).filter(Boolean).pop() || "");
     s = s.split(known).join(leaf === LOCAL_PLACEHOLDER ? `\u0000${LOCAL_PLACEHOLDER}` : leaf);
