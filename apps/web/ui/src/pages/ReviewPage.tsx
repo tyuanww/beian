@@ -776,6 +776,23 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
         <span className="review-grow" />
         {hasUnsavedNotes ? <span className="review-draft-status" role="status">先保存备注，再继续。</span> : null}
         <span className="review-actions">
+        {/* 产品哥：「上传新稿」不放看稿工具条，只在退回后出现在页头。 */}
+          {!phone && reworkable && task?.status === "completed" ? (
+          <button
+            type="button"
+            className="btn-ghost review-upload-new"
+            disabled={busy || hasUnsavedNotes}
+            onClick={() => {
+              const input = document.createElement("input");
+              input.type = "file";
+              input.accept = ".pdf";
+              input.onchange = () => { const f = input.files?.[0]; if (f) void uploadRework(f); };
+              input.click();
+            }}
+          >
+            上传新稿
+          </button>
+        ) : null}
         {gate.hint ? <span className="review-signhint" id="review-sign-hint" title={gate.title} aria-live="polite">{gate.hint}</span> : null}
         <button type="button" className="btn-ghost review-reject" disabled={!gate.canReject || busy || hasUnsavedNotes} title={gate.title || undefined} onClick={() => { setSubmitFailed(null); setDialog("reject"); }}>
           {REVIEW_COPY.reject}
@@ -966,21 +983,6 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
           <button type="button" className="review-fullscreen-toggle" aria-pressed={reviewFullscreen} onClick={() => void toggleReviewFullscreen()}>
             {reviewFullscreen ? "退出" : "全屏"}
           </button>
-          {!phone && reworkable && !(Array.isArray(task?.pages_v2) && task.pages_v2.length > 0) ? (
-            <button
-              type="button"
-              disabled={busy || hasUnsavedNotes}
-              onClick={() => {
-                const input = document.createElement("input");
-                input.type = "file";
-                input.accept = ".pdf";
-                input.onchange = () => { const f = input.files?.[0]; if (f) void uploadRework(f); };
-                input.click();
-              }}
-            >
-              上传新稿
-            </button>
-          ) : null}
           {!phone ? <button type="button" aria-label="快捷键" aria-expanded={shortcutsOpen} title="快捷键 ?" onClick={() => setShortcutsOpen((v) => !v)}>?</button> : null}
           {shortcutsOpen && !phone ? (
             <div className="review-keys" role="note">

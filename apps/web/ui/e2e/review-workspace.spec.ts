@@ -568,3 +568,16 @@ for (const [w, h] of [[1440, 900], [1280, 800], [768, 1024], [390, 844]]) {
     expect(box.y + box.height).toBeLessThanOrEqual(view.y + view.height + 1);
   });
 }
+
+test("「上传新稿」不在看稿工具条，只在退回后出现在页头", async ({ page, syntheticApi }) => {
+  const open = reviewTask("e5969b58cd80");
+  const back = reviewTask("e5969b58cd81");
+  Object.assign(back, { status: "completed", board: "done", complete_kind: "rework", completed_by: "E2E 审核" });
+  syntheticApi.tasks.push(open, back);
+  await page.goto(`/review/${open.id}`);
+  await expect(page.locator(".review-tbar")).toBeVisible();
+  await expect(page.getByRole("button", { name: "上传新稿" })).toHaveCount(0);
+  await page.goto(`/review/${back.id}`);
+  await expect(page.locator(".review-top").getByRole("button", { name: "上传新稿" })).toBeVisible();
+  await expect(page.locator(".review-tbar").getByRole("button", { name: "上传新稿" })).toHaveCount(0);
+});
