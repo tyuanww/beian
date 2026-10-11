@@ -361,3 +361,10 @@ describe("redactLocalPaths: slash paths with spaces in directory names", () => {
     assert.equal(r("http://x/?p=/Users/bob/a.pdf step 2/3"), "http://x/?p=/本机路径 step 2/3");
   });
 });
+
+describe("redactLocalPaths: stack line under a directory with a space", () => {
+  it("/home/bob/My Project/x.ts:12:5 keeps only x.ts:12:5", () => {
+    assert.equal(r("at /home/bob/My Project/x.ts:12:5"), "at x.ts:12:5");
+    assert.equal(r("at f (/home/bob/My Project/src/x.ts:12:5)"), "at f (x.ts:12:5)");
+  });
+});
