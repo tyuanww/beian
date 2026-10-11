@@ -231,4 +231,3 @@ describe("single-line 这些字没读全", () => {
     assert.equal(ask?.because, "烟酰胺；甘油");
   });
 });
-

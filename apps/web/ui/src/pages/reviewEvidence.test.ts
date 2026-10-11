@@ -159,4 +159,3 @@ describe("revision list with empty ask", () => {
     assert.doesNotMatch(result.text, /；；|；\s*\/|疑点：\s*\//);
   });
 });
-
