@@ -101,7 +101,7 @@ html[data-theme="dark"] .review-thumbs { background: #1f1a24; }
 .review-flat-page.is-phone .review-ccol { min-height: 60dvh; }
 
 @media (prefers-reduced-motion: no-preference) {
-  .review-flat .review-sidebar.is-overlay { animation: review-slide-in 280ms ease-in-out; }
+  .review-flat .review-sidebar.is-overlay { animation: review-slide-in 280ms ease-out; }
   .review-flat-page button, .review-th { transition: background-color 150ms ease-in-out, border-color 150ms ease-in-out, color 150ms ease-in-out; }
 }
 @keyframes review-slide-in { from { transform: translateX(24px); opacity: 0; } to { transform: none; opacity: 1; } }
