@@ -393,3 +393,12 @@ describe("redactLocalPaths: cap point inside URL credentials", () => {
     assert.ok(out.endsWith("（后面省略）"));
   });
 });
+
+describe("redactLocalPaths: separators still encoded after the layer limit", () => {
+  it("leftover %2F / %5C (any %25 depth) are treated as separators", () => {
+    assert.equal(r("%2525252FUsers%2525252Fbob"), "本机路径");
+    assert.equal(r("%2525252Fhome%2525252Fbob%2525252Fa.pdf"), "a.pdf");
+    assert.equal(r("C:%2525255cUsers%2525255Cbob%2525255Ca.pdf"), "a.pdf");
+    assert.equal(r("http://x/?f=%2525252FUsers%2525252Fbob%2525252Fa.pdf"), "http://x/?f=/本机路径");
+  });
+});
