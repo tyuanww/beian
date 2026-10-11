@@ -481,8 +481,9 @@ test("已被别人签字：提交 400 后重读锁页并提示「这一单已被
   syntheticApi.otherCompletesNext = { by: "天元", kind: "signed" };
   await page.getByRole("button", { name: "签字", exact: true }).click();
   await page.getByRole("dialog").getByRole("button", { name: "确认签字" }).click();
-  await expect(page.getByText("这一单已被天元签字")).toBeVisible();
-  await expect(page.getByText("已被天元签字", { exact: false }).first()).toBeVisible();
+  // 提示（toast）和锁页横幅现在同文案，分开断言，避免 strict mode 撞两个元素。
+  await expect(page.locator(".ant-message")).toContainText("这一单已被天元签字");
+  await expect(page.locator(".review-lock")).toContainText("这一单已被天元签字");
   await expect(page.getByRole("button", { name: "签字", exact: true })).toBeDisabled();
   await expect(page.getByRole("dialog")).toHaveCount(0);
 });
