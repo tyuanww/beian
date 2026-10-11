@@ -486,3 +486,14 @@ test("已被别人签字：提交 400 后重读锁页并提示「这一单已被
   await expect(page.getByRole("button", { name: "签字", exact: true })).toBeDisabled();
   await expect(page.getByRole("dialog")).toHaveCount(0);
 });
+
+test("下结论/撤销时任务已被别人完成：重读后锁页，不报没存上", async ({ page, syntheticApi }) => {
+  const task = reviewTask("e5969b58cd63");
+  syntheticApi.tasks.push(task);
+  await page.goto(`/review/${task.id}`);
+  syntheticApi.otherCompletesNext = { by: "天元", kind: "rework" };
+  await page.getByTestId("review-dock").getByRole("button", { name: /^一致/ }).click();
+  await expect(page.locator(".review-lock")).toContainText("已被天元退回");
+  await expect(page.getByTestId("review-dock").getByRole("button", { name: /^有错/ })).toBeDisabled();
+  await expect(page.getByText("没连上网，这条没存上")).toHaveCount(0);
+});

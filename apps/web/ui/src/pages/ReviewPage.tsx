@@ -505,6 +505,8 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
         if (opts.undoable !== false && previous !== decision) showUndo(hit, decision, previous, fromIndex);
         return true;
       } catch (err) {
+        // 已被别人签字/退回：服务端 /decision 回 400，重读后按 completed_by 锁页，不再报「没存上」。
+        if (err instanceof ApiError && err.status === 400 && (await refreshIfCompleted(targetTaskId))) return false;
         const detail = decisionFailureText(err, typeof navigator === "undefined" ? true : navigator.onLine !== false);
         if (taskIdRef.current === targetTaskId) setDecisionError(detail);
         message.error({ content: detail, key: "review-decision-error" });
@@ -625,6 +627,19 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
     } finally {
       submittingRef.current = false;
       endBusy();
+    }
+  }
+
+  /** 重读任务；已被别人完成就换上新任务（页面按 completed_by 锁定），返回是否已完成。 */
+  async function refreshIfCompleted(id: string, onCompleted?: (by: string) => void): Promise<boolean> {
+    try {
+      const fresh = await api.task(id);
+      if (fresh.status !== "completed") return false;
+      setTask((cur) => (cur?.id === id ? fresh : cur));
+      onCompleted?.(fresh.completed_by || "别人");
+      return true;
+    } catch {
+      return false;
     }
   }
 
