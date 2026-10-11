@@ -9,7 +9,7 @@ import { blenderBin, illustratorBin, pythonBin } from "./settings.js";
  *   所以紧贴中文也算起点，相对路径 `docs/x.md` 不算）。Unix 路径至少要有一级目录（`/tmp` 原样保留）。
  * - 路径在空白、引号、括号、逗号分号等中英文标点处结束；Windows / UNC 目录名中的空格见 scanPath。
  * - 末段带 1–8 位 ASCII 扩展名的当作文件名保留；扩展名后紧跟非 ASCII 字符（如「失败」）时，文件名到扩展名为止。
- *   末段没有扩展名时整段换成「本机路径」；末段是「ASCII 开头 + 中文结尾」时中文部分视为后文保留。
+ *   堆栈里的 `文件名:行:列` 保留行列号。末段没有扩展名时整段换成「本机路径」；末段是「ASCII 开头 + 中文结尾」时中文部分视为后文保留。
  * - 替换结果与前后紧贴的中文之间补一个空格（已有空格或标点则不补）。
  */
 const LOCAL_PLACEHOLDER = "本机路径";
@@ -93,6 +93,12 @@ function renderLeaf(leaf: string): [string, string] {
       }
       break;
     }
+  }
+  // 堆栈位置 `x.ts:12:5` / `y.js:3`：文件名保留，行列号原样跟在后面。
+  const loc = /^(.*\.[A-Za-z0-9]{1,8})((?::\d+){1,2})$/.exec(name);
+  if (loc) {
+    name = loc[1];
+    rest = loc[2] + rest;
   }
   // 句末标点（如 `a.pdf.`、`a.pdf:`）留给后文。
   const trail = /[.:!?]+$/.exec(name);
