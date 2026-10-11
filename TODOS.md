@@ -333,7 +333,7 @@ RF-10–RF-13 的原始依赖见 [ADR-007 §20.7](docs/adr-007-packaging-render-
 
 - [ ] **F10 — 任务/作业失败报错是否向非管理员带出本机路径（部分解决）**
 
-  已做（0.31.1.14，`fix/settings-admin-only`）：`/api/tasks` 列表与详情的 `job_error` / `error` 对非管理员去目录留文件名，管理员看原文；飞书失败通知（`fireTaskNotify`、`fireMockupNotify`）同样脱敏。规则见 `docs/contracts/identity-settings.md`（`apps/web/server/src/pathRedact.ts`，测试 `path-redact.test.ts`、`job-error-redact.test.ts`）。打样 `publicMockupError` 原本已脱敏，未改。
+  已做（0.31.1.14，`fix/settings-admin-only`）：`/api/tasks` 列表与详情的 `job_error` / `error` 对非管理员去目录留文件名，管理员看原文；飞书失败通知（`fireTaskNotify`、`fireMockupNotify`）同样脱敏，兜底文案「任务失败，原文已隐藏，请到后台查看（单号 …）」。规则见 `docs/contracts/identity-settings.md`（`apps/web/server/src/pathRedact.ts`，测试 `path-redact.test.ts`、`job-error-redact.test.ts`）。打样单列表 / 详情（`publicMockupSummaryFields`、`publicRenderMutation`）对非管理员在原 `publicMockupError` 之后叠加脱敏 + 兜底（单号 `job.id`，测试 `mockup-error-guard.test.ts`），管理员照旧只走 `publicMockupError`。
 
   明确不在本次范围、未审计（可能仍带出本机路径）：
   - `apps/web/server/src/index.ts:424` 全局错误处理对 4xx 原样返回 `err.message` 作 `detail`。
@@ -341,10 +341,14 @@ RF-10–RF-13 的原始依赖见 [ADR-007 §20.7](docs/adr-007-packaging-render-
   - `apps/web/server/src/mockup.ts:595` `print_faces_repair.error` 原样返回。
   - 已知规则缺口：斜杠写法只剩末尾一截文件名含空格或中文标点时露出后半截文件名（`/Users/bob/my docs/a b.pdf` → `本机路径 b.pdf`，`/home/bob/a，b.pdf` → `本机路径，b.pdf`）；目录名已不漏。
   - 已知规则缺口：网址里百分号编码的用户名密码（`http://bob%3Apw%40x/`）原样输出，不拦。
-  - 已知规则缺口：全角斜杠 `／`、`＼` 不当分隔符。
+  - 已知规则缺口（不拦）：全角斜杠 `／`、`＼`、`∖` 不当分隔符；超长 UTF-8 `%c0%af`、HTML 实体 `&#47;` 不解码；路径被换行断开时只认换行前半截。
+  - 已知规则缺口（不拦）：`ftp://` 等非 http(s) 网址按普通路径处理，输出 `ftp:本机路径`。
+  - 已知取舍（不拦）：8000 字截断落在占位词中间时留半截占位词；打样单报错（含兜底后）只留前 80 字。
+  - 已知取舍：渲染代际提交结果（`publicMutationResult*`，`jobs.ts`）拿不到角色，`mutation.error` 一律按非管理员规则输出，管理员在这一处也看不到原文。
   - 已知副作用：`%2F` / `%5C`（含 `%252F` 等多重编码）整条报错一起解码，非路径文字也会变（如 `进度 50%2F100` → `进度 50/100`，网址里的 `%2F` 同样被解开）。
   - 已知取舍：Windows/UNC 末段无扩展名、空格后的词以扩展名结尾时合成一个文件名（`C:\x\dir see.log` → `dir see.log`），只认一个空格。
-  - 已知取舍：反斜杠根路径只要有一段目录名不少于 2 个字符就脱敏，报错里字面的 `\nfoo\nbar` 这类转义串也会被换成「本机路径」。
+  - 已知取舍：反斜杠根路径只要有一段目录名不少于 2 个字符就脱敏；兜底再拦「反斜杠 + 至少 2 个字母」（`C:\Documents and Settings\bob` 这类空格过多的目录），所以报错里字面的 `\nfoo` 这类转义串会整条隐藏；单字母 `\n`、`\t` 不受影响。
+  - 已知取舍：查询参数名为 `password` / `pw` / `token` / `secret` / `key` 等（含 `api_key`、`access_token`）时整条隐藏，即使值无害；`monkey`、`keyword`、`tokens_left` 不算。
   - 已知取舍：网址路径里出现 `/Users/`、`/home/`、`/root/`、`/var/folders/`、`/private/var/` 时，即使是公开网站也会被替换（`https://example.com/Users/list` → `https://example.com/本机路径`），宁可误伤也不漏。
   - `apps/web/backend` worker 输出与其他 HTTP `detail` 未逐一盘点。
 
