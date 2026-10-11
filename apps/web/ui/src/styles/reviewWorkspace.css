@@ -60,7 +60,8 @@ html[data-theme="dark"] .review-thumbs { background: #1f1a24; }
 .review-flat-row strong { overflow-wrap: anywhere; font-weight: 500; }
 .review-flat-row small { color: var(--muted); font-size: 13px; }
 .review-flat-detail { padding: 0 12px 12px; display: grid; gap: 8px; }
-.review-flat-detail .review-spoken p { margin: 2px 0; font-size: 14px; }
+/* visual-check #2：核对要点正文跟外观字号（--ui-font，默认 16px）。 */
+.review-flat-detail .review-spoken p { margin: 2px 0; font-size: var(--ui-font, 16px); }
 .review-flat-detail .review-evidence-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .review-verdicts { display: flex; gap: 6px; }
 .review-verdicts button { flex: 1; border: 1px solid var(--line); border-radius: 10px; background: var(--stage, #fff); cursor: pointer; font-size: 14px; color: var(--ink); }
