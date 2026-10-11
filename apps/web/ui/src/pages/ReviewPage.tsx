@@ -756,7 +756,8 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
       ref={pageRef}
     >
       <header className="review-top">
-        <button type="button" className="review-crumb" onClick={onBack}>审稿台 /</button>
+        {/* 手机 <720 不显示「审稿台 /」面包屑（底部导航已有「审稿台」）。 */}
+        {!phone ? <button type="button" className="review-crumb" onClick={onBack}>审稿台 /</button> : null}
         <h1 className="review-title">{task?.product_name || task?.title || "审核页"}</h1>
         {Array.isArray(task?.pages_v2) && task.pages_v2.length > 0 ? (
           <span className="review-ver">

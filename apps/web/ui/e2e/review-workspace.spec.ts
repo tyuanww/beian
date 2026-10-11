@@ -687,3 +687,13 @@ test("锁页：页头位置写「当前/总数」不写「全部已下结论」�
   await expect(none).toHaveCSS("padding-left", "16px");
   await expect(none).toHaveCSS("padding-top", "16px");
 });
+
+test("手机 390 不显示「审稿台 /」面包屑，底部导航仍有「审稿台」", async ({ page, syntheticApi }) => {
+  const task = reviewTask("e5969b58cda4");
+  syntheticApi.tasks.push(task);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto(`/review/${task.id}`);
+  await expect(page.locator(".review-flat-page.is-phone")).toBeVisible();
+  await expect(page.locator(".review-crumb")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "审稿台", exact: true })).toBeVisible();
+});
