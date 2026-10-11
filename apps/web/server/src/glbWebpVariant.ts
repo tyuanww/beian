@@ -17,8 +17,8 @@ import { DATA_DIR } from "./config.js";
 import { compressGlbTexturesToWebp, type GlbWebpOptions, type GlbWebpResult } from "./glbWebp.js";
 import { GLB_WEBP_VARIANT } from "./rolloutFlags.js";
 
-export const GLB_WEBP_VARIANT_DIR = ".webp-variant";
-export const GLB_WEBP_VARIANT_SCHEMA = "glb-webp-variant/1";
+const GLB_WEBP_VARIANT_DIR = ".webp-variant";
+const GLB_WEBP_VARIANT_SCHEMA = "glb-webp-variant/1";
 const VARIANT_SUFFIX = ".webpv";
 const META_SUFFIX = ".webpv.json";
 const GLB_WEBP_VARIANT_QUALITY = 90;
@@ -141,7 +141,7 @@ export function glbWebpVariantHashComputeCountForTest(): number {
  * 同一 fd 上算 sha256。缓存键 = dev+ino+mtimeNs+size（bigint fstat）：原地同大小覆盖会改 mtimeNs，
  * rename 替换会换 inode；不命中就从这个 fd 流式重算。
  */
-export function sha256OfFd(fd: number): { sha256: string; bytes: number } {
+function sha256OfFd(fd: number): { sha256: string; bytes: number } {
   const st = fstatSync(fd, { bigint: true });
   const bytes = Number(st.size);
   const key = `${st.dev}:${st.ino}:${st.mtimeNs}:${st.size}`;
@@ -202,7 +202,7 @@ export type OpenedGlb =
   | { kind: "variant"; fd: number; bytes: number; sha256: string; sourceSha256: string }
   | { kind: "original"; fd: number; bytes: number; sha256: string; sourceSha256: string; reason: string };
 
-export const GLB_VERSION_HEX_CHARS = 16;
+const GLB_VERSION_HEX_CHARS = 16;
 
 export function glbVersionOf(sha256: string): string {
   return sha256.slice(0, GLB_VERSION_HEX_CHARS);
