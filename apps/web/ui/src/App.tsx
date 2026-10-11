@@ -1,5 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useState, type ReactNode } from "react";
 import { api, brokenApiMessage, type Me } from "./api";
+import { setUploadLimitFromMe, resetUploadLimit } from "./uploadLimit";
 import { authFailureAction, feishuLoginHref, shouldAutoRedirectToFeishu } from "./authGate";
 import { Sidebar, type NavKey } from "./chrome/Sidebar";
 import { isAdmin } from "./authRole";
@@ -138,6 +139,7 @@ export function App() {
   const refreshMe = useCallback(async () => {
     try {
       const next = await api.me();
+      setUploadLimitFromMe(next);
       setMe(next);
       setApiBroken(null);
       if (next.logged_in) {
@@ -151,6 +153,7 @@ export function App() {
         setTaskId(null);
       }
     } catch (e) {
+      resetUploadLimit();
       uploadStore.setOwner(null);
       setApiBroken(brokenApiMessage(e, window.location.host));
       setMe({ logged_in: false, display_name: null, avatar_url: null, role: null, perms: [] });
@@ -293,6 +296,7 @@ export function App() {
   }
 
   async function logout() {
+    resetUploadLimit();
     await api.logout();
     window.location.replace(feishuLoginHref(window.location.pathname));
   }

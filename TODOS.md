@@ -460,3 +460,9 @@ RF-10–RF-13 的原始依赖见 [ADR-007 §20.7](docs/adr-007-packaging-render-
 - 核对页 `reviewWorkspace.css` 还有一批硬编码色在 tokens.css / DESIGN.md 里没有对应变量，本 PR 不自造变量，等设计哥定 token 名后替换：主侧栏/缩略图条 `#fbfafc`（深色 `#1f1a24`，已批第 39 行）；状态标签浅色字 `#8a5a00` / `#a8071a` / `#237804`、底 `#fff7e6` / `#fff1f0` / `#f6ffed`、描边 `#ffd591` / `#ffa39e` / `#b7eb8f`（已批第 13 行）；深色标签 `#F2B44C`/`#43332E`、`#FF7A7F`/`#452A36`、`#7BC86C`/`#303733` 及描边 `#654c34` / `#693944` / `#3e523e`（dark-tags.md，已批第 38 行）。
 - 打样页（MockupPage）改版前就有的两处问题，等核对页 A 通铺与上传上限两个 PR 合入后单开小 PR 修：（1）失败提示 Alert 在深色主题下仍是浅粉底 `rgb(255,243,240)`，应改用深色 error 底 token；（2）打样失败后提示下方仍显示「正在确认当前版本资源。」，失败态应不再显示该进行中文案。另：工单「复制」按钮排在错误等级/错误码那批工作里一起做。
 - e2e「产品灯变化保留桌墙背景亮度并改变盒身」偶发失败，根因未确认：曾在满负载全量跑时 GLB 加载超过默认 5s（「复位模型视角」仍 disabled），已把等待放宽到 15s（`6e9ef07`）；加负载后单独重跑 110 次加载均未复现。若再失败，先测量实际 GLB 加载耗时，不要再继续放宽等待。
+- 审稿台改版时一并清理（均为既有问题，不在上传上限 PR 修）：
+  1. `apps/web/ui/src/pages/reviewWorkspaceState.ts` 的 `sidebarWidth`（:17）、`readSidebar`（:26）、`writeSidebar`（:34）在 A 通铺后只剩测试在用，随审稿台改版删掉（连同 `reviewWorkspaceState.test.ts` 对应用例）。
+  2. 核对要点兜底文案「这条请核对」+「这一面没读全，请核对」（`hitText.ts:134`）连说两次「请核对」，审稿台那轮合成一句。
+  3. 还有以「你」称呼用户的句子：`NewTaskPage.tsx:315`「不确定的内容会请你确认。」、`:319`「你来确认」，`mockupRenderVersions.ts:41`「你的账号只能查看。」（改版前就有）。
+- 工具链：`apps/web/ui` 的 `npm test` 在 Node 20 上 `src/**/*.test.ts` glob 不展开（报找不到文件），Node 24 正常；需改成由脚本展开或锁定 Node 版本。
+- 工具链：干净环境首次构建缺 `@rollup/rollup-linux-x64-gnu`（npm 可选依赖的已知问题），需在 lockfile/CI 里显式装上或文档写明 `npm i @rollup/rollup-linux-x64-gnu`。

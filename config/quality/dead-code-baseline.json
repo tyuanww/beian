@@ -45,7 +45,6 @@
     {"tool":"knip","kind":"exports","path":"apps/web/ui/src/pages/setupBoard.ts","symbol":"SETUP_NEXT","line":4,"confidence":100},
     {"tool":"knip","kind":"exports","path":"apps/web/ui/src/pages/uploadDesk.ts","symbol":"receiptDisplayTitle","line":29,"confidence":100},
     {"tool":"knip","kind":"exports","path":"apps/web/ui/src/theme.ts","symbol":"theme","line":81,"confidence":100},
-    {"tool":"knip","kind":"exports","path":"apps/web/ui/src/uploadLimit.ts","symbol":"PUBLIC_UPLOAD_MB","line":2,"confidence":100},
     {"tool":"knip","kind":"file","path":"workers/packaging/illustrator/create_smoke_fixture.jsx","symbol":"","line":0,"confidence":100},
     {"tool":"knip","kind":"types","path":"apps/web/server/src/billing.ts","symbol":"BillRow","line":27,"confidence":100},
     {"tool":"knip","kind":"types","path":"apps/web/server/src/billing.ts","symbol":"ChargeStatus","line":12,"confidence":100},

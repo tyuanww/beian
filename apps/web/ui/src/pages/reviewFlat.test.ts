@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { FieldHit } from "../api";
-import { PUBLIC_UPLOAD_BYTES, UPLOAD_TOO_LARGE } from "../uploadLimit";
+import { PUBLIC_UPLOAD_BYTES, UPLOAD_TOO_LARGE, setUploadLimitFromMe } from "../uploadLimit";
 import {
   completedAtLabel, completedByText, conclusionFor, decisionFailureText, reworkUploadBlocked, submitFailureText, flatLayout, isTypingTarget, lockedBy, markerOutsideCorner, nextPendingAfter,
   panToClearPanel, positionLabel, rejectRows, shouldShowShortcutsOnOpen, submitGate, tabIndices, thumbMarks, verdictCounts, verdictForKey,
@@ -108,6 +108,15 @@ describe("reviewFlat", () => {
     assert.equal(completedByText({ ...base, complete_kind: "rework" }, now), "这一单已被天元退回，等新稿 18:20");
     assert.equal(completedByText({ ...base }, now), "这一单已被天元处理 18:20");
     assert.equal(completedByText({ status: "completed", completed_by: "天元", complete_kind: "signed" }, now), "这一单已被天元签字");
+  });
+  it("上传新稿按当前账号上限预检，提示里的 MB 数跟着变", () => {
+    setUploadLimitFromMe({ upload_limit_bytes: 10_000_000 });
+    try {
+      assert.equal(reworkUploadBlocked({ size: 10_000_001 }), "文件太大，请压到 10MB 以内再传（多份合计）");
+      assert.equal(reworkUploadBlocked({ size: 10_000_000 }), null);
+    } finally {
+      setUploadLimitFromMe(null);
+    }
   });
   it("上传新稿超公网上限就挡下并给 UPLOAD_TOO_LARGE，不超放行", () => {
     assert.equal(reworkUploadBlocked({ size: PUBLIC_UPLOAD_BYTES + 1 }), UPLOAD_TOO_LARGE);

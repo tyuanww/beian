@@ -4,6 +4,7 @@ import { api, UploadPausedError, type PendingUploadReceipt } from "../api";
 import type { CompressionBatch, CompressionFile } from "../batchTypes";
 import { customerCopy } from "./customerCopy";
 import { COMPRESSION_STATUS_LABEL } from "../copy/labels";
+import { bytesTooLarge, uploadTooLargeText } from "../uploadLimit";
 
 export const compressionStatus: Record<string, string> = {
   queued: "排队中", running: "处理中", succeeded: "已完成", passthrough: COMPRESSION_STATUS_LABEL.passthrough,
@@ -16,7 +17,9 @@ export function displayBytes(bytes: number | null) {
 export function validateCompressionFiles(files: readonly File[]): string | null {
   if (files.length < 1 || files.length > 20) return "每批请选择 1–20 个文件。";
   if (files.some(file => !/\.(pdf|jpe?g|png|webp)$/i.test(file.name))) return "支持 PDF、JPG、PNG 和 WebP。";
-  if (files.some(file => file.size <= 0) || files.reduce((sum, file) => sum + file.size, 0) > 100 * 1024 * 1024) return "每批总大小不能超过 100 MiB，文件不能为空。";
+  if (files.some(file => file.size <= 0)) return "文件不能为空。";
+  // 和其他上传入口同一个上限（uploadLimitBytes(me)）和同一句文案。
+  if (bytesTooLarge(...files.map(file => file.size))) return uploadTooLargeText();
   return null;
 }
 const ready = (file: CompressionFile) => (file.status === "succeeded" || file.status === "passthrough") && Boolean(file.key);
