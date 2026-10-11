@@ -5,7 +5,7 @@ import { closeSync, copyFileSync, existsSync, lstatSync, mkdirSync, openSync, re
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { DATA_DIR, PACKAGING, PYTHON } from "./config.js";
 import { compareBookkeeping } from "./billing.js";
-import { notifyJobFinished } from "./notify.js";
+import { notifyJobFinished, type WatchdogEvent } from "./notify.js";
 import {
   applyRenderGenerationPatch,
   assertCanManageMockup,
@@ -245,7 +245,7 @@ export type JobsTestHooks = {
   runRelight?: typeof runPackagingBlenderOnly;
   runRaster?: (opts: { source: string; outDir: string }) => Promise<{ ok: boolean; png?: string; message: string }>;
   notify?: typeof notifyJobFinished;
-  nativeAlert?: (task: Task) => Promise<unknown>;
+  watchdogAlert?: (task: { id: string; title?: string }, event: WatchdogEvent, kind: "compare" | "mockup") => Promise<unknown>;
   killTree?: typeof killTree;
   inspectWorker?: typeof inspectWorkerProcess;
   inspectGenerationGroup?: typeof inspectRenderGenerationGroup;
@@ -2747,7 +2747,7 @@ export function tryStart(): void {
       startNative(next.task, hooks.runNativeText || runNativeText, () => {
         if (!nativeQueue().running.some(t => t.id === next.task.id) && live.illustrator === `native:${next.task.id}`) live.illustrator = null;
         tryStart();
-      }, hooks.nativeAlert);
+      }, hooks.watchdogAlert ? (t, e) => hooks.watchdogAlert!(t, e, "compare") : undefined);
     }
     else if (next?.kind === "unfolded") claimUnfoldedNative(next.job);
     else if (next) claimAi(next.job);
