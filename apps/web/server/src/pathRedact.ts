@@ -71,7 +71,7 @@ function pathStart(s: string, i: number): number {
  * 空格后的词以扩展名结尾（`a b.pdf`），这时把这个词算进文件名。Unix 路径遇空格即结束。
  * 单趟扫描不回看；回退的那一段最多再被外层逐字扫一次，整体线性。
  */
-function scanPath(s: string, from: number, allowSpaces: boolean): [number, number] {
+function scanPath(s: string, from: number, allowSpaces: boolean, leafSpace: boolean): [number, number] {
   let j = from;
   let lastSep = from - 1;
   let pending = -1;
@@ -101,7 +101,7 @@ function scanPath(s: string, from: number, allowSpaces: boolean): [number, numbe
   }
   if (pending < 0) return [j, lastSep];
   // 文件名含一个空格（`a b.pdf`）：空格前的末段没有扩展名、空格后的词以扩展名结尾时，把这个词算进文件名。
-  if (!newPath && !EXT_AT_END.test(s.slice(lastSep + 1, pending)) && EXT_AT_END.test(s.slice(pending + 1, j))) {
+  if (leafSpace && !newPath && !EXT_AT_END.test(s.slice(lastSep + 1, pending)) && EXT_AT_END.test(s.slice(pending + 1, j))) {
     return [j, lastSep];
   }
   return [pending, lastSep];
@@ -172,7 +172,8 @@ function scanAndRedact(s: string): string {
     }
     const bsRoot = s[i] === "\\" && s[i + 1] !== "\\";
     const isUnix = s[i] === "/" || s[i] === "~" || bsRoot;
-    const [end, lastSep] = scanPath(s, from, !isUnix);
+    // 斜杠写法（`/`、`~`）与 Windows / UNC 都允许目录名含空格；文件名含空格（`a b.pdf`）只对 Windows / UNC 处理。
+    const [end, lastSep] = scanPath(s, from, !bsRoot, !isUnix);
     const [text, rest] = renderLeaf(s.slice(lastSep + 1, end));
     // Unix / 反斜杠根路径至少一级目录；反斜杠根路径没有文件名时，还要求至少一段目录名不少于 2 个字符，
     // 避免误伤 `\n\t` 之类单字母转义（`\Users\bob\Desktop` 照常换成「本机路径」）。
@@ -222,7 +223,7 @@ function urlPathAt(s: string, j: number, known: string[]): string | null {
  * Windows 写法（盘符、反斜杠）的空格与网址外 scanPath 同一规则：空格后的词在空白、终点字符或新路径起点之前
  * 出现分隔符才续接；空格前末段无扩展名、空格后的词以扩展名结尾（`a b.pdf`）时把这个词算进来。单趟扫描，线性。
  */
-function urlPathEnd(s: string, from: number, allowSpaces: boolean): number {
+function urlPathEnd(s: string, from: number, leafSpace: boolean): number {
   const stop = (ch: string) => isSpace(ch) || URL_PATH_STOP.has(ch);
   let j = from;
   let lastSep = from - 1;
@@ -230,7 +231,7 @@ function urlPathEnd(s: string, from: number, allowSpaces: boolean): number {
   let newPath = false;
   while (j < s.length) {
     const ch = s[j];
-    if (ch === " " && allowSpaces) {
+    if (ch === " ") {
       if (pending >= 0) break;
       pending = j;
       j += 1;
@@ -251,7 +252,7 @@ function urlPathEnd(s: string, from: number, allowSpaces: boolean): number {
     j += 1;
   }
   if (pending < 0) return j;
-  if (!newPath && !EXT_AT_END.test(s.slice(lastSep + 1, pending)) && EXT_AT_END.test(s.slice(pending + 1, j))) return j;
+  if (leafSpace && !newPath && !EXT_AT_END.test(s.slice(lastSep + 1, pending)) && EXT_AT_END.test(s.slice(pending + 1, j))) return j;
   return pending;
 }
 
