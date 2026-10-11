@@ -379,14 +379,16 @@ export function App() {
     );
   }
 
+  // A 通铺核对页：侧栏固定收成 52px 窄条（deviations 第 10 行，已批 2026-10-11），不改用户保存的展开偏好。
+  const sidebarCollapsed = collapsed || view === "review";
   return (
-    <div className="shell">
+    <div className={view === "review" ? "shell is-review-flat" : "shell"}>
       <div className="workspace">
-        {!collapsed ? (
+        {!sidebarCollapsed ? (
           <button type="button" className="sidebar-scrim" aria-label="收起侧栏" onClick={toggleSidebar} />
         ) : null}
         <Sidebar
-          collapsed={collapsed}
+          collapsed={sidebarCollapsed}
           active={navOf(view)}
           displayName={me.display_name || "飞书用户"}
           avatarUrl={me.avatar_url}
@@ -475,6 +477,7 @@ export function App() {
           <ReviewPage
             key={`${me.open_id || "session-only"}:${taskId}`}
             userId={me.open_id || null}
+            displayName={me.display_name || null}
             taskId={taskId}
             onBack={() => goRoute({ view: "tasks" })}
           />

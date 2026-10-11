@@ -1,5 +1,10 @@
 import { expect, reviewTask, test } from "./fixtures";
 
+test.use({ viewport: { width: 1440, height: 900 } });
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript(() => localStorage.setItem("wb_review_shortcuts_seen_v1", "1"));
+});
+
 test("原稿文字和 OCR 分开展示，冲突不会自动提交人工结论", async ({ page, syntheticApi }, info) => {
   const task = reviewTask();
   task.hits![0].native_text_evidence = { version: 1, status: "conflict", native_text: "净含量 30ml", ocr_text: "净含量 80ml", message: "两种文字来源无法唯一对应，请对照稿面。" };
@@ -36,11 +41,13 @@ test("原生覆盖完整时核对栏说明未调用 OCR", async ({ page, synthet
 });
 
 test("窄屏深色长文字来源可展开阅读，未知版本不会显示成功", async ({ page, syntheticApi }, info) => {
-  await page.setViewportSize({ width: 390, height: 844 });
+  // <720 手机不做逐条核对（2026-10-11 已批第 16 行）；用 1024 浮层右栏验证长文字。
+  await page.setViewportSize({ width: 1024, height: 844 });
   await page.addInitScript(() => localStorage.setItem("wb_appearance", JSON.stringify({ theme: "dark", fontPx: 20 })));
   const task = reviewTask();
   task.hits![0].native_text_evidence = { version: 1, status: "used", native_text: "生产地址与完整配方".repeat(60), ocr_text: "生产地址与配方".repeat(60), message: "已核对可见稿面及文字位置，原稿文字已参与现有核对规则。" };
   syntheticApi.tasks.push(task); await page.goto(`/review/${task.id}`);
+  await page.getByTestId("review-dock").click();
   const evidence = page.getByLabel("文字来源证据");
   await evidence.getByText("查看文字来源").click();
   await evidence.scrollIntoViewIfNeeded();
@@ -48,6 +55,7 @@ test("窄屏深色长文字来源可展开阅读，未知版本不会显示成�
   await page.screenshot({ path: info.outputPath("native-evidence-mobile.png") });
   task.hits![0].native_text_evidence = { version: 2, status: "used", native_text: "不能冒充成功" };
   await page.reload();
+  await page.getByTestId("review-dock").click();
   await expect(page.getByLabel("文字来源证据").getByRole("heading")).toHaveText("文字来源暂无法确认");
   await expect(page.getByText("不能冒充成功")).toHaveCount(0);
 });

@@ -1,68 +1,39 @@
-import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
-import { reviewStorage, readSidebar, sidebarWidth, SIDEBAR_BREAKPOINT, SIDEBAR_DEFAULT, SIDEBAR_MIN, writeSidebar } from "./reviewWorkspaceState";
+import type { ReactNode } from "react";
+import { REVIEW_COPY } from "../copy/labels";
+import { FLAT_PANEL_WIDTH, FLAT_THUMB_WIDTH, type FlatLayout } from "./reviewFlat";
 import "../styles/reviewWorkspace.css";
 
-type Props = { userId: string | null; children: ReactNode; panel: ReactNode };
+type Props = {
+  layout: FlatLayout;
+  thumbs: ReactNode;
+  children: ReactNode;
+  panel: ReactNode;
+  panelOpen: boolean;
+  pending: number;
+  onPanelOpen: (open: boolean) => void;
+};
 
-export function ReviewWorkspace({ userId, children, panel }: Props) {
-  const [preference, setPreference] = useState(() => readSidebar(reviewStorage(), userId));
-  const [room, setRoom] = useState(0);
-  const root = useRef<HTMLDivElement>(null);
-  const drag = useRef<{ x: number; width: number } | null>(null);
-  const stacked = room < SIDEBAR_BREAKPOINT;
-  const width = sidebarWidth(preference.width, room);
-  const maximum = sidebarWidth(560, room);
-  useLayoutEffect(() => {
-    const node = root.current;
-    if (!node) return;
-    const read = () => setRoom(node.clientWidth);
-    read();
-    const observer = new ResizeObserver(read);
-    observer.observe(node);
-    return () => observer.disconnect();
-  }, []);
-  function changeWidth(next: number) {
-    if (stacked) return;
-    const value = { ...preference, width: sidebarWidth(next, room) };
-    setPreference(value);
-    writeSidebar(reviewStorage(), userId, value);
-  }
-  function toggle() {
-    const value = { ...preference, open: !preference.open };
-    setPreference(value);
-    writeSidebar(reviewStorage(), userId, value);
-  }
+/**
+ * A 通铺三栏（deviations 第 6/7/10 行，已批 2026-10-11）：缩略图条 52 | 稿件 | 右栏 320。
+ * <1440 右栏默认收起，展开时 320 浮层盖在稿件右侧；<720 手机只留稿件（第 16 行）。
+ */
+export function ReviewWorkspace({ layout, thumbs, children, panel, panelOpen, pending, onPanelOpen }: Props) {
+  const wide = layout === "wide";
+  const phone = layout === "phone";
+  const columns = phone ? "minmax(0, 1fr)" : wide && panelOpen ? `${FLAT_THUMB_WIDTH}px minmax(0, 1fr) ${FLAT_PANEL_WIDTH}px` : `${FLAT_THUMB_WIDTH}px minmax(0, 1fr)`;
   return (
-    <div ref={root} className={`review-desk review-workspace${stacked ? " is-stacked" : ""}${preference.open ? "" : " is-collapsed"}`}
-      style={{ gridTemplateColumns: stacked ? "minmax(0, 1fr)" : preference.open ? `minmax(480px, 1fr) 8px ${width}px` : "minmax(0, 1fr) 56px" }}>
-      {children}
-      {!stacked && preference.open ? (
-        <div className="review-sidebar-resizer" role="separator" tabIndex={0} aria-label="调整右侧审核栏宽度"
-          aria-orientation="vertical" aria-valuemin={SIDEBAR_MIN} aria-valuemax={maximum} aria-valuenow={width}
-          onKeyDown={(event) => {
-            const next = event.key === "ArrowLeft" ? width + 16 : event.key === "ArrowRight" ? width - 16 : event.key === "Home" ? SIDEBAR_MIN : event.key === "End" ? maximum : null;
-            if (next == null) return;
-            event.preventDefault(); changeWidth(next);
-          }}
-          onDoubleClick={() => changeWidth(SIDEBAR_DEFAULT)}
-          onPointerDown={(event) => {
-            if (event.button !== 0) return;
-            event.preventDefault();
-            drag.current = { x: event.clientX, width };
-            event.currentTarget.setPointerCapture(event.pointerId);
-          }}
-          onPointerMove={(event) => { if (drag.current) changeWidth(drag.current.width + drag.current.x - event.clientX); }}
-          onPointerUp={() => { drag.current = null; }} onPointerCancel={() => { drag.current = null; }} onLostPointerCapture={() => { drag.current = null; }} />
-      ) : null}
-      <aside data-testid="review-dock" className={`review-sidebar glass-pane${preference.open ? "" : " is-shut"}`} aria-label="右侧审核栏">
-        <div className="review-sidebar-header">
-          {preference.open ? <strong>审核栏</strong> : null}
-          <button type="button" className="btn-ghost" aria-expanded={preference.open} aria-controls="review-sidebar-content" onClick={toggle}>
-            {preference.open ? "收起" : "展开审核栏"}
-          </button>
-        </div>
-        <div id="review-sidebar-content" className="review-sidebar-body" hidden={!preference.open}>{panel}</div>
-      </aside>
+    <div className={`review-desk review-workspace review-flat is-${layout}${panelOpen ? " is-open" : " is-collapsed"}`} style={{ gridTemplateColumns: columns }}>
+      {phone ? null : <nav className="review-thumbs" aria-label="页面">{thumbs}</nav>}
+      <div className="review-ccol">{children}</div>
+      {phone ? null : panelOpen ? (
+        <aside data-testid="review-dock" className={`review-sidebar${wide ? "" : " is-overlay"}`} aria-label="右侧审核栏" style={{ width: FLAT_PANEL_WIDTH }}>
+          <div id="review-sidebar-content" className="review-sidebar-body">{panel}</div>
+        </aside>
+      ) : (
+        <button type="button" data-testid="review-dock" className="review-panel-tab" aria-expanded={false} onClick={() => onPanelOpen(true)}>
+          {REVIEW_COPY.expand(pending)}
+        </button>
+      )}
     </div>
   );
 }

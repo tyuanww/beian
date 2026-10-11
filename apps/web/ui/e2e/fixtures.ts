@@ -58,6 +58,7 @@ export type SyntheticTask = {
   conclusion?: string;
   /** 后端目前列表不返回；合成数据用来验证有/无该字段都能显示。 */
   complete_kind?: string;
+  completed_by?: string;
   pages_v2?: SyntheticTask["pages"];
   hits_v2?: SyntheticHit[];
 };
@@ -187,6 +188,8 @@ export type SyntheticApi = {
   calls: ApiCall[];
   failDeletes: Set<string>;
   failNextDecision: boolean;
+  /** 下一次 /complete 返回 500（提交失败态）。 */
+  failNextComplete: boolean;
   loseNextUploadResponse: boolean;
   holdNextUploadComplete: boolean;
   expireNextTaskStart: boolean;
@@ -568,7 +571,14 @@ async function installSyntheticApi(page: Page, state: SyntheticApi) {
       if (method === "POST" && complete) {
         const task = state.tasks.find((item) => item.id === complete[1]);
         if (!task) return json(route, { detail: "合成任务不存在" }, 404);
+        if (state.failNextComplete) {
+          state.failNextComplete = false;
+          return json(route, { detail: "合成提交失败" }, 500);
+        }
         const data = (body || {}) as Record<string, unknown>;
+        // 与服务端 /complete 同口径：有「有错」→ rework，否则 signed。
+        task.complete_kind = (task.hits || []).some((hit) => hit.decision === "issue") ? "rework" : "signed";
+        task.completed_by = "E2E（合成用户）";
         task.status = "completed";
         task.board = "done";
         task.conclusion = String(data.conclusion || "");
@@ -747,6 +757,7 @@ export const test = base.extend<{ syntheticApi: SyntheticApi }>({
       calls: [],
       failDeletes: new Set(),
       failNextDecision: false,
+      failNextComplete: false,
       loseNextUploadResponse: false,
       holdNextUploadComplete: false,
       expireNextTaskStart: false,
