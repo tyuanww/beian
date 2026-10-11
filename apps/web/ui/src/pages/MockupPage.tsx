@@ -1,5 +1,6 @@
 import { MockupGlbViewer } from "./MockupGlbViewer";
 import { glbPosterKey } from "./mockupGlbProgress";
+import { type GlbTextureInfo, glbTextureFormat } from "./mockupGlbTexture";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { Alert, App, Button, ConfigProvider, Empty, Input, Segmented, Space, Table, Tabs, Tag, theme as antdTheme } from "antd";
@@ -1517,7 +1518,7 @@ function GlbShot({
   onNotice,
 }: {
   jobId: string;
-  files?: Array<{ key: string }>;
+  files?: Array<{ key: string } & GlbTextureInfo>;
   generation:string;
   onSourceError:()=>void;
   boxRef: { current: HTMLDivElement | null };
@@ -1539,6 +1540,7 @@ function GlbShot({
         <MockupGlbViewer
           source={fileHref(jobId, "glb", false, generation)}
           poster={posterKey ? fileHref(jobId, posterKey, false, generation) : undefined}
+          textureFormat={glbTextureFormat(files)}
           backdrop={backdrop}
           backgroundLight={backgroundLight}
           productLight={productLight}
