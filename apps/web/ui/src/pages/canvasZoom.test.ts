@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { clampScale, fittedPage, panBy, resetZoom, zoomAt, zoomCss, zoomToBox } from "./canvasZoom.js";
+import { clampScale, fittedPage, panBy, panToBoxAt, resetZoom, zoomAt, zoomCss, zoomToBox } from "./canvasZoom.js";
 
 describe("clampScale", () => {
   it("stays between 1 and 6", () => {
@@ -106,5 +106,19 @@ describe("zoomToBox", () => {
       zoomToBox({ left: 1, top: 1, width: 2, height: 2 }, { width: 1, height: 1 }, { width: 400, height: 400 }),
       resetZoom(),
     );
+  });
+});
+
+describe("panToBoxAt", () => {
+  it("没放大时保持整页适配", () => {
+    assert.deepEqual(panToBoxAt({ left: 10, top: 10, width: 20, height: 20 }, { width: 100, height: 100 }, { width: 200, height: 100 }, 1), resetZoom());
+  });
+  it("放大后保持倍数，框中心落到画布中心", () => {
+    const view = { width: 200, height: 100 }; const page = { width: 100, height: 100 };
+    const z = panToBoxAt({ left: 10, top: 10, width: 20, height: 20 }, page, view, 3);
+    assert.equal(z.scale, 3);
+    const laid = fittedPage(page, view);
+    assert.ok(Math.abs(laid.offsetX + z.x + 20 * 3 - 100) < 1e-6);
+    assert.ok(Math.abs(laid.offsetY + z.y + 20 * 3 - 50) < 1e-6);
   });
 });

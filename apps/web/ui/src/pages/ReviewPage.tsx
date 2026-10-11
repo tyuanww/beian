@@ -4,7 +4,7 @@ import { REVIEW_COPY, NAV_LABEL } from "../copy/labels";
 import { ApiError, api, type Decision, type FieldHit, type TaskDetail, type TaskPage } from "../api";
 import { WaitCard } from "../chrome/WaitCard";
 import { forgetReviewHandoff, reviewHandoffFor } from "../jobHandoff";
-import { fittedPage, panBy, resetZoom, zoomAt, zoomCss, zoomToBox } from "./canvasZoom";
+import { fittedPage, panBy, panToBoxAt, resetZoom, zoomAt, zoomCss } from "./canvasZoom";
 import { locateBoxesForHit, locationPageForHit, overlayFromBox, overlaysForHit, pickHitBox, pinHitGroupsForPage, resolvePageMetrics, visiblePinGroups } from "./pinBox";
 import {
   enterElementFullscreen,
@@ -663,7 +663,8 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
       commitZoom(resetZoom());
       return;
     }
-    commitZoom(zoomToBox(box, metrics, { width: el.clientWidth, height: el.clientHeight }));
+    // 产品哥：默认整页适配进画布，切条时不自动放大；用户自己放大过才保持倍数、平移到这条的框。
+    commitZoom(panToBoxAt(box, metrics, { width: el.clientWidth, height: el.clientHeight }, zoomRef.current.scale));
   }
   fitHitRef.current = fitHit;
 

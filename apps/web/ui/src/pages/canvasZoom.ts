@@ -78,3 +78,19 @@ export function zoomToBox(
     y: vh / 2 - laid.offsetY - cy * scale,
   };
 }
+
+/** 保持当前缩放，只平移让框居中（默认整页适配，用户放大后才跟着框走）。 */
+export function panToBoxAt(
+  box: PixelBox,
+  page: { width: number; height: number },
+  view: { width: number; height: number },
+  scale: number,
+): ZoomState {
+  if (!(scale > 1)) return resetZoom();
+  const z = zoomToBox(box, page, view);
+  if (!(z.scale > 0)) return resetZoom();
+  const laid = fittedPage(page, view);
+  const cx = (view.width / 2 - laid.offsetX - z.x) / z.scale;
+  const cy = (view.height / 2 - laid.offsetY - z.y) / z.scale;
+  return { scale, x: view.width / 2 - laid.offsetX - cx * scale, y: view.height / 2 - laid.offsetY - cy * scale };
+}

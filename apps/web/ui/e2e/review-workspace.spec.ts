@@ -550,3 +550,21 @@ for (const theme of ["light", "dark"]) {
     expect(ratio).toBeGreaterThanOrEqual(4.5);
   });
 }
+
+for (const [w, h] of [[1440, 900], [1280, 800], [768, 1024], [390, 844]]) {
+  test(`默认整页适配进画布，不自动放大（${w}）`, async ({ page, syntheticApi }) => {
+    const task = reviewTask(`e5969b58c${w}`.slice(0, 12).padEnd(12, "0"));
+    syntheticApi.tasks.push(task);
+    await page.setViewportSize({ width: w, height: h });
+    await page.goto(`/review/${task.id}`);
+    const img = page.locator(".canvas-view img").first();
+    await expect(img).toBeVisible();
+    await page.waitForTimeout(400);
+    const view = (await page.locator(".canvas-view").boundingBox())!;
+    const box = (await img.boundingBox())!;
+    expect(box.x).toBeGreaterThanOrEqual(view.x - 1);
+    expect(box.y).toBeGreaterThanOrEqual(view.y - 1);
+    expect(box.x + box.width).toBeLessThanOrEqual(view.x + view.width + 1);
+    expect(box.y + box.height).toBeLessThanOrEqual(view.y + view.height + 1);
+  });
+}
