@@ -1,4 +1,5 @@
 import { glbTextureFormat, type GlbTextureFormat } from "./glbWebp.js";
+import { glbWebpVariantEnabled, glbWebpVariantTextureFormat } from "./glbWebpVariant.js";
 import {
   closeSync,
   copyFileSync,
@@ -1794,10 +1795,15 @@ function liveReadPanelFiles(jobId: string): MockupJob["files"] {
 
 type PublicMockupFile = { key: string; name: string; texture_format?: GlbTextureFormat };
 
-/** GLB 才带 texture_format（"webp" | "png"），由 extensionsUsed 判定并按文件缓存；读不出则不输出。 */
+/**
+ * GLB 才带 texture_format（"webp" | "png"），由 extensionsUsed 判定并按文件缓存；读不出则不输出。
+ * 旁路开关打开且旁路校验通过（与文件路由同一缓存）时报 "webp"，否则按原件。
+ */
 function publicMockupFile(job: MockupJob, file: { key: string; name: string; path?: string }): PublicMockupFile {
   if (file.key !== "glb") return { key: file.key, name: file.name };
-  const format = glbTextureFormat(fileOf(job, "glb")?.path);
+  const path = fileOf(job, "glb")?.path;
+  const variant = glbWebpVariantEnabled() && !isGenerationManagedMockup(job) ? glbWebpVariantTextureFormat(job.id, path) : null;
+  const format = variant ?? glbTextureFormat(path);
   return format ? { key: file.key, name: file.name, texture_format: format } : { key: file.key, name: file.name };
 }
 
