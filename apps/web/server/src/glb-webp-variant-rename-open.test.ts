@@ -141,7 +141,7 @@ describe("windows-2022 CI wiring", () => {
     const workflow = readFileSync(join(repo, ".github/workflows/quality.yml"), "utf8");
     const windowsJob = workflow.slice(workflow.indexOf("runs-on: windows-2022"), workflow.indexOf("\n  quality:"));
     assert.ok(windowsJob.length > 0);
-    assert.match(windowsJob, /tsx\.cmd"\) --test "src\\glb-webp-variant-rename-open\.test\.ts" "src\\glb-webp-variant-fsync\.test\.ts"/);
+    assert.match(windowsJob, /tsx\.cmd"\) --test "src\\glb-webp-variant-rename-open\.test\.ts" "src\\glb-webp-variant-fsync\.test\.ts" "src\\glb-webp-variant-windows-replace\.test\.ts"/);
     assert.doesNotMatch(windowsJob, /self-hosted/);
   });
 });
