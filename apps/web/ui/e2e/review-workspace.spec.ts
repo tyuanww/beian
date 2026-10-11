@@ -297,7 +297,8 @@ test("<1440 右栏默认收起，展开为 320 浮层并平移让当前标记露
   await page.goto(`/review/${task.id}`);
   const tab = page.getByTestId("review-dock");
   await expect(tab).toHaveText("展开疑点 · 待确认 1");
-  expect((await page.locator(".review-ccol").boundingBox())!.width / 1280).toBeGreaterThan(0.9);
+  // 已批第 40 行：1280 宽稿件列 1176px（1280 − 主侧栏 52 − 缩略图条 52）。
+  expect((await page.locator(".review-ccol").boundingBox())!.width).toBeCloseTo(1176, 0);
   await tab.click();
   const aside = page.locator(".review-sidebar.is-overlay");
   await expect(aside).toBeVisible();
