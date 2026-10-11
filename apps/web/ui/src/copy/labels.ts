@@ -128,5 +128,5 @@ export const REVIEW_COPY = {
   lockedOther: (who: string) => `这一单已被${who}处理`,
   lockedUnknown: "这份稿已经提交过了",
   footer: (left: number, page: number) => `这单还剩 ${left} 条待确认 · 本页还有 ${page} 条`,
-  noBox: "这条我钉不住，请整面看",
+  noBox: "没找到位置，请看整页",
 } as const;
