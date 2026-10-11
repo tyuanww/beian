@@ -129,3 +129,11 @@ html[data-theme="dark"] .review-miss { color: #F2B44C; background: #43332E; }
   .review-flat-page.is-phone .review-actions { position: fixed; left: 0; right: 0; bottom: calc(52px + env(safe-area-inset-bottom, 0px)); z-index: 20; padding: 8px 16px; background: var(--stage, #fff); border-top: 1px solid var(--line); flex-wrap: wrap; }
 }
 .review-flat .review-evidence-label { font-size: max(13px, .85em); }
+/* design F-002：≥720 页头不折行，「退回 / 签字」始终靠右；挤的时候先截品名、再截提示。 */
+.review-flat-page:not(.is-phone) .review-top { flex-wrap: nowrap; }
+.review-flat-page:not(.is-phone) .review-top > * { flex-shrink: 0; }
+.review-flat-page:not(.is-phone) .review-top > .review-title { flex: 0 1 auto; min-width: 64px; }
+.review-flat-page:not(.is-phone) .review-top > .review-grow { flex: 1 1 0; min-width: 0; }
+.review-flat-page:not(.is-phone) .review-actions { flex: 0 1 auto; min-width: 0; justify-content: flex-end; }
+.review-flat-page:not(.is-phone) .review-actions > button { flex: none; }
+.review-flat-page:not(.is-phone) .review-signhint { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

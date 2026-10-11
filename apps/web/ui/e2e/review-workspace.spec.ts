@@ -407,3 +407,17 @@ test("深色主题：状态标签用 dark-tags.md 专用亮版，深底上过 AA
   });
   expect(ratio).toBeGreaterThanOrEqual(4.5);
 });
+
+test("768 宽页头不折行，退回/签字靠右（design F-002）", async ({ page, syntheticApi }) => {
+  const task = reviewTask();
+  syntheticApi.tasks.push(task);
+  await page.setViewportSize({ width: 768, height: 1024 });
+  await page.goto(`/review/${task.id}`);
+  const top = (await page.locator(".review-top").boundingBox())!;
+  expect(top.height).toBeLessThanOrEqual(64);
+  const sign = (await page.getByRole("button", { name: "签字", exact: true }).boundingBox())!;
+  const reject = (await page.getByRole("button", { name: "退回", exact: true }).boundingBox())!;
+  expect(top.x + top.width - (sign.x + sign.width)).toBeLessThanOrEqual(24);
+  expect(Math.abs(reject.y - sign.y)).toBeLessThan(2);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+});
