@@ -1,3 +1,4 @@
+import { PUBLIC_UPLOAD_BYTES, UPLOAD_TOO_LARGE } from "../src/uploadLimit";
 import { deflateSync } from "node:zlib";
 import { expect, reviewTask, test } from "./fixtures";
 
@@ -696,4 +697,25 @@ test("手机 390 不显示「审稿台 /」面包屑，底部导航仍有「审�
   await expect(page.locator(".review-flat-page.is-phone")).toBeVisible();
   await expect(page.locator(".review-crumb")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "审稿台", exact: true })).toBeVisible();
+});
+
+test("退回后「上传新稿」选了超过公网上限的 PDF：直接提示，不发 /rework 请求", async ({ page, syntheticApi }, testInfo) => {
+  const fs = await import("node:fs");
+  const big = testInfo.outputPath("too-large.pdf");
+  const fd = fs.openSync(big, "w");
+  fs.ftruncateSync(fd, PUBLIC_UPLOAD_BYTES + 1); // 稀疏文件，不真占盘
+  fs.closeSync(fd);
+  const task = reviewTask("e5969b58cda5");
+  Object.assign(task, { status: "completed", board: "done", complete_kind: "rework", completed_by: "E2E 审核" });
+  syntheticApi.tasks.push(task);
+  let reworkRequests = 0;
+  page.on("request", (r) => { if (/\/api\/tasks\/[^/]+\/rework/.test(r.url())) reworkRequests += 1; });
+  await page.goto(`/review/${task.id}`);
+  const chooser = page.waitForEvent("filechooser");
+  await page.locator(".review-top").getByRole("button", { name: "上传新稿" }).click();
+  await (await chooser).setFiles(big);
+  await expect(page.locator(".ant-message")).toContainText(UPLOAD_TOO_LARGE);
+  await page.waitForTimeout(300);
+  expect(reworkRequests).toBe(0);
+  expect(syntheticApi.calls.filter((c) => c.path.endsWith("/rework"))).toHaveLength(0);
 });

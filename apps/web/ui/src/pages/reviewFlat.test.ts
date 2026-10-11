@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { FieldHit } from "../api";
+import { PUBLIC_UPLOAD_BYTES, UPLOAD_TOO_LARGE } from "../uploadLimit";
 import {
-  completedAtLabel, completedByText, conclusionFor, decisionFailureText, submitFailureText, flatLayout, isTypingTarget, lockedBy, markerOutsideCorner, nextPendingAfter,
+  completedAtLabel, completedByText, conclusionFor, decisionFailureText, reworkUploadBlocked, submitFailureText, flatLayout, isTypingTarget, lockedBy, markerOutsideCorner, nextPendingAfter,
   panToClearPanel, positionLabel, rejectRows, shouldShowShortcutsOnOpen, submitGate, tabIndices, thumbMarks, verdictCounts, verdictForKey,
 } from "./reviewFlat.js";
 
@@ -107,5 +108,11 @@ describe("reviewFlat", () => {
     assert.equal(completedByText({ ...base, complete_kind: "rework" }, now), "这一单已被天元退回，等新稿 18:20");
     assert.equal(completedByText({ ...base }, now), "这一单已被天元处理 18:20");
     assert.equal(completedByText({ status: "completed", completed_by: "天元", complete_kind: "signed" }, now), "这一单已被天元签字");
+  });
+  it("上传新稿超公网上限就挡下并给 UPLOAD_TOO_LARGE，不超放行", () => {
+    assert.equal(reworkUploadBlocked({ size: PUBLIC_UPLOAD_BYTES + 1 }), UPLOAD_TOO_LARGE);
+    assert.equal(reworkUploadBlocked({ size: PUBLIC_UPLOAD_BYTES }), null);
+    assert.equal(reworkUploadBlocked({ size: 1024 }), null);
+    assert.equal(reworkUploadBlocked(null), null);
   });
 });

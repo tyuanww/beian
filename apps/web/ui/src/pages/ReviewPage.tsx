@@ -15,7 +15,7 @@ import {
 import { readBoxesOn, readPinsOn, skipPackSheetField, writeBoxesOn, writePinsOn } from "./reviewDock";
 import { ReviewSubmitDialog } from "./ReviewSubmitDialog";
 import {
-  conclusionFor, decisionFailureText, submitFailureText, flatLayout, isTypingTarget, lockedBy, markShortcutsSeen, markerOutsideCorner, nextPendingAfter,
+  conclusionFor, decisionFailureText, reworkUploadBlocked, submitFailureText, flatLayout, isTypingTarget, lockedBy, markShortcutsSeen, markerOutsideCorner, nextPendingAfter,
   panToClearPanel, positionLabel, rejectRows, shouldShowShortcutsOnOpen, submitGate, tabIndices, thumbMarks, verdictCounts, verdictForKey,
   type FlatLayout, type FlatTab,
 } from "./reviewFlat";
@@ -574,6 +574,12 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
 
   async function uploadRework(file: File) {
     if (!task || !reworkable || hasUnsavedNotes) return;
+    // 公网上传上限预检：超了就直接提示，不发请求（否则会先被 413 HTML 拦掉）。
+    const tooLarge = reworkUploadBlocked(file);
+    if (tooLarge) {
+      message.error({ content: tooLarge, key: "review-rework-too-large" });
+      return;
+    }
     if (!(await decisionQueueRef.current)) {
       message.error("先保存备注，再继续。");
       return;
