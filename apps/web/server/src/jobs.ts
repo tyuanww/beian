@@ -1921,7 +1921,7 @@ function publicMutationResultFromFact(
   job: MockupJob,
   fact: RenderGenerationIdempotencyFact,
 ): RenderGenerationMutationEnqueueResult {
-  const mutation = publicRenderMutation({render_mutation:fact.mutation});
+  const mutation = publicRenderMutation({id:job.id,render_mutation:fact.mutation});
   if (!mutation) throw generationError("render_generation_invalid", "渲染代际记录无效", 409, "核验已有请求");
   return {
     mutation,

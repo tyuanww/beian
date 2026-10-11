@@ -243,7 +243,7 @@ function need(
 }
 
 function publishMockup(job: Parameters<typeof publicMockup>[0], s: Session) {
-  return {...publicMockup(job, { structureDesk: s.role === "admin" }),
+  return {...publicMockup(job, { structureDesk: s.role === "admin", admin: s.role === "admin" }),
     ...renderGenerationView(job,viewerFromSession(s),hasPerm(s.role,"create"))};
 }
 
@@ -1446,8 +1446,8 @@ app.post("/api/settings/billing/refresh", async (c) => {
 });
 
 app.get("/api/mockups", (c) => {
-  need(c, "read");
-  return c.json(decorateQueueAhead(listJobs().map(publicMockupSummary)));
+  const s = need(c, "read");
+  return c.json(decorateQueueAhead(listJobs().map((job) => publicMockupSummary(job, { admin: s.role === "admin" }))));
 });
 
 app.get("/api/mockups/:id", (c) => {
