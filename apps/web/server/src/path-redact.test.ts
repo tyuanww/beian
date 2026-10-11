@@ -279,3 +279,15 @@ describe("redactLocalPaths: root-relative backslash directories", () => {
     assert.equal(r("a\\b\\c"), "a\\b\\c");
   });
 });
+
+describe("redactLocalPaths: Windows/UNC file names containing a space", () => {
+  it("keeps 'a b.pdf' when the word after the space ends in an extension", () => {
+    assert.equal(r("\\\\nas\\share x\\a b.pdf"), "a b.pdf");
+    assert.equal(r("C:\\x\\客户 稿.ai 打不开"), "客户 稿.ai 打不开");
+    assert.equal(r("读不到 C:\\x\\a b.pdf，请检查"), "读不到 a b.pdf，请检查");
+  });
+  it("does not glue unrelated words", () => {
+    assert.equal(r("C:\\x\\a.ai 打不开"), "a.ai 打不开");
+    assert.equal(r("C:\\a\\b.pdf 和 D:\\c\\d.pdf"), "b.pdf 和 d.pdf");
+  });
+});
