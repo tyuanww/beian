@@ -160,3 +160,42 @@ describe("redactLocalPaths: root-relative backslash paths", () => {
     assert.equal(r("\\a.pdf"), "\\a.pdf");
   });
 });
+
+describe("redactLocalPaths: length cap and linear time", () => {
+  const MARK = "（后面省略）";
+  it("short messages are not capped", () => {
+    const s = "a".repeat(8000);
+    assert.equal(r(s), s);
+  });
+  it("Windows path straddling position 8000 leaves no directory segment", () => {
+    const pre = "x".repeat(7990) + " ";
+    const out = r(pre + "C:\\Users\\bob\\docs\\a.pdf 后面还有");
+    assert.ok(out.endsWith(MARK), out.slice(-30));
+    assert.ok(!/Users|\\bo|C:\\/.test(out), out.slice(-30));
+    assert.equal(out, pre + "本机路径" + MARK);
+  });
+  it("UNC path straddling position 8000 leaves no directory segment", () => {
+    const pre = "x".repeat(7992) + " ";
+    const out = r(pre + "\\\\nas\\share\\bob\\a.pdf");
+    assert.ok(!/nas|\\\\/.test(out), out.slice(-30));
+    assert.equal(out, pre + "本机路径" + MARK);
+  });
+  it("URL-encoded input is capped after decoding", () => {
+    const out = r("%5Cab".repeat(3000)); // 15000 raw chars, 9000 after decoding
+    assert.ok(out.endsWith(MARK));
+    assert.ok(!out.includes("%5C"));
+    assert.ok(out.length <= 8000 + MARK.length);
+  });
+  for (const [name, input] of [
+    ["C:\\a b repeated", "C:\\a b ".repeat(43000)],
+    ["\\\\a repeated", "\\\\a ".repeat(75000)],
+  ] as const) {
+    it(`${name} (${input.length} chars) < 200ms`, () => {
+      assert.ok(input.length >= 300000);
+      const t0 = performance.now();
+      r(input);
+      const ms = performance.now() - t0;
+      assert.ok(ms < 200, `${name}: ${ms.toFixed(1)}ms`);
+    });
+  }
+});
