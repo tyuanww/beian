@@ -171,9 +171,9 @@ function scanAndRedact(s: string): string {
   return out.join("");
 }
 
-// 网址（`http://`、`https://` 等，`file://` 除外）整段原样保留：到空白、引号、尖括号或非 ASCII 字符为止。
-// 后顾断言保证只在词首尝试匹配，整体线性。
-const URL_RE = /(?<![A-Za-z0-9+.-])(?!file:)[A-Za-z][A-Za-z0-9+.-]*:\/\/[^\s"'`<>\u0080-\uffff]*/gi;
+// 只有 `http://`、`https://`（大小写不限）算网址：到空白、引号、尖括号或非 ASCII 字符为止。其他协议（`x://`、
+// `git+ssh://`、`file://`）按普通路径扫描。后顾断言保证只在词首尝试匹配，整体线性。
+const URL_RE = /(?<![A-Za-z0-9+.-])https?:\/\/[^\s"'`<>\u0080-\uffff]*/gi;
 
 /** 处理上限：URL 解码后超过这个长度只处理前这么多字符，后面不输出，改为追加 TRUNCATED_MARK。 */
 const REDACT_MAX_CHARS = 8000;
