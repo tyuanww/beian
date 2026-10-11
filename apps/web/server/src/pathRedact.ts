@@ -388,7 +388,7 @@ export function hasLeakResidue(text: string): boolean {
   return LEAK_RESIDUE.some((re) => re.test(text));
 }
 
-export function hiddenErrorText(ticket: string): string {
+function hiddenErrorText(ticket: string): string {
   return `任务失败，请联系管理员（单号 ${ticket}）`;
 }
 
