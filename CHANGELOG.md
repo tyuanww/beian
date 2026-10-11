@@ -3,7 +3,12 @@
 ## [0.31.1.12] - 2026-10-11
 
 ### Added
-- 出图版本（render generation）新生成的候选 GLB 在封存前同样转为 WebP q90，封存 hash 与质量证明绑定转换后字节；转换失败保留原 GLB、只记日志，不让出图失败。glb 条目的 `texture_format` 同样适用。已封存的历史代不转换。
+- 出图版本（render generation）新生成的候选 GLB 在封存前转为 WebP q90：在校验 worker 输出凭证之后、生成封存凭证之前转换并重算 sha256/bytes，封存 hash 与质量证明绑定转换后字节。glb 条目的 `texture_format` 同样适用；已封存的历史代不转换。
+- 转换失败或跳过时保留 worker 原 GLB 与原凭证，只记日志（`render-generation <job> glb webp ...`）。跳过条件：剩余出图预算不足 max(2 分钟, 按文件大小估算的转换时间) 时直接跳过（`deadline_insufficient`）；等待进程内压缩锁超过「剩余预算 − 所需时间」时放弃排队（`lock_wait_timeout`），排到后也不再执行。
+- 原子替换前再检查一次：用户已取消或剩余预算不足 1 分钟时丢弃转换结果、保留原文件（`deadline_insufficient`）。用户取消仍按原语义使出图失败。
+
+### Known risk
+- 转换开始后不能中途中止：若单次转换实际远慢于估算并越过截止时间，结果会被丢弃，但出图仍可能在后续检查点超时失败。
 
 ## [0.31.1.11] - 2026-10-11
 
