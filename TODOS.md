@@ -349,6 +349,13 @@ RF-10–RF-13 的原始依赖见 [ADR-007 §20.7](docs/adr-007-packaging-render-
   - 已知取舍：Windows/UNC 末段无扩展名、空格后的词以扩展名结尾时合成一个文件名（`C:\x\dir see.log` → `dir see.log`），只认一个空格。
   - 已知取舍：反斜杠根路径只要有一段目录名不少于 2 个字符就脱敏；兜底再拦「反斜杠 + 至少 2 个字母」（`C:\Documents and Settings\bob` 这类空格过多的目录），所以报错里字面的 `\nfoo` 这类转义串会整条隐藏；单字母 `\n`、`\t` 不受影响。
   - 已知取舍：查询参数名为 `password` / `pw` / `token` / `secret` / `key` 等（含 `api_key`、`access_token`）时整条隐藏，即使值无害；`monkey`、`keyword`、`tokens_left` 不算。
+  - 已知规则缺口（不拦）：网址外的凭据写法（`password=hunter2`、`token: xxx`、`"password":"x"`）。原因：`Unexpected token: }`、`missing key: foo` 这类常见报错会被大量误隐藏；等报错分级上错误码后统一处理。
+  - 已知规则缺口（不拦）：网址 fragment（`#access_token=…`）和网址路径里的令牌（`/token/abc123`）。
+  - 已知规则缺口（不拦）：斜杠写法目录名含空格时露出最后一截（`/Users/bob smith/a.pdf`、`/Users/bob/Google Drive/a.pdf` 这类，空格后只剩一段时）。
+  - 已知规则缺口（不拦）：`postgres://…` 等非 http(s) 连接串输出成 `postgres:本机路径`。
+  - 已知取舍：兜底「反斜杠 + 非 ASCII」与「非 ASCII 紧贴反斜杠再接内容」会把中文紧贴的转义（`换行\n`）整条隐藏；`共享盘\\` 这类后面是空白或反斜杠的不算。
+  - 已知取舍：`Bearer` / `Basic` 后只拦含数字或符号、不少于 6 字符的值；纯字母值（`Bearer abcdefgh`、`Basic dXNlcjpwYXNz`）不拦，以免误伤「bearer 字段为空」「Basic settings」；`Authorization` 任意大小写都拦。
+  - `apps/web/server/src/mockup.ts` `print_faces_repair.error` 未接兜底：来源是白名单文案，不含原始报错。
   - 已知规则缺口（不拦）：凭据词与前缀无分隔符连写的参数名（`?apikey=1`、`?accesstoken=`）不触发兜底。
   - 已知取舍：网址路径里出现 `/Users/`、`/home/`、`/root/`、`/var/folders/`、`/private/var/` 时，即使是公开网站也会被替换（`https://example.com/Users/list` → `https://example.com/本机路径`），宁可误伤也不漏。
   - `apps/web/backend` worker 输出与其他 HTTP `detail` 未逐一盘点。
