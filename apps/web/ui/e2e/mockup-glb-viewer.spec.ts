@@ -45,9 +45,13 @@ async function serve(page: Page, fail = false, white = false, textureFormat?: st
     return json([]);
   });
 }
+// GLB 解析 + 软件 WebGL 首帧在满负载下会超过默认 5s（全量跑时「复位」按钮 5s 内仍 disabled）；
+// 这里等的是真实加载完成事件，不是固定帧数，所以放宽到 15s，并把本文件用例总时长放到 60s。
+const GLB_LOAD_MS = 15_000;
+test.describe.configure({ timeout: 60_000 });
 async function loaded(page: Page) {
-  await expect(page.getByRole('button',{name:'复位模型视角'})).toBeEnabled();
-  await expect.poll(() => page.locator('model-viewer').evaluate((el:any) => el.loaded)).toBe(true);
+  await expect(page.getByRole('button',{name:'复位模型视角'})).toBeEnabled({ timeout: GLB_LOAD_MS });
+  await expect.poll(() => page.locator('model-viewer').evaluate((el:any) => el.loaded), { timeout: GLB_LOAD_MS }).toBe(true);
 }
 async function orbit(page: Page) {
   return page.locator('model-viewer').evaluate((el:any) => { const o=el.getCameraOrbit(); return {theta:o.theta*180/Math.PI,phi:o.phi*180/Math.PI,radius:o.radius,fov:el.getFieldOfView()}; });
