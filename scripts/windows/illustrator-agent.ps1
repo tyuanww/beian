@@ -17,7 +17,17 @@ $RequestReadTimeoutMs = 15000
 $HeartbeatIntervalMs = 5000
 $CleanupReserveMs = 30000
 $UnattendedStallMs = 60000
+# Save-stage watchdog: across 66 production exports the
+# artwork PDF save finished within 1.1 s and open+full save within 433.7 s.
+# A save is only "stalled" when the job directory (size/mtime of every file,
+# including partial PDFs, debug.log and the progress sidecar) stays unchanged
+# for this long; elapsed time alone never qualifies.
 $UnattendedSavingStallMs = 300000
+$SaveWatchStages = @("saving_full_pdf", "saving_artwork_pdf")
+# A visible Illustrator window normally appears within seconds of launch; a
+# matching process still windowless after this grace is treated as a zombie.
+$ZombieWindowGraceMs = 120000
+$WatchdogRestartMs = 180000
 $UnattendedMaxJobMs = 900000
 $UnattendedOuterMs = 1260000
 $UnattendedKillForbiddenStages = @(
@@ -301,7 +311,7 @@ function Write-Heartbeat([string]$State, [string]$LastCode = "") {
   Write-AtomicJson $HeartbeatPath $payload
 }
 
-function Write-AgentLog([string]$Event, [string]$RequestId = "", [string]$Code = "") {
+function Write-AgentLog([string]$Event, [string]$RequestId = "", [string]$Code = "", [object]$Details = $null) {
   if ((Test-Path $LogPath) -and (Get-Item $LogPath).Length -gt 5MB) {
     $rotated = "$LogPath.1"
     if (Test-Path $rotated) { Remove-Item $rotated -Force }
@@ -315,9 +325,10 @@ function Write-AgentLog([string]$Event, [string]$RequestId = "", [string]$Code =
     pid = $AgentPid
     session_id = $AgentSessionId
   }
+  if ($null -ne $Details) { $entry["details"] = $Details }
   [System.IO.File]::AppendAllText(
     $LogPath,
-    (($entry | ConvertTo-Json -Compress) + "`n"),
+    (($entry | ConvertTo-Json -Compress -Depth 6) + "`n"),
     $Utf8NoBom
   )
 }
@@ -389,8 +400,11 @@ function Get-SessionIllustratorProcesses([string]$Executable) {
   return @($items | ForEach-Object {
     $actualPath = ""
     try { $actualPath = [System.IO.Path]::GetFullPath([string]$_.Path) } catch { }
+    $startedUtc = ""
+    try { $startedUtc = $_.StartTime.ToUniversalTime().ToString("o") } catch { }
     [ordered]@{
       pid = [int]$_.Id
+      start_time_utc = $startedUtc
       session_id = [int]$_.SessionId
       window_handle = [int64]$_.MainWindowHandle
       window_title = [string]$_.MainWindowTitle
@@ -533,6 +547,61 @@ function Test-KillForbiddenStage([string]$Stage) {
   return [bool]($UnattendedKillForbiddenStages -contains $Stage)
 }
 
+function Get-JobOutputSnapshot([string]$Directory) {
+  if (-not $Directory -or -not (Test-Path -LiteralPath $Directory -PathType Container)) { return "missing" }
+  $parts = @(Get-ChildItem -LiteralPath $Directory -File -Force -ErrorAction SilentlyContinue |
+    Sort-Object Name |
+    ForEach-Object { [string]$_.Name + ":" + [string]$_.Length + ":" + [string]$_.LastWriteTimeUtc.Ticks })
+  return ($parts -join "|")
+}
+
+# Returns $true only when a save stage has shown no file growth/mtime change
+# and no progress update for $UnattendedSavingStallMs. Pure: callers pass time.
+function Update-SaveWatch([hashtable]$Watch, [string]$Stage, [string]$ProgressStamp, [string]$Snapshot, [DateTime]$Now) {
+  if ($SaveWatchStages -notcontains $Stage) {
+    $Watch["key"] = $null
+    $Watch["since"] = $Now
+    return $false
+  }
+  $key = $Stage + "#" + $ProgressStamp + "#" + $Snapshot
+  if (-not $Watch.ContainsKey("key") -or $Watch["key"] -ne $key) {
+    $Watch["key"] = $key
+    $Watch["since"] = $Now
+    return $false
+  }
+  return [bool](($Now - [DateTime]$Watch["since"]).TotalMilliseconds -ge $UnattendedSavingStallMs)
+}
+
+# The only process a watchdog may end: same pid AND same start time as the
+# Illustrator the job used, same session, configured executable.
+function Select-IdentityMatch([object[]]$Processes, [object]$Expected) {
+  if ($null -eq $Expected -or -not [string]$Expected.start_time_utc) { return $null }
+  $matched = @($Processes | Where-Object {
+    $_.matches_executable -and
+    [int]$_.pid -eq [int]$Expected.pid -and
+    [string]$_.start_time_utc -eq [string]$Expected.start_time_utc
+  })
+  if ($matched.Count -eq 1) { return $matched[0] }
+  return $null
+}
+
+function Select-JobIllustratorIdentity([object[]]$Processes) {
+  $visible = @($Processes | Where-Object { $_.matches_executable -and [int64]$_.window_handle -ne 0 -and [string]$_.start_time_utc })
+  if ($visible.Count -ne 1) { return $null }
+  return [ordered]@{ pid = [int]$visible[0].pid; start_time_utc = [string]$visible[0].start_time_utc }
+}
+
+function Select-WindowlessZombies([object[]]$Processes, [DateTime]$Now) {
+  return @($Processes | Where-Object {
+    $started = [DateTime]::MinValue
+    $_.matches_executable -and
+    [int64]$_.window_handle -eq 0 -and
+    [string]$_.start_time_utc -and
+    [DateTime]::TryParse([string]$_.start_time_utc, [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::RoundtripKind, [ref]$started) -and
+    ($Now - $started.ToUniversalTime()).TotalMilliseconds -ge $ZombieWindowGraceMs
+  })
+}
+
 function Read-JobSidecar([string]$Path, [string]$AttemptId) {
   if (-not $Path -or -not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $null }
   try {
@@ -552,10 +621,32 @@ function Get-JobProgressPath([object]$Config) {
   return Join-Path ([System.IO.Path]::GetDirectoryName($debugLog)) "illustrator_progress.json"
 }
 
+function Stop-IdentifiedIllustrator([string]$Executable, [object]$Target, [string]$Reason) {
+  # Re-read immediately before ending: pid reuse or a user-started instance
+  # must never be ended. Only an exact pid + start time match qualifies.
+  $current = @(Get-SessionIllustratorProcesses $Executable)
+  $match = Select-IdentityMatch $current $Target
+  if ($null -eq $match) {
+    if (@($current | Where-Object { [int]$_.pid -eq [int]$Target.pid }).Count -eq 0) { return "gone" }
+    Throw-AgentFailure "illustrator_recovery_failed" "Illustrator identity changed; refusing to end it" @{ expected = $Target; processes = $current }
+  }
+  Write-AgentLog "watchdog_end_illustrator" "" $Reason ([ordered]@{ target = $match; processes = $current })
+  Stop-Process -Id ([int]$match.pid) -Force -ErrorAction SilentlyContinue
+  $deadline = [DateTime]::UtcNow.AddSeconds(30)
+  while ([DateTime]::UtcNow -lt $deadline) {
+    $left = @(Get-SessionIllustratorProcesses $Executable)
+    if ($null -eq (Select-IdentityMatch $left $Target)) { return "ended" }
+    Start-Sleep -Milliseconds 500
+  }
+  Throw-AgentFailure "illustrator_recovery_failed" "Identified Illustrator did not exit after Stop-Process" @{ target = $match }
+}
+
 function Invoke-JobCscript(
   [string]$RuntimePath,
   [object]$Config,
-  [DateTime]$OuterDeadline
+  [DateTime]$OuterDeadline,
+  [string]$Executable = "",
+  [object]$Identity = $null
 ) {
   if (-not (Test-Path -LiteralPath $CscriptPath -PathType Leaf)) {
     Throw-AgentFailure "illustrator_bridge_missing" "cscript.exe was not found"
@@ -566,6 +657,10 @@ function Invoke-JobCscript(
   $attemptId = [string](Get-JsonProperty $Config "attempt_id" $true)
   $resultPath = [string](Get-JsonProperty $Config "result_json" $true)
   $progressPath = Get-JobProgressPath $Config
+  $jobDirectory = Split-Path -Parent $progressPath
+  $saveWatch = @{}
+  $saveStalled = $false
+  $stalledStage = ""
   $jobStarted = [DateTime]::UtcNow
   $allArguments = @("//Nologo", $RunnerPath, "run", $RuntimePath)
   $startInfo = New-Object System.Diagnostics.ProcessStartInfo
@@ -604,8 +699,15 @@ function Invoke-JobCscript(
       $elapsedMs = [int]([DateTime]::UtcNow - $jobStarted).TotalMilliseconds
       $hasResult = [bool]$result
       if (Test-KillForbiddenStage $stage) {
-        # saving_full_pdf / saving_artwork_pdf / writing_result: forbid Kill
+        # saving_full_pdf / saving_artwork_pdf / writing_result: forbid a blind
+        # Kill; only the no-progress save watchdog below may intervene.
         $allowKill = $false
+        $stamp = if ($progress -and $progress.updated_at) { [string]$progress.updated_at } else { "" }
+        if (Update-SaveWatch $saveWatch $stage $stamp (Get-JobOutputSnapshot $jobDirectory) ([DateTime]::UtcNow)) {
+          $saveStalled = $true
+          $stalledStage = $stage
+          break
+        }
       } elseif ($hasResult) {
         $allowKill = [bool]($null -ne $progressAgeMs -and $progressAgeMs -ge $UnattendedStallMs)
       } elseif (
@@ -620,6 +722,32 @@ function Invoke-JobCscript(
       if ($allowKill) { break }
       $finished = $process.WaitForExit($sliceMs)
       if (-not $finished) { Write-Heartbeat "busy" }
+    }
+    if ($saveStalled) {
+      $processes = @(Get-SessionIllustratorProcesses $Executable)
+      Write-AgentLog "save_stalled" "" "illustrator_save_timeout" ([ordered]@{ stage = $stalledStage; stall_ms = $UnattendedSavingStallMs; expected = $Identity; processes = $processes })
+      if ($null -eq (Select-IdentityMatch $processes $Identity)) {
+        Throw-AgentFailure "illustrator_recovery_failed" "Save stalled but the job Illustrator identity could not be proven" @{ stage = $stalledStage; expected = $Identity; processes = $processes }
+      }
+      $ended = Stop-IdentifiedIllustrator $Executable $Identity "illustrator_save_timeout"
+      if (-not $process.WaitForExit(15000)) {
+        $process.Kill()
+        if (-not $process.WaitForExit(5000)) {
+          Throw-AgentFailure "illustrator_recovery_failed" "cscript.exe did not exit after its Illustrator was ended"
+        }
+      }
+      $exitProven = $true
+      return [PSCustomObject]@{
+        ExitCode = -1
+        Stdout = ""
+        Stderr = ""
+        TimedOut = $true
+        LeftRunning = $false
+        SaveStalled = $true
+        StalledStage = $stalledStage
+        Processes = $processes
+        Ended = $ended
+      }
     }
     if (-not $finished) {
       $progress = Read-JobSidecar $progressPath $attemptId
@@ -654,6 +782,7 @@ function Invoke-JobCscript(
             Stderr = ""
             TimedOut = $true
             LeftRunning = $true
+            SaveStalled = $false
           }
         }
       }
@@ -669,6 +798,7 @@ function Invoke-JobCscript(
       Stderr = $stderr.Trim()
       TimedOut = (-not $finished)
       LeftRunning = $false
+      SaveStalled = $false
     }
   } finally {
     if ($processStarted -and -not $exitProven) {
@@ -713,8 +843,20 @@ function Ensure-Illustrator(
   $processes = @(Get-SessionIllustratorProcesses $Executable)
   Assert-IllustratorProcessIdentity $processes $Executable
   if ($processes.Count -gt 0 -and @($processes | Where-Object { $_.window_handle -ne 0 }).Count -eq 0) {
-    Throw-AgentFailure "illustrator_no_window" "Illustrator exists in this session but has no visible window" @{
-      processes = $processes
+    $zombies = @(Select-WindowlessZombies $processes ([DateTime]::UtcNow))
+    if ($zombies.Count -ne $processes.Count) {
+      Throw-AgentFailure "illustrator_no_window" "Illustrator exists in this session but has no visible window" @{
+        processes = $processes
+      }
+    }
+    Write-AgentLog "windowless_zombie" "" "illustrator_no_window" ([ordered]@{ grace_ms = $ZombieWindowGraceMs; processes = $processes })
+    foreach ($zombie in $zombies) {
+      Stop-IdentifiedIllustrator $Executable ([ordered]@{ pid = [int]$zombie.pid; start_time_utc = [string]$zombie.start_time_utc }) "illustrator_no_window" | Out-Null
+    }
+    $processes = @(Get-SessionIllustratorProcesses $Executable)
+    Assert-IllustratorProcessIdentity $processes $Executable
+    if ($processes.Count -gt 0) {
+      Throw-AgentFailure "illustrator_recovery_failed" "Windowless Illustrator remained after identity-checked end" @{ processes = $processes }
     }
   }
   if ($processes.Count -eq 0) {
@@ -853,6 +995,75 @@ function Restore-OwnedDocumentState(
   }
 }
 
+function Get-SourceSha256([string]$Path) {
+  if (-not $Path -or -not (Test-Path -LiteralPath $Path -PathType Leaf)) { return "" }
+  return (Get-FileHash -Algorithm SHA256 -LiteralPath $Path).Hash.ToLowerInvariant()
+}
+
+# Deletes only this job's outputs, and only when they live in the job's own
+# directory (the .native-* attempt dir or the semantic export dir).
+function Remove-JobPartialOutputs([object]$Config, [string]$JobDirectory) {
+  $removed = @()
+  $root = [System.IO.Path]::GetFullPath($JobDirectory).TrimEnd("\", "/")
+  foreach ($key in @("print_pdf", "full_pdf", "structure_json", "result_json", "close_json")) {
+    $raw = Get-JsonProperty $Config $key
+    if (-not $raw) { continue }
+    $path = [System.IO.Path]::GetFullPath([string]$raw)
+    $parent = [System.IO.Path]::GetDirectoryName($path).TrimEnd("\", "/")
+    if (-not $parent.Equals($root, [System.StringComparison]::OrdinalIgnoreCase)) { continue }
+    if (Test-Path -LiteralPath $path -PathType Leaf) {
+      Remove-Item -LiteralPath $path -Force
+      $removed += [System.IO.Path]::GetFileName($path)
+    }
+  }
+  return ,$removed
+}
+
+function Complete-SaveWatchdog([object]$Config, [object]$Run, [string]$Executable, [string]$SourcePath, [string]$HashBefore, [string]$JobDirectory) {
+  $removed = @(Remove-JobPartialOutputs $Config $JobDirectory)
+  $hashAfter = Get-SourceSha256 $SourcePath
+  $sourceUnchanged = [bool]($HashBefore -and $HashBefore -eq $hashAfter)
+  $restartDeadline = [DateTime]::UtcNow.AddMilliseconds($WatchdogRestartMs)
+  $restarted = $null
+  $smokeOk = $false
+  $restartError = ""
+  try {
+    $restarted = Ensure-Illustrator $Executable $restartDeadline 0
+    Invoke-SmokeRequest $null $restartDeadline | Out-Null
+    $smokeOk = $true
+  } catch {
+    $restartError = [string]$_.Exception.Message
+  }
+  $closedClean = [bool]($null -ne $restarted -and [int]$restarted.document_count -eq 0)
+  $details = [ordered]@{
+    stage = [string]$Run.StalledStage
+    stall_ms = $UnattendedSavingStallMs
+    ended = [string]$Run.Ended
+    processes = @($Run.Processes)
+    removed = $removed
+    source_sha256_before = $HashBefore
+    source_sha256_after = $hashAfter
+    source_unchanged = $sourceUnchanged
+    restarted = [bool]($null -ne $restarted)
+    smoke_ok = $smokeOk
+    restart_error = $restartError
+  }
+  Write-AgentLog "save_watchdog_recovered" "" "illustrator_save_timeout" $details
+  $sourceSha = [string](Get-JsonProperty $Config "source_sha256")
+  if ($closedClean -and $sourceUnchanged -and $sourceSha) {
+    # The host that held the document was ended and a fresh host has zero
+    # documents, so the attempt is provably closed for the worker's fence.
+    $details["close_observation"] = @{
+      attempt_id = [string](Get-JsonProperty $Config "attempt_id" $true)
+      source_sha256 = $sourceSha
+      bridge_exited = $true
+      document_count = 0
+      documents = @()
+    }
+  }
+  Throw-AgentFailure "illustrator_save_timeout" "Illustrator save made no progress; ended and restarted" $details
+}
+
 function Invoke-RunRequest([object]$Request, [DateTime]$Deadline) {
   $configPath = Resolve-DataPath ([string](Get-JsonProperty $Request "config_path" $true))
   $config = Read-JsonFile $configPath
@@ -875,7 +1086,12 @@ function Invoke-RunRequest([object]$Request, [DateTime]$Deadline) {
   $attemptId = [string](Get-JsonProperty $config "attempt_id" $true)
   $resultPath = [string](Get-JsonProperty $config "result_json" $true)
   $progressPath = Get-JobProgressPath $config
-  $run = Invoke-JobCscript $runtimePath $config $Deadline
+  $hashBefore = Get-SourceSha256 $sourcePath
+  $identity = Select-JobIllustratorIdentity @($probe.processes)
+  $run = Invoke-JobCscript $runtimePath $config $Deadline $executable $identity
+  if ($run.SaveStalled) {
+    Complete-SaveWatchdog $config $run $executable $sourcePath $hashBefore (Split-Path -Parent $progressPath)
+  }
   $jobResult = Read-JobSidecar $resultPath $attemptId
   $progress = Read-JobSidecar $progressPath $attemptId
   $stage = if ($progress) { [string]$progress.stage } else { "" }
