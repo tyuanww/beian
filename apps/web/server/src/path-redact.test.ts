@@ -76,3 +76,16 @@ describe("redactLocalPaths: URL-encoded separators", () => {
     assert.equal(r("读不到 c:%5cdata%5cb.ai"), "读不到 b.ai");
   });
 });
+
+describe("redactLocalPaths: file:// and drive-letter boundary", () => {
+  it("file:// URLs keep only the file name", () => {
+    assert.equal(r("file:///Users/bob/a.pdf"), "a.pdf");
+    assert.equal(r("打开 file:///C:/data/b.ai 失败"), "打开 b.ai 失败");
+    assert.equal(r("FILE://C:\\data\\c.pdf"), "c.pdf");
+  });
+  it("drive letter must not match inside a word", () => {
+    assert.equal(r("abc:/x/y.pdf"), "abc:y.pdf");
+    assert.equal(r("abc:\\x\\y.pdf"), "abc:\\x\\y.pdf");
+    assert.equal(r("ratio:\\n\\t"), "ratio:\\n\\t");
+  });
+});
