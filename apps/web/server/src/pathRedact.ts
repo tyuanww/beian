@@ -6,7 +6,7 @@ import { blenderBin, illustratorBin, pythonBin } from "./settings.js";
  *
  * `http(s)://` 等网址整段原样保留（`file://` 照常脱敏）。其余部分先把 URL 编码的分隔符 `%5C` / `%2F` 还原。手写的线性扫描器（不用回溯正则，避免 ReDoS）。规则：
  * - 路径起点：Windows 盘符 `X:\` / `X:/`（前一个字符不能是 ASCII 字母数字，`abc:\x` 不算）；`file://` 前缀先去掉；UNC `\\`（含 `\\?\`）；Unix 绝对路径 `/`（前一个字符不是 ASCII 字母数字或 `. _ - ~ / \`，
- *   所以紧贴中文也算起点，相对路径 `docs/x.md` 不算）；`~/` 与 `~用户名/`。Unix 路径至少要有一级目录（`/tmp` 原样保留）。
+ *   所以紧贴中文也算起点，相对路径 `docs/x.md` 不算）；`~/` 与 `~用户名/`；无盘符的反斜杠根路径 `\\Users\\bob\\a.pdf`（至少一级目录且末段带扩展名才算）。Unix 路径至少要有一级目录（`/tmp` 原样保留）。
  * - 路径在空白、引号、括号、逗号分号等中英文标点处结束；Windows / UNC 目录名中的空格见 scanPath。
  * - 末段带 1–8 位 ASCII 扩展名的当作文件名保留；扩展名后紧跟非 ASCII 字符（如「失败」）时，文件名到扩展名为止。
  *   堆栈里的 `文件名:行:列` 保留行列号。末段没有扩展名时整段换成「本机路径」；末段是「ASCII 开头 + 中文结尾」时中文部分视为后文保留。
@@ -43,6 +43,8 @@ function pathStart(s: string, i: number): number {
   if (ch === "\\" && s[i + 1] === "\\" && prev !== "\\") return i + 2;
   if (isAsciiLetter(ch) && !(prev && /[A-Za-z0-9]/.test(prev)) && s[i + 1] === ":" && isSep(s[i + 2] || "")) return i + 3;
   if (ch === "/" && !(prev && isAsciiWordish(prev))) return i + 1;
+  // 无盘符的反斜杠根路径 `\Users\bob\a.pdf`（如 `%5C` 解码而来）；是否脱敏见 scanAndRedact。
+  if (ch === "\\" && s[i + 1] !== "\\" && !(prev && isAsciiWordish(prev))) return i + 1;
   // `~/...` 与 `~user/...`：用户名也算目录，不保留。
   if (ch === "~" && !(prev && isAsciiWordish(prev))) {
     let k = i + 1;
@@ -141,14 +143,16 @@ function scanAndRedact(s: string): string {
       i += 1;
       continue;
     }
-    const isUnix = s[i] === "/" || s[i] === "~";
+    const bsRoot = s[i] === "\\" && s[i + 1] !== "\\";
+    const isUnix = s[i] === "/" || s[i] === "~" || bsRoot;
     const [end, lastSep] = scanPath(s, from, !isUnix);
-    if (isUnix && lastSep <= i) {
+    const [text, rest] = renderLeaf(s.slice(lastSep + 1, end));
+    // Unix / 反斜杠根路径至少一级目录；反斜杠根路径还要求末段是文件名，避免误伤 `\n\t` 之类转义。
+    if ((isUnix && lastSep <= i) || (bsRoot && text === LOCAL_PLACEHOLDER)) {
       out += s[i];
       i += 1;
       continue;
     }
-    const [text, rest] = renderLeaf(s.slice(lastSep + 1, end));
     if (isCjkText(out[out.length - 1])) out += " ";
     out += text;
     const after = rest || s[end];

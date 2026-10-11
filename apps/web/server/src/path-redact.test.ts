@@ -85,7 +85,7 @@ describe("redactLocalPaths: file:// and drive-letter boundary", () => {
   });
   it("drive letter must not match inside a word", () => {
     assert.equal(r("abc:/x/y.pdf"), "abc:y.pdf");
-    assert.equal(r("abc:\\x\\y.pdf"), "abc:\\x\\y.pdf");
+    assert.equal(r("abc:\\x\\y.pdf"), "abc:y.pdf");
     assert.equal(r("ratio:\\n\\t"), "ratio:\\n\\t");
   });
 });
