@@ -84,3 +84,22 @@ test("admin 侧栏仍有设置，裁剪后的空分组不进菜单", async ({ pa
   await expect(aside.getByText("残缺分组")).toHaveCount(0);
   expect(calls).toContain("/api/settings");
 });
+
+for (const theme of ["light", "dark"] as const) {
+  test(`外观弹窗在${theme}主题下是实心面并有遮罩`, async ({ page }) => {
+    await asRole(page, "reviewer");
+    await page.addInitScript((t) => { localStorage.setItem("wb_appearance", JSON.stringify({ theme: t })); localStorage.setItem("wb_appearance:ou_e2e_synthetic", JSON.stringify({ theme: t })); }, theme);
+    await page.goto("/reviewup");
+    await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
+    await page.locator(".account-row").click();
+    await page.getByRole("menuitem", { name: "外观" }).click();
+    const dialog = page.getByRole("dialog", { name: "外观" });
+    await expect(dialog).toBeVisible();
+    const box = page.locator(".appearance-modal .ant-modal-container, .appearance-modal .ant-modal-content").first();
+    const bg = await box.evaluate((el) => getComputedStyle(el).backgroundColor);
+    const surface = await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--surface").trim());
+    expect(bg).not.toMatch(/rgba\([^)]*,\s*0(\.\d+)?\)/);
+    expect(bg).toBe(await page.evaluate((c) => { const d = document.createElement("div"); d.style.color = c; document.body.append(d); const v = getComputedStyle(d).color; d.remove(); return v; }, surface));
+    await expect(page.locator(".appearance-modal .ant-modal-mask")).toBeVisible();
+  });
+}

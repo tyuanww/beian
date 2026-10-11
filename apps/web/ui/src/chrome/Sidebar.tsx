@@ -136,6 +136,8 @@ export function Sidebar({
         title="外观"
         footer={null}
         width={640}
+        rootClassName="appearance-modal"
+        mask
         onCancel={() => setAppearanceOpen(false)}
         destroyOnHidden
       >
