@@ -60,3 +60,13 @@ export function secretPlaceholder(f: Pick<SettingFieldView, "set" | "last4">): s
   if (!f.set) return "未填";
   return f.last4 ? `已填 ${f.last4}，留空不改` : "已填，留空不改";
 }
+
+/** 后端（2026-10-11）对非管理员 403 的动作：检查连接、费用账单/刷新、飞书发送测试。非管理员不发、不显示按钮。 */
+export function settingsActions(canAdmin: boolean): { probe: boolean; billing: boolean; sendTest: boolean } {
+  return { probe: canAdmin, billing: canAdmin, sendTest: canAdmin };
+}
+
+/** 设置页侧菜单的虚拟分组；非管理员不出「费用账单」。 */
+export function virtualGroups(canAdmin: boolean): string[] {
+  return settingsActions(canAdmin).billing ? ["外观", "开工板", "费用账单"] : ["外观", "开工板"];
+}

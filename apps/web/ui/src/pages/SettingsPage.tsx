@@ -7,7 +7,7 @@ import {
   type SettingFieldView,
   type SettingsView,
 } from "../api";
-import { initialDraft, normalizeSettings, resolveGroup, secretPlaceholder, valuesToSave } from "./settingsView";
+import { initialDraft, normalizeSettings, resolveGroup, secretPlaceholder, settingsActions, valuesToSave, virtualGroups } from "./settingsView";
 import { BillingPane } from "../features/billing/BillingPane";
 import { AppearancePane } from "../chrome/AppearancePane";
 import {
@@ -54,6 +54,7 @@ export function SettingsPage({
 }: Props) {
   const { message } = App.useApp();
   const canWrite = canAdmin;
+  const allow = settingsActions(canAdmin);
   const [view, setView] = useState<SettingsView | null>(null);
   const [draft, setDraft] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
@@ -95,7 +96,7 @@ export function SettingsPage({
   }, []);
 
   useEffect(() => {
-    if (group !== "费用账单") return;
+    if (group !== "费用账单" || !allow.billing) return;
     let cancelled = false;
     void api
       .billing()
@@ -120,17 +121,13 @@ export function SettingsPage({
       cancelled = true;
       window.removeEventListener("focus", onFocus);
     };
-  }, [group]);
+  }, [group, allow.billing]);
 
   const catalogGroup = view?.groups.find((g) => g.title === group);
   const menuItems = useMemo(() => {
-    const extra = [
-      { key: "外观", label: shortGroupLabel("外观") },
-      { key: "开工板", label: shortGroupLabel("开工板") },
-      { key: "费用账单", label: shortGroupLabel("费用账单") },
-    ];
+    const extra = virtualGroups(canAdmin).map((key) => ({ key, label: shortGroupLabel(key) }));
     return [...extra, ...(view?.groups || []).map((g) => ({ key: g.title, label: shortGroupLabel(g.title) }))];
-  }, [view]);
+  }, [view, canAdmin]);
 
   function setField(key: string, value: string) {
     setDraft((prev) => ({ ...prev, [key]: value }));
@@ -166,7 +163,8 @@ export function SettingsPage({
     }
   }
 
-  async function probe(id: string) {
+  async function probe(id: string): Promise<ProbeResult> {
+    if (!allow.probe) return { id, ok: false, message: "需管理员" } as ProbeResult;
     const rowId = id === "lark_send" ? "lark" : id;
     setProbes((prev) => ({ ...prev, [id]: { pending: true }, [rowId]: { pending: true } }));
     try {
@@ -292,6 +290,7 @@ export function SettingsPage({
   }
 
   async function refreshBills() {
+    if (!allow.billing) return;
     setBillBusy(true);
     try {
       setBilling(await api.refreshBilling());
@@ -374,7 +373,7 @@ export function SettingsPage({
           </div>
           <div className="settings-main-head">
             <h2 className="settings-group-title">{shortGroupLabel(group)}</h2>
-            {group === "费用账单" ? (
+            {group === "费用账单" && allow.billing ? (
               <Button type="primary" loading={billBusy} onClick={() => void refreshBills()}>
                 刷新费用
               </Button>
@@ -383,11 +382,13 @@ export function SettingsPage({
                 <Button onClick={() => void scanPc()} loading={scanBusy} disabled={!canAdmin}>
                   {canAdmin ? "扫描环境" : "需管理员"}
                 </Button>
-                <Button type="primary" onClick={() => void probeGroup()} loading={Boolean(probeBusy)}>
-                  {probeBusy || "检查全部"}
-                </Button>
+                {allow.probe ? (
+                  <Button type="primary" onClick={() => void probeGroup()} loading={Boolean(probeBusy)}>
+                    {probeBusy || "检查全部"}
+                  </Button>
+                ) : null}
               </div>
-            ) : groupProbes.length ? (
+            ) : groupProbes.length && allow.probe ? (
               <Button onClick={() => void probeGroup()} loading={Boolean(probeBusy)}>
                 {probeBusy || "检查连接"}
               </Button>
@@ -416,7 +417,7 @@ export function SettingsPage({
             />
           ) : null}
 
-          {group === "费用账单" ? <BillingPane billing={billing} /> : null}
+          {group === "费用账单" && allow.billing ? <BillingPane billing={billing} /> : null}
 
           {wizard && !hideWizard ? <WizardSteps guide={wizard} /> : null}
           {group === "本机依赖" ? <p className="wizard-intro">{HOST_INTRO}</p> : null}
@@ -437,7 +438,7 @@ export function SettingsPage({
               飞书登录
             </Button>
           ) : null}
-          {group === "飞书推送" ? (
+          {group === "飞书推送" && allow.sendTest ? (
             <Button type="primary" className="wizard-cta" loading={sendingPush} onClick={() => void sendPushTest()}>
               {openId ? "发送测试" : feishuAppReady(view?.groups) ? "先登录飞书" : "先完成登录设置"}
             </Button>
@@ -527,6 +528,7 @@ function SetupBoard({
   canAdmin: boolean;
   scanBusy: boolean;
 }) {
+  const allow = settingsActions(canAdmin);
   const done = BOARD_ROWS.map((row) => probes[row.id]).filter(
     (r): r is ProbeResult => Boolean(r) && !("pending" in r),
   );
@@ -568,7 +570,7 @@ function SetupBoard({
                 <h3>{row.title}</h3>
                 <p aria-live="polite">{msg}</p>
               </div>
-              {row.kind === "wizard" ? (
+              {row.kind === "wizard" && allow.probe ? (
                 <button
                   type="button"
                   className={st.cls === "is-bad" ? "setup-btn danger" : "setup-btn ghost"}
@@ -588,7 +590,7 @@ function SetupBoard({
                   )}
                 </button>
               ) : null}
-              {row.kind === "push" ? (
+              {row.kind === "push" && allow.sendTest ? (
                 <button type="button" className="setup-btn" onClick={onPush} disabled={busy} aria-busy={busy}>
                   {sending ? "发送中…" : pending ? "检查中…" : "发送测试"}
                 </button>

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { initialDraft, normalizeSettings, resolveGroup, secretPlaceholder, valuesToSave } from "./settingsView.js";
+import { settingsActions, virtualGroups, initialDraft, normalizeSettings, resolveGroup, secretPlaceholder, valuesToSave } from "./settingsView.js";
 
 const field = { key: "A", label: "A", kind: "text", help: "", restart: false, set: false, last4: "", value: "x" };
 const VIRTUAL = new Set(["外观", "开工板", "费用账单"]);
@@ -67,5 +67,16 @@ describe("stripped value / last4 (non-admin payload)", () => {
   it("derived without redirect_uri / python survives", () => {
     assert.equal(stripped.derived?.redirect_uri, undefined);
     assert.equal(stripped.derived?.python, undefined);
+  });
+});
+
+describe("admin-only actions (backend 403 for non-admin)", () => {
+  it("admin keeps probe / billing / send-test and 费用账单", () => {
+    assert.deepEqual(settingsActions(true), { probe: true, billing: true, sendTest: true });
+    assert.deepEqual(virtualGroups(true), ["外观", "开工板", "费用账单"]);
+  });
+  it("non-admin gets none and no 费用账单", () => {
+    assert.deepEqual(settingsActions(false), { probe: false, billing: false, sendTest: false });
+    assert.deepEqual(virtualGroups(false), ["外观", "开工板"]);
   });
 });
