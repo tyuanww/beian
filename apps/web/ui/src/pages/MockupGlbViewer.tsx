@@ -6,17 +6,45 @@ import { DEFAULT_GLB_VIEW, glbCameraDistances } from "./mockupGlbCamera";
 import { GLB_LOADING_TEXT, GLB_PREPARING_TEXT, type GlbProgress, glbInteractive, glbTotalKnown, glbViewerProgress, glbStatusText, readGlbWithProgress } from "./mockupGlbProgress";
 import { GLB_ENVIRONMENT, glbViewerExposure, glbRoomEmission } from "./mockupGlbLighting";
 import { type BackdropPreset, studioBackdrop } from "./mockupStudio";
+import { GLB_WEBP_UNSUPPORTED_TEXT, glbTextureGate, webpSupport } from "./mockupGlbTexture";
 
 type Bounds = { center: number[]; sphereRadius: number };
 type View = { theta: number; phi: number; zoom: number };
 const initialView = (): View => ({ ...DEFAULT_GLB_VIEW });
 const degrees = (radians: number) => radians * 180 / Math.PI;
 
-/** The display scene is disposable; the caller keeps downloads bound to the original generation. */
-export function MockupGlbViewer({ source, poster, backdrop, backgroundLight, productLight, onSourceError }: {
+type ViewerProps = {
   source: string; poster?: string; backdrop: BackdropPreset; backgroundLight: number; productLight: number;
   onSourceError: () => void;
-}) {
+};
+
+/** 贴图是 WebP 且本机真解码失败时不挂 model-viewer，只留效果图和一句说明；其余照旧加载。 */
+export function MockupGlbViewer({ textureFormat, ...props }: ViewerProps & { textureFormat?: string }) {
+  const [webp, setWebp] = useState<boolean | null>(() => webpSupport.known());
+  const gate = glbTextureGate(textureFormat, webp);
+  useEffect(() => {
+    if (gate !== "detecting") return;
+    let active = true;
+    void webpSupport.detect().then((ok) => { if (active) setWebp(ok); });
+    return () => { active = false; };
+  }, [gate]);
+  if (gate === "load") return <GlbScene {...props} />;
+  return <GlbPosterOnly poster={props.poster} note={gate === "fallback"} />;
+}
+
+function GlbPosterOnly({ poster, note }: { poster?: string; note: boolean }) {
+  const [posterFailed, setPosterFailed] = useState<string | null>(null);
+  return <>
+    {poster && posterFailed !== poster
+      ? <img className="mockup-glb-poster" src={poster} alt="" aria-hidden="true" onError={() => setPosterFailed(poster)} />
+      : <div className="mockup-glb-poster mockup-glb-skeleton" aria-hidden="true" />}
+    {note && <p role="status" className="mockup-glb-message mockup-glb-progress">{GLB_WEBP_UNSUPPORTED_TEXT}</p>}
+    <button type="button" className="mockup-dl mockup-glb-reset" aria-label="复位模型视角" disabled>复位</button>
+  </>;
+}
+
+/** The display scene is disposable; the caller keeps downloads bound to the original generation. */
+function GlbScene({ source, poster, backdrop, backgroundLight, productLight, onSourceError }: ViewerProps) {
   const set = backdrop === "white_set";
   const identity = `${source}:${set ? "room" : "plain"}`;
   const [asset, setAsset] = useState<{ identity: string; url: string; bounds?: Bounds } | null>(null);
