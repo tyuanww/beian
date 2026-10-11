@@ -71,6 +71,40 @@ describe("glb webp post-step", () => {
     assert.equal(glbTextureFormatParseCountForTest(), 2);
   });
 
+  it("re-reads the written temp file and keeps the original when structure counts differ", async () => {
+    const { NodeIO } = await import("@gltf-transform/core");
+    const path = join(dir, "e.glb");
+    const original = Buffer.from(await buildPngTexturedGlbForProbe(256));
+    writeFileSync(path, original);
+    // Converter drops a material/texture but still emits a smaller WebP GLB.
+    const dropping = async (input: Uint8Array) => {
+      const real = await convertGlbBytesToWebp(input);
+      const io = new NodeIO().registerExtensions((await import("@gltf-transform/extensions")).ALL_EXTENSIONS);
+      const doc = await io.readBinary(real.bytes);
+      for (const prim of doc.getRoot().listMeshes()[0].listPrimitives()) prim.dispose();
+      return { bytes: await io.writeBinary(doc), textures: real.textures };
+    };
+    const result = await compressGlbTexturesToWebp(path, { convert: dropping });
+    assert.deepEqual(result, { status: "failed", reason: "output_structure_mismatch" });
+    assert.ok(readFileSync(path).equals(original));
+  });
+
+  it("keeps the original when the written output cannot be fully re-read", async () => {
+    const path = join(dir, "f.glb");
+    const original = Buffer.from(await buildPngTexturedGlbForProbe(256));
+    writeFileSync(path, original);
+    const truncated = async (input: Uint8Array) => {
+      const real = await convertGlbBytesToWebp(input);
+      // Header + JSON stay valid (still says EXT_texture_webp) but the BIN chunk is truncated.
+      const bytes = Buffer.from(real.bytes.subarray(0, real.bytes.length - 512));
+      bytes.writeUInt32LE(bytes.length, 8);
+      return { bytes, textures: real.textures };
+    };
+    const result = await compressGlbTexturesToWebp(path, { convert: truncated });
+    assert.equal(result.status, "failed");
+    assert.ok(readFileSync(path).equals(original));
+  });
+
   it("encodes every texture through our sharp (not ndarray-pixels)", async () => {
     const sharp = (await import("sharp")).default;
     let calls = 0;

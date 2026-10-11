@@ -106,6 +106,47 @@ export async function convertGlbBytesToWebp(
   return { bytes, textures };
 }
 
+type GlbStructure = { meshes: number; primitives: number; materials: number; textures: number; images: number };
+
+/** GLB 容器严格校验：chunk 首尾相接、总长一致、bufferView 不越过 BIN。gltf-transform 读取较宽松，不能单靠它。 */
+function assertGlbContainer(bytes: Uint8Array): void {
+  const buf = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  if (buf.length < 20 || buf.toString("latin1", 0, 4) !== "glTF" || buf.readUInt32LE(4) !== 2) throw new Error("glb_header");
+  if (buf.readUInt32LE(8) !== buf.length) throw new Error("glb_length");
+  let offset = 12;
+  let json: { bufferViews?: { buffer?: number; byteOffset?: number; byteLength: number }[] } | null = null;
+  let binLength = 0;
+  while (offset < buf.length) {
+    if (offset + 8 > buf.length) throw new Error("glb_chunk_header");
+    const length = buf.readUInt32LE(offset);
+    const type = buf.readUInt32LE(offset + 4);
+    if (offset + 8 + length > buf.length) throw new Error("glb_chunk_length");
+    if (type === 0x4e4f534a) json = JSON.parse(buf.toString("utf8", offset + 8, offset + 8 + length));
+    else if (type === 0x004e4942) binLength = length;
+    offset += 8 + length;
+  }
+  if (offset !== buf.length || !json) throw new Error("glb_chunks");
+  for (const view of json.bufferViews || []) {
+    if ((view.buffer ?? 0) === 0 && (view.byteOffset ?? 0) + view.byteLength > binLength) throw new Error("glb_buffer_view");
+  }
+}
+
+/** 严格校验容器后完整 readBinary 一遍并数结构；读不出抛错。images 取 GLB JSON 的 images 数组长度。 */
+async function readGlbStructure(bytes: Uint8Array): Promise<GlbStructure> {
+  assertGlbContainer(bytes);
+  const [{ NodeIO }, { ALL_EXTENSIONS }] = await Promise.all([import("@gltf-transform/core"), import("@gltf-transform/extensions")]);
+  const doc = await new NodeIO().registerExtensions(ALL_EXTENSIONS).readBinary(bytes);
+  const root = doc.getRoot();
+  const json = await new NodeIO().registerExtensions(ALL_EXTENSIONS).binaryToJSON(bytes);
+  return {
+    meshes: root.listMeshes().length,
+    primitives: root.listMeshes().reduce((sum, mesh) => sum + mesh.listPrimitives().length, 0),
+    materials: root.listMaterials().length,
+    textures: root.listTextures().length,
+    images: (json.json.images || []).length,
+  };
+}
+
 /**
  * 原地转换一个新生成的 GLB。成功才原子替换；失败、无贴图、已是 WebP 或没变小都保留原文件。
  */
@@ -129,6 +170,18 @@ export async function compressGlbTexturesToWebp(
     if (!check || textureFormatOfGlbJson(check) !== "webp") {
       rmSync(tmp, { force: true });
       return { status: "failed", reason: "output_not_webp" };
+    }
+    // 改名前把落盘的临时文件完整读回，结构计数必须与原文件一致。
+    let structureOk = false;
+    try {
+      const [before, after] = await Promise.all([readGlbStructure(input), readGlbStructure(readFileSync(tmp))]);
+      structureOk = JSON.stringify(before) === JSON.stringify(after);
+    } catch {
+      structureOk = false;
+    }
+    if (!structureOk) {
+      rmSync(tmp, { force: true });
+      return { status: "failed", reason: "output_structure_mismatch" };
     }
     renameSync(tmp, path);
     return { status: "converted", beforeBytes, afterBytes: bytes.length, textures };
