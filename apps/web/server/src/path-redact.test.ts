@@ -219,3 +219,19 @@ describe("redactLocalPaths: only http/https count as URLs", () => {
     assert.equal(r("Http://x/a/b"), "Http://x/a/b");
   });
 });
+
+describe("redactLocalPaths: local paths embedded in http(s) URLs", () => {
+  it("embedded path segment becomes 本机路径, scheme+host kept", () => {
+    assert.equal(r("http://x/?p=C:\\Users\\bob\\a.pdf"), "http://x/?p=本机路径");
+    assert.equal(r("http://x/?p=C:\\Users\\bob\\a.pdf&q=1"), "http://x/?p=本机路径&q=1");
+    assert.equal(r("http://x/C:/Users/bob/a.pdf"), "http://x/本机路径");
+    assert.equal(r("http://x/?p=C:%5CUsers%5Cbob%5Ca.pdf"), "http://x/?p=本机路径");
+    assert.equal(r("http://x/?p=%5CUsers%5Cbob"), "http://x/?p=本机路径");
+    assert.equal(r("https://h:8787/open/Users/bob/a.pdf"), "https://h:8787/open/本机路径");
+    assert.equal(r("https://h/f?path=/home/bob/a.pdf#x"), "https://h/f?path=/本机路径#x");
+  });
+  it("normal URLs unchanged", () => {
+    assert.equal(r("https://example.com/api/v1/x.json"), "https://example.com/api/v1/x.json");
+    assert.equal(r("http://[::1]:8787/api/settings?id=1#f"), "http://[::1]:8787/api/settings?id=1#f");
+  });
+});
