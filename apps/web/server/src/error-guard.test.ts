@@ -164,3 +164,32 @@ describe("leak safety net on every exit", () => {
     }
   });
 });
+
+describe("leak residue: more local roots, home shortcuts, UNC and configured dirs", () => {
+  it("each class matches", () => {
+    for (const s of [
+      "/root/x",
+      "/var/folders/tz/T",
+      "/private/var/tmp",
+      "~/Desktop/a.ai",
+      "~bob/a.ai",
+      "\\\\srv\\share",
+      "\\\\192.168.1.9\\共享",
+    ]) assert.equal(hasLeakResidue(s), true, s);
+  });
+  it("configured data / tool dirs match (read once per message)", async () => {
+    const { saveSettings } = await import("./settings.js");
+    saveSettings({ BLENDER_EXECUTABLE: "/srv/tools/bin/blender" });
+    assert.equal(hasLeakResidue("x /srv/tools/bin/blender"), true);
+    assert.equal(hasLeakResidue(`x ${DATA_DIR}`), true);
+  });
+  it("tradeoff: a /root/ segment inside a relative path or URL path also hides (safety over fidelity)", () => {
+    assert.equal(hasLeakResidue("见 docs/root/a.md"), true);
+    assert.equal(guardPublicError("见 docs/root/a.md", "0000000b0009").hidden, true);
+  });
+  it("ordinary text is not hit", () => {
+    for (const s of ["~", "约 ~3 秒", "a~b", "rootkit/x", "/rooted 了", "http://x/a/b", "\\\\ 两个反斜杠", "共享盘\\\\"]) {
+      assert.equal(hasLeakResidue(s), false, s);
+    }
+  });
+});
