@@ -326,3 +326,15 @@ describe("redactLocalPaths: URL userinfo is replaced", () => {
     assert.equal(r("https://example.com/api?mail=a@b.com"), "https://example.com/api?mail=a@b.com");
   });
 });
+
+describe("redactLocalPaths: multi-layer URL encoding of separators", () => {
+  it("decodes %25-wrapped separators up to 3 layers", () => {
+    assert.equal(r("http://x/?f=%252FUsers%252Fbob%252Fa.pdf"), "http://x/?f=/本机路径");
+    assert.equal(r("%252Fhome%252Fbob%252Fa.pdf"), "a.pdf");
+    assert.equal(r("C:%255Cusers%255Cbob%255Ca.pdf"), "a.pdf");
+    assert.equal(r("%25252Fhome%25252Fbob%25252Fa.pdf"), "a.pdf");
+  });
+  it("other %25 sequences are left alone", () => {
+    assert.equal(r("进度 50%25 完成"), "进度 50%25 完成");
+  });
+});
