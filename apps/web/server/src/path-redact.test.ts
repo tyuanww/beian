@@ -89,3 +89,11 @@ describe("redactLocalPaths: file:// and drive-letter boundary", () => {
     assert.equal(r("ratio:\\n\\t"), "ratio:\\n\\t");
   });
 });
+
+describe("redactLocalPaths: stack trace locations", () => {
+  it("keeps file:line:col but drops directories", () => {
+    assert.equal(r("at main (/home/bob/app/src/x.ts:12:5)"), "at main (x.ts:12:5)");
+    assert.equal(r("at C:\\app\\src\\y.js:3"), "at y.js:3");
+    assert.equal(r("at /Users/bob/app/z.mjs:7:1"), "at z.mjs:7:1");
+  });
+});
