@@ -241,6 +241,25 @@ test('找茬哥 a2：WebP 版贴图解码出错（坏模型）自动改拉原始
   await expect(page.getByText('这台设备显示不了 3D')).toHaveCount(0);
 });
 
+test('先显示效果图和「正在加载 3D」，浏览器空闲后才开始拉 GLB',async({page})=>{
+  await page.addInitScript(()=>{
+    const held: Array<() => void> = [];
+    (window as any).requestIdleCallback=(cb: () => void)=>{held.push(cb);return held.length;};
+    (window as any).cancelIdleCallback=()=>undefined;
+    (window as any).__releaseIdle=()=>{for(const cb of held.splice(0))cb();};
+  });
+  let glbRequests=0;page.on('request',r=>{if(r.url().includes('/files/glb')&&!r.url().includes('download=1'))glbRequests++;});
+  await serve(page);await page.goto(`/mockup/${ID}`);
+  await expect(page.locator('.mockup-sheet-glb .mockup-glb-poster')).toBeVisible();
+  await expect(page.locator('.mockup-sheet-glb .mockup-glb-progress')).toContainText('正在加载 3D');
+  await page.waitForTimeout(800);
+  expect(glbRequests).toBe(0);
+  await expect(page.locator('model-viewer')).toHaveCount(0);
+  await page.evaluate(()=>(window as any).__releaseIdle());
+  await loaded(page);
+  expect(glbRequests).toBeGreaterThan(0);
+});
+
 test('找茬哥 b：默认与原始是两个带各自 ?v= 的不同地址，缓存分开',async({page})=>{
   const urls = new Set<string>();page.on('request',r=>{if(r.url().includes('/files/glb')&&!r.url().includes('download=1'))urls.add(new URL(r.url()).pathname+new URL(r.url()).search);});
   await serve(page,false,false,'webp',{primary:'500',versions:true});await page.goto(`/mockup/${ID}`);await loaded(page);

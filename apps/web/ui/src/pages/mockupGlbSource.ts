@@ -42,3 +42,23 @@ export function glbAttempts(gate: GlbTextureGate, urls: { primary: string; origi
   if (gate === "fallback") return [urls.original];
   return urls.primary === urls.original ? [urls.primary] : [urls.primary, urls.original];
 }
+
+type IdleScope = {
+  requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number;
+  cancelIdleCallback?: (id: number) => void;
+  setTimeout: (cb: () => void, ms: number) => unknown;
+  clearTimeout: (id: never) => void;
+};
+
+/**
+ * 浏览器空闲时再开始拉 GLB：效果图和页面先画出来，模型在后台下载，审稿员点到 3D 时多半已就绪。
+ * timeout 保证忙页面也不会一直不拉；没有 requestIdleCallback（Safari）时退 setTimeout。返回取消函数。
+ */
+export function whenIdle(run: () => void, timeoutMs = 1500, scope: IdleScope = globalThis as unknown as IdleScope): () => void {
+  if (typeof scope.requestIdleCallback === "function") {
+    const id = scope.requestIdleCallback(run, { timeout: timeoutMs });
+    return () => scope.cancelIdleCallback?.(id);
+  }
+  const id = scope.setTimeout(run, Math.min(200, timeoutMs));
+  return () => scope.clearTimeout(id as never);
+}

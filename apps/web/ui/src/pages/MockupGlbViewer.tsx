@@ -7,7 +7,7 @@ import { GLB_LOADING_TEXT, GLB_PREPARING_TEXT, type GlbProgress, glbInteractive,
 import { GLB_ENVIRONMENT, glbViewerExposure, glbRoomEmission } from "./mockupGlbLighting";
 import { type BackdropPreset, studioBackdrop } from "./mockupStudio";
 import { GLB_WEBP_UNSUPPORTED_TEXT, glbTextureGate, webpSupport } from "./mockupGlbTexture";
-import { glbAttempts } from "./mockupGlbSource";
+import { glbAttempts, whenIdle } from "./mockupGlbSource";
 
 type Bounds = { center: number[]; sphereRadius: number };
 type View = { theta: number; phi: number; zoom: number };
@@ -42,19 +42,26 @@ export function MockupGlbViewer({ textureFormat, originalSource, onSourceError, 
   errorRef.current = onSourceError;
   const exhausted = attempts.length > 0 && count >= attempts.length;
   useEffect(() => { if (exhausted) errorRef.current(); }, [exhausted, plan]);
+  // 先只放效果图，浏览器空闲时才开始在后台拉 GLB。
+  const [idle, setIdle] = useState(false);
+  useEffect(() => whenIdle(() => setIdle(true)), []);
   const source = attempts[count];
-  if (!source) return <GlbPosterOnly poster={props.poster} note={exhausted} />;
+  if (!source || !idle) return <GlbPosterOnly poster={props.poster} note={exhausted} loading={!exhausted} />;
   return <GlbScene key={source} {...props} source={source}
     onFail={() => setFailed((prev) => ({ plan, count: (prev.plan === plan ? prev.count : 0) + 1 }))} />;
 }
 
-function GlbPosterOnly({ poster, note }: { poster?: string; note: boolean }) {
+function GlbPosterOnly({ poster, note, loading }: { poster?: string; note: boolean; loading: boolean }) {
   const [posterFailed, setPosterFailed] = useState<string | null>(null);
   return <>
     {poster && posterFailed !== poster
       ? <img className="mockup-glb-poster" src={poster} alt="" aria-hidden="true" onError={() => setPosterFailed(poster)} />
       : <div className="mockup-glb-poster mockup-glb-skeleton" aria-hidden="true" />}
     {note && <p role="status" className="mockup-glb-message mockup-glb-progress">{GLB_WEBP_UNSUPPORTED_TEXT}</p>}
+    {loading && <div className="mockup-glb-message mockup-glb-progress">
+      <span className="mockup-glb-progress-visual" aria-hidden="true"><span>{GLB_LOADING_TEXT}</span></span>
+      <span role="status" className="sr-only">{GLB_LOADING_TEXT}</span>
+    </div>}
     <button type="button" className="mockup-dl mockup-glb-reset" aria-label="复位模型视角" disabled>复位</button>
   </>;
 }
