@@ -100,6 +100,21 @@ for (const theme of ["light", "dark"] as const) {
     const surface = await page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--surface").trim());
     expect(bg).not.toMatch(/rgba\([^)]*,\s*0(\.\d+)?\)/);
     expect(bg).toBe(await page.evaluate((c) => { const d = document.createElement("div"); d.style.color = c; document.body.append(d); const v = getComputedStyle(d).color; d.remove(); return v; }, surface));
-    await expect(page.locator(".appearance-modal .ant-modal-mask")).toBeVisible();
+    const mask = page.locator(".appearance-modal .ant-modal-mask");
+    await expect(mask).toBeVisible();
+    // 遮罩取 --mask token（经浏览器规范化后比较）。
+    const maskToken = await page.evaluate(() => {
+      const d = document.createElement("div");
+      d.style.backgroundColor = "var(--mask)";
+      document.body.append(d);
+      const v = getComputedStyle(d).backgroundColor;
+      d.remove();
+      return v;
+    });
+    expect(maskToken).not.toBe("rgba(0, 0, 0, 0)");
+    expect(await mask.evaluate((el) => getComputedStyle(el).backgroundColor)).toBe(maskToken);
+
+    await page.keyboard.press("Escape");
+    await expect(dialog).toBeHidden();
   });
 }

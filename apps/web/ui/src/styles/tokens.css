@@ -20,6 +20,7 @@
   --bg: #f8f5fa;
   --surface: #ffffff;
   --stage: #fffcfe;
+  --mask: rgba(20, 16, 24, 0.45);
   --col: #f6f3f8;
   --ink: #1c1a1f;
   --muted: #6b6572;
@@ -63,6 +64,7 @@ html[data-theme="dark"] {
   --bg: #141018;
   --surface: #2a2232;
   --stage: #221b28;
+  --mask: rgba(8, 6, 10, 0.6);
   --col: #322838;
   --ink: #f6f1f8;
   --muted: #c9b8d4;

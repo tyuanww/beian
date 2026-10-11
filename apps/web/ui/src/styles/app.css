@@ -1435,7 +1435,7 @@ html[data-theme="dark"] .workspace {
 
 /* 头像菜单「外观」弹窗：实心 --surface 面，背后压暗遮罩，浅/深色都不透出页面。 */
 .appearance-modal .ant-modal-mask {
-  background: rgba(20, 16, 24, 0.45);
+  background: var(--mask);
 }
 
 .appearance-modal .ant-modal-container,

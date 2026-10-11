@@ -63,6 +63,7 @@ Figma 变量集 `审稿室`（Light）：
 | brand/purple-mist | `#EDE7F1` | 浅雾、弱分割 |
 | surface/bg | `#F8F5FA` | 页底 |
 | surface/white | `#FFFFFF` | 主区 |
+| mask | `rgba(20,16,24,.45)`（深色 `rgba(8,6,10,.6)`） | 弹窗背后遮罩，token `--mask`（2026-10-11） |
 | text/ink | `#1C1A1F` | 正文 |
 | text/mute | `#6B6572` | 次要 |
 | line/subtle | `#E7E2EC` | 线 |
