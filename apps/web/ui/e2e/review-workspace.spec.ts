@@ -367,13 +367,14 @@ test("手机 <720：只看稿和签字/退回，注明逐条下结论仅电脑�
   await page.screenshot({ path: testInfo.outputPath("review-mobile-dark.png") });
 });
 
-test("深色主题：状态标签用更浅专用色，深底上过 AA（已批第 38 行）", async ({ page, syntheticApi }) => {
+test("深色主题：状态标签用 dark-tags.md 专用亮版，深底上过 AA（已批第 38 行）", async ({ page, syntheticApi }) => {
   const task = reviewTask();
   syntheticApi.tasks.push(task);
   await page.goto(`/review/${task.id}`);
   await page.evaluate(() => document.documentElement.setAttribute("data-theme", "dark"));
   const tag = page.getByTestId("review-dock").locator(".ant-tag.t-pend").first();
-  await expect(tag).toHaveCSS("color", "rgb(255, 192, 105)");
+  await expect(tag).toHaveCSS("color", "rgb(242, 180, 76)");
+  await expect(tag).toHaveCSS("background-color", "rgb(67, 51, 46)");
   const ratio = await tag.evaluate((el) => {
     const rgb = (s: string) => (s.match(/\d+(\.\d+)?/g) || []).slice(0, 3).map(Number);
     const lum = ([r, g, b]: number[]) => [r, g, b].map((v) => { const c = v / 255; return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; })

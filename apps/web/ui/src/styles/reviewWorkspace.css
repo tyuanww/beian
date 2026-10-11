@@ -72,14 +72,15 @@ html[data-theme="dark"] .review-thumbs { background: #1f1a24; }
 .review-flat .ant-tag.t-pend { color: #8a5a00; background: #fff7e6; border-color: #ffd591; }
 .review-flat .ant-tag.t-err { color: #a8071a; background: #fff1f0; border-color: #ffa39e; }
 .review-flat .ant-tag.t-ok { color: #237804; background: #f6ffed; border-color: #b7eb8f; }
-/* 已批第 38 行：深色主题用各自更浅的专用色；对比度（字/标签底、字/页底 #221b28）都 ≥ 6.5:1，过 AA。 */
-html[data-theme="dark"] .review-flat .ant-tag.t-pend { color: #ffc069; background: #2b2111; border-color: #594214; }
-html[data-theme="dark"] .review-flat .ant-tag.t-err { color: #ff7875; background: #2a1215; border-color: #5c2223; }
-html[data-theme="dark"] .review-flat .ant-tag.t-ok { color: #95de64; background: #162312; border-color: #274916; }
-html[data-theme="dark"] .review-th.s-err .review-th-s, html[data-theme="dark"] .review-submit-error { color: #ff7875; }
-html[data-theme="dark"] .review-th.s-done .review-th-s { color: #95de64; }
-html[data-theme="dark"] .review-zero { color: #95de64; background: #162312; }
-html[data-theme="dark"] .review-miss { color: #ffc069; background: #2b2111; }
+/* 已批第 38 行（2026-10-11，按 review-a-impl/dark-tags.md）：深色主题（含「跟随系统」解析成深色，同样落到 html[data-theme=dark]）
+   标签用深色专用亮版；底 = 文字色 16% 叠主台，描边 = 32% 叠主台。文字 vs 标签底 ≥5.09:1、vs 主台 ≥6.64:1，过 AA。 */
+html[data-theme="dark"] .review-flat .ant-tag.t-pend { color: #F2B44C; background: #43332E; border-color: #654C34; }
+html[data-theme="dark"] .review-flat .ant-tag.t-err { color: #FF7A7F; background: #452A36; border-color: #693944; }
+html[data-theme="dark"] .review-flat .ant-tag.t-ok { color: #7BC86C; background: #303733; border-color: #3E523E; }
+html[data-theme="dark"] .review-th.s-err .review-th-s, html[data-theme="dark"] .review-submit-error { color: #FF7A7F; }
+html[data-theme="dark"] .review-th.s-done .review-th-s { color: #7BC86C; }
+html[data-theme="dark"] .review-zero { color: #7BC86C; background: #303733; }
+html[data-theme="dark"] .review-miss { color: #F2B44C; background: #43332E; }
 .review-flat .ant-tag.t-ign { color: #4a4550; background: #f5f5f5; border-color: #d9d9d9; }
 .review-workspace .pin { transform: scale(var(--review-pin-scale, 1)); }
 
