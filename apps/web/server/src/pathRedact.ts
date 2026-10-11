@@ -415,6 +415,9 @@ const LEAK_RESIDUE = [
   /\b(?:bearer|basic)\s+(?=[A-Za-z0-9._~+/=-]*[0-9._~+/=-])[A-Za-z0-9._~+/=-]{6,}/i,
   // `Basic ` 后一整串 base64（无空格）至少 8 位，且除首字母外还有大写字母，或含数字、`+`、`/`、`=`
   //（`Basic dXNlcjpwYXNz` 命中；`Basic settings`、`Basic Settings` 不命中）。关键字不分大小写，串本身区分。
+  // 单个盘符字母 + 冒号 + 占位词，后面还有内容（打样链 publicMockupError 只换掉 `/客户` 时剩 `D:本机稿件 张三/报价`）。
+  // 选兜底而不是调换打样链顺序：调换会改变已有打样文案（`本机稿件` → `稿件文件`）和管理员一致性。
+  /(?:^|[^A-Za-z])[A-Za-z]:(?:本机稿件|本机路径)\s*\S/,
   /\b[Bb][Aa][Ss][Ii][Cc]\s+(?=[A-Za-z0-9+/=]{8,}(?![A-Za-z0-9+/=]))[A-Za-z0-9+/=][a-z]*[A-Z0-9+/=]/,
   // 查询参数名像凭据：password / passwd / pwd / pw / token / secret / key，或以 `_` `-` `.` 接这些词结尾
   //（`api_key`、`access_token`、`client_secret`）。大小写不限；`monkey`、`keyword`、`tokens_left` 不算。
