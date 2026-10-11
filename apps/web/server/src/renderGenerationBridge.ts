@@ -7,6 +7,7 @@ import { inspectRenderGenerationGroup, renderGenerationProcessSupported, signalR
 import { contentFingerprint, type QualityVerifier } from "./renderGenerations.js";
 import { isRenderLifecycle, RenderBudgetError, type RenderLifecycle } from "./renderGenerationBudget.js";
 import type { IsolatedUpgradeCandidate } from "./renderGenerationUpgradeCandidate.js";
+import { compressGlbTexturesToWebp, logGlbWebpResult, type GlbWebpOptions, type GlbWebpResult } from "./glbWebp.js";
 
 export const RENDER_GENERATION_OUTPUT_KEYS: Readonly<Record<string, string>> = Object.freeze({
   front_right: "white_a", back_left: "white_b", glb: "glb",
@@ -57,6 +58,8 @@ export type RenderBridgeOptions = {
   timeoutMs?: number;
   terminationGraceMs?: number;
   upgradeCandidate?: IsolatedUpgradeCandidate;
+  /** 候选 GLB 贴图转 WebP q90；测试可注入。默认 compressGlbTexturesToWebp。 */
+  compressGlb?: (path: string, opts?: GlbWebpOptions) => Promise<GlbWebpResult>;
 };
 
 type ResolvedBridgeOptions = {
@@ -66,6 +69,7 @@ type ResolvedBridgeOptions = {
   timeoutMs: number;
   terminationGraceMs: number;
   upgradeCandidate?: IsolatedUpgradeCandidate;
+  compressGlb?: (path: string, opts?: GlbWebpOptions) => Promise<GlbWebpResult>;
 };
 
 export type RenderBridgeValidation = {
@@ -336,6 +340,52 @@ function command(options: ResolvedBridgeOptions, request: Json, observer: Render
 }
 
 /** Async RF-02 validation + isolated execution; jobs wiring requires explicit local runtime registration. */
+/**
+ * 在捕获封存凭证之前把候选 GLB 贴图转 WebP q90，使 seal proof / content_fingerprint 绑定的就是转换后的字节。
+ * 失败、跳过都保留 worker 原 GLB 与其原凭证，只记日志，不让出图失败。
+ * 注意：worker 的 artifact_checks.glb 针对转换前字节；转换后由 glbWebp 复核 GLB 结构与 EXT_texture_webp。
+ */
+/** 压缩至少要留的预算：2 分钟，或按文件大小估算的转换时间（取大者）。 */
+const GLB_WEBP_MIN_BUDGET_MS = 2 * 60 * 1000;
+function estimateGlbWebpMs(bytes: number): number {
+  return 10_000 + Math.ceil(bytes / (1024 * 1024)) * 5_000;
+}
+
+async function compressCandidateGlb(
+  candidateDir: string,
+  original: OutputEvidence,
+  deadline: number,
+  signal: AbortSignal | undefined,
+  compress: ((path: string, opts?: GlbWebpOptions) => Promise<GlbWebpResult>) | undefined,
+  jobId: string | undefined,
+): Promise<OutputEvidence> {
+  const label = `render-generation ${jobId || "candidate"}`;
+  const required = Math.max(GLB_WEBP_MIN_BUDGET_MS, estimateGlbWebpMs(original.bytes));
+  const left = () => deadline - performance.now();
+  // 压缩只能省体积，不能因时间把成功的出图变成失败：预算不够就跳过，保留原 GLB 与原凭证。
+  if (left() < required) {
+    logGlbWebpResult(label, { status: "skipped", reason: "deadline_insufficient" });
+    return original;
+  }
+  let result: GlbWebpResult;
+  try {
+    result = await (compress || compressGlbTexturesToWebp)(original.path, {
+      lockWaitMs: Math.max(0, left() - required),
+      // 改名前再看一次：剩余预算仍须够后续凭证/封存步骤（≥ 最低预算的一半），否则丢弃结果。
+      beforeCommit: () => !signal?.aborted && left() >= GLB_WEBP_MIN_BUDGET_MS / 2,
+    });
+  } catch (error) {
+    result = { status: "failed", reason: (error instanceof Error ? error.message : String(error)).slice(0, 200) };
+  }
+  logGlbWebpResult(label, result);
+  // 用户取消仍按原语义失败；超时不在这里判定（交给后续正常检查点）。
+  if (signal?.aborted) throw new RenderBridgeError("render_generation_cancelled", "cancelled");
+  if (result.status !== "converted") return original;
+  return fileIdentity(candidateDir, original.path, FILE_LIMIT, () => {
+    if (signal?.aborted) throw new RenderBridgeError("render_generation_cancelled", "cancelled");
+  });
+}
+
 export function createRenderGenerationBridge(config: RenderBridgeOptions) {
   const options: ResolvedBridgeOptions = {
     pythonExecutable: absolute(config.pythonExecutable),
@@ -344,6 +394,7 @@ export function createRenderGenerationBridge(config: RenderBridgeOptions) {
     timeoutMs: config.timeoutMs ?? 1_260_000,
     terminationGraceMs: config.terminationGraceMs ?? 5000,
     upgradeCandidate: config.upgradeCandidate,
+    compressGlb: config.compressGlb,
   };
   for (const [value, ceiling] of [[options.timeoutMs, 1_260_000], [options.terminationGraceMs, 5000]]) {
     if (!Number.isSafeInteger(value) || value <= 0 || value > ceiling) invalid("time_budget");
@@ -503,6 +554,7 @@ export function createRenderGenerationBridge(config: RenderBridgeOptions) {
           if (evidence.sha256 !== row.sha256 || evidence.bytes !== row.bytes) invalid("output_identity");
           outputs[key] = evidence;
         }
+        if (outputs.glb) outputs.glb = await compressCandidateGlb(candidateDir, outputs.glb, Math.min(binding.deadline, observer.lifecycle?.deadline ?? Infinity), observer.signal, options.compressGlb, observer.context?.jobId);
         if (!Array.isArray(result.optional_warnings) || result.optional_warnings.length > OUTPUT_KEYS.size) {
           invalid("optional_warnings");
         }
