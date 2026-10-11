@@ -1,0 +1,256 @@
+import assert from "node:assert/strict";
+import { existsSync, mkdirSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import { dirname, join } from "node:path";
+import { describe, it } from "node:test";
+import { makeTestTempDir } from "./testTemp.js";
+
+process.env.VITEST = "1";
+process.env.WB_DATA_DIR = makeTestTempDir("beian-glb-webp-");
+
+const {
+  buildPngTexturedGlbForProbe,
+  cleanupStaleGlbWebpTemps,
+  glbWebpTempPath,
+  compressGlbTexturesToWebp,
+  convertGlbBytesToWebp,
+  glbTextureFormat,
+  glbTextureFormatParseCountForTest,
+  readGlbJson,
+  resetGlbTextureFormatCacheForTest,
+} = await import("./glbWebp.js");
+const { enqueue, resetJobsTestHooks, setJobsTestHooks } = await import("./jobs.js");
+const { loadMockup, publicMockup, publicMockupSummary, saveMockup } = await import("./mockup.js");
+
+const dir = makeTestTempDir("beian-glb-webp-unit-");
+
+describe("glb webp post-step", () => {
+  it("converts PNG textures to EXT_texture_webp and reports webp", async () => {
+    const path = join(dir, "a.glb");
+    writeFileSync(path, await buildPngTexturedGlbForProbe(128));
+    assert.equal(glbTextureFormat(path), "png");
+    const result = await compressGlbTexturesToWebp(path);
+    assert.equal(result.status, "converted");
+    const json = readGlbJson(path)!;
+    assert.ok((json.extensionsUsed as string[]).includes("EXT_texture_webp"));
+    const images = json.images as { mimeType?: string }[];
+    assert.ok(images.every((img) => img.mimeType === "image/webp"));
+    assert.equal(glbTextureFormat(path), "webp");
+    const again = await compressGlbTexturesToWebp(path);
+    assert.deepEqual(again.status === "skipped" && again.reason, "already_webp");
+  });
+
+  it("keeps the original PNG GLB byte-for-byte when conversion throws", async () => {
+    const path = join(dir, "b.glb");
+    const original = Buffer.from(await buildPngTexturedGlbForProbe(32));
+    writeFileSync(path, original);
+    const result = await compressGlbTexturesToWebp(path, { convert: async () => { throw new Error("boom"); } });
+    assert.equal(result.status, "failed");
+    assert.ok(readFileSync(path).equals(original));
+    assert.equal(glbTextureFormat(path), "png");
+  });
+
+  it("rejects non-GLB input without touching it and omits texture_format", async () => {
+    const path = join(dir, "c.glb");
+    writeFileSync(path, "not a glb");
+    const result = await compressGlbTexturesToWebp(path);
+    assert.deepEqual(result, { status: "failed", reason: "not_glb" });
+    assert.equal(readFileSync(path, "utf8"), "not a glb");
+    assert.equal(glbTextureFormat(path), undefined);
+    assert.equal(glbTextureFormat(join(dir, "missing.glb")), undefined);
+  });
+
+  it("caches the parse by path+size+mtime: repeat reads do not re-parse, a changed file does", async () => {
+    resetGlbTextureFormatCacheForTest();
+    const path = join(dir, "d.glb");
+    writeFileSync(path, await buildPngTexturedGlbForProbe(16));
+    utimesSync(path, new Date(1_700_000_000_000), new Date(1_700_000_000_000));
+    for (let i = 0; i < 5; i++) assert.equal(glbTextureFormat(path), "png");
+    assert.equal(glbTextureFormatParseCountForTest(), 1);
+    const result = await compressGlbTexturesToWebp(path);
+    assert.equal(result.status, "converted");
+    for (let i = 0; i < 5; i++) assert.equal(glbTextureFormat(path), "webp");
+    assert.equal(glbTextureFormatParseCountForTest(), 2);
+  });
+
+  it("re-reads the written temp file and keeps the original when structure counts differ", async () => {
+    const { NodeIO } = await import("@gltf-transform/core");
+    const path = join(dir, "e.glb");
+    const original = Buffer.from(await buildPngTexturedGlbForProbe(256));
+    writeFileSync(path, original);
+    // Converter drops a material/texture but still emits a smaller WebP GLB.
+    const dropping = async (input: Uint8Array) => {
+      const real = await convertGlbBytesToWebp(input);
+      const io = new NodeIO().registerExtensions((await import("@gltf-transform/extensions")).ALL_EXTENSIONS);
+      const doc = await io.readBinary(real.bytes);
+      for (const prim of doc.getRoot().listMeshes()[0].listPrimitives()) prim.dispose();
+      return { bytes: await io.writeBinary(doc), textures: real.textures };
+    };
+    const result = await compressGlbTexturesToWebp(path, { convert: dropping });
+    assert.deepEqual(result, { status: "failed", reason: "output_structure_mismatch" });
+    assert.ok(readFileSync(path).equals(original));
+  });
+
+  it("keeps the original when the written output cannot be fully re-read", async () => {
+    const path = join(dir, "f.glb");
+    const original = Buffer.from(await buildPngTexturedGlbForProbe(256));
+    writeFileSync(path, original);
+    const truncated = async (input: Uint8Array) => {
+      const real = await convertGlbBytesToWebp(input);
+      // Header + JSON stay valid (still says EXT_texture_webp) but the BIN chunk is truncated.
+      const bytes = Buffer.from(real.bytes.subarray(0, real.bytes.length - 512));
+      bytes.writeUInt32LE(bytes.length, 8);
+      return { bytes, textures: real.textures };
+    };
+    const result = await compressGlbTexturesToWebp(path, { convert: truncated });
+    assert.equal(result.status, "failed");
+    assert.ok(readFileSync(path).equals(original));
+  });
+
+  it("serializes concurrent compressions in-process (no overlap)", async () => {
+    const a = join(dir, "g1.glb");
+    const b = join(dir, "g2.glb");
+    writeFileSync(a, await buildPngTexturedGlbForProbe(256));
+    writeFileSync(b, await buildPngTexturedGlbForProbe(256));
+    const spans: { name: string; start: number; end: number }[] = [];
+    let active = 0;
+    let maxActive = 0;
+    const slow = (name: string) => async (input: Uint8Array) => {
+      const start = performance.now();
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+      await new Promise((r) => setTimeout(r, 60));
+      const out = await convertGlbBytesToWebp(input);
+      active -= 1;
+      spans.push({ name, start, end: performance.now() });
+      return out;
+    };
+    const [ra, rb] = await Promise.all([
+      compressGlbTexturesToWebp(a, { convert: slow("a") }),
+      compressGlbTexturesToWebp(b, { convert: slow("b") }),
+    ]);
+    assert.equal(ra.status, "converted");
+    assert.equal(rb.status, "converted");
+    assert.equal(maxActive, 1);
+    assert.deepEqual(spans.map((s) => s.name), ["a", "b"]);
+    assert.ok(spans[1].start >= spans[0].end);
+  });
+
+  it("a failing compression does not wedge the lock", async () => {
+    const path = join(dir, "h.glb");
+    writeFileSync(path, await buildPngTexturedGlbForProbe(256));
+    const failed = compressGlbTexturesToWebp(path, { convert: async () => { throw new Error("boom"); } });
+    const next = compressGlbTexturesToWebp(path);
+    assert.equal((await failed).status, "failed");
+    assert.equal((await next).status, "converted");
+  });
+
+  it("startup cleanup removes only our stale temp files", () => {
+    const root = makeTestTempDir("beian-glb-webp-clean-");
+    const job = join(root, "abcdef000009");
+    const cand = join(job, ".render-generations", ".candidate-x");
+    mkdirSync(cand, { recursive: true });
+    const old = Date.now() - 11 * 60 * 1000;
+    const files: Record<string, { at: string; age: number }> = {
+      ".box.glb.webp-123-1700000000000.tmp": { at: job, age: old },
+      ".glb.webp-9-1700000000001.tmp": { at: cand, age: old },
+      ".box.glb.webp-123-1700000000002.tmp ": { at: job, age: old },
+      "box.glb.webp-123-1700000000003.tmp": { at: job, age: old },
+      ".box.png.webp-1-2.tmp": { at: job, age: old },
+      ".box.glb.webp-x-1.tmp": { at: job, age: old },
+      "box.glb": { at: job, age: old },
+      ".fresh.glb.webp-1-2.tmp": { at: job, age: Date.now() },
+    };
+    for (const [name, { at, age }] of Object.entries(files)) {
+      const p = join(at, name);
+      writeFileSync(p, "x");
+      utimesSync(p, new Date(age), new Date(age));
+    }
+    assert.equal(cleanupStaleGlbWebpTemps(root), 2);
+    const left = (at: string, name: string) => existsSync(join(at, name));
+    assert.equal(left(job, ".box.glb.webp-123-1700000000000.tmp"), false);
+    assert.equal(left(cand, ".glb.webp-9-1700000000001.tmp"), false);
+    for (const name of [".box.glb.webp-123-1700000000002.tmp ", "box.glb.webp-123-1700000000003.tmp", ".box.png.webp-1-2.tmp", ".box.glb.webp-x-1.tmp", "box.glb", ".fresh.glb.webp-1-2.tmp"]) {
+      assert.equal(left(name === ".glb.webp-9-1700000000001.tmp" ? cand : job, name), true, name);
+    }
+    assert.equal(cleanupStaleGlbWebpTemps(join(root, "missing")), 0);
+  });
+
+  it("temp names produced by compression match the cleanup pattern", () => {
+    const root = makeTestTempDir("beian-glb-webp-name-");
+    for (const [index, name] of ["box.glb", "BOX.GLB", "glb"].entries()) {
+      mkdirSync(join(root, String(index)));
+      const tmp = glbWebpTempPath(join(root, String(index), name));
+      writeFileSync(tmp, "x");
+    }
+    assert.equal(cleanupStaleGlbWebpTemps(root, { now: Date.now() + 11 * 60 * 1000 }), 3);
+  });
+
+  it("encodes every texture through our sharp (not ndarray-pixels)", async () => {
+    const sharp = (await import("sharp")).default;
+    let calls = 0;
+    const spy = ((...args: Parameters<typeof sharp>) => {
+      calls += 1;
+      return sharp(...args);
+    }) as typeof sharp;
+    const { textures } = await convertGlbBytesToWebp(await buildPngTexturedGlbForProbe(64), 90, spy);
+    assert.equal(textures, 1);
+    assert.equal(calls, textures);
+  });
+
+  it("pins @gltf-transform/functions: encoder present => sharp path only, ndarray-pixels never used", () => {
+    const require = createRequire(import.meta.url);
+    const pkgDir = dirname(dirname(require.resolve("@gltf-transform/functions")));
+    const pkg = JSON.parse(readFileSync(join(pkgDir, "package.json"), "utf8")) as { version: string };
+    assert.equal(pkg.version, "4.5.1", "bump requires re-verifying the encoder branch below");
+    const src = readFileSync(join(pkgDir, "dist", "index.js"), "utf8");
+    const body = src.slice(src.indexOf("async function compressTexture("), src.indexOf("async function _encodeWithNdarrayPixels("));
+    assert.match(body, /const dstImage = encoder \? await _encodeWithSharp\(/);
+    const sharpFn = body.slice(body.indexOf("async function _encodeWithSharp("));
+    assert.doesNotMatch(sharpFn, /getPixels|savePixels/);
+    assert.match(sharpFn, /instance\.resize\(/);
+  });
+});
+
+async function runFreshMockup(id: string, compressGlb?: (path: string) => Promise<never>) {
+  const root = join(process.env.WB_DATA_DIR || "", "mockups", id);
+  const glb = Buffer.from(await buildPngTexturedGlbForProbe(128));
+  setJobsTestHooks({
+    runPack: async () => {
+      mkdirSync(root, { recursive: true });
+      writeFileSync(join(root, "box.glb"), glb);
+      return { code: 0, stdout: "", stderr: "", timedOut: false };
+    },
+    ...(compressGlb ? { compressGlb } : {}),
+  });
+  saveMockup({ id, status: "queued", created_at: "2026-10-11T00:00:00.000Z", files: [], job_kind: "mockup", job_status: "queued" });
+  try {
+    enqueue({ kind: "mockup", id });
+    for (let i = 0; i < 300 && loadMockup(id)?.job_status !== "succeeded" && loadMockup(id)?.job_status !== "failed"; i++) {
+      await new Promise((r) => setTimeout(r, 10));
+    }
+  } finally {
+    resetJobsTestHooks();
+  }
+  return { job: loadMockup(id)!, root, glb };
+}
+
+describe("mockup pipeline + API texture_format", () => {
+  it("fresh mockup GLB is converted and API reports texture_format=webp", async () => {
+    const { job, root } = await runFreshMockup("abcdef000001");
+    assert.equal(job.job_status, "succeeded");
+    assert.equal(glbTextureFormat(join(root, "box.glb")), "webp");
+    const detail = publicMockup(job).files.find((f) => f.key === "glb");
+    assert.deepEqual(detail, { key: "glb", name: "box.glb", texture_format: "webp" });
+    const summary = publicMockupSummary(job).files.find((f) => f.key === "glb");
+    assert.equal(summary?.texture_format, "webp");
+    assert.equal(publicMockup(job).files.some((f) => f.key !== "glb" && "texture_format" in f), false);
+  });
+
+  it("conversion failure keeps PNG GLB, mockup still succeeds, texture_format=png", async () => {
+    const { job, root, glb } = await runFreshMockup("abcdef000002", async () => { throw new Error("converter down"); });
+    assert.equal(job.job_status, "succeeded");
+    assert.ok(readFileSync(join(root, "box.glb")).equals(glb));
+    assert.equal(publicMockup(job).files.find((f) => f.key === "glb")?.texture_format, "png");
+  });
+});

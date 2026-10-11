@@ -1,3 +1,4 @@
+import { glbTextureFormat, type GlbTextureFormat } from "./glbWebp.js";
 import {
   closeSync,
   copyFileSync,
@@ -557,7 +558,7 @@ function publicMockupSummaryFields(job: MockupJob) {
     error: legacyError || jobError,
     created_at: job.created_at,
     owner: job.created_by || job.owner,
-    files: (job.files || []).map((f) => ({ key: f.key, name: f.name })),
+    files: (job.files || []).map((f) => publicMockupFile(job, f)),
     job_kind: job.job_kind || "mockup",
     job_status: job.job_status,
     job_stage: job.job_stage,
@@ -1758,11 +1759,20 @@ function liveReadPanelFiles(jobId: string): MockupJob["files"] {
   return files;
 }
 
-function visibleMockupFiles(job: MockupJob): { key: string; name: string }[] {
-  const byKey = new Map<string, { key: string; name: string }>();
+type PublicMockupFile = { key: string; name: string; texture_format?: GlbTextureFormat };
+
+/** GLB 才带 texture_format（"webp" | "png"），由 extensionsUsed 判定并按文件缓存；读不出则不输出。 */
+function publicMockupFile(job: MockupJob, file: { key: string; name: string; path?: string }): PublicMockupFile {
+  if (file.key !== "glb") return { key: file.key, name: file.name };
+  const format = glbTextureFormat(fileOf(job, "glb")?.path);
+  return format ? { key: file.key, name: file.name, texture_format: format } : { key: file.key, name: file.name };
+}
+
+function visibleMockupFiles(job: MockupJob): PublicMockupFile[] {
+  const byKey = new Map<string, PublicMockupFile>();
   for (const file of job.files || []) {
     if (!file.key || !file.name) continue;
-    byKey.set(file.key, { key: file.key, name: file.name });
+    byKey.set(file.key, publicMockupFile(job, file));
   }
   for (const file of liveReadPanelFiles(job.id)) {
     if (!byKey.has(file.key)) byKey.set(file.key, { key: file.key, name: file.name });

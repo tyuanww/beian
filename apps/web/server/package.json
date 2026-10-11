@@ -13,6 +13,9 @@
     "node": ">=20"
   },
   "dependencies": {
+    "@gltf-transform/core": "4.5.1",
+    "@gltf-transform/extensions": "4.5.1",
+    "@gltf-transform/functions": "4.5.1",
     "@hono/node-server": "^1.19.0",
     "busboy": "^1.6.0",
     "hono": "^4.9.6",

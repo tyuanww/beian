@@ -72,6 +72,29 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
           & (Join-Path $env:GITHUB_WORKSPACE "scripts\windows\release-staging-rehearsal.ps1")
+      - name: Set up Node for GLB WebP conversion check
+        uses: actions/setup-node@v4
+        with:
+          # Production Windows runs Node 20 LTS (scripts/windows/README.md, docs/adr-001-frontend-stack.md).
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - name: Real npm ci + GLB WebP conversion of a small test GLB (Windows natives)
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          npm ci --no-audit --no-fund
+          if ($LASTEXITCODE -ne 0) { throw "npm ci failed exit=$LASTEXITCODE" }
+          Push-Location (Join-Path $env:GITHUB_WORKSPACE "apps\web\server")
+          try {
+            & (Join-Path $env:GITHUB_WORKSPACE "node_modules\.bin\tsx.cmd") "src\glbWebpProbe.ts"
+            if ($LASTEXITCODE -ne 0) { throw "GLB WebP probe failed exit=$LASTEXITCODE" }
+            # Synthetic GLB with the real mockup texture layout (no customer data); logs peak RSS.
+            & (Join-Path $env:GITHUB_WORKSPACE "node_modules\.bin\tsx.cmd") "src\glbWebpMemoryProbe.ts"
+            if ($LASTEXITCODE -ne 0) { throw "GLB WebP memory probe failed exit=$LASTEXITCODE" }
+          } finally {
+            Pop-Location
+          }
 
   quality:
     runs-on: ubuntu-latest

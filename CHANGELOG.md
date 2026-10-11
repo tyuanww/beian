@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.31.1.11] - 2026-10-11
+
+### Added
+- 新生成的打样 GLB 贴图自动转为 WebP（`EXT_texture_webp`，quality 90），实测 3.37 MiB → 1.25 MiB、小字无可见损失。转换失败时保留原 PNG GLB、只记日志，打样不受影响；旧文件不转换，托管代际 GLB 不在范围内。
+- 压缩结果在原子改名前完整读回：严格校验 GLB 容器并 `readBinary`，mesh/primitive/material/texture/image 计数须与原文件一致；不一致或读不出记为 `output_structure_mismatch` 等失败，保留原文件。
+- GLB WebP 压缩在服务进程内串行执行（同一时刻只跑一个，失败不卡锁），限制解码内存峰值。
+- 启动时（`reclaimOnBoot` 之前）清理被中断压缩遗留的 `.<名>.glb.webp-<pid>-<ms>.tmp`：只扫 `DATA_DIR/mockups`、名字完全匹配且超过 10 分钟的普通文件，不跟随符号链接。
+- 打样详情与列表的 `files[]` 中 `key: "glb"` 条目新增 `texture_format`（`"webp"` / `"png"`），由 GLB `extensionsUsed` 判定并缓存，只增不改；前端可据此决定是否做 WebP 解码检查。
+
+### Changed
+- 新增依赖 `@gltf-transform/core` / `extensions` / `functions` 4.5.1（纯 JS，复用 sharp 0.34.4，根 `overrides` 固定 sharp 防止重复原生包），走 `release.ps1` 停服前 staged `npm ci` 离线交接；staged/live 离线探针与 Windows CI 新增真实 GLB WebP 转换检查。
+
 ## [0.31.1.9] - 2026-10-11
 
 ### Fixed

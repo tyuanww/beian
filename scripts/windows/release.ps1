@@ -345,6 +345,12 @@ function Assert-OfflineRuntimeIntegrity([string]$PythonPath) {
   Assert-NativeOfflineProbe "Vite CLI" $node.Source @($vite, "--version")
   Assert-NativeOfflineProbe "Rollup native module" $node.Source @("-e", "require(process.argv[1])", [string]$rollupNative.FullName)
   Assert-NativeOfflineProbe "Python dependency graph" $PythonPath @("-m", "pip", "check")
+  # Mockup GLB WebP post-step: real offline conversion of a tiny generated GLB.
+  # Older live trees without the probe skip it; once landed, every release reruns it.
+  $glbWebpProbe = Join-Path $Root "apps\web\server\src\glbWebpProbe.ts"
+  if (Test-Path -LiteralPath $glbWebpProbe -PathType Leaf) {
+    Assert-NativeOfflineProbe "GLB WebP conversion" $tsx @($glbWebpProbe) (Join-Path $Root "apps\web\server")
+  }
 
   $backend = Join-Path $Root "apps\web\backend"
   $priorPythonPath = [Environment]::GetEnvironmentVariable("PYTHONPATH", "Process")
@@ -362,7 +368,7 @@ function Assert-OfflineRuntimeIntegrity([string]$PythonPath) {
       $env:PYTHONPATH = $priorPythonPath
     }
   }
-  Write-Host "offline runtime integrity verified: npm graph, tsx, Hono service entry, Vite, Rollup, pip, worker imports"
+  Write-Host "offline runtime integrity verified: npm graph, tsx, Hono service entry, Vite, Rollup, pip, GLB WebP, worker imports"
 }
 
 function Snapshot-UiDist {
@@ -789,6 +795,7 @@ function Assert-StagedOfflineIntegrity([object]$Plan) {
       Assert-NativeOfflineProbe "staged npm installed graph" $npm.Source @("ls", "--all", "--offline", "--ignore-scripts", "--silent") $stage
       Assert-NativeOfflineProbe "staged tsx launcher" $tsx @("--version") $stage
       Assert-NativeOfflineProbe "staged sharp native module" $node.Source @("-e", $sharpProbe, $logo) (Join-Path $stage "apps\web\server")
+      Assert-NativeOfflineProbe "staged GLB WebP conversion" $tsx @((Join-Path $stage "apps\web\server\src\glbWebpProbe.ts")) (Join-Path $stage "apps\web\server")
       Assert-NativeOfflineProbe "staged Vite CLI" $node.Source @($vite, "--version") $stage
       Assert-NativeOfflineProbe "staged Rollup native module" $node.Source @("-e", "require(process.argv[1])", [string]$rollupNative.FullName) $stage
       # The Hono entry mounts serveStatic(UI_DIST) at import time, exactly like the
@@ -807,7 +814,7 @@ function Assert-StagedOfflineIntegrity([object]$Plan) {
   } finally {
     Remove-Item -LiteralPath $emptyCache -Recurse -Force -ErrorAction SilentlyContinue
   }
-  Write-Host "staged offline integrity verified: installed graph, npm ls, tsx, sharp, Vite, Rollup, UI build, Hono entry"
+  Write-Host "staged offline integrity verified: installed graph, npm ls, tsx, sharp, GLB WebP, Vite, Rollup, UI build, Hono entry"
 }
 
 function Test-ReusableDependencyStage([object]$Plan) {

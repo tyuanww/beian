@@ -6,6 +6,7 @@ import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { DATA_DIR, PACKAGING, PYTHON } from "./config.js";
 import { compareBookkeeping } from "./billing.js";
 import { notifyIllustratorWatchdog, notifyJobFinished, watchdogEventFromStdout, type WatchdogEvent } from "./notify.js";
+import { compressGlbTexturesToWebp, logGlbWebpResult } from "./glbWebp.js";
 import {
   applyRenderGenerationPatch,
   assertCanManageMockup,
@@ -235,6 +236,8 @@ export type JobsTestHooks = {
   runCompare?: typeof compareTask;
   runRework?: typeof reworkTask;
   runPack?: typeof runPackaging;
+  /** GLB 贴图 WebP 后处理；测试可注入，生产走 compressGlbTexturesToWebp。 */
+  compressGlb?: typeof compressGlbTexturesToWebp;
   runStructure?: typeof preflightPackaging;
   confirmStructure?: typeof confirmPackagingStructure;
   runPrintFaceRepair?: typeof runPrintFaceRepair;
@@ -3375,7 +3378,25 @@ async function runMockup(id: string, startedAt: string): Promise<void> {
       timedOut: false,
     };
   }
+  if (!result.timedOut && result.code === 0) await compressFreshMockupGlb(id, startedAt);
   finishMockup(id, startedAt, result);
+}
+
+/**
+ * 只压本次刚生成的旧管线 GLB：同一次运行、未托管代际（代际字节已封存，不能改）。
+ * 失败只记日志，原 PNG GLB 保留，打样照常完成。
+ */
+async function compressFreshMockupGlb(id: string, startedAt: string): Promise<void> {
+  const job = loadMockup(id);
+  if (!job || job.job_started_at !== startedAt || isGenerationManagedMockup(job)) return;
+  const glb = collectOutputs(join(DATA_DIR, "mockups", id)).find((file) => file.key === "glb");
+  if (!glb?.path) return;
+  try {
+    const result = await (hooks.compressGlb || compressGlbTexturesToWebp)(glb.path);
+    logGlbWebpResult(`mockup ${id}`, result);
+  } catch (err) {
+    console.warn(`mockup ${id} glb webp failed, keep original PNG GLB:`, err instanceof Error ? err.message : err);
+  }
 }
 
 function finishMockup(id: string, startedAt: string, result: RunPythonResult): void {

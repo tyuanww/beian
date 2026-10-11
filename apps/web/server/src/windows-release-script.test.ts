@@ -474,6 +474,9 @@ describe("windows release.ps1 contract", () => {
     assert.match(script, /Vite CLI/);
     assert.match(script, /Rollup native module/);
     assert.match(script, /"Python dependency graph"/);
+    assert.match(script, /"GLB WebP conversion" \$tsx @\(\$glbWebpProbe\)/);
+    assert.match(script, /"staged GLB WebP conversion" \$tsx/);
+    assert.match(script, /apps\\web\\server\\src\\glbWebpProbe\.ts/);
     assert.match(script, /import app\.cli; import fitz; import openpyxl/);
     assert.ok(indexOf(/Assert-OfflineRuntimeIntegrity \$releasePython/) < indexOf(/Stop-Service beian-server-8787 so WinSW onfailure does not respawn/));
     assert.match(recovery, /npm installed graph/);

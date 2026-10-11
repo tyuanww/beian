@@ -1,3 +1,4 @@
+import { cleanupStaleGlbWebpTemps } from "./glbWebp.js";
 import {
   closeSync,
   copyFileSync,
@@ -176,7 +177,7 @@ type NodeBindings = HttpBindings | Http2Bindings;
 type Env = { Bindings: NodeBindings; Variables: { session: Session } };
 
 const app = new Hono<Env>();
-const VERSION = "0.31.1.9";
+const VERSION = "0.31.1.11";
 
 const STRUCTURE_INPUT_BODY_BYTES = 16 * 1024;
 
@@ -1786,6 +1787,12 @@ if (process.env.VITEST !== "1") {
   );
   if (Object.values(recoveredReceipts).some((count) => count > 0)) {
     console.info("recovered upload receipt claims", recoveredReceipts);
+  }
+  try {
+    const staleGlbTemps = cleanupStaleGlbWebpTemps(join(DATA_DIR, "mockups"));
+    if (staleGlbTemps) console.info(`removed ${staleGlbTemps} stale glb webp temp file(s)`);
+  } catch (err) {
+    console.warn("glb webp temp cleanup failed:", err instanceof Error ? err.message : err);
   }
   reclaimOnBoot();
   serve({ fetch: releaseFetch, hostname: HOST, port: PORT, serverOptions: SERVER_HTTP_OPTIONS }, (info) => {

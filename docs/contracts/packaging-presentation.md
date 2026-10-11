@@ -37,3 +37,11 @@
 独立 print_faces_zip：0 面 unavailable、1–5 面 incomplete + faces_incomplete、六面才 ready + file_key=print_faces_zip。净版不能由六面拼接或 GLB 截图代替。
 
 两个文件都沿 `/api/mockups/:id/files/:key`：净版仅 ready 返回 application/pdf，坏 PDF 返回 415「净版展开不是可印刷的 PDF。」；六面不齐返回 404「六面印刷图还不齐」，齐全返回 application/zip、print-faces.zip。净版普通 GET 允许 inline 预览，download=1 才附件；缓存头沿既有预览/下载策略。未 ready 或源稿已变不提供旧净版。
+
+## GLB 贴图 WebP 与 `texture_format`
+
+- 旧管线（`runPackaging` → `finishMockup`）每次新生成的打样 GLB，在登记文件前做一次后处理：用 `@gltf-transform/core` + `@gltf-transform/functions`（`textureCompress`，编码器为已有 `sharp`）把贴图转为 `EXT_texture_webp`，quality 90。实现在 `apps/web/server/src/glbWebp.ts`。
+- 转换失败、无贴图、已是 WebP 或结果不比原文件小时，保留原 PNG GLB 原样不动，只写服务日志（`glb webp failed, keep original PNG GLB` / `glb webp skipped`），打样照常成功。成功时先写同目录临时文件（`.<name>.glb.webp-<pid>-<ms>.tmp`），复核 `extensionsUsed`，再把临时文件完整读回、核对结构计数与原文件一致，不一致记 `output_structure_mismatch` 并保留原文件，全部通过才原子改名替换。同一服务进程内压缩串行执行，一次只跑一个 GLB，限制解码内存峰值。服务启动时清理 `DATA_DIR/mockups` 下被中断压缩遗留、名字完全匹配且超过 10 分钟的临时文件（不跟随符号链接），失败只记日志。
+- 不转换旧文件；托管代际（render generation）GLB 字节已封存、带 hash 门，不在此后处理范围内。
+- `GET /api/mockups/:id` 的 `files[]` 和列表摘要 `files[]` 中，仅 `key: "glb"` 的条目带 `texture_format: "webp" | "png"`：GLB JSON `extensionsUsed` 含 `EXT_texture_webp` 为 `"webp"`，否则 `"png"`。按文件路径+大小+mtime 缓存，不在每次请求重解析整个 GLB（只读文件头与 JSON chunk）。读不出合法 GLB 时省略该字段。其他 key 不带此字段。前端据此决定是否先跑 WebP 解码检查。
+- 发版：依赖变化走 `release.ps1` 停服前 staged `npm ci`；staged 树和 live 树（存在 `glbWebpProbe.ts` 时）都跑 `tsx apps/web/server/src/glbWebpProbe.ts` 离线转换探针，失败拒绝停 8787。CI `windows-2022` 用 Node 20（与生产一致）真跑 `npm ci` + 同一探针，再用合成的同布局 GLB（`glbWebpMemoryProbe.ts`，无客户数据）记录转换峰值 RSS。
