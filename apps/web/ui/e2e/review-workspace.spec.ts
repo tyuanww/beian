@@ -372,8 +372,17 @@ test("手机 <720：只看稿和签字/退回，注明逐条下结论仅电脑�
   const reject = page.getByRole("button", { name: "退回", exact: true });
   await expect(reject).toBeEnabled();
   expect((await reject.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+  // visual-check #7：底部导航「审稿台 / 历史」，签字/退回在它上方不重叠。
+  const nav = page.getByRole("navigation", { name: "主导航" });
+  await expect(nav.getByRole("button", { name: "审稿台" })).toHaveAttribute("aria-current", "page");
+  await expect(nav.getByRole("button", { name: "历史" })).toBeEnabled();
+  const navBox = (await nav.boundingBox())!;
+  expect(navBox.y + navBox.height).toBeCloseTo(844, 0);
+  expect((await reject.boundingBox())!.y + 44).toBeLessThanOrEqual(navBox.y + 1);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.screenshot({ path: testInfo.outputPath("review-mobile-dark.png") });
+  await nav.getByRole("button", { name: "历史" }).click();
+  await expect(page).toHaveURL(/history/);
 });
 
 test("深色主题：状态标签用 dark-tags.md 专用亮版，深底上过 AA（已批第 38 行）", async ({ page, syntheticApi }) => {

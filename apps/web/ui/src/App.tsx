@@ -480,6 +480,7 @@ export function App() {
             displayName={me.display_name || null}
             taskId={taskId}
             onBack={() => goRoute({ view: "tasks" })}
+            onHistory={() => goRoute({ view: "history" })}
           />
         ) : null}
         </main>

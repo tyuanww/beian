@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Alert, App, Button, Empty, Tag } from "antd";
-import { REVIEW_COPY } from "../copy/labels";
+import { REVIEW_COPY, NAV_LABEL } from "../copy/labels";
 import { ApiError, api, type Decision, type FieldHit, type TaskDetail, type TaskPage } from "../api";
 import { WaitCard } from "../chrome/WaitCard";
 import { forgetReviewHandoff, reviewHandoffFor } from "../jobHandoff";
@@ -46,6 +46,8 @@ type Props = {
   /** 当前登录人显示名；只用来判断「已被别人签字」。 */
   displayName?: string | null;
   onBack: () => void;
+  /** 手机底部导航「历史」。 */
+  onHistory?: () => void;
 };
 
 function isReviewable(status?: string) {
@@ -70,7 +72,7 @@ function viewportLayout(): FlatLayout {
   return typeof window === "undefined" ? "wide" : flatLayout(window.innerWidth);
 }
 
-export function ReviewPage({ taskId, userId, displayName = null, onBack }: Props) {
+export function ReviewPage({ taskId, userId, displayName = null, onBack, onHistory }: Props) {
   const { message } = App.useApp();
   const [task, setTask] = useState<TaskDetail | null>(() => reviewHandoffFor(taskId));
   const [error, setError] = useState<string | null>(null);
@@ -966,6 +968,13 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack }: Props
         onCancel={() => { if (!busy) { setDialog(null); setSubmitFailed(false); } }}
         onConfirm={(extra) => { if (dialog) void submit(dialog, extra); }}
       />
+      {phone ? (
+        // visual-check #7（第 33 行）：手机 <720 主侧栏不显示，底部给「审稿台 / 历史」导航，签字/退回在它上面。
+        <nav className="review-bottom-nav" aria-label="主导航">
+          <button type="button" aria-current="page" onClick={onBack}>{NAV_LABEL.review}</button>
+          <button type="button" onClick={onHistory} disabled={!onHistory}>{NAV_LABEL.history}</button>
+        </nav>
+      ) : null}
     </section>
   );
 }

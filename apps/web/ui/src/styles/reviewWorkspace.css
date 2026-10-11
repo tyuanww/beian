@@ -122,7 +122,10 @@ html[data-theme="dark"] .review-miss { color: #F2B44C; background: #43332E; }
 .review-actions { display: inline-flex; align-items: center; gap: 8px; }
 @media (max-width: 719px) {
   .shell.is-review-flat .sidebar { display: none; }
-  .review-flat-page.is-phone { padding-bottom: 76px; }
-  .review-flat-page.is-phone .review-actions { position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; padding: 8px 16px calc(8px + env(safe-area-inset-bottom, 0px)); background: var(--stage, #fff); border-top: 1px solid var(--line); flex-wrap: wrap; }
+  .review-flat-page.is-phone { padding-bottom: 136px; }
+  .review-bottom-nav { position: fixed; left: 0; right: 0; bottom: 0; z-index: 21; display: flex; padding: 0 8px env(safe-area-inset-bottom, 0px); background: var(--stage, #fff); border-top: 1px solid var(--line); }
+  .review-bottom-nav button { flex: 1; min-height: 52px; border: 0; background: none; font-size: 14px; color: var(--muted); cursor: pointer; }
+  .review-bottom-nav button[aria-current="page"] { color: var(--accent); font-weight: 600; }
+  .review-flat-page.is-phone .review-actions { position: fixed; left: 0; right: 0; bottom: calc(52px + env(safe-area-inset-bottom, 0px)); z-index: 20; padding: 8px 16px; background: var(--stage, #fff); border-top: 1px solid var(--line); flex-wrap: wrap; }
 }
 .review-flat .review-evidence-label { font-size: max(13px, .85em); }
