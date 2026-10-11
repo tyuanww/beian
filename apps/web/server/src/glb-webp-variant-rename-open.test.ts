@@ -35,7 +35,10 @@ function readAll(fd: number, bytes: number): Buffer {
 const WIN = process.platform === "win32";
 const LOCKED = new Set(["EPERM", "EACCES", "EBUSY"]);
 
-/** Windows 上替换/删除被打开的文件会报 EPERM（CI 38156418007 实测）；POSIX 上成功且旧句柄读旧内容。 */
+/**
+ * windows-2022（Node 20）实测：改名覆盖被打开的文件报 EPERM（CI 38156418007）；删除被打开的文件成功
+ * （Node 用 POSIX 删除语义），旧句柄仍读旧内容（CI 38159537915）。POSIX 两者都成功。
+ */
 function expectPlatform(action: () => void, fd: number, oldBytes: Buffer): boolean {
   if (WIN) {
     assert.throws(action, (error: NodeJS.ErrnoException) => LOCKED.has(String(error.code)));
@@ -47,18 +50,15 @@ function expectPlatform(action: () => void, fd: number, oldBytes: Buffer): boole
 }
 
 describe("rename-while-open (platform semantics)", () => {
-  it("unlink of an open file: POSIX succeeds, Windows refuses", () => {
+  it("unlink of an open file succeeds on both and the old fd keeps reading the old bytes", () => {
     const dir = makeTestTempDir("beian-winfs-unlink-");
     const path = join(dir, "box.glb.webpv");
     const oldBytes = Buffer.alloc(256 * 1024, 1);
     writeFileSync(path, oldBytes);
     const fd = openSync(path, "r");
     try {
-      if (expectPlatform(() => unlinkSync(path), fd, oldBytes)) {
-        writeFileSync(`${path}.tmp`, Buffer.alloc(1000, 2));
-        renameSync(`${path}.tmp`, path);
-        assert.equal(readFileSync(path).length, 1000);
-      }
+      unlinkSync(path);
+      assert.equal(sha(readAll(fd, oldBytes.length)), sha(oldBytes));
     } finally {
       closeSync(fd);
     }
@@ -115,7 +115,8 @@ describe("rename-while-open (platform semantics)", () => {
       const newPath = variant.glbWebpVariantPaths(id, glbPath)!.variant;
       assert.notEqual(newPath, oldPath, "new variant is written under a new content-hashed name");
       assert.match(newPath, /box\.glb\.[0-9a-f]{16}\.webpv$/);
-      assert.ok(existsSync(oldPath), "old file is still held open, left for later cleanup");
+      // POSIX 上注入的 EPERM 让旧文件留下；Windows 上删除打开的文件实际会成功，旧文件可能已删。
+      if (!WIN) assert.ok(existsSync(oldPath), "old file is still held open, left for later cleanup");
     } finally {
       open = false;
       closeSync(held.fd);

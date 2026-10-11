@@ -52,7 +52,7 @@ function servedSha(id: string, glbPath: string): { kind: string; sha256: string 
 
 describe("meta update while the meta file is open", () => {
   it("meta is read in one shot and closed: serving leaves no handle on it", () => {
-    const src = readFileSync(new URL("./glbWebpVariant.ts", import.meta.url), "utf8");
+    const src = readFileSync(new URL("./glbWebpVariant.ts", import.meta.url), "utf8").replace(/\r\n/g, "\n"); // Windows checkout 是 CRLF
     const body = src.slice(src.indexOf("export function readGlbWebpVariantMeta"), src.indexOf("\n}\n", src.indexOf("export function readGlbWebpVariantMeta")));
     assert.match(body, /readFileSync\(path, "utf8"\)/);
     assert.doesNotMatch(body, /openSync|createReadStream/);
