@@ -983,7 +983,7 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
           <button type="button" className="review-fullscreen-toggle" aria-pressed={reviewFullscreen} onClick={() => void toggleReviewFullscreen()}>
             {reviewFullscreen ? "退出" : "全屏"}
           </button>
-          {!phone ? <button type="button" aria-label="快捷键" aria-expanded={shortcutsOpen} title="快捷键 ?" onClick={() => setShortcutsOpen((v) => !v)}>?</button> : null}
+          {!phone ? <button type="button" aria-label="快捷键" aria-expanded={shortcutsOpen} title="快捷键" onClick={() => setShortcutsOpen((v) => !v)}>?</button> : null}
           {shortcutsOpen && !phone ? (
             <div className="review-keys" role="note">
               <b>{REVIEW_COPY.shortcutsTitle}</b> 读要点 → 按 <kbd>1</kbd>一致 <kbd>2</kbd>有错 <kbd>3</kbd>忽略，自动跳下一条 · <kbd>J</kbd>/<kbd>K</kbd> 上下条 · <kbd>[</kbd> 右栏 · <kbd>?</kbd> 再看
