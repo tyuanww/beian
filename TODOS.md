@@ -317,7 +317,11 @@ RF-10–RF-13 的原始依赖见 [ADR-007 §20.7](docs/adr-007-packaging-render-
   2. 由用户确认组织仓迁移或第二管理员方案；具体设置变更、邀请人员或迁移仓库按对应授权落实，不重复启用已生效的 main 保护。
   3. 保护设置已完成只读回读；后续如获准变更，再只读复核有效设置与权限，不用破坏性 push 试验。**验收：归属/移交、管理人员、有效保护证据齐全；套餐不支持时保留明确缺口，脚本不冒充不可绕过保护。**
 
-## P3 — 独立后续（10 项）
+## P3 — 独立后续（11 项）
+
+- [ ] **F12 — 飞书签字通知只数 `task.hits`，忽略 `hits_v2`**
+
+  状态：未开始。`apps/web/server/src/notify.ts` 的 `taskCompleteHeadline` / `taskCompleteText` 只读 `task.hits`；有 `hits_v2` 的任务（`tasks.ts` 摘要已优先用 `hits_v2`）在缺 `complete_kind` 时可能把标题判错、改稿条数和字段列表也不准。设置 PR 合入后单独做一个小修复：与 `tasks.ts` 一样优先 `hits_v2`，非空时用它，否则回落 `hits`。**验收：只有 `hits_v2` 含改稿项的任务，飞书标题为「已退回」且条数正确，有单测。**
 
 - [ ] **F11 — 0.31.1.15 飞书告警一起做：发送测试可发给已配置接收人（产品哥建议）**
 
@@ -327,9 +331,11 @@ RF-10–RF-13 的原始依赖见 [ADR-007 §20.7](docs/adr-007-packaging-render-
   2. 接收人为空时，在按钮旁提示「接收人还没填，测试后会设成你自己」，或禁用按钮。
   3. **验收：已配置接收人时测试消息到达该接收人且 `FEISHU_OPEN_ID` 不变；为空时界面有提示或按钮禁用，并有测试覆盖。**
 
-- [ ] **F10 — 任务/作业失败报错是否向非管理员带出本机路径（待查）**
+- [x] **F10 — 任务/作业失败报错是否向非管理员带出本机路径（待查）**
 
-  状态：2026-10-11 设置接口按角色收紧（`fix/settings-role-trim`）自查时发现，不在该 PR 范围内，未审计。`/api/settings` 已对非管理员去掉本机路径，但审稿任务、打样、出图、压缩等作业失败时返回给前端的报错文案（HTTP `detail`、任务/作业的 error/reason 字段、worker stderr 摘要）可能原样带出 `C:\`、`/Users/`、`/home/`、数据目录（`WB_DATA_DIR`）、Python 或 Blender/Illustrator 路径。
+  已解决（0.31.1.14，`fix/settings-admin-only`）：`/api/tasks` 列表与详情的 `job_error` / `error` 对非管理员去目录留文件名，管理员看原文；飞书失败通知同样脱敏（`apps/web/server/src/pathRedact.ts`，测试 `job-error-redact.test.ts`）。打样 `publicMockupError` 原本已脱敏，未改。
+
+  原状态：2026-10-11 设置接口按角色收紧（`fix/settings-role-trim`）自查时发现，不在该 PR 范围内，未审计。`/api/settings` 已对非管理员去掉本机路径，但审稿任务、打样、出图、压缩等作业失败时返回给前端的报错文案（HTTP `detail`、任务/作业的 error/reason 字段、worker stderr 摘要）可能原样带出 `C:\`、`/Users/`、`/home/`、数据目录（`WB_DATA_DIR`）、Python 或 Blender/Illustrator 路径。
 
   1. 盘点 server 中所有把作业错误、子进程 stderr 或异常 message 回传给客户端的位置（含 `apps/web/backend` worker 输出）。
   2. 对 reviewer/viewer 做路径脱敏（或只给通用文案），管理员保留原文；脱敏规则与 `settings.ts` 的 `redact` 对齐。
