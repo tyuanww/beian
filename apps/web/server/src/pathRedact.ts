@@ -309,7 +309,8 @@ function decodeSeparators(input: string): string {
     if (next === s) break;
     s = next;
   }
-  return s;
+  // 解到上限仍残留的编码分隔符（任意层 `%25` 包着的 `%2F` / `%5C`，大小写不限）直接当分隔符，整段按路径处理。
+  return s.replace(/%(?:25)*2f/gi, "/").replace(/%(?:25)*5c/gi, "\\");
 }
 
 export function redactLocalPaths(message: string | undefined | null): string {
