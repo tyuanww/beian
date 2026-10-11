@@ -175,6 +175,23 @@ function scanAndRedact(s: string): string {
 // `git+ssh://`、`file://`）按普通路径扫描。后顾断言保证只在词首尝试匹配，整体线性。
 const URL_RE = /(?<![A-Za-z0-9+.-])https?:\/\/[^\s"'`<>\u0080-\uffff]*/gi;
 
+// 网址内夹带的本机路径：盘符路径、反斜杠路径、`/Users/`、`/home/` 等家目录与系统临时目录，到 `& # ?` 或网址结尾为止。
+const URL_EMBEDDED_PATH =
+  /(?<![A-Za-z0-9])[A-Za-z]:[\\/][^&#?]*|\\[^&#?]*|(?<=\/)(?:Users|home|root|var\/folders|private\/var)\/[^&#?]*/g;
+
+/** 网址：协议 + 主机原样保留；后面夹带的本机路径（含已配置的数据 / 工具目录）整段换成「本机路径」。 */
+function redactUrl(url: string): string {
+  const hostStart = url.indexOf("://") + 3;
+  let hostEnd = hostStart;
+  while (hostEnd < url.length && !"/?#\\".includes(url[hostEnd])) hostEnd += 1;
+  let tail = url.slice(hostEnd);
+  for (const known of knownLocalPaths()) {
+    if (tail.includes(known)) tail = tail.split(known).join(LOCAL_PLACEHOLDER);
+  }
+  tail = tail.replace(URL_EMBEDDED_PATH, LOCAL_PLACEHOLDER);
+  return url.slice(0, hostEnd) + tail;
+}
+
 /** 处理上限：URL 解码后超过这个长度只处理前这么多字符，后面不输出，改为追加 TRUNCATED_MARK。 */
 const REDACT_MAX_CHARS = 8000;
 const TRUNCATED_MARK = "（后面省略）";
@@ -190,7 +207,7 @@ export function redactLocalPaths(message: string | undefined | null): string {
   const parts: string[] = [];
   let last = 0;
   for (const m of s.matchAll(URL_RE)) {
-    parts.push(redactPlain(s.slice(last, m.index)), m[0]);
+    parts.push(redactPlain(s.slice(last, m.index)), redactUrl(m[0]));
     last = m.index! + m[0].length;
   }
   parts.push(redactPlain(s.slice(last)));
