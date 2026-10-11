@@ -149,3 +149,29 @@ def test_compact_evidence_never_silently_truncates_readings():
     audit = [{"page": 1, "bbox": [0, 0, 10, 10], "status": "used", "native_text": "a" * 5000, "ocr_text": "b" * 5000}] * 2
     native_text.attach_evidence(hits, audit)
     assert "native_text_evidence" not in hits[0]
+
+
+def _illustrator_worker():
+    import sys
+    folder = Path(__file__).resolve().parents[4] / "workers/packaging/illustrator"
+    sys.path.insert(0, str(folder))
+    try:
+        spec = importlib.util.spec_from_file_location("illustrator_worker_watchdog_test", folder / "illustrator_worker.py")
+        module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
+        return module
+    finally:
+        sys.path.remove(str(folder))
+
+
+@pytest.mark.parametrize("proven", [True, False])
+def test_save_watchdog_reports_save_timeout_and_closes_only_with_proof(tmp_path, capsys, proven):
+    worker = _illustrator_worker()
+    config = {"protocol": "beian.illustrator.export/2", "request_kind": "native_text", "attempt_id": "a" * 32, "source_sha256": "b" * 64, "close_json": str(tmp_path / "close.json")}
+    observation = {"attempt_id": "a" * 32, "source_sha256": "b" * 64, "bridge_exited": True, "document_count": 0, "documents": []}
+    error = worker.IllustratorAgentError("illustrator_save_timeout", "stalled", details={"close_observation": observation} if proven else {})
+    code = worker.save_watchdog_exit(config, error)
+    public = json.loads(capsys.readouterr().out)
+    assert public["reason"] == "save_timeout" and public["ok"] is False
+    assert code == (4 if proven else 8)
+    assert (tmp_path / "close.json").is_file() is proven
+    assert worker.save_watchdog_exit(config, worker.IllustratorAgentError("illustrator_timeout", "x")) is None
