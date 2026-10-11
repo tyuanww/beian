@@ -383,3 +383,13 @@ describe("redactLocalPaths: CJK punctuation inside directory names", () => {
     assert.equal(r("（/home/bob/a.pdf）"), "（a.pdf）");
   });
 });
+
+describe("redactLocalPaths: cap point inside URL credentials", () => {
+  it("does not leak a password cut at position 8000", () => {
+    const pre = "x".repeat(7985) + " ";
+    const out = r(pre + "http://bob:SECRET@x/Users/bob/a.pdf 后面");
+    assert.ok(!out.includes("SECRET"), out.slice(-40));
+    assert.ok(!out.includes("bob"), out.slice(-40));
+    assert.ok(out.endsWith("（后面省略）"));
+  });
+});
