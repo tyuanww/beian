@@ -190,6 +190,12 @@ export type SyntheticApi = {
   failNextDecision: boolean;
   /** 下一次 /complete 返回 500（提交失败态）。 */
   failNextComplete: boolean;
+  /** 让 /complete 晚这么多毫秒再回，测连点。 */
+  completeDelayMs: number;
+  /** 下一次 /complete 用这个状态码失败（如 409 = 对照还在跑）。 */
+  completeFailStatus: number | null;
+  /** 下一次 /decision 或 /complete 之前，模拟别人先把这单签字/退回了。 */
+  otherCompletesNext: { by: string; kind: "signed" | "rework" } | null;
   loseNextUploadResponse: boolean;
   holdNextUploadComplete: boolean;
   expireNextTaskStart: boolean;
@@ -558,7 +564,13 @@ async function installSyntheticApi(page: Page, state: SyntheticApi) {
           return json(route, { detail: "合成记录失败" }, 500);
         }
         const task = state.tasks.find((item) => item.id === decision[1]);
+        if (task && state.otherCompletesNext) {
+          Object.assign(task, { status: "completed", board: "done", completed_by: state.otherCompletesNext.by, complete_kind: state.otherCompletesNext.kind });
+          state.otherCompletesNext = null;
+        }
         if (!task) return json(route, { detail: "合成任务不存在" }, 404);
+        // 与服务端 /decision 同口径：已签字/已退回的任务不能再改结论。
+        if (task.status === "completed") return json(route, { detail: "当前状态不可审核" }, 400);
         const data = (body || {}) as Record<string, unknown>;
         task.hits = (task.hits || []).map((hit) =>
           hit.id === data.hit_id
@@ -570,12 +582,27 @@ async function installSyntheticApi(page: Page, state: SyntheticApi) {
       const complete = path.match(/^\/api\/tasks\/([0-9a-f]{12})\/complete$/);
       if (method === "POST" && complete) {
         const task = state.tasks.find((item) => item.id === complete[1]);
+        if (task && state.otherCompletesNext) {
+          Object.assign(task, { status: "completed", board: "done", completed_by: state.otherCompletesNext.by, complete_kind: state.otherCompletesNext.kind });
+          state.otherCompletesNext = null;
+        }
         if (!task) return json(route, { detail: "合成任务不存在" }, 404);
+        if (state.completeFailStatus) {
+          const status = state.completeFailStatus;
+          state.completeFailStatus = null;
+          return json(route, { detail: status === 409 ? "对照还在排队或正在跑，不能签字" : "合成提交失败" }, status);
+        }
         if (state.failNextComplete) {
           state.failNextComplete = false;
           return json(route, { detail: "合成提交失败" }, 500);
         }
         const data = (body || {}) as Record<string, unknown>;
+        // 与服务端 /complete 同口径：已完成、还有疑点/缺失没下结论、结论为空都 400。
+        if (task.status === "completed") return json(route, { detail: "当前状态不可签字" }, 400);
+        const undecided = (task.hits || []).filter((hit) => (hit.status === "疑点" || hit.status === "缺失") && !["confirm", "issue", "ignore"].includes(String(hit.decision)));
+        if (undecided.length) return json(route, { detail: `仍有 ${undecided.length} 条疑点/缺失未处理` }, 400);
+        if (!String(data.conclusion || "").trim()) return json(route, { detail: "请写下结论" }, 400);
+        if (state.completeDelayMs) await new Promise((resolve) => setTimeout(resolve, state.completeDelayMs));
         // 与服务端 /complete 同口径：有「有错」→ rework，否则 signed。
         task.complete_kind = (task.hits || []).some((hit) => hit.decision === "issue") ? "rework" : "signed";
         task.completed_by = "E2E（合成用户）";
@@ -758,6 +785,9 @@ export const test = base.extend<{ syntheticApi: SyntheticApi }>({
       failDeletes: new Set(),
       failNextDecision: false,
       failNextComplete: false,
+      completeDelayMs: 0,
+      completeFailStatus: null,
+      otherCompletesNext: null,
       loseNextUploadResponse: false,
       holdNextUploadComplete: false,
       expireNextTaskStart: false,
