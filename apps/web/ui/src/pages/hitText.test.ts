@@ -177,15 +177,19 @@ describe("impersonal reviewer copy", () => {
     for (const [hit, field, located] of cases) {
       const ask = spokenAsk(hit, field, located);
       const text = ask ? `${ask.lead}${ask.because}${ask.ask}` : "";
-      assert.doesNotMatch(text, /我/);
+      assert.doesNotMatch(text, /[我你]/);
+      assert.doesNotMatch(doubtLines(hit).join(""), /[我你]/);
       assert.doesNotMatch(text, /请对着这一面核对/);
-      assert.doesNotMatch(spokenLines(hit, field, located).join(""), /我|请对着这一面核对/);
+      assert.doesNotMatch(spokenLines(hit, field, located).join(""), /[我你]|请对着这一面核对/);
       for (const line of [...spokenLines(hit, field, located), ask?.lead || "", ask?.because || "", ask?.ask || ""]) {
         assert.doesNotMatch(line, /。$/, `一行提示不带句号：${line}`);
       }
     }
   });
   it("uses 产品哥's wording", () => {
+    assert.equal(spokenAsk({ status: "疑点", bboxes: box })?.lead, "这条请核对");
+    assert.deepEqual(spokenLines({ status: "疑点", doubt_bucket: "ocr_graphic", excel_value: "09", bboxes: box }), ["这块是大号图形字，轮廓或竖排机器常认不出", "请核对是否印了确认单要求的字"]);
+    assert.equal(spokenAsk({ status: "疑点", doubt_bucket: "ocr_graphic", excel_value: "09", bboxes: box })?.because, "请核对是否印了确认单要求的字");
     assert.equal(spokenAsk({ status: "疑点", field_group: "净含量", excel_value: "30ml", bboxes: box })?.because, "这个数字没读到，请核对");
     assert.equal(spokenAsk({ status: "疑点", field_group: "净含量&条形码", excel_value: "30ml", bboxes: box })?.because, "毫升和条码没读全，请核对");
     assert.equal(spokenAsk({ status: "疑点", coverage: { miss: ["烟酰胺"] }, bboxes: box })?.lead, "这些字没读全，请核对");

@@ -86,7 +86,7 @@ export function spokenLines(h: HitText, field?: string, located?: boolean): stri
     return ["这条是法规小字，必须印", "这一面没读全，请核对", "请对着刀线边缘看这一句"];
   }
   if (bucket === "ocr_graphic") {
-    return ["这块是大号图形字，轮廓或竖排机器常认不出", "请你看是不是印了确认单要的那几个字"];
+    return ["这块是大号图形字，轮廓或竖排机器常认不出", "请核对是否印了确认单要求的字"];
   }
   if (fg === "净含量&条形码" || (/净含量/.test(name) && /条形码|条码/.test(name))) {
     return ["确认单要毫升和条码", "毫升和条码没读全，请核对", "请对着这一面看毫升数字和条码"];
@@ -131,7 +131,7 @@ export function spokenAsk(h: HitText, field?: string, located?: boolean): Spoken
   if (ev && !isAccountingCopy(ev)) {
     return { lead: customerCopy(ev).slice(0, 80), because: "这一面没读全，请核对", ask: "" };
   }
-  return { lead: "这条需要你看一眼", because: "这一面没读全，请核对", ask: "" };
+  return { lead: "这条请核对", because: "这一面没读全，请核对", ask: "" };
 }
 
 /** 当前项目顶栏。一致且没有未读内容时返回空。 */
