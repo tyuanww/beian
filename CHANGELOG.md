@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.31.1.9] - 2026-10-11
+
+### Fixed
+- Illustrator 在保存 PDF 阶段卡死时不再无限等待：任务目录（含部分 PDF、debug.log、进度）连续 300 秒无任何变化才判定卡住；仅结束 pid 与启动时间都和本任务一致的 Illustrator，删除本次部分输出、核对原稿 hash 未变，在 Session 1 干净重启并跑 smoke。慢但仍在写文件的保存不会被结束。
+- 无窗口超过 120 秒的 Illustrator 僵死进程按同一身份核对路径结束并重启，不再要求人工重启电脑。
+
+### Changed
+- 原稿文字提取被看门狗中断时，详情 `native_text` 显示 `status=fallback`、`reason=save_timeout`，本次继续图像识别，并发飞书告警。
+
 ## [0.31.1.8] - 2026-10-11
 
 ### Added
