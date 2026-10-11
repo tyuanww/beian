@@ -349,6 +349,7 @@ RF-10–RF-13 的原始依赖见 [ADR-007 §20.7](docs/adr-007-packaging-render-
   - 已知取舍：Windows/UNC 末段无扩展名、空格后的词以扩展名结尾时合成一个文件名（`C:\x\dir see.log` → `dir see.log`），只认一个空格。
   - 已知取舍：反斜杠根路径只要有一段目录名不少于 2 个字符就脱敏；兜底再拦「反斜杠 + 至少 2 个字母」（`C:\Documents and Settings\bob` 这类空格过多的目录），所以报错里字面的 `\nfoo` 这类转义串会整条隐藏；单字母 `\n`、`\t` 不受影响。
   - 已知取舍：查询参数名为 `password` / `pw` / `token` / `secret` / `key` 等（含 `api_key`、`access_token`）时整条隐藏，即使值无害；`monkey`、`keyword`、`tokens_left` 不算。
+  - 已知规则缺口（不拦）：凭据词与前缀无分隔符连写的参数名（`?apikey=1`、`?accesstoken=`）不触发兜底。
   - 已知取舍：网址路径里出现 `/Users/`、`/home/`、`/root/`、`/var/folders/`、`/private/var/` 时，即使是公开网站也会被替换（`https://example.com/Users/list` → `https://example.com/本机路径`），宁可误伤也不漏。
   - `apps/web/backend` worker 输出与其他 HTTP `detail` 未逐一盘点。
 
