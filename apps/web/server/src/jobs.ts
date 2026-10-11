@@ -3598,7 +3598,7 @@ async function fireTaskNotify(task: Task, ok: boolean): Promise<void> {
     title: String(task.product_name || task.title || task.id),
     kind: task.job_kind === "rework" ? "rework" : "compare",
     ok,
-    error: task.job_error,
+    error: task.job_error ? redactLocalPaths(task.job_error) : task.job_error,
   });
   if (r.ok || r.skipped) {
     // 已结束任务允许在通知飞行期间删除；晚到的通知只能放弃收尾，不能复活 JSON。
@@ -3649,7 +3649,7 @@ async function fireMockupNotify(job: MockupJob, ok: boolean): Promise<void> {
     title: job.id,
     kind: "mockup",
     ok,
-    error: job.job_error,
+    error: job.job_error ? redactLocalPaths(job.job_error) : job.job_error,
   });
   if (r.ok || r.skipped) {
     const fresh = loadMockup(job.id);
