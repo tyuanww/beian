@@ -396,6 +396,11 @@ const LEAK_RESIDUE = [
   /\\(?:[A-Za-z]{2,}|[^\x00-\x7f])/,
   // 非 ASCII 字符紧贴反斜杠（`李四\x`）：中文目录名后接分隔符再接内容（`共享盘\\` 这类后面是空白或反斜杠的不算）。取舍：中文紧贴转义（`换行\n`）也会整条隐藏。
   /[^\x00-\x7f]\\[^\s\\]/,
+  // 鉴权头：`Authorization`（任意大小写，含 JSON 键）；`Bearer ` / `Basic ` 后跟像令牌的值
+  //（不少于 6 个令牌字符且含数字或 `. _ ~ + / = -`）。取舍：纯字母的短值（`Bearer abcdefgh`）不拦，
+  // 以免误伤「bearer 字段为空」「Basic settings」这类文字；中文「基本信息」不受影响。
+  /authorization/i,
+  /\b(?:bearer|basic)\s+(?=[A-Za-z0-9._~+/=-]*[0-9._~+/=-])[A-Za-z0-9._~+/=-]{6,}/i,
   // 查询参数名像凭据：password / passwd / pwd / pw / token / secret / key，或以 `_` `-` `.` 接这些词结尾
   //（`api_key`、`access_token`、`client_secret`）。大小写不限；`monkey`、`keyword`、`tokens_left` 不算。
   /[?&](?:[A-Za-z0-9_.-]*[_.-])?(?:password|passwd|pwd|pw|token|secret|key)=/i,
