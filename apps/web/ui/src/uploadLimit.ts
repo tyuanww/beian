@@ -15,6 +15,10 @@ let currentLimit = PUBLIC_UPLOAD_BYTES;
 export function setUploadLimitFromMe(me?: { upload_limit_bytes?: unknown } | null): void {
   currentLimit = uploadLimitBytes(me);
 }
+/** 退出登录、换账号前、/api/me 失败时调用：回到公网回退上限，不沿用上一个账号的值。 */
+export function resetUploadLimit(): void {
+  currentLimit = PUBLIC_UPLOAD_BYTES;
+}
 export function currentUploadLimitBytes(): number {
   return currentLimit;
 }

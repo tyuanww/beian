@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { PUBLIC_UPLOAD_BYTES, UPLOAD_TOO_LARGE, uploadLimitMb, bytesTooLarge, currentUploadLimitBytes, setUploadLimitFromMe, uploadLimitBytes, uploadTooLargeText } from "./uploadLimit.js";
+import { resetUploadLimit, PUBLIC_UPLOAD_BYTES, UPLOAD_TOO_LARGE, uploadLimitMb, bytesTooLarge, currentUploadLimitBytes, setUploadLimitFromMe, uploadLimitBytes, uploadTooLargeText } from "./uploadLimit.js";
 
 describe("bytesTooLarge", () => {
   it("lets a 40MB pair through", () => {
@@ -72,5 +72,15 @@ describe("十进制回退上限与 MB 显示", () => {
     assert.equal(uploadLimitMb(999_999), 1);
     assert.equal(uploadLimitMb(1), 1);
     assert.equal(uploadTooLargeText(500_000), "文件太大，请压到 1MB 以内再传（多份合计）");
+  });
+});
+
+describe("resetUploadLimit", () => {
+  it("换账号/退出/me 失败后回到回退上限", () => {
+    setUploadLimitFromMe({ upload_limit_bytes: 5_000_000 });
+    assert.equal(currentUploadLimitBytes(), 5_000_000);
+    resetUploadLimit();
+    assert.equal(currentUploadLimitBytes(), PUBLIC_UPLOAD_BYTES);
+    assert.equal(uploadTooLargeText(), UPLOAD_TOO_LARGE);
   });
 });
