@@ -205,3 +205,17 @@ describe("redactLocalPaths: length cap and linear time", () => {
     });
   }
 });
+
+describe("redactLocalPaths: only http/https count as URLs", () => {
+  const noDirs = (out: string) => assert.ok(!/Users|bob/.test(out), out);
+  it("other schemes get normal path scanning", () => {
+    noDirs(r("x://Users/bob/a.pdf"));
+    noDirs(r("foo:///Users/bob"));
+    noDirs(r("git+ssh://host/Users/bob/a.pdf"));
+    assert.ok(r("git+ssh://host/Users/bob/a.pdf").includes("a.pdf"));
+  });
+  it("http/https are case-insensitive", () => {
+    assert.equal(r("HTTPS://example.com/api/v1/x.json"), "HTTPS://example.com/api/v1/x.json");
+    assert.equal(r("Http://x/a/b"), "Http://x/a/b");
+  });
+});
