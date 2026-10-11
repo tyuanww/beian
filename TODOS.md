@@ -456,3 +456,4 @@ RF-10–RF-13 的原始依赖见 [ADR-007 §20.7](docs/adr-007-packaging-render-
 - 打样宿主/结构：[结构合同](docs/contracts/packaging-structure.md)；成片/下载：[成片合同](docs/contracts/packaging-presentation.md)。
 - 身份/设置/推送：[身份与设置合同](docs/contracts/identity-settings.md)；模块边界：[架构合同](docs/contracts/architecture.md)。
 - 2026-09-02 现场数据：[历史诊断](docs/diagnoses/2026-09-02-mockup-illustrator.md)，不代表持续监控或当前验收。
+- 核对页提交失败提示目前只按 HTTP 状态 + 重读任务判断（`reviewFlat.ts` `submitFailureText`），服务端 `/complete` 只回 status + detail 文本。等后端第 1 项（结构化错误码）和第 6 项（退回至少一条有错的校验/错误码）上线后，改成按错误码映射，并补「至少标一条有错才能退回」文案与 e2e（第 6 项未批，本 PR 不做）。
