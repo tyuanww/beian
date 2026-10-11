@@ -68,3 +68,11 @@ describe("redactLocalPaths: spaces in directory names", () => {
     assert.equal(r("/home/a/b.pdf failed at step 2/3"), "b.pdf failed at step 2/3");
   });
 });
+
+describe("redactLocalPaths: URL-encoded separators", () => {
+  it("decodes %5C / %2F before redaction", () => {
+    assert.equal(r("C:%5Cusers%5Cbob%5Ca.pdf"), "a.pdf");
+    assert.equal(r("%2FUsers%2Fbob%2Fa.pdf"), "a.pdf");
+    assert.equal(r("读不到 c:%5cdata%5cb.ai"), "读不到 b.ai");
+  });
+});
