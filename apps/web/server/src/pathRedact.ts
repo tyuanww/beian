@@ -288,7 +288,7 @@ function redactUrlAt(s: string, start: number, known: string[]): [string, number
   return [out.join(""), j];
 }
 
-/** 处理上限：URL 解码后超过这个长度只处理前这么多字符，后面不输出，改为追加 TRUNCATED_MARK。 */
+/** 输出上限：脱敏后超过这个长度只保留前这么多字符，后面不输出，改为追加 TRUNCATED_MARK。 */
 const REDACT_MAX_CHARS = 8000;
 const TRUNCATED_MARK = "（后面省略）";
 
@@ -313,21 +313,18 @@ function decodeSeparators(input: string): string {
 }
 
 export function redactLocalPaths(message: string | undefined | null): string {
-  let s = String(message ?? "");
-  if (!s) return s;
-  // ① URL 编码的分隔符（%5C、%2F，大小写不限）整条还原；② 超长截到前 REDACT_MAX_CHARS 字符；③ 对截下的部分脱敏；
-  // ④ 截过就追加「（后面省略）」。未脱敏的尾巴从不输出；被截断的半截路径照常脱敏（如 `C:\Users\bo` → 本机路径）。
-  s = decodeSeparators(s);
+  // ① 整条解码 + 脱敏（线性，不先截断，避免截断点落在网址密码等中间漏出半截）；② 脱敏后超过 REDACT_MAX_CHARS 字符
+  // 只保留前这么多字符，截断点落在代理对中间时往前退一位；③ 截过就追加「（后面省略）」。
+  let s = redactLocalPathsUncapped(message);
   const truncated = s.length > REDACT_MAX_CHARS;
   if (truncated) {
-    // 截断点落在代理对（如表情）中间时往前退一位，不留半个字符。
     const hi = s.charCodeAt(REDACT_MAX_CHARS - 1);
     s = s.slice(0, hi >= 0xd800 && hi <= 0xdbff ? REDACT_MAX_CHARS - 1 : REDACT_MAX_CHARS);
   }
-  return redactDecoded(s) + (truncated ? TRUNCATED_MARK : "");
+  return s + (truncated ? TRUNCATED_MARK : "");
 }
 
-/** 不截断的完整脱敏（解码 + 网址处理 + 路径扫描）。供性能测试单独验证扫描器线性；业务代码请用 redactLocalPaths。 */
+/** 不截断的完整脱敏（解码 + 网址处理 + 路径扫描）。redactLocalPaths 先调它再截断；业务代码请用 redactLocalPaths。 */
 export function redactLocalPathsUncapped(message: string | undefined | null): string {
   const s = String(message ?? "");
   return s ? redactDecoded(decodeSeparators(s)) : s;

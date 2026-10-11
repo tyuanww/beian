@@ -170,23 +170,23 @@ describe("redactLocalPaths: length cap and linear time", () => {
     assert.equal(r(s), s);
   });
   it("Windows path straddling position 8000 leaves no directory segment", () => {
-    const pre = "x".repeat(7990) + " ";
+    const pre = "x".repeat(7997) + " ";
     const out = r(pre + "C:\\Users\\bob\\docs\\a.pdf 后面还有");
     assert.ok(out.endsWith(MARK), out.slice(-30));
-    assert.ok(!/Users|\\bo|C:\\/.test(out), out.slice(-30));
-    assert.equal(out, pre + "本机路径" + MARK);
+    assert.ok(!/Users|bob|docs|C:\\/.test(out), out.slice(-30));
+    assert.equal(out, pre + "a." + MARK);
   });
   it("UNC path straddling position 8000 leaves no directory segment", () => {
-    const pre = "x".repeat(7992) + " ";
-    const out = r(pre + "\\\\nas\\share\\bob\\a.pdf");
-    assert.ok(!/nas|\\\\/.test(out), out.slice(-30));
-    assert.equal(out, pre + "本机路径" + MARK);
+    const pre = "x".repeat(7997) + " ";
+    const out = r(pre + "\\\\nas\\share\\bob\\a.pdf 后面");
+    assert.ok(!/nas|share|bob|\\\\/.test(out), out.slice(-30));
+    assert.equal(out, pre + "a." + MARK);
   });
-  it("URL-encoded input is capped after decoding", () => {
-    const out = r("%5Cab".repeat(3000)); // 15000 raw chars, 9000 after decoding
+  it("URL-encoded input is decoded before the cap", () => {
+    const out = r("a%2Fb ".repeat(2500)); // 15000 raw chars, 10000 after decoding
     assert.ok(out.endsWith(MARK));
-    assert.ok(!out.includes("%5C"));
-    assert.ok(out.length <= 8000 + MARK.length);
+    assert.ok(!out.includes("%2F"));
+    assert.equal(out, "a/b ".repeat(2000) + MARK);
   });
   for (const [name, input] of [
     ["C:\\a b repeated", "C:\\a b ".repeat(43000)],
