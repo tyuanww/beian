@@ -1,6 +1,6 @@
 /* A 通铺核对页（老板 2026-10-11 已批：deviations.md 第 6/7/10/11/12/13/14/16 行）。 */
-.shell.is-review-flat { padding: 0; background: var(--stage, #fff); }
-.shell.is-review-flat .workspace { border-radius: 0; box-shadow: none; background: var(--stage, #fff); }
+.shell.is-review-flat { padding: 0; background: var(--stage); }
+.shell.is-review-flat .workspace { border-radius: 0; box-shadow: none; background: var(--stage); }
 /* 已批第 39 行：核对页主侧栏实心 #fbfafc。玻璃层（.sidebar-glass）原来压在底色上面，核对页直接不画。 */
 .shell.is-review-flat .sidebar-glass { display: none; }
 .shell.is-review-flat .sidebar, .shell.is-review-flat .sidebar.is-collapsed { width: 52px; padding: 16px 4px; backdrop-filter: none; -webkit-backdrop-filter: none; background: #fbfafc; border-right: 1px solid var(--line); }
@@ -10,7 +10,7 @@ html[data-theme="dark"] .shell.is-review-flat .sidebar, html[data-theme="dark"] 
 .review-flat-page { display: flex; flex-direction: column; height: 100%; min-height: 0; font-size: max(13px, 1em); }
 .review-flat-page :focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
 .review-flat-page button { min-height: 44px; min-width: 44px; }
-.review-top { display: flex; align-items: center; gap: 8px; padding: 0 16px; min-height: 60px; border-bottom: 1px solid var(--line); flex: none; position: sticky; top: 0; z-index: 5; background: var(--stage, #fff); }
+.review-top { display: flex; align-items: center; gap: 8px; padding: 0 16px; min-height: 60px; border-bottom: 1px solid var(--line); flex: none; position: sticky; top: 0; z-index: 5; background: var(--stage); }
 .review-crumb { border: 0; background: none; color: var(--muted); font-size: 14px; cursor: pointer; padding: 0 4px; }
 .review-title { margin: 0; font-size: 20px; font-weight: 650; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 40vw; }
 .review-ver { display: inline-flex; gap: 8px; align-items: center; }
@@ -27,39 +27,39 @@ html[data-theme="dark"] .shell.is-review-flat .sidebar, html[data-theme="dark"] 
 .review-workspace.review-flat { display: grid; flex: 1; min-height: 0; position: relative; gap: 0; height: auto; }
 .review-thumbs { display: flex; flex-direction: column; gap: 8px; padding: 8px 4px; border-right: 1px solid var(--line); background: #fbfafc; overflow: auto; }
 html[data-theme="dark"] .review-thumbs { background: #1f1a24; }
-.review-flat-page .review-th { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0; width: 44px; min-height: 64px; border: 1px solid var(--line); border-radius: 8px; background: var(--stage, #fff); cursor: pointer; font-size: 13px; color: var(--ink); padding: 2px; }
+.review-flat-page .review-th { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0; width: 44px; min-height: 64px; border: 1px solid var(--line); border-radius: 8px; background: var(--stage); cursor: pointer; font-size: 13px; color: var(--ink); padding: 2px; }
 .review-th.is-on { border: 2px solid var(--accent); }
 .review-th-s { font-weight: 700; }
 .review-th.s-err .review-th-s { color: #a8071a; }
 .review-th.s-done .review-th-s { color: #237804; }
 .review-th-w { font-size: 13px; color: var(--muted); }
 .review-ccol { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
-.review-ccol > .canvas { flex: 1; min-height: 0; border: 0; border-radius: 0; background: var(--stage, #fff); }
+.review-ccol > .canvas { flex: 1; min-height: 0; border: 0; border-radius: 0; background: var(--stage); }
 .review-ccol .canvas-view { min-height: 0; justify-content: center; }
 .review-tbar { flex: none; min-height: 52px; display: flex; align-items: center; gap: 4px; padding: 4px 16px; border-top: 1px solid var(--line); position: relative; flex-wrap: wrap; }
 .review-tbar > button { border: 1px solid transparent; background: none; border-radius: 10px; padding: 0 8px; font-size: 14px; cursor: pointer; color: var(--ink); }
 .review-tbar > button:hover { border-color: var(--line); }
 /* 设计哥 F-004：按下态 = accent-soft 底 + accent 字 + accent 描边，和 hover 分开。 */
 .review-tbar > button[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
-.review-keys { position: absolute; bottom: 100%; left: 16px; right: 16px; margin-bottom: 8px; padding: 8px 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--stage, #fff); font-size: 14px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; z-index: 4; }
+.review-keys { position: absolute; bottom: 100%; left: 16px; right: 16px; margin-bottom: 8px; padding: 8px 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--stage); font-size: 14px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; z-index: 4; }
 .review-keys kbd, .review-verdicts kbd { font: 13px/1 ui-monospace, monospace; border: 1px solid var(--line); border-radius: 4px; padding: 2px 4px; }
 .review-keys button { margin-left: auto; border: 0; background: none; color: var(--accent); cursor: pointer; }
-.review-media-hint { position: absolute; top: 8px; left: 8px; z-index: 3; margin: 0; padding: 2px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--stage, #fff); font-size: 13px; }
+.review-media-hint { position: absolute; top: 8px; left: 8px; z-index: 3; margin: 0; padding: 2px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--stage); font-size: 13px; }
 .review-media-hint button { border: 0; background: none; color: var(--accent); cursor: pointer; text-decoration: underline; min-height: 44px; }
 .review-media-status.is-error { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 48px; }
 
-.review-flat .review-sidebar { display: flex; flex-direction: column; min-height: 0; overflow: hidden; border-left: 1px solid var(--line); background: var(--stage, #fff); border-radius: 0; }
+.review-flat .review-sidebar { display: flex; flex-direction: column; min-height: 0; overflow: hidden; border-left: 1px solid var(--line); background: var(--stage); border-radius: 0; }
 .review-flat .review-sidebar.is-overlay { position: absolute; top: 0; right: 0; bottom: 0; z-index: 6; box-shadow: -8px 0 24px rgba(28, 26, 31, 0.12); }
 .review-flat .review-sidebar-body { min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 0; flex: 1; }
-.review-panel-tab { position: absolute; top: 16px; right: 16px; z-index: 6; border: 1px solid var(--line); border-radius: 12px; background: var(--stage, #fff); padding: 0 16px; font-size: 14px; cursor: pointer; color: var(--accent); }
-.review-ptabs { display: flex; align-items: center; gap: 2px; padding: 4px 8px; border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--stage, #fff); z-index: 1; }
+.review-panel-tab { position: absolute; top: 16px; right: 16px; z-index: 6; border: 1px solid var(--line); border-radius: 12px; background: var(--stage); padding: 0 16px; font-size: 14px; cursor: pointer; color: var(--accent); }
+.review-ptabs { display: flex; align-items: center; gap: 2px; padding: 4px 8px; border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--stage); z-index: 1; }
 .review-flat-page .review-ptab { border: 0; background: none; padding: 0 8px; font-size: 14px; cursor: pointer; color: var(--muted); border-bottom: 2px solid transparent; }
 .review-flat-page .review-ptab.is-on { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
 .review-ptab i { font-style: normal; font-variant-numeric: tabular-nums; }
 .review-pcollapse { margin-left: auto; border: 0; background: none; color: var(--muted); cursor: pointer; font-size: 14px; }
 .review-flat-list { list-style: none; margin: 0; padding: 0; }
-.review-flat-list > li { border-bottom: 1px solid var(--line); } /* visual-check #5：line #E7E2EC */
-.review-flat-list > li.is-on { background: var(--accent-soft); } /* visual-check #4：purple-soft #F6F1F8 */
+.review-flat-list > li { border-bottom: 1px solid var(--line); } /* visual-check #5 */
+.review-flat-list > li.is-on { background: var(--accent-soft); } /* visual-check #4 */
 .review-flat-row { display: grid; grid-template-columns: 24px minmax(0, 1fr) auto auto; align-items: center; gap: 8px; width: 100%; text-align: left; border: 0; background: none; padding: 8px 16px; font-size: 14px; cursor: pointer; color: var(--ink); }
 .review-flat-row strong { overflow-wrap: anywhere; font-weight: 500; }
 .review-flat-row small { color: var(--muted); font-size: 13px; }
@@ -68,10 +68,10 @@ html[data-theme="dark"] .review-thumbs { background: #1f1a24; }
 .review-flat-detail .review-spoken p { margin: 2px 0; font-size: var(--ui-font, 16px); }
 .review-flat-detail .review-evidence-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .review-verdicts { display: flex; gap: 8px; }
-.review-verdicts button { flex: 1; border: 1px solid var(--line); border-radius: 10px; background: var(--stage, #fff); cursor: pointer; font-size: 14px; color: var(--ink); }
+.review-verdicts button { flex: 1; border: 1px solid var(--line); border-radius: 10px; background: var(--stage); cursor: pointer; font-size: 14px; color: var(--ink); }
 .review-verdicts button.is-on { border-color: var(--accent); color: var(--accent); font-weight: 600; }
 .review-verdicts button:disabled { cursor: not-allowed; opacity: .6; }
-.review-pfoot { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 16px; border-top: 1px solid var(--line); font-size: 13px; color: var(--muted); position: sticky; bottom: 0; background: var(--stage, #fff); flex-wrap: wrap; }
+.review-pfoot { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 16px; border-top: 1px solid var(--line); font-size: 13px; color: var(--muted); position: sticky; bottom: 0; background: var(--stage); flex-wrap: wrap; }
 .review-zero { margin: 16px; padding: 8px 16px; border-radius: 10px; background: color-mix(in srgb, var(--ok) 10%, var(--stage)); color: #237804; font-weight: 600; }
 .review-dock-none { padding: 16px 16px; color: var(--muted); }
 .review-flat .ant-tag.t-pend { color: #8a5a00; background: #fff7e6; border-color: #ffd591; }
@@ -110,7 +110,7 @@ html[data-theme="dark"] .review-miss { color: #F2B44C; background: #43332E; }
 .review-flat-page.is-phone .review-title { max-width: 100%; flex-basis: 100%; font-size: 16px; white-space: normal; order: -1; }
 .review-flat-page.is-phone .review-signhint { flex-basis: 100%; order: 3; }
 .review-flat-page.is-phone .review-reject, .review-flat-page.is-phone .review-sign { flex: 1; }
-.review-flat-page.is-phone .review-tbar { position: sticky; bottom: 0; background: var(--stage, #fff); }
+.review-flat-page.is-phone .review-tbar { position: sticky; bottom: 0; background: var(--stage); }
 .review-phone-sum { padding: 8px 16px; border-bottom: 1px solid var(--line); font-size: 14px; }
 .review-phone-sum summary { min-height: 44px; display: flex; align-items: center; cursor: pointer; font-weight: 600; }
 .review-phone-note { margin: 0; color: var(--muted); font-size: 13px; }
@@ -127,10 +127,10 @@ html[data-theme="dark"] .review-miss { color: #F2B44C; background: #43332E; }
 @media (max-width: 719px) {
   .shell.is-review-flat .sidebar { display: none; }
   .review-flat-page.is-phone { padding-bottom: 136px; }
-  .review-bottom-nav { position: fixed; left: 0; right: 0; bottom: 0; z-index: 21; display: flex; padding: 0 8px env(safe-area-inset-bottom, 0px); background: var(--stage, #fff); border-top: 1px solid var(--line); }
+  .review-bottom-nav { position: fixed; left: 0; right: 0; bottom: 0; z-index: 21; display: flex; padding: 0 8px env(safe-area-inset-bottom, 0px); background: var(--stage); border-top: 1px solid var(--line); }
   .review-bottom-nav button { flex: 1; min-height: 52px; border: 0; background: none; font-size: 14px; color: var(--muted); cursor: pointer; }
   .review-bottom-nav button[aria-current="page"] { color: var(--accent); font-weight: 600; }
-  .review-flat-page.is-phone .review-actions { position: fixed; left: 0; right: 0; bottom: calc(52px + env(safe-area-inset-bottom, 0px)); z-index: 20; padding: 8px 16px; background: var(--stage, #fff); border-top: 1px solid var(--line); flex-wrap: wrap; }
+  .review-flat-page.is-phone .review-actions { position: fixed; left: 0; right: 0; bottom: calc(52px + env(safe-area-inset-bottom, 0px)); z-index: 20; padding: 8px 16px; background: var(--stage); border-top: 1px solid var(--line); flex-wrap: wrap; }
 }
 .review-flat .review-evidence-label { font-size: max(13px, .85em); }
 /* design F-002（设计哥复核方案）：≥720 页头一行不折，品名可收缩省略（去掉 40vw 上限），「退回 / 签字」靠右；
