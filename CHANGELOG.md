@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.31.1.19] - 2026-10-12
+
+### Added
+- 旧打样 GLB 的 WebP 旁路（PR-a，服务端）：转换结果存在打样目录下隐藏的 `.webp-variant/`，按内容哈希命名（`<原名>.<sha256 前16位>.webpv`），元数据指向当前文件，替换时写新文件名、旧文件删不掉（Windows EPERM/EBUSY）就留给下次写入和启动清理，原件不动；元数据记两侧 sha256，写入顺序为旁路→fsync→元数据→目录 fsync，启动清理 tmp/孤儿/源已不存在的旁路；10 个会改 GLB 的入口先删旁路（静态测试锁住）。发布开关在已提交的 `rolloutFlags.ts`，`GLB_WEBP_VARIANT` 默认关、回填 `GLB_WEBP_BACKFILL_LIMIT=0`（关），不读环境变量；回填本身属 PR-b，本版不做。
+- 开关打开时：`GET /api/mockups/:id/files/glb` 默认返回校验通过的旁路（核不过回原件），`?variant=original` 总是返回原件；GLB 文件信息带 `glb_version` / `glb_original_version`（两端点实际内容 sha256 前 16 位），`?v=` 匹配才长缓存（`private, max-age=31536000, immutable`），否则 `no-cache`；`texture_format` 按默认端点实际内容报。开关关时行为与上一版相同、不输出版本字段。
+- 仅测试用注入点（`*ForTest`）只在 VITEST 进程生效，生产代码不引用。
+
 ## [0.31.1.18] - 2026-10-12
 
 ### Changed
