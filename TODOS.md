@@ -333,7 +333,7 @@ RF-10–RF-13 的原始依赖见 [ADR-007 §20.7](docs/adr-007-packaging-render-
 
 - [ ] **F10 — 任务/作业失败报错是否向非管理员带出本机路径（部分解决）**
 
-  已做（0.31.1.14，`fix/settings-admin-only`）：`/api/tasks` 列表与详情的 `job_error` / `error` 对非管理员去目录留文件名，管理员看原文；飞书完成/失败通知（`fireTaskNotify`、`fireMockupNotify`）同样脱敏。规则见 `docs/contracts/identity-settings.md`（`apps/web/server/src/pathRedact.ts`，测试 `path-redact.test.ts`、`job-error-redact.test.ts`）。打样 `publicMockupError` 原本已脱敏，未改。
+  已做（0.31.1.14，`fix/settings-admin-only`）：`/api/tasks` 列表与详情的 `job_error` / `error` 对非管理员去目录留文件名，管理员看原文；飞书失败通知（`fireTaskNotify`、`fireMockupNotify`）同样脱敏。规则见 `docs/contracts/identity-settings.md`（`apps/web/server/src/pathRedact.ts`，测试 `path-redact.test.ts`、`job-error-redact.test.ts`）。打样 `publicMockupError` 原本已脱敏，未改。
 
   明确不在本次范围、未审计（可能仍带出本机路径）：
   - `apps/web/server/src/index.ts:424` 全局错误处理对 4xx 原样返回 `err.message` 作 `detail`。
