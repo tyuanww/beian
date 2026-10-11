@@ -317,9 +317,13 @@ function decodeSeparators(input: string): string {
 }
 
 export function redactLocalPaths(message: string | undefined | null): string {
+  return redactCapped(message, knownLocalPaths());
+}
+
+function redactCapped(message: string | undefined | null, known: string[]): string {
   // ① 整条解码 + 脱敏（线性，不先截断，避免截断点落在网址密码等中间漏出半截）；② 脱敏后超过 REDACT_MAX_CHARS 字符
   // 只保留前这么多字符，截断点落在代理对中间时往前退一位；③ 截过就追加「（后面省略）」。
-  let s = redactLocalPathsUncapped(message);
+  let s = redactUncapped(message, known);
   const truncated = s.length > REDACT_MAX_CHARS;
   if (truncated) {
     const hi = s.charCodeAt(REDACT_MAX_CHARS - 1);
@@ -330,13 +334,16 @@ export function redactLocalPaths(message: string | undefined | null): string {
 
 /** 不截断的完整脱敏（解码 + 网址处理 + 路径扫描）。redactLocalPaths 先调它再截断；业务代码请用 redactLocalPaths。 */
 export function redactLocalPathsUncapped(message: string | undefined | null): string {
-  const s = String(message ?? "");
-  return s ? redactDecoded(decodeSeparators(s)) : s;
+  return redactUncapped(message, knownLocalPaths());
 }
 
-function redactDecoded(s: string): string {
-  // 已配置路径每条报错只读一次（读设置有开销，不能按片段反复读）。
-  const known = knownLocalPaths();
+function redactUncapped(message: string | undefined | null, known: string[]): string {
+  const s = String(message ?? "");
+  return s ? redactDecoded(decodeSeparators(s), known) : s;
+}
+
+/** known：已配置路径，由入口每条报错只读一次（读设置有开销，不能按片段反复读）后传进来。 */
+function redactDecoded(s: string, known: string[]): string {
   const parts: string[] = [];
   let last = 0;
   URL_START.lastIndex = 0;
@@ -373,10 +380,17 @@ function redactPlain(input: string, knownPaths: string[]): string {
 // ---------------------------------------------------------------------------
 // 保守兜底：脱敏 + 截断之后若仍匹配下列特征，整条报错换成「任务失败，请联系管理员（单号 <任务编号>）」。
 // 特征：`/Users/`、`/home/`、`\Users\`（大小写不限）；盘符 `X:\` / `X:/`（前一个字符不是字母，避免 `http://` 误判）；
-// `%2F`、`%5C`；窄版凭据 `://用户名:…@`（用户名后紧跟 `:`，且 `@` 之前没有 `/ ? #` 或空白，带端口的 `http://host:8080/x` 不触发）。
+// `%2F`、`%5C`；窄版凭据 `://用户名:…@`（用户名后紧跟 `:`，且 `@` 之前没有 `/ ? #` 或空白，带端口的 `http://host:8080/x` 不触发）；
+// `/root/`、`/var/folders/`、`/private/var/`（大小写不限；相对路径或网址路径里的 `a/root/b` 也算，宁可误伤）；
+// `~/`、`~用户名/`（`~` 前不是 ASCII 字母数字；单独的 `~`、`~3 秒` 不算）；UNC `\\服务器\`；已配置的数据 / 工具目录原文。
 const LEAK_RESIDUE = [
   /\/users\//i,
   /\/home\//i,
+  /\/root\//i,
+  /\/var\/folders\//i,
+  /\/private\/var\//i,
+  /(?<![A-Za-z0-9])~[A-Za-z0-9._-]*\//,
+  /\\\\[^\s\\]+\\/,
   /\\users\\/i,
   /(?<![A-Za-z])[A-Za-z]:[\\/]/,
   /%2f/i,
@@ -384,8 +398,8 @@ const LEAK_RESIDUE = [
   /:\/\/[^\s/?#@:]+:[^\s/?#@]*@/,
 ];
 
-export function hasLeakResidue(text: string): boolean {
-  return LEAK_RESIDUE.some((re) => re.test(text));
+export function hasLeakResidue(text: string, known: string[] = knownLocalPaths()): boolean {
+  return LEAK_RESIDUE.some((re) => re.test(text)) || known.some((k) => text.includes(k));
 }
 
 function hiddenErrorText(ticket: string): string {
@@ -393,9 +407,9 @@ function hiddenErrorText(ticket: string): string {
 }
 
 /** 非管理员 / 飞书出口的最后一步：脱敏 + 截断，仍有残留特征就整条隐藏。ticket 只能传纯任务编号（task.id / job.id）。 */
-export function guardPublicError(message: string, ticket: string): { text: string; hidden: boolean } {
-  const text = redactLocalPaths(message);
-  return hasLeakResidue(text) ? { text: hiddenErrorText(ticket), hidden: true } : { text, hidden: false };
+export function guardPublicError(message: string, ticket: string, known: string[] = knownLocalPaths()): { text: string; hidden: boolean } {
+  const text = redactCapped(message, known);
+  return hasLeakResidue(text, known) ? { text: hiddenErrorText(ticket), hidden: true } : { text, hidden: false };
 }
 
 /**
@@ -405,9 +419,10 @@ export function guardPublicError(message: string, ticket: string): { text: strin
 export function guardErrorFields(ticket: string, fields: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   let hidden = false;
+  const known = knownLocalPaths();
   for (const [k, v] of Object.entries(fields)) {
     if (typeof v !== "string") continue;
-    const g = guardPublicError(v, ticket);
+    const g = guardPublicError(v, ticket, known);
     out[k] = g.text;
     hidden ||= g.hidden;
   }
