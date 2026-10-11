@@ -322,3 +322,20 @@ describe("leak residue: backslash + non-ASCII", () => {
     assert.equal(hasLeakResidue("换行\\n"), true);
   });
 });
+
+describe("leak residue: Authorization / Bearer / Basic", () => {
+  it("Authorization header and JSON form hide on list, detail and Feishu", async () => {
+    await assertTaskChainHidden("请求失败 Authorization: Bearer xxx");
+    await assertTaskChainHidden('上游返回 {"Authorization":"Bearer eyJhbGciOiJIUzI1NiJ9.e30.x"}');
+  });
+  it("token-looking Bearer / Basic values hide; any case of authorization hides", () => {
+    for (const s of ["Bearer abc.def-123", "basic dXNlcjpwYXNz0=", "BEARER eyJ0eXAi.x", "header AUTHORIZATION missing"]) {
+      assert.equal(guardPublicError(s, "x").hidden, true, s);
+    }
+  });
+  it("ordinary words are not hit (tradeoff: all-letter short tokens after Bearer pass)", () => {
+    for (const s of ["基本信息缺失", "bearer 字段为空", "Basic settings 未填", "the bearer of the bill", "Bearer abcdefgh"]) {
+      assert.equal(guardPublicError(s, "x").hidden, false, s);
+    }
+  });
+});
