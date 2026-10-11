@@ -497,3 +497,13 @@ test("下结论/撤销时任务已被别人完成：重读后锁页，不报没�
   await expect(page.getByTestId("review-dock").getByRole("button", { name: /^有错/ })).toBeDisabled();
   await expect(page.getByText("没连上网，这条没存上")).toHaveCount(0);
 });
+
+test("按住数字键的自动重复不算", async ({ page, syntheticApi }) => {
+  const task = reviewTask("e5969b58cd64");
+  syntheticApi.tasks.push(task);
+  await page.goto(`/review/${task.id}`);
+  await expect(page.getByTestId("review-dock")).toBeVisible();
+  await page.evaluate(() => window.dispatchEvent(new KeyboardEvent("keydown", { key: "1", repeat: true, bubbles: true })));
+  await page.waitForTimeout(300);
+  expect(syntheticApi.calls.filter((c) => c.path.endsWith("/decision"))).toHaveLength(0);
+});

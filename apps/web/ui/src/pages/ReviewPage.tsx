@@ -681,6 +681,8 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
   }
 
   keyHandlerRef.current = (e: KeyboardEvent) => {
+    // 按住不放的自动重复不算（避免一路连标）。
+    if (e.repeat) return;
     if (e.metaKey || e.ctrlKey || e.altKey || dialog || isTypingTarget(e.target) || layout === "phone") return;
     if (e.key === "?") { e.preventDefault(); setShortcutsOpen((v) => !v); return; }
     if (e.key === "Escape") { setShortcutsOpen(false); return; }
