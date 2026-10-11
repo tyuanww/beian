@@ -170,12 +170,29 @@ export function panToClearPanel(markerRight: number, panelLeft: number, margin =
 
 const SHORTCUT_SEEN_KEY = "wb_review_shortcuts_seen_v1";
 
+/** 浏览器禁用存储（隐私模式 SecurityError / 配额 QuotaExceededError）抛 DOMException；其他错误照常抛出。 */
+function isStorageDenied(err: unknown): boolean {
+  return typeof DOMException !== "undefined" && err instanceof DOMException;
+}
+
 export function shouldShowShortcutsOnOpen(store: Pick<Storage, "getItem"> | null): boolean {
-  try { return !store?.getItem(SHORTCUT_SEEN_KEY); } catch { return false; }
+  if (!store) return false;
+  try {
+    return !store.getItem(SHORTCUT_SEEN_KEY);
+  } catch (err) {
+    if (!isStorageDenied(err)) throw err;
+    return false; // 读不了存储就不弹，避免每次打开都弹；点「?」仍可看
+  }
 }
 
 export function markShortcutsSeen(store: Pick<Storage, "setItem"> | null): void {
-  try { store?.setItem(SHORTCUT_SEEN_KEY, "1"); } catch { /* 存不了就只在本次显示 */ }
+  if (!store) return;
+  try {
+    store.setItem(SHORTCUT_SEEN_KEY, "1");
+  } catch (err) {
+    if (!isStorageDenied(err)) throw err;
+    console.warn("快捷键条已看标记没存上，下次打开可能再弹一次", err);
+  }
 }
 
 /** 位置「3/9」：当前在该 tab 列表中的序号。 */

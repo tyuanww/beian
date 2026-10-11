@@ -79,5 +79,8 @@ describe("reviewFlat", () => {
   it("快捷键条只在首次打开显示", () => {
     assert.equal(shouldShowShortcutsOnOpen({ getItem: () => null }), true);
     assert.equal(shouldShowShortcutsOnOpen({ getItem: () => "1" }), false);
+    assert.equal(shouldShowShortcutsOnOpen(null), false);
+    assert.equal(shouldShowShortcutsOnOpen({ getItem: () => { throw new DOMException("denied", "SecurityError"); } }), false);
+    assert.throws(() => shouldShowShortcutsOnOpen({ getItem: () => { throw new TypeError("bug"); } }), TypeError);
   });
 });
