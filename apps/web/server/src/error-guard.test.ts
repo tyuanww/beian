@@ -193,3 +193,37 @@ describe("leak residue: more local roots, home shortcuts, UNC and configured dir
     }
   });
 });
+
+describe("mockup Feishu failure notification is guarded", () => {
+  it("residue in a mockup job_error is hidden with the job id as ticket", async () => {
+    const { saveMockup } = await import("./mockup.js");
+    const id = "0000000c0001";
+    const seen: Array<string | undefined> = [];
+    setJobsTestHooks({
+      notify: async (opts) => {
+        if (opts.tid === id) seen.push(opts.error);
+        return { ok: true };
+      },
+    });
+    try {
+      saveMockup({
+        id,
+        status: "failed",
+        created_at: "2026-10-11T10:00:00.000Z",
+        files: [],
+        job_kind: "mockup",
+        job_status: "failed",
+        job_error: RESIDUE,
+        notify_job_id: `${id}:mockup:t`,
+        notify_sent: false,
+      });
+      reclaimOnBoot();
+      await new Promise((r) => setTimeout(r, 50));
+      assert.equal(seen.length, 1);
+      assert.doesNotMatch(String(seen[0]), /Users|bob|a\.pdf/);
+      assert.match(String(seen[0]), new RegExp(`单号 ${id}`));
+    } finally {
+      resetJobsTestHooks();
+    }
+  });
+});
