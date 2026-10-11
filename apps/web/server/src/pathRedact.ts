@@ -198,6 +198,7 @@ function isUrlChar(ch: string): boolean {
 }
 /** 网址内夹带的路径到这些字符为止（中文、emoji 等不算终点）。 */
 const URL_PATH_STOP = new Set([..."&#?\"'`<>，。；：、（）【】「」！？"]);
+const URL_USERINFO_MASK = "***";
 const URL_HOME_DIRS = ["Users/", "home/", "root/", "var/folders/", "private/var/"];
 
 /** j 处是否开始一段网址内夹带的本机路径；返回替换文本，不是返回 null。 */
@@ -226,9 +227,15 @@ function urlPathEnd(s: string, from: number): number {
  */
 function redactUrlAt(s: string, start: number, known: string[]): [string, number] {
   const out: string[] = [];
-  let h = s.indexOf("://", start) + 3;
-  while (h < s.length && isUrlChar(s[h]) && !"/?#\\".includes(s[h])) h += 1;
-  out.push(s.slice(start, h));
+  const authStart = s.indexOf("://", start) + 3;
+  let h = authStart;
+  let at = -1;
+  while (h < s.length && isUrlChar(s[h]) && !"/?#\\".includes(s[h])) {
+    if (s[h] === "@") at = h;
+    h += 1;
+  }
+  // 用户名 / 密码（`user:pass@`、`user@`，到最后一个 `@` 为止）整段换成 `***@`，主机与端口保留。
+  out.push(at >= 0 ? `${s.slice(start, authStart)}${URL_USERINFO_MASK}${s.slice(at, h)}` : s.slice(start, h));
   let j = h;
   while (j < s.length) {
     const repl = urlPathAt(s, j, known);
