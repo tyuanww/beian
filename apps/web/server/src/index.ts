@@ -1343,8 +1343,8 @@ app.get("/api/tasks/:tid/pages/:side/:name", (c) => {
 });
 
 app.get("/api/settings", (c) => {
-  need(c, "read");
-  const view = publicView();
+  const s = need(c, "read");
+  const view = publicView({ admin: s.role === "admin" });
   const q = queueSnapshot();
   return c.json({
     ...view,
@@ -1383,11 +1383,12 @@ app.post("/api/settings", async (c) => {
     "MINIMAX_API_KEY",
   ];
   if (billingKeys.some((k) => k in patch)) resetBillingCache();
-  return c.json({ ...publicView(), restart });
+  return c.json({ ...publicView({ admin: true }), restart });
 });
 
 app.post("/api/settings/probe", async (c) => {
   const s = need(c, "read");
+  if (s.role !== "admin") throw new HTTPException(403, { message: "自检需要管理员" });
   const body = (await c.req.json().catch(() => ({}))) as { id?: string };
   const id = String(body.id || "").trim();
   if (!id) throw new HTTPException(400, { message: "缺少探测 id" });
@@ -1431,13 +1432,15 @@ app.post("/api/settings/scan", (c) => {
 });
 
 app.get("/api/settings/billing", async (c) => {
-  need(c, "read");
+  const s = need(c, "read");
+  if (s.role !== "admin") throw new HTTPException(403, { message: "看费用账单需要管理员" });
   await loadVendorBills(false);
   return c.json(billingSnapshot());
 });
 
 app.post("/api/settings/billing/refresh", async (c) => {
-  need(c, "read");
+  const s = need(c, "read");
+  if (s.role !== "admin") throw new HTTPException(403, { message: "刷新费用账单需要管理员" });
   const vendors = await loadVendorBills(true);
   return c.json({ ...billingSnapshot(), vendors });
 });

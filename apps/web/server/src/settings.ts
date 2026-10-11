@@ -348,11 +348,28 @@ export function maxUploadBytes(): number {
   return Math.min(mb, 2048) * 1024 * 1024;
 }
 
-export function publicView() {
-  const groups = new Map<string, ReturnType<typeof fieldView>[]>();
+// 非管理员只看得到开关和上传上限的值；其余字段只给“是否已填”，不给值和末四位。
+const NON_ADMIN_VALUE_KEYS = new Set(["WB_MAX_UPLOAD_MB"]);
+
+function nonAdminSeesValue(f: SettingField): boolean {
+  return f.kind === "toggle" || NON_ADMIN_VALUE_KEYS.has(f.key);
+}
+
+type FieldRow = Omit<ReturnType<typeof fieldView>, "value" | "last4"> & { value?: string; last4?: string };
+
+function trimFieldForNonAdmin(f: SettingField, row: ReturnType<typeof fieldView>): FieldRow {
+  if (nonAdminSeesValue(f)) return row;
+  const { value: _value, last4: _last4, ...rest } = row;
+  return rest;
+}
+
+export function publicView(opts: { admin: boolean }) {
+  const admin = opts.admin === true;
+  const groups = new Map<string, FieldRow[]>();
   for (const f of CATALOG) {
     const val = getSetting(f.key);
-    const row = fieldView(f, val);
+    const full = fieldView(f, val);
+    const row = admin ? full : trimFieldForNonAdmin(f, full);
     const list = groups.get(f.group) || [];
     list.push(row);
     groups.set(f.group, list);
@@ -368,12 +385,25 @@ export function publicView() {
       { id: "illustrator", label: "Illustrator" },
       { id: "lark", label: "飞书推送" },
     ],
-    derived: {
-      redirect_uri: feishuRedirect(),
-      tenant_key_filled: Boolean(getSetting("FEISHU_TENANT_KEY")),
-      python: pythonBin(),
+    derived: admin
+      ? {
+          redirect_uri: feishuRedirect(),
+          tenant_key_filled: Boolean(getSetting("FEISHU_TENANT_KEY")),
+          python: pythonBin(),
+        }
+      : { tenant_key_filled: Boolean(getSetting("FEISHU_TENANT_KEY")) },
+    health: admin ? computeHealth() : nonAdminHealth(computeHealth()),
+  };
+}
+
+// 健康卡片给非管理员时去掉任何本机路径，只留状态文案。
+function nonAdminHealth(h: ReturnType<typeof computeHealth>): ReturnType<typeof computeHealth> {
+  return {
+    ...h,
+    mockup: {
+      ...h.mockup,
+      detail: h.mockup.ok ? "已配置 Blender" : h.mockup.detail,
     },
-    health: computeHealth(),
   };
 }
 
