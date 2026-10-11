@@ -120,4 +120,22 @@ describe("mockup list/detail errors go through redact + guard for non-admins", (
       for (const obj of [v.row, v.detail]) assert.doesNotMatch(String(obj.job_error), /bob|smith/, `${input} -> ${String(obj.job_error)}`);
     }
   });
+
+  it("Basic base64 tokens hide; Basic settings / Settings stay", async () => {
+    for (const [i, input] of ["上游 401：Basic dXNlcjpwYXNz", "上游 401：Basic dXNlcjpwYXNzMTIz"].entries()) {
+      const id = `0000000e04${String(i).padStart(2, "0")}`;
+      save(id, "job_error", input);
+      const v = await views(id, auth("reviewer", "ou_mg_rv"));
+      for (const obj of [v.row, v.detail]) {
+        assert.equal(obj.job_error, `任务失败，请联系管理员（单号 ${id}）`, `${input} -> ${String(obj.job_error)}`);
+        assert.equal(obj.error_ticket, id);
+      }
+    }
+    for (const [i, input] of ["Basic settings 未填", "Basic Settings 未填"].entries()) {
+      const id = `0000000e05${String(i).padStart(2, "0")}`;
+      save(id, "job_error", input);
+      const v = await views(id, auth("reviewer", "ou_mg_rv"));
+      for (const obj of [v.row, v.detail]) assert.equal(obj.job_error, input);
+    }
+  });
 });

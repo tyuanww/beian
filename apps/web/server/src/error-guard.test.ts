@@ -347,3 +347,26 @@ describe("home user segment with spaces (/Users/bob smith)", () => {
     }
   });
 });
+
+describe("Basic + base64 token", () => {
+  it("Basic dXNlcjpwYXNz / dXNlcjpwYXNzMTIz hide on task list, detail and Feishu", async () => {
+    await assertTaskChainHidden("上游 401：Basic dXNlcjpwYXNz");
+    await assertTaskChainHidden("上游 401：Basic dXNlcjpwYXNzMTIz");
+  });
+  it("Basic settings / Basic Settings stay visible on task list, detail and Feishu", async () => {
+    for (const input of ["Basic settings 未填", "Basic Settings 未填"]) {
+      const r = await taskChain(input);
+      assert.equal(r.list, input);
+      assert.equal(r.detail, input);
+      assert.equal(r.notify, input);
+    }
+  });
+  it("rule edges: >=8 chars and (an uppercase after the first char, or a digit / + / =)", () => {
+    for (const s of ["basic YWxhZGRpbjpvcGVuc2VzYW1l", "Basic QWxhZGRpbg==", "Basic abc+defgh", "Basic abcdefg1"]) {
+      assert.equal(guardPublicError(s, "x").hidden, true, s);
+    }
+    for (const s of ["基本信息缺失", "Basic auth 未配置", "Basic information", "Basic Information", "Basic aB1"]) {
+      assert.equal(guardPublicError(s, "x").hidden, false, s);
+    }
+  });
+});
