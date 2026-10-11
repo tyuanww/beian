@@ -198,7 +198,7 @@ async function denyWebp(page: Page) {
 test('WebP 贴图在不能解码的设备上只显示效果图和说明，不请求模型',async({page})=>{
   let glbRequests=0;page.on('request',r=>{if(r.url().includes('/files/glb')&&!r.url().includes('download=1'))glbRequests++;});
   await denyWebp(page);await serve(page,false,false,'webp');await page.goto(`/mockup/${ID}`);
-  await expect(page.getByRole('status').filter({hasText:'此设备无法显示 3D 预览'})).toHaveText('此设备无法显示 3D 预览，先看效果图。');
+  await expect(page.getByRole('status').filter({hasText:'这台设备显示不了 3D'})).toHaveText('这台设备显示不了 3D，已换成效果图');
   await expect(page.locator('.mockup-sheet-glb img.mockup-glb-poster')).toBeVisible();
   await expect(page.locator('model-viewer')).toHaveCount(0);
   await expect(page.locator('.mockup-sheet-glb .ant-progress, .mockup-sheet-glb .ant-spin')).toHaveCount(0);
@@ -210,7 +210,7 @@ test('WebP 贴图在不能解码的设备上只显示效果图和说明，不请
 
 test('WebP 贴图在能解码的设备上照常加载 3D',async({page})=>{
   await serve(page,false,false,'webp');await page.goto(`/mockup/${ID}`);await loaded(page);
-  await expect(page.getByText('此设备无法显示 3D 预览')).toHaveCount(0);
+  await expect(page.getByText('这台设备显示不了 3D')).toHaveCount(0);
 });
 
 test('PNG 贴图即使设备不能解码 WebP 也照常加载 3D',async({page})=>{

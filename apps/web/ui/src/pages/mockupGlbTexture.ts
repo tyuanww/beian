@@ -8,7 +8,7 @@ type GlbTextureFormat = "webp" | "png";
 export type GlbTextureInfo = { [K in typeof GLB_TEXTURE_FORMAT_FIELD]?: GlbTextureFormat | (string & {}) };
 
 // 老板定稿（2026-10-11）；见 DESIGN.md「3D 贴图不支持」。
-export const GLB_WEBP_UNSUPPORTED_TEXT = "此设备无法显示 3D 预览，先看效果图。";
+export const GLB_WEBP_UNSUPPORTED_TEXT = "这台设备显示不了 3D，已换成效果图";
 
 /** 最小合法 1×1 无损 WebP（base64）。本地 atob 成 Blob，不走 fetch，也不用 data: URL，免得被 CSP 误判为不支持。 */
 const WEBP_PROBE_BASE64 = "UklGRhoAAABXRUJQVlA4TA0AAAAvAAAAEAcQERGIiP4HAA==";
