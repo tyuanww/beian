@@ -469,3 +469,32 @@ RF-10–RF-13 的原始依赖见 [ADR-007 §20.7](docs/adr-007-packaging-render-
 - 后端下发 `upload_limit_bytes`（`/api/auth/me`）暂缓：前端已支持该可选字段，线上目前不返回，统一用 99MB（99,000,000 字节）默认上限。
 - 3D 打样 GLB 两地址（默认 WebP 版 / `?variant=original`）与 `glb_version` / `glb_original_version` 依赖后端 PR-a（开发哥 `aff0608`，未合入；当前开关关着，线上两字段不出现）；前端已按合同实现并用测试 mock，PR-a 合入后用真后端复验缓存头（匹配 `?v=` 为 immutable，不匹配 no-cache + ETag）并定版本号。
 - 上传上限跟进（0.31.1.17 遗留）：（1）后端 `/api/auth/me` 还不下发 `upload_limit_bytes`，之后单开小 PR 加；前端 `uploadLimit.ts` 现在只认 ≥1,000,000 的整数——小于 1MB 时提示写成「1MB」（MB 数最少显示 1），带小数时预检会拒掉全部文件，后端下发前要先定好取值规则再一起改。（2）文件压缩页上限由 100MiB 改为 99MB（十进制 99,000,000 字节）后没有对应的 e2e，只有单测覆盖。
+
+## 2026-10-12 交接（0.31.1.19 之后）
+
+交接说明见 [docs/handoff-2026-10-12.md](docs/handoff-2026-10-12.md)。
+
+**WebP 旁路**
+- 紧急关闭开关：打开 `GLB_WEBP_VARIANT` 之前，先补一个紧急关闭用的文件开关；用 3 个模型试点，老板点头才开。
+- 回填（PR-b）未做；`GLB_WEBP_BACKFILL_LIMIT = 0`，单文件上限常量 32MB 已在 `rolloutFlags.ts`。
+
+**前端待办**
+1. 3D 降级时还会多弹「版本图片暂时读不到，请重新打开此单」，降级时应不弹（真机也会出现）。
+2. WebP 开关关着时，偶发加载失败也显示「这台设备显示不了 3D」，不准确；产品定稿：偶发失败用「3D 没加载出来，请重新打开此单」，真不支持用「这台设备显示不了 3D，已换成效果图」。
+3. WebP 开关打开后用真后端复验两个地址的 ?v= 和缓存头。
+4. 删掉 reviewWorkspaceState.ts 里没用的 sidebarWidth/readSidebar/writeSidebar。
+5. 核对要点里重复的「请核对」合并成一处。
+6. 剩 3 处带「你」：NewTaskPage.tsx 315、319 行，mockupRenderVersions.ts 41 行。
+7. Node 20 下 ui 的 npm test 识别不了通配符；全新构建缺 @rollup/rollup-linux-x64-gnu。
+8. 后端下发 upload_limit_bytes 暂缓，线上先用默认 99MB。
+
+**审查待办**
+1. hits[].evidence 识别文本本身不脱敏，带本机路径会原样给到审稿员。
+2. 打样单里 D:\a b\c 这种带空格的纯英文路径会露出「b\c」。
+3. 开关关着时启动仍无条件跑 cleanupGlbWebpVariantsOnBoot，开开关前要用开关包一下。
+4. 304 只认完全相等的 If-None-Match，W/ 前缀和多个值不命中。
+5. 上传上限：服务端下发小于 1MB 或小数时提示不准或拒掉所有文件，做后端小 PR 时前端只认至少 1,000,000 的整数。
+6. 「删旁路」插在十几个入口，以后新增改 GLB 的入口容易漏。
+
+**文档**
+- 飞书「beian 前端优化方案」文档停在旧进度，没同步，要老板私聊飞书哥说一句才同步。
