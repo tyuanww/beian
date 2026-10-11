@@ -129,12 +129,41 @@ export function conclusionFor(kind: "sign" | "reject", extra: string, rows: Reje
 }
 
 /** 已被别人签字/退回：只用现有 completed_by / complete_kind 字段，不新增接口。 */
-export function lockedBy(task: Pick<TaskDetail, "status" | "completed_by" | "complete_kind"> | null, me: string | null): string | null {
-  if (!task || task.status !== "completed") return null;
+/** completed_at → 用户时区（Asia/Shanghai）的「18:20」/「10月9日 18:20」/「2025年10月9日 18:20」；缺或坏就不写时间（绝不拿当前时间顶）。 */
+export function completedAtLabel(iso: string | null | undefined, now: Date = new Date()): string {
+  if (!iso) return "";
+  const at = new Date(iso);
+  if (Number.isNaN(at.getTime())) return "";
+  const parts = (d: Date) => {
+    const o: Record<string, string> = {};
+    for (const p of new Intl.DateTimeFormat("en-US", { timeZone: "Asia/Shanghai", year: "numeric", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(d)) o[p.type] = p.value;
+    return o;
+  };
+  const a = parts(at), n = parts(now);
+  const hm = `${a.hour}:${a.minute}`;
+  if (a.year === n.year && a.month === n.month && a.day === n.day) return hm;
+  if (a.year === n.year) return `${a.month}月${a.day}日 ${hm}`;
+  return `${a.year}年${a.month}月${a.day}日 ${hm}`;
+}
+
+type DoneTask = Pick<TaskDetail, "status" | "completed_by" | "complete_kind" | "completed_at">;
+
+/** 已被别人完成时的锁页文案：签字 / 退回（等新稿）/ 没写种类就「处理」，后面带完成时间。 */
+export function completedByText(task: DoneTask, now: Date = new Date()): string {
   const who = (task.completed_by || "").trim();
   if (!who) return REVIEW_COPY.lockedUnknown;
-  if (me && who === me) return null;
-  return task.complete_kind === "rework" ? REVIEW_COPY.lockedRework(who) : REVIEW_COPY.lockedSign(who);
+  const head = task.complete_kind === "rework" ? REVIEW_COPY.lockedRework(who)
+    : task.complete_kind === "signed" ? REVIEW_COPY.lockedSign(who)
+    : REVIEW_COPY.lockedOther(who);
+  const at = completedAtLabel(task.completed_at, now);
+  return at ? `${head} ${at}` : head;
+}
+
+export function lockedBy(task: DoneTask | null, me: string | null, now: Date = new Date()): string | null {
+  if (!task || task.status !== "completed") return null;
+  const who = (task.completed_by || "").trim();
+  if (who && me && who === me) return null;
+  return completedByText(task, now);
 }
 
 /** 断网或请求没到服务器 → 「没连上网，这条没存上」；不排队、不自动重发。 */
@@ -222,14 +251,13 @@ export function tabIndices(hits: FieldHit[], tab: FlatTab, active: number): numb
  */
 export function submitFailureText(
   status: number | null,
-  fresh: Pick<TaskDetail, "status" | "completed_by"> | null,
+  fresh: DoneTask | null,
   freshPending: number,
 ): string {
   if (status === 409) return REVIEW_COPY.submitStillChecking;
   if (status === 400 && fresh) {
     if (fresh.status === "completed") {
-      const who = (fresh.completed_by || "").trim();
-      return who ? REVIEW_COPY.submitCompletedBy(who) : REVIEW_COPY.lockedUnknown;
+      return completedByText(fresh);
     }
     if (freshPending > 0) return REVIEW_COPY.submitPending(freshPending);
   }

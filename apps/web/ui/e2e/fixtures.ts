@@ -195,7 +195,7 @@ export type SyntheticApi = {
   /** 下一次 /complete 用这个状态码失败（如 409 = 对照还在跑）。 */
   completeFailStatus: number | null;
   /** 下一次 /decision 或 /complete 之前，模拟别人先把这单签字/退回了。 */
-  otherCompletesNext: { by: string; kind: "signed" | "rework" } | null;
+  otherCompletesNext: { by: string; kind: "signed" | "rework" | null; at?: string } | null;
   loseNextUploadResponse: boolean;
   holdNextUploadComplete: boolean;
   expireNextTaskStart: boolean;
@@ -565,7 +565,7 @@ async function installSyntheticApi(page: Page, state: SyntheticApi) {
         }
         const task = state.tasks.find((item) => item.id === decision[1]);
         if (task && state.otherCompletesNext) {
-          Object.assign(task, { status: "completed", board: "done", completed_by: state.otherCompletesNext.by, complete_kind: state.otherCompletesNext.kind });
+          Object.assign(task, { status: "completed", board: "done", completed_by: state.otherCompletesNext.by, complete_kind: state.otherCompletesNext.kind ?? undefined, completed_at: state.otherCompletesNext.at });
           state.otherCompletesNext = null;
         }
         if (!task) return json(route, { detail: "合成任务不存在" }, 404);
@@ -583,7 +583,7 @@ async function installSyntheticApi(page: Page, state: SyntheticApi) {
       if (method === "POST" && complete) {
         const task = state.tasks.find((item) => item.id === complete[1]);
         if (task && state.otherCompletesNext) {
-          Object.assign(task, { status: "completed", board: "done", completed_by: state.otherCompletesNext.by, complete_kind: state.otherCompletesNext.kind });
+          Object.assign(task, { status: "completed", board: "done", completed_by: state.otherCompletesNext.by, complete_kind: state.otherCompletesNext.kind ?? undefined, completed_at: state.otherCompletesNext.at });
           state.otherCompletesNext = null;
         }
         if (!task) return json(route, { detail: "合成任务不存在" }, 404);

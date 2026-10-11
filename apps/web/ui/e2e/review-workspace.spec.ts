@@ -258,7 +258,7 @@ test("已被别人签字：用 completed_by 锁定只读", async ({ page, synthe
   task.completed_by = "天元（魏炜）";
   syntheticApi.tasks.push(task);
   await page.goto(`/review/${task.id}`);
-  await expect(page.getByText("🔒 已被天元（魏炜）签字")).toBeVisible();
+  await expect(page.getByText("🔒 这一单已被天元（魏炜）签字")).toBeVisible();
   await expect(page.getByRole("button", { name: "签字", exact: true })).toBeDisabled();
   await expect(page.getByRole("button", { name: "退回", exact: true })).toBeDisabled();
 });
@@ -592,4 +592,45 @@ test("「?」悬停说明写「快捷键」；‹ › 点击区 ≥44px", async 
     expect(b.width).toBeGreaterThanOrEqual(44);
     expect(b.height).toBeGreaterThanOrEqual(44);
   }
+});
+
+test.describe("已被别人完成：锁页文案 + 完成时间（固定上海时区格式，浏览器时区设成洛杉矶也不受影响）", () => {
+  test.use({ timezoneId: "America/Los_Angeles" });
+  const cases = [
+    { id: "e5969b58cd90", now: "2026-10-11T10:30:00Z", kind: "signed", at: "2026-10-11T10:20:00Z", want: "这一单已被天元签字 18:20" },
+    { id: "e5969b58cd91", now: "2026-10-11T10:30:00Z", kind: "rework", at: "2026-10-09T10:20:00Z", want: "这一单已被天元退回，等新稿 10月9日 18:20" },
+    { id: "e5969b58cd92", now: "2026-10-11T10:30:00Z", kind: undefined, at: "2026-10-11T10:20:00Z", want: "这一单已被天元处理 18:20" },
+    { id: "e5969b58cd93", now: "2026-10-11T10:30:00Z", kind: "signed", at: undefined, want: "这一单已被天元签字" },
+    // 上海已过零点（10-12 00:30），完成在上海 10-11 23:50；洛杉矶两者同一天，若误用浏览器时区会写成「08:50」。
+    { id: "e5969b58cd94", now: "2026-10-11T16:30:00Z", kind: "signed", at: "2026-10-11T15:50:00Z", want: "这一单已被天元签字 10月11日 23:50" },
+    { id: "e5969b58cd95", now: "2026-10-11T10:30:00Z", kind: "signed", at: "2025-10-09T10:20:00Z", want: "这一单已被天元签字 2025年10月9日 18:20" },
+  ];
+  for (const c of cases) {
+    test(c.want, async ({ page, syntheticApi }) => {
+      await page.clock.setFixedTime(new Date(c.now));
+      const task = reviewTask(c.id);
+      Object.assign(task, { status: "completed", board: "done", completed_by: "天元", complete_kind: c.kind, completed_at: c.at });
+      syntheticApi.tasks.push(task);
+      await page.goto(`/review/${task.id}`);
+      await expect(page.locator(".review-lock")).toContainText(`🔒 ${c.want}`);
+      const title = await page.locator(".review-lock .ant-alert-title").innerText();
+      expect(title.trim()).toBe(`🔒 ${c.want}`);
+      await expect(page.getByRole("button", { name: "签字", exact: true })).toBeDisabled();
+      await expect(page.getByRole("button", { name: "上传新稿" })).toHaveCount(c.kind === "rework" ? 1 : 0);
+    });
+  }
+
+  test("提交时才发现被别人退回：重读后提示并锁页，页头出现「上传新稿」", async ({ page, syntheticApi }) => {
+    await page.clock.setFixedTime(new Date("2026-10-11T10:30:00Z"));
+    const task = reviewTask("e5969b58cd96");
+    task.hits![0].decision = "confirm";
+    syntheticApi.tasks.push(task);
+    await page.goto(`/review/${task.id}`);
+    syntheticApi.otherCompletesNext = { by: "天元", kind: "rework", at: "2026-10-11T10:20:00Z" };
+    await page.getByRole("button", { name: "签字", exact: true }).click();
+    await page.getByRole("dialog").getByRole("button", { name: "确认签字" }).click();
+    await expect(page.locator(".ant-message")).toContainText("这一单已被天元退回，等新稿 18:20");
+    await expect(page.locator(".review-lock")).toContainText("这一单已被天元退回，等新稿 18:20");
+    await expect(page.locator(".review-top").getByRole("button", { name: "上传新稿" })).toBeVisible();
+  });
 });

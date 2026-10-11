@@ -113,7 +113,6 @@ export const REVIEW_COPY = {
   /** 提交失败按服务端状态/错误码映射；不把服务端原文给用户看。 */
   submitStillChecking: "这份稿还在检查，等一会儿再提交",
   submitPending: (n: number) => `还有 ${n} 条待确认，处理完才能签字`,
-  submitCompletedBy: (name: string) => `这一单已被${name}签字`,
   rejectBlockedByPending: (n: number) => `还有 ${n} 条待确认，处理完才能退回`,
   collapse: "收起",
   expand: (n: number) => `展开疑点 · 待确认 ${n}`,
@@ -123,8 +122,10 @@ export const REVIEW_COPY = {
   shortcutsGotIt: "知道了",
   phoneOnly: "逐条下结论仅电脑端",
   phoneIssues: (n: number) => `有错 ${n} 条`,
-  lockedSign: (who: string) => `已被${who}签字`,
-  lockedRework: (who: string) => `已被${who}退回`,
+  /** 已被别人完成（锁页横幅 + 提交失败提示共用；项目哥/产品哥 2026-10-11 定稿）。 */
+  lockedSign: (who: string) => `这一单已被${who}签字`,
+  lockedRework: (who: string) => `这一单已被${who}退回，等新稿`,
+  lockedOther: (who: string) => `这一单已被${who}处理`,
   lockedUnknown: "这份稿已经提交过了",
   footer: (left: number, page: number) => `这单还剩 ${left} 条待确认 · 本页还有 ${page} 条`,
   noBox: "这条我钉不住，请整面看",

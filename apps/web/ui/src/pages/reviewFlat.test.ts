@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { FieldHit } from "../api";
 import {
-  conclusionFor, decisionFailureText, submitFailureText, flatLayout, isTypingTarget, lockedBy, markerOutsideCorner, nextPendingAfter,
+  completedAtLabel, completedByText, conclusionFor, decisionFailureText, submitFailureText, flatLayout, isTypingTarget, lockedBy, markerOutsideCorner, nextPendingAfter,
   panToClearPanel, positionLabel, rejectRows, shouldShowShortcutsOnOpen, submitGate, tabIndices, thumbMarks, verdictCounts, verdictForKey,
 } from "./reviewFlat.js";
 
@@ -49,8 +49,8 @@ describe("reviewFlat", () => {
     assert.equal(conclusionFor("sign", " ", []), "无改稿项");
   });
   it("已被他人签字锁定只看 completed_by", () => {
-    assert.equal(lockedBy({ status: "completed", completed_by: "天元", complete_kind: "signed" }, "籽烨"), "已被天元签字");
-    assert.equal(lockedBy({ status: "completed", completed_by: "天元", complete_kind: "rework" }, "籽烨"), "已被天元退回");
+    assert.equal(lockedBy({ status: "completed", completed_by: "天元", complete_kind: "signed" }, "籽烨"), "这一单已被天元签字");
+    assert.equal(lockedBy({ status: "completed", completed_by: "天元", complete_kind: "rework" }, "籽烨"), "这一单已被天元退回，等新稿");
     assert.equal(lockedBy({ status: "completed", completed_by: "籽烨" }, "籽烨"), null);
     assert.equal(lockedBy({ status: "in_review" }, "籽烨"), null);
   });
@@ -87,11 +87,25 @@ describe("reviewFlat", () => {
   });
   it("提交失败只按状态码 + 重读任务映射文案", () => {
     assert.equal(submitFailureText(409, null, 0), "这份稿还在检查，等一会儿再提交");
-    assert.equal(submitFailureText(400, { status: "completed", completed_by: "天元" }, 0), "这一单已被天元签字");
+    assert.equal(submitFailureText(400, { status: "completed", completed_by: "天元", complete_kind: "signed" }, 0), "这一单已被天元签字");
     assert.equal(submitFailureText(400, { status: "completed", completed_by: "" }, 0), "这份稿已经提交过了");
     assert.equal(submitFailureText(400, { status: "in_review" }, 2), "还有 2 条待确认，处理完才能签字");
     assert.equal(submitFailureText(400, { status: "in_review" }, 0), "没提交成功，请重试");
     assert.equal(submitFailureText(400, null, 3), "没提交成功，请重试");
     assert.equal(submitFailureText(500, null, 0), "没提交成功，请重试");
+  });
+  it("已被别人完成：签字/退回/未知种类 + 完成时间（上海时区，今天只写时分）", () => {
+    const now = new Date("2026-10-11T10:30:00Z"); // 上海 18:30
+    assert.equal(completedAtLabel("2026-10-11T10:20:00Z", now), "18:20");
+    assert.equal(completedAtLabel("2026-10-09T10:20:00Z", now), "10月9日 18:20");
+    assert.equal(completedAtLabel("2025-10-09T10:20:00Z", now), "2025年10月9日 18:20");
+    assert.equal(completedAtLabel("2026-10-10T16:05:00Z", now), "00:05"); // 跨 UTC 日界，上海已是今天
+    assert.equal(completedAtLabel(undefined, now), "");
+    assert.equal(completedAtLabel("坏时间", now), "");
+    const base = { status: "completed", completed_by: "天元", completed_at: "2026-10-11T10:20:00Z" };
+    assert.equal(completedByText({ ...base, complete_kind: "signed" }, now), "这一单已被天元签字 18:20");
+    assert.equal(completedByText({ ...base, complete_kind: "rework" }, now), "这一单已被天元退回，等新稿 18:20");
+    assert.equal(completedByText({ ...base }, now), "这一单已被天元处理 18:20");
+    assert.equal(completedByText({ status: "completed", completed_by: "天元", complete_kind: "signed" }, now), "这一单已被天元签字");
   });
 });
