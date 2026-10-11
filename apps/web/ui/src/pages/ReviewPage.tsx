@@ -788,7 +788,7 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack }: Props
           <ReviewDockPanel
             key={`${taskId}:${useV2 ? "v2" : "v1"}`}
             hits={hits} active={active} current={current} tab={tab} onTab={setTab}
-            onCollapse={layout === "wide" ? undefined : () => setPanelOpen(false)}
+            onCollapse={() => setPanelOpen(false)}
             currentHasBox={currentHasBox} pageNo={pageNo} reviewable={reviewable && !locked} busy={busy}
             note={noteFor(current)}
             emptyMessage={task?.status === "compare_failed" || task?.job_status === "failed" ? "检查未完成，暂时没有结果。" : "暂时没有检查结果，请翻页查看。"}
