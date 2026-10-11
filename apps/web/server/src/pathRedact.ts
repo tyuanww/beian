@@ -7,7 +7,7 @@ import { blenderBin, illustratorBin, pythonBin } from "./settings.js";
  * 手写的线性扫描器（不用回溯正则，避免 ReDoS）。规则：
  * - 路径起点：Windows 盘符 `X:\` / `X:/`；UNC `\\`（含 `\\?\`）；Unix 绝对路径 `/`（前一个字符不是 ASCII 字母数字或 `. _ - ~ / \`，
  *   所以紧贴中文也算起点，相对路径 `docs/x.md` 不算）。Unix 路径至少要有一级目录（`/tmp` 原样保留）。
- * - 路径在空白、引号、括号、逗号分号等中英文标点处结束。
+ * - 路径在空白、引号、括号、逗号分号等中英文标点处结束；Windows / UNC 目录名中的空格见 scanPath。
  * - 末段带 1–8 位 ASCII 扩展名的当作文件名保留；扩展名后紧跟非 ASCII 字符（如「失败」）时，文件名到扩展名为止。
  *   末段没有扩展名时整段换成「本机路径」；末段是「ASCII 开头 + 中文结尾」时中文部分视为后文保留。
  * - 替换结果与前后紧贴的中文之间补一个空格（已有空格或标点则不补）。
@@ -46,15 +46,37 @@ function pathStart(s: string, i: number): number {
   return -1;
 }
 
-/** 从起点扫描路径结束位置，返回 [结束位置, 最后一个分隔符位置]。 */
-function scanPath(s: string, from: number): [number, number] {
+/**
+ * 从起点扫描路径结束位置，返回 [结束位置, 最后一个分隔符位置]。
+ * Windows / UNC 路径的目录名可含空格：遇到空格时向后看下一个词，只有它在碰到空白、标点或新路径起点之前
+ * 出现分隔符，才把空格当作目录名的一部分继续；否则路径在空格处结束。Unix 路径遇空格即结束。
+ * 每个字符最多被扫描两次（一次预读、一次正式），整体线性。
+ */
+function scanPath(s: string, from: number, allowSpaces: boolean): [number, number] {
   let j = from;
   let lastSep = from - 1;
-  while (j < s.length && !isStop(s[j])) {
-    if (isSep(s[j])) lastSep = j;
+  while (j < s.length) {
+    const ch = s[j];
+    if (ch === " " && allowSpaces && continuesAcrossSpace(s, j + 1)) {
+      j += 1;
+      continue;
+    }
+    if (isStop(ch)) break;
+    if (isSep(ch)) lastSep = j;
     j += 1;
   }
   return [j, lastSep];
+}
+
+function continuesAcrossSpace(s: string, k: number): boolean {
+  if (k >= s.length || pathStart(s, k) >= 0) return false;
+  for (let m = k; m < s.length; m += 1) {
+    const ch = s[m];
+    if (isStop(ch)) return false;
+    if (isSep(ch)) return m > k;
+    if (m > k && pathStart(s, m) >= 0) return false;
+  }
+  return false;
 }
 
 /** 末段渲染：返回 [替换文本, 留给后文的部分]。 */
@@ -107,8 +129,8 @@ function scanAndRedact(s: string): string {
       i += 1;
       continue;
     }
-    const [end, lastSep] = scanPath(s, from);
     const isUnix = s[i] === "/";
+    const [end, lastSep] = scanPath(s, from, !isUnix);
     if (isUnix && lastSep <= i) {
       out += s[i];
       i += 1;
