@@ -4,7 +4,7 @@ import { blenderBin, illustratorBin, pythonBin } from "./settings.js";
 /**
  * 给非管理员和飞书看的报错：去掉本机目录，只留文件名；没有文件名的目录写成「本机路径」。
  *
- * 先把 URL 编码的分隔符 `%5C` / `%2F` 还原。手写的线性扫描器（不用回溯正则，避免 ReDoS）。规则：
+ * `http(s)://` 等网址整段原样保留（`file://` 照常脱敏）。其余部分先把 URL 编码的分隔符 `%5C` / `%2F` 还原。手写的线性扫描器（不用回溯正则，避免 ReDoS）。规则：
  * - 路径起点：Windows 盘符 `X:\` / `X:/`（前一个字符不能是 ASCII 字母数字，`abc:\x` 不算）；`file://` 前缀先去掉；UNC `\\`（含 `\\?\`）；Unix 绝对路径 `/`（前一个字符不是 ASCII 字母数字或 `. _ - ~ / \`，
  *   所以紧贴中文也算起点，相对路径 `docs/x.md` 不算）；`~/` 与 `~用户名/`。Unix 路径至少要有一级目录（`/tmp` 原样保留）。
  * - 路径在空白、引号、括号、逗号分号等中英文标点处结束；Windows / UNC 目录名中的空格见 scanPath。
@@ -159,8 +159,25 @@ function scanAndRedact(s: string): string {
   return out;
 }
 
+// 网址（`http://`、`https://` 等，`file://` 除外）整段原样保留：到空白、引号、尖括号或非 ASCII 字符为止。
+// 后顾断言保证只在词首尝试匹配，整体线性。
+const URL_RE = /(?<![A-Za-z0-9+.-])(?!file:)[A-Za-z][A-Za-z0-9+.-]*:\/\/[^\s"'`<>\u0080-\uffff]*/gi;
+
 export function redactLocalPaths(message: string | undefined | null): string {
-  let s = String(message ?? "");
+  const s = String(message ?? "");
+  if (!s) return s;
+  const parts: string[] = [];
+  let last = 0;
+  for (const m of s.matchAll(URL_RE)) {
+    parts.push(redactPlain(s.slice(last, m.index)), m[0]);
+    last = m.index! + m[0].length;
+  }
+  parts.push(redactPlain(s.slice(last)));
+  return parts.join("");
+}
+
+function redactPlain(input: string): string {
+  let s = input;
   if (!s) return s;
   // URL 编码的分隔符（%5C、%2F，大小写不限）先还原，再按普通路径处理。
   s = s.replace(/%5c/gi, "\\").replace(/%2f/gi, "/");
