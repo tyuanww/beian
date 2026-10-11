@@ -13,12 +13,12 @@ if (@($parseErrors).Count -ne 0) { throw "illustrator-agent.ps1 did not parse cl
 $wanted = @(
   "Get-JsonProperty", "Test-KillForbiddenStage", "Get-JobOutputSnapshot", "Update-SaveWatch",
   "Select-IdentityMatch", "Select-JobIllustratorIdentity", "Select-WindowlessZombies",
-  "Stop-IdentifiedIllustrator", "Remove-JobPartialOutputs"
+  "Stop-IdentifiedIllustrator", "Remove-JobPartialOutputs", "Get-RestartBudget", "Register-WatchdogRestart"
 )
 $functions = @($ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $false) |
   Where-Object { $wanted -contains $_.Name })
 if ($functions.Count -ne $wanted.Count) { throw ("missing watchdog functions: " + ($wanted -join ",")) }
-$constants = @("UnattendedKillForbiddenStages", "UnattendedSavingStallMs", "SaveWatchStages", "ZombieWindowGraceMs")
+$constants = @("UnattendedKillForbiddenStages", "UnattendedSavingStallMs", "SaveWatchStages", "ZombieWindowGraceMs", "WatchdogRestartCap", "WatchdogRestartWindowMs")
 $assignments = @($ast.EndBlock.Statements | Where-Object {
   $_ -is [System.Management.Automation.Language.AssignmentStatementAst] -and
   $constants -contains $_.Left.VariablePath.UserPath
@@ -41,9 +41,11 @@ function Stop-Process { param([int]$Id, [switch]$Force, $ErrorAction) $script:st
 function Get-SessionIllustratorProcesses([string]$Executable) { return @($script:fake) }
 function Start-Sleep { param([int]$Milliseconds) }
 
-function New-Fake([int]$ProcessId, [string]$Started, [int64]$Window = 100, [bool]$Matches = $true) {
-  return [PSCustomObject]@{ pid = $ProcessId; start_time_utc = $Started; session_id = 1; matches_executable = $Matches; window_handle = $Window; path = "C:\Illustrator.exe" }
+function New-Fake([int]$ProcessId, [string]$Started, [int64]$Window = 100, [bool]$Matches = $true, [int]$Visible = -2) {
+  if ($Visible -eq -2) { $Visible = $(if ($Window -ne 0) { 1 } else { 0 }) }
+  return [PSCustomObject]@{ pid = $ProcessId; start_time_utc = $Started; session_id = 1; matches_executable = $Matches; window_handle = $Window; visible_windows = $Visible; path = "C:\Illustrator.exe" }
 }
+function Write-Utf8File([string]$Path, [string]$Text) { [System.IO.File]::WriteAllText($Path, $Text) }
 
 # 1. Stuck save: identical files + progress for 300 s triggers, 299 s does not.
 $t0 = [DateTime]::Parse("2026-10-10T12:00:00Z").ToUniversalTime()
@@ -117,5 +119,34 @@ if (@(Select-WindowlessZombies @(New-Fake 4040 $young 0) $now).Count -ne 0) { th
 if (@(Select-WindowlessZombies @(New-Fake 4040 $old 100) $now).Count -ne 0) { throw "windowed Illustrator treated as zombie" }
 if (@(Select-WindowlessZombies @(New-Fake 4040 $old 0 $false) $now).Count -ne 0) { throw "foreign executable treated as zombie" }
 if (@(Select-WindowlessZombies @(New-Fake 4040 "" 0) $now).Count -ne 0) { throw "unknown start time treated as zombie" }
+
+# 5. Loading / sign-in / license dialog: MainWindowHandle=0 but a visible
+# top-level window exists, or window enumeration failed (-1) => never a zombie.
+if (@(Select-WindowlessZombies @(New-Fake 4040 $old 0 $true 1) $now).Count -ne 0) { throw "dialog-only Illustrator treated as zombie" }
+if (@(Select-WindowlessZombies @(New-Fake 4040 $old 0 $true -1) $now).Count -ne 0) { throw "unknown window state treated as zombie" }
+
+# 6. Restart cap: 2 per rolling hour, persisted across agent restarts.
+if ($WatchdogRestartCap -ne 2 -or $WatchdogRestartWindowMs -ne 3600000) { throw "restart cap must stay 2 per hour" }
+$b = Get-RestartBudget @($now.AddMinutes(-50).ToString("o"), $now.AddMinutes(-10).ToString("o")) $now
+if ($b.allowed) { throw "third restart within an hour allowed" }
+$b = Get-RestartBudget @($now.AddMinutes(-61).ToString("o"), $now.AddMinutes(-10).ToString("o")) $now
+if (-not $b.allowed -or @($b.history).Count -ne 1) { throw "expired restart not pruned" }
+$b = Get-RestartBudget @("garbage", "garbage") $now
+if ($b.allowed) { throw "unparseable history must fail closed" }
+$RuntimeDir = Join-Path ([System.IO.Path]::GetTempPath()) ("aiwd-rt-" + [Guid]::NewGuid().ToString("N"))
+New-Item -ItemType Directory -Path $RuntimeDir | Out-Null
+try {
+  Register-WatchdogRestart "illustrator_no_window"
+  Register-WatchdogRestart "illustrator_no_window"   # a fresh agent re-reads the same file
+  $capped = $false
+  try { Register-WatchdogRestart "illustrator_no_window" } catch { $capped = ([string]$_.Exception.Data["AgentCode"] -eq "illustrator_recovery_failed") }
+  if (-not $capped) { throw "restart cap not enforced from persisted history" }
+  [System.IO.File]::WriteAllText((Join-Path $RuntimeDir "watchdog-restarts.json"), "{not json")
+  $capped = $false
+  try { Register-WatchdogRestart "illustrator_no_window" } catch { $capped = $true }
+  if (-not $capped) { throw "corrupt restart history must fail closed" }
+} finally {
+  Remove-Item -LiteralPath $RuntimeDir -Recurse -Force -ErrorAction SilentlyContinue
+}
 
 Write-Output "illustrator-agent watchdog contract ok"

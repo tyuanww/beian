@@ -28,6 +28,11 @@ $SaveWatchStages = @("saving_full_pdf", "saving_artwork_pdf")
 # matching process still windowless after this grace is treated as a zombie.
 $ZombieWindowGraceMs = 120000
 $WatchdogRestartMs = 180000
+# At most this many watchdog ends (save stall or windowless zombie) per rolling
+# hour, persisted in runtime\watchdog-restarts.json so an agent restart cannot
+# reset it. Over the cap the agent faults instead of ending Illustrator again.
+$WatchdogRestartCap = 2
+$WatchdogRestartWindowMs = 3600000
 $UnattendedMaxJobMs = 900000
 $UnattendedOuterMs = 1260000
 $UnattendedKillForbiddenStages = @(
@@ -392,6 +397,35 @@ function Get-RequestDeadline([object]$Request) {
   return $deadline
 }
 
+# MainWindowHandle is 0 while Illustrator shows only a splash, sign-in or
+# license dialog. Count every visible top-level window the pid owns instead,
+# so a loading or dialog-blocked Illustrator is never treated as a zombie.
+function Get-VisibleTopLevelWindowCount([int]$ProcessId) {
+  if (-not ("BeianTopLevelWindows" -as [type])) {
+    Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+public static class BeianTopLevelWindows {
+  private delegate bool EnumProc(IntPtr hWnd, IntPtr lParam);
+  [DllImport("user32.dll")] private static extern bool EnumWindows(EnumProc callback, IntPtr lParam);
+  [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+  [DllImport("user32.dll")] private static extern bool IsWindowVisible(IntPtr hWnd);
+  public static int CountVisible(int pid) {
+    int count = 0;
+    EnumWindows(delegate (IntPtr hWnd, IntPtr lParam) {
+      uint owner;
+      GetWindowThreadProcessId(hWnd, out owner);
+      if (owner == (uint)pid && IsWindowVisible(hWnd)) { count++; }
+      return true;
+    }, IntPtr.Zero);
+    return count;
+  }
+}
+"@
+  }
+  try { return [int][BeianTopLevelWindows]::CountVisible($ProcessId) } catch { return -1 }
+}
+
 function Get-SessionIllustratorProcesses([string]$Executable) {
   $processName = [System.IO.Path]::GetFileNameWithoutExtension($Executable)
   $items = @(Get-Process -Name $processName -ErrorAction SilentlyContinue | Where-Object {
@@ -407,6 +441,7 @@ function Get-SessionIllustratorProcesses([string]$Executable) {
       start_time_utc = $startedUtc
       session_id = [int]$_.SessionId
       window_handle = [int64]$_.MainWindowHandle
+      visible_windows = $(if ([int64]$_.MainWindowHandle -ne 0) { 1 } else { Get-VisibleTopLevelWindowCount ([int]$_.Id) })
       window_title = [string]$_.MainWindowTitle
       path = $actualPath
       matches_executable = [bool](
@@ -585,6 +620,34 @@ function Select-IdentityMatch([object[]]$Processes, [object]$Expected) {
   return $null
 }
 
+# Pure: prunes entries older than the rolling window and decides if one more
+# watchdog end is allowed. Unparseable entries count (fail closed).
+function Get-RestartBudget([object[]]$History, [DateTime]$Now) {
+  $kept = @()
+  foreach ($entry in @($History)) {
+    $at = [DateTime]::MinValue
+    if (-not [DateTime]::TryParse([string]$entry, [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::RoundtripKind, [ref]$at)) { $kept += [string]$entry; continue }
+    if (($Now - $at.ToUniversalTime()).TotalMilliseconds -lt $WatchdogRestartWindowMs) { $kept += [string]$entry }
+  }
+  return [ordered]@{ allowed = [bool]($kept.Count -lt $WatchdogRestartCap); history = $kept }
+}
+
+function Register-WatchdogRestart([string]$Reason) {
+  $path = Join-Path $RuntimeDir "watchdog-restarts.json"
+  $history = @()
+  if (Test-Path -LiteralPath $path -PathType Leaf) {
+    try { $history = @(([System.IO.File]::ReadAllText($path) | ConvertFrom-Json).restarts) } catch { $history = @(1..$WatchdogRestartCap | ForEach-Object { "unreadable" }) }
+  }
+  $now = [DateTime]::UtcNow
+  $budget = Get-RestartBudget $history $now
+  if (-not $budget.allowed) {
+    Write-AgentLog "watchdog_restart_cap" "" $Reason ([ordered]@{ cap = $WatchdogRestartCap; window_ms = $WatchdogRestartWindowMs; restarts = $budget.history })
+    Throw-AgentFailure "illustrator_recovery_failed" "Watchdog restart cap reached; manual check required" @{ watchdog_cap = $true; reason = $Reason; restarts = $budget.history }
+  }
+  $next = @($budget.history) + @($now.ToString("o"))
+  Write-Utf8File $path ((@{ restarts = $next }) | ConvertTo-Json -Compress)
+}
+
 function Select-JobIllustratorIdentity([object[]]$Processes) {
   $visible = @($Processes | Where-Object { $_.matches_executable -and [int64]$_.window_handle -ne 0 -and [string]$_.start_time_utc })
   if ($visible.Count -ne 1) { return $null }
@@ -596,6 +659,7 @@ function Select-WindowlessZombies([object[]]$Processes, [DateTime]$Now) {
     $started = [DateTime]::MinValue
     $_.matches_executable -and
     [int64]$_.window_handle -eq 0 -and
+    [int]$_.visible_windows -eq 0 -and
     [string]$_.start_time_utc -and
     [DateTime]::TryParse([string]$_.start_time_utc, [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::RoundtripKind, [ref]$started) -and
     ($Now - $started.ToUniversalTime()).TotalMilliseconds -ge $ZombieWindowGraceMs
@@ -729,6 +793,7 @@ function Invoke-JobCscript(
       if ($null -eq (Select-IdentityMatch $processes $Identity)) {
         Throw-AgentFailure "illustrator_recovery_failed" "Save stalled but the job Illustrator identity could not be proven" @{ stage = $stalledStage; expected = $Identity; processes = $processes }
       }
+      Register-WatchdogRestart "illustrator_save_timeout"
       $ended = Stop-IdentifiedIllustrator $Executable $Identity "illustrator_save_timeout"
       if (-not $process.WaitForExit(15000)) {
         $process.Kill()
@@ -850,6 +915,7 @@ function Ensure-Illustrator(
       }
     }
     Write-AgentLog "windowless_zombie" "" "illustrator_no_window" ([ordered]@{ grace_ms = $ZombieWindowGraceMs; processes = $processes })
+    Register-WatchdogRestart "illustrator_no_window"
     foreach ($zombie in $zombies) {
       Stop-IdentifiedIllustrator $Executable ([ordered]@{ pid = [int]$zombie.pid; start_time_utc = [string]$zombie.start_time_utc }) "illustrator_no_window" | Out-Null
     }
