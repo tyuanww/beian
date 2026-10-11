@@ -391,9 +391,11 @@ const LEAK_RESIDUE = [
   /\/private\/var\//i,
   /(?<![A-Za-z0-9])~[A-Za-z0-9._-]*\//,
   /\\\\[^\s\\]+\\/,
-  // 反斜杠 + 至少 2 个字母（`\Settings`、`\bob`）：脱敏后仍残留的 Windows 目录片段。单字母转义（`\n`、`\t`）不算；
-  // 取舍：字面写出的 `\nfoo` 这类也会整条隐藏。
-  /\\[A-Za-z]{2,}/,
+  // 反斜杠 + 至少 2 个字母（`\Settings`、`\bob`）或 + 任一非 ASCII 字符（`\报价`、`\张三`）：脱敏后仍残留的
+  // Windows 目录片段。单字母转义（`\n`、`\t`）不算；取舍：字面写出的 `\nfoo` 这类也会整条隐藏。
+  /\\(?:[A-Za-z]{2,}|[^\x00-\x7f])/,
+  // 非 ASCII 字符紧贴反斜杠（`李四\x`）：中文目录名后接分隔符再接内容（`共享盘\\` 这类后面是空白或反斜杠的不算）。取舍：中文紧贴转义（`换行\n`）也会整条隐藏。
+  /[^\x00-\x7f]\\[^\s\\]/,
   // 查询参数名像凭据：password / passwd / pwd / pw / token / secret / key，或以 `_` `-` `.` 接这些词结尾
   //（`api_key`、`access_token`、`client_secret`）。大小写不限；`monkey`、`keyword`、`tokens_left` 不算。
   /[?&](?:[A-Za-z0-9_.-]*[_.-])?(?:password|passwd|pwd|pw|token|secret|key)=/i,

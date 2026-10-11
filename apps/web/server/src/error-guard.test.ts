@@ -317,5 +317,8 @@ describe("leak residue: backslash + non-ASCII", () => {
     assert.equal(hasLeakResidue("本机稿件 张三\\报价"), true);
     assert.equal(hasLeakResidue("用 \\n 换行"), false);
     assert.equal(hasLeakResidue("\\t\\r"), false);
+    assert.equal(hasLeakResidue("本机稿件 李四\\x\\y"), true);
+    // 取舍：中文紧贴转义也会被隐藏。
+    assert.equal(hasLeakResidue("换行\\n"), true);
   });
 });
