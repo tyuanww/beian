@@ -449,3 +449,40 @@ test("连点确认签字只发一次 /complete（同步防重入）", async ({ p
   await expect(page.locator(".ant-alert").getByText("已签字。", { exact: true })).toBeVisible();
   expect(syntheticApi.calls.filter((c) => c.path.endsWith("/complete"))).toHaveLength(1);
 });
+
+test("提交失败按状态码映射：409 还在检查；400 重读后还有待确认 / 已被别人签字并锁页", async ({ page, syntheticApi }) => {
+  const task = reviewTask("e5969b58cd61");
+  task.hits![0].decision = "confirm";
+  syntheticApi.tasks.push(task);
+  await page.goto(`/review/${task.id}`);
+  const errors: string[] = [];
+  page.on("console", (m) => { if (m.type() === "error") errors.push(m.text()); });
+
+  syntheticApi.completeFailStatus = 409;
+  await page.getByRole("button", { name: "签字", exact: true }).click();
+  const dialog = page.getByRole("dialog");
+  await dialog.getByRole("button", { name: "确认签字" }).click();
+  await expect(dialog.getByText("这份稿还在检查，等一会儿再提交")).toBeVisible();
+  await expect(dialog.getByText("对照还在排队")).toHaveCount(0);
+
+  // 服务端那边又多出一条没下结论（别的窗口改的）→ 400，重读后写「还有 1 条待确认」。
+  Object.assign(task.hits![0], { status: "疑点", decision: "pending" });
+  await dialog.getByRole("button", { name: "重试" }).click();
+  await expect(dialog.getByText("还有 1 条待确认，处理完才能签字")).toBeVisible();
+  await expect(dialog.getByText("仍有")).toHaveCount(0);
+  await dialog.getByRole("button", { name: "再看看" }).click();
+});
+
+test("已被别人签字：提交 400 后重读锁页并提示「这一单已被某某签字」", async ({ page, syntheticApi }) => {
+  const task = reviewTask("e5969b58cd62");
+  task.hits![0].decision = "confirm";
+  syntheticApi.tasks.push(task);
+  await page.goto(`/review/${task.id}`);
+  syntheticApi.otherCompletesNext = { by: "天元", kind: "signed" };
+  await page.getByRole("button", { name: "签字", exact: true }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "确认签字" }).click();
+  await expect(page.getByText("这一单已被天元签字")).toBeVisible();
+  await expect(page.getByText("已被天元签字", { exact: false }).first()).toBeVisible();
+  await expect(page.getByRole("button", { name: "签字", exact: true })).toBeDisabled();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+});

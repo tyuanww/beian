@@ -211,3 +211,27 @@ export function tabIndices(hits: FieldHit[], tab: FlatTab, active: number): numb
   if (tab === "issue") return hits.map((h, i) => ({ h, i })).filter(({ h, i }) => h.decision === "issue" || i === active).map(({ i }) => i);
   return issues.filter(({ hit, index }) => isPendingDecision(hit.decision) || index === active).map(({ index }) => index);
 }
+
+/**
+ * 签字/退回失败的提示，只看 HTTP 状态 + 重读回来的任务（结构化字段），不匹配服务端原文。
+ * 现有服务端 /complete（apps/web/server/src/index.ts）只回 status + detail 文本：
+ * - 409 只在「对照还在排队或正在跑」时用 → 「这份稿还在检查，等一会儿再提交」；
+ * - 400 有三种（已完成 / 还有疑点没处理 / 结论为空），文本区分不了，调用方重读任务后按状态判断；
+ * - 其他一律通用文案，原文只打 console.error。
+ * TODO(TODOS.md)：后端补错误码（后端第 1、6 项）后改成按 code 映射。
+ */
+export function submitFailureText(
+  status: number | null,
+  fresh: Pick<TaskDetail, "status" | "completed_by"> | null,
+  freshPending: number,
+): string {
+  if (status === 409) return REVIEW_COPY.submitStillChecking;
+  if (status === 400 && fresh) {
+    if (fresh.status === "completed") {
+      const who = (fresh.completed_by || "").trim();
+      return who ? REVIEW_COPY.submitCompletedBy(who) : REVIEW_COPY.lockedUnknown;
+    }
+    if (freshPending > 0) return REVIEW_COPY.submitPending(freshPending);
+  }
+  return REVIEW_COPY.submitFailed;
+}

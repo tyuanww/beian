@@ -110,6 +110,10 @@ export const REVIEW_COPY = {
   lowResFailed: "稿件没加载出来",
   zeroIssues: "✓ 没发现问题",
   allDecided: "全部已下结论",
+  /** 提交失败按服务端状态/错误码映射；不把服务端原文给用户看。 */
+  submitStillChecking: "这份稿还在检查，等一会儿再提交",
+  submitPending: (n: number) => `还有 ${n} 条待确认，处理完才能签字`,
+  submitCompletedBy: (name: string) => `这一单已被${name}签字`,
   rejectBlockedByPending: (n: number) => `还有 ${n} 条待确认，处理完才能退回`,
   collapse: "收起",
   expand: (n: number) => `展开疑点 · 待确认 ${n}`,

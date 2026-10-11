@@ -15,7 +15,7 @@ import {
 import { readBoxesOn, readPinsOn, skipPackSheetField, writeBoxesOn, writePinsOn } from "./reviewDock";
 import { ReviewSubmitDialog } from "./ReviewSubmitDialog";
 import {
-  conclusionFor, decisionFailureText, flatLayout, isTypingTarget, lockedBy, markShortcutsSeen, markerOutsideCorner, nextPendingAfter,
+  conclusionFor, decisionFailureText, submitFailureText, flatLayout, isTypingTarget, lockedBy, markShortcutsSeen, markerOutsideCorner, nextPendingAfter,
   panToClearPanel, positionLabel, rejectRows, shouldShowShortcutsOnOpen, submitGate, tabIndices, thumbMarks, verdictCounts, verdictForKey,
   type FlatLayout, type FlatTab,
 } from "./reviewFlat";
@@ -83,7 +83,8 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
   const [tab, setTab] = useState<FlatTab>("pending");
   const [seenPages, setSeenPages] = useState<Set<number>>(() => new Set());
   const [dialog, setDialog] = useState<"sign" | "reject" | null>(null);
-  const [submitFailed, setSubmitFailed] = useState(false);
+  /** 签字/退回失败的提示文案；null = 没失败。 */
+  const [submitFailed, setSubmitFailed] = useState<string | null>(null);
   /** 同步置位，防连点：await 队列之前就挡住第二次提交。 */
   const submittingRef = useRef(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
@@ -597,20 +598,30 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
     beginBusy();
     try {
       if (!(await decisionQueueRef.current)) {
-        setSubmitFailed(true);
+        setSubmitFailed(REVIEW_COPY.submitFailed);
         return;
       }
       const next = await api.complete(task.id, { conclusion: conclusionFor(kind, extra, rejectRows(hits, notes)) });
       setTask(next);
       setDialog(null);
-      setSubmitFailed(false);
+      setSubmitFailed(null);
       message.success(REVIEW_COPY_DONE[kind]);
-    } catch {
-      setSubmitFailed(true);
-      // 可能已被别人签字：重读一次，用现有 completed_by 锁定。
-      void api.task(task.id).then((fresh) => {
-        if (fresh.status === "completed") { setTask(fresh); setDialog(null); }
-      }).catch(() => undefined);
+    } catch (err) {
+      const status = err instanceof ApiError ? err.status : null;
+      let fresh: TaskDetail | null = null;
+      if (status === 400) fresh = await api.task(task.id).catch(() => null);
+      const freshPending = fresh ? verdictCounts(reviewHits(fresh, useV2Ref.current).filter((h) => !skipPackSheetField(h.field))).pending : 0;
+      const text = submitFailureText(status, fresh, freshPending);
+      if (text === REVIEW_COPY.submitFailed) console.error("[review] 提交失败", err);
+      if (fresh) setTask((cur) => (cur?.id === fresh!.id ? fresh : cur));
+      if (fresh?.status === "completed") {
+        // 已被别人签字/退回：关框，页面按 completed_by 锁定只读。
+        setDialog(null);
+        setSubmitFailed(null);
+        message.warning({ content: text, key: "review-submit-locked" });
+      } else {
+        setSubmitFailed(text);
+      }
     } finally {
       submittingRef.current = false;
       endBusy();
@@ -748,10 +759,10 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
         {hasUnsavedNotes ? <span className="review-draft-status" role="status">先保存备注，再继续。</span> : null}
         <span className="review-actions">
         {gate.hint ? <span className="review-signhint" id="review-sign-hint" title={gate.title} aria-live="polite">{gate.hint}</span> : null}
-        <button type="button" className="btn-ghost review-reject" disabled={!gate.canReject || busy || hasUnsavedNotes} title={gate.title || undefined} onClick={() => { setSubmitFailed(false); setDialog("reject"); }}>
+        <button type="button" className="btn-ghost review-reject" disabled={!gate.canReject || busy || hasUnsavedNotes} title={gate.title || undefined} onClick={() => { setSubmitFailed(null); setDialog("reject"); }}>
           {REVIEW_COPY.reject}
         </button>
-        <button type="button" className="btn-primary review-sign" disabled={!gate.canSign || busy || hasUnsavedNotes} title={gate.title || undefined} aria-describedby={gate.hint ? "review-sign-hint" : undefined} onClick={() => { setSubmitFailed(false); setDialog("sign"); }}>
+        <button type="button" className="btn-primary review-sign" disabled={!gate.canSign || busy || hasUnsavedNotes} title={gate.title || undefined} aria-describedby={gate.hint ? "review-sign-hint" : undefined} onClick={() => { setSubmitFailed(null); setDialog("sign"); }}>
           {REVIEW_COPY.sign}
         </button>
         </span>
@@ -969,7 +980,7 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
         pending={counts.pending}
         busy={busy}
         failed={submitFailed}
-        onCancel={() => { if (!busy) { setDialog(null); setSubmitFailed(false); } }}
+        onCancel={() => { if (!busy) { setDialog(null); setSubmitFailed(null); } }}
         onConfirm={(extra) => { if (dialog) void submit(dialog, extra); }}
       />
       {phone ? (

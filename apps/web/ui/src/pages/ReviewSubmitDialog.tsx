@@ -9,7 +9,8 @@ type Props = {
   /** 还没下结论的条数；>0 时服务端不收 /complete，确认按钮挡住。 */
   pending?: number;
   busy: boolean;
-  failed: boolean;
+  /** 失败提示文案；null = 没失败。 */
+  failed: string | null;
   onCancel: () => void;
   onConfirm: (extra: string) => void;
 };
@@ -51,7 +52,7 @@ export function ReviewSubmitDialog({ kind, rows, pending = 0, busy, failed, onCa
           </label>
         </>
       ) : null}
-      {failed ? <p className="review-submit-error" role="alert">{REVIEW_COPY.submitFailed}</p> : null}
+      {failed ? <p className="review-submit-error" role="alert">{failed}</p> : null}
     </Modal>
   );
 }

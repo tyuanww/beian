@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { FieldHit } from "../api";
 import {
-  conclusionFor, decisionFailureText, flatLayout, isTypingTarget, lockedBy, markerOutsideCorner, nextPendingAfter,
+  conclusionFor, decisionFailureText, submitFailureText, flatLayout, isTypingTarget, lockedBy, markerOutsideCorner, nextPendingAfter,
   panToClearPanel, positionLabel, rejectRows, shouldShowShortcutsOnOpen, submitGate, tabIndices, thumbMarks, verdictCounts, verdictForKey,
 } from "./reviewFlat.js";
 
@@ -84,5 +84,14 @@ describe("reviewFlat", () => {
     assert.equal(shouldShowShortcutsOnOpen(null), false);
     assert.equal(shouldShowShortcutsOnOpen({ getItem: () => { throw new DOMException("denied", "SecurityError"); } }), false);
     assert.throws(() => shouldShowShortcutsOnOpen({ getItem: () => { throw new TypeError("bug"); } }), TypeError);
+  });
+  it("提交失败只按状态码 + 重读任务映射文案", () => {
+    assert.equal(submitFailureText(409, null, 0), "这份稿还在检查，等一会儿再提交");
+    assert.equal(submitFailureText(400, { status: "completed", completed_by: "天元" }, 0), "这一单已被天元签字");
+    assert.equal(submitFailureText(400, { status: "completed", completed_by: "" }, 0), "这份稿已经提交过了");
+    assert.equal(submitFailureText(400, { status: "in_review" }, 2), "还有 2 条待确认，处理完才能签字");
+    assert.equal(submitFailureText(400, { status: "in_review" }, 0), "没提交成功，请重试");
+    assert.equal(submitFailureText(400, null, 3), "没提交成功，请重试");
+    assert.equal(submitFailureText(500, null, 0), "没提交成功，请重试");
   });
 });
