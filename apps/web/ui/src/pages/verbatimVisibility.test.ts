@@ -8,9 +8,11 @@ const dock = readFileSync(new URL("./ReviewDockPanel.tsx", import.meta.url), "ut
 
 describe("verbatim visibility", () => {
   it("keeps all four release conditions in the review page", () => {
-    assert.match(page, /data-testid="review-held-line"/);
-    assert.match(workspace, /REVIEW_COPY\.heldButton\(held\)/);
-    assert.match(dock, /data-testid="review-held-bar"/);
+    assert.match(page, /REVIEW_COPY\.heldHeader\(heldCount\)/);
+    assert.match(workspace, /REVIEW_COPY\.heldCollapse\(held\)/);
+    assert.match(dock, /setHeldOpen\(false\); onTab\(key\)/);
+    assert.match(dock, /onTab\("issue"\)/);
+    assert.match(page, /REVIEW_COPY\.heldBar\(heldCount\)/);
     assert.match(page, /data-testid="review-phone-held"/);
     assert.match(page, /data-testid="review-verbatim-warning"/);
   });

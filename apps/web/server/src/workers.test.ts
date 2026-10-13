@@ -28,7 +28,7 @@ describe("verbatim argv", () => {
     const args = compareArgs(base, { modelDir: "/opt/models" });
     assert.deepEqual(args.slice(-5), ["--verbatim-check", "--max-pages", "4", "--model-dir", "/opt/models"]);
     assert.equal(reworkArgs({ tid: base.tid, pdf: base.pdf, actor: base.actor }).includes("--max-pages"), false);
-    assert.equal(verbatimMemoryFailure("SIGKILL"), "这一单认字超出内存");
+    assert.equal(verbatimMemoryFailure("SIGKILL"), "这一单认字超出内存，没有结果");
     assert.equal(verbatimMemoryFailure("SIGTERM"), null);
   });
 });

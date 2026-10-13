@@ -47,9 +47,13 @@ export type SubmitGate = {
  * 服务端 /complete 只有一个入口：有「有错」→ 已退回，没有 → 已签字，且都要求没有待确认。
  * 所以签字要「无待确认且无有错」，退回要「无待确认且至少一条有错」。
  */
+export function isOpenHeld(hit: FieldHit): boolean {
+  return hit.status === "待人工确认" && hit.decision !== "confirm" && hit.decision !== "issue" && hit.decision !== "ignore";
+}
+
 export function submitGate(hits: FieldHit[], reviewable: boolean, locked = false, releaseHeld = false): SubmitGate {
   const c = verdictCounts(hits);
-  const held = hits.filter((hit) => hit.status === "待人工确认" && hit.decision !== "confirm" && hit.decision !== "issue" && hit.decision !== "ignore").length;
+  const held = hits.filter(isOpenHeld).length;
   const pending = c.pending + (releaseHeld ? 0 : held);
   if (!reviewable || locked) return { canSign: false, canReject: false, hint: "", title: "" };
   if (pending > 0) {
@@ -74,9 +78,10 @@ export function thumbMarks(pages: TaskPage[], hits: FieldHit[], seen: ReadonlySe
   return pages.map((p, index) => {
     const page = Number(p.page || index + 1);
     const errs = hits.filter((h) => h.decision === "issue" && Number(h.page) === page).length;
-    const state: ThumbState = errs ? "err" : seen.has(page) ? "done" : "new";
-    const word = state === "err" ? "有错" : state === "done" ? "看完" : "未看";
-    const symbol = state === "err" ? `✗${errs}` : state === "done" ? "✓" : "•";
+    const held = hits.filter((h) => isOpenHeld(h) && Number(h.page) === page).length;
+    const state: ThumbState = errs ? "err" : held ? "new" : seen.has(page) ? "done" : "new";
+    const word = errs ? "有错" : held ? "待人工" : state === "done" ? "看完" : "未看";
+    const symbol = errs ? `✗${errs}` : held ? `?${held}` : state === "done" ? "✓" : "•";
     const label = `第${page}页，${state === "err" ? `${errs} 处有错` : word}`;
     return { index, page, state, symbol, word, label };
   });
@@ -228,8 +233,14 @@ export function markShortcutsSeen(store: Pick<Storage, "setItem"> | null): void 
 }
 
 /** 位置「3/9」：当前在该 tab 列表中的序号。 */
-export function positionLabel(list: number[], active: number, pendingLeft?: number): string {
+export function positionLabel(list: number[], active: number, pendingLeft?: number, held = 0): string {
   // 「待确认」tab 会把刚下完结论的当前条留在列表里不跳走；待确认已清零时不写「1/1」，写「全部已下结论」。
+  // 还有未决待人工确认时，这个位置不能写成全部已下结论。
+  if (held > 0) {
+    if (!list.length) return "–";
+    const k = list.indexOf(active);
+    return `${k < 0 ? "–" : k + 1}/${list.length}`;
+  }
   if (!list.length || pendingLeft === 0) return REVIEW_COPY.allDecided;
   const k = list.indexOf(active);
   return `${k < 0 ? "–" : k + 1}/${list.length}`;

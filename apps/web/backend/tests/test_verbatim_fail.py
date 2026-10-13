@@ -139,7 +139,7 @@ raise SystemExit(_verbatim_fail(oom_fail()))
     proc = _run([PY, "-c", script])
     body = _fail_json(proc)
     assert body["code"] == "oom"
-    assert body["error"] == "这一单认字超出内存"
+    assert body["error"] == "这一单认字超出内存，没有结果"
 
 
 def test_measured_rss_over_cap_exits_oom() -> None:

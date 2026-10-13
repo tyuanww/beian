@@ -33,6 +33,9 @@ describe("reviewFlat", () => {
     const m = thumbMarks([{ page: 1 }, { page: 2 }, { page: 3 }], [hit("a", "issue", 2), hit("b", "issue", 2)], new Set([1]));
     assert.deepEqual(m.map((x) => x.symbol), ["✓", "✗2", "•"]);
     assert.equal(m[1].label, "第2页，2 处有错");
+    const heldMark = thumbMarks([{ page: 1 }], [hit("h", "pending", 1, "待人工确认")], new Set([1]));
+    assert.equal(heldMark[0].symbol, "?1");
+    assert.equal(heldMark[0].word, "待人工");
   });
   it("一致/忽略自动跳下一条待确认并绕回；有错停留", () => {
     const hs = [hit("a"), hit("b", "confirm"), hit("c"), hit("d")];
@@ -81,6 +84,7 @@ describe("reviewFlat", () => {
     assert.equal(positionLabel([0, 2], 2), "2/2");
     assert.equal(positionLabel([], 0), "全部已下结论");
     assert.equal(positionLabel([3], 3, 0), "全部已下结论");
+    assert.equal(positionLabel([3], 3, 0, 2), "1/1");
     assert.equal(positionLabel([0, 3], 3, 1), "2/2");
   });
   it("快捷键条只在首次打开显示", () => {

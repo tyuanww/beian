@@ -67,11 +67,11 @@ def guard_stdout(text: str, limit: int | None = None) -> None:
     if limit is None and raw:
         cap = int(raw)
     if len(text.encode("utf-8")) > cap:
-        raise VerbatimFail("核对结果写不下", "result_truncated", "stdout limit")
+        raise VerbatimFail("这一单结果没写完，没有结果", "result_truncated", "stdout limit")
 
 
 def oom_fail() -> VerbatimFail:
-    return VerbatimFail("这一单认字超出内存", "oom", "rss limit")
+    return VerbatimFail("这一单认字超出内存，没有结果", "oom", "rss limit")
 
 
 def rss_used_bytes() -> int:
@@ -160,7 +160,7 @@ def prepare(model_dir: Path) -> Path:
         raise VerbatimFail("认字依赖没装齐", "dep_missing", "prototype missing")
     for name in DEPS:
         if importlib.util.find_spec(name) is None:
-            raise VerbatimFail("认字依赖没装齐", "dep_missing", "import missing")
+            raise VerbatimFail("认字组件没装上，没有结果", "dep_missing", "import missing")
     return root
 
 

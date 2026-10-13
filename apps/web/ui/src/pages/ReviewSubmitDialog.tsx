@@ -8,6 +8,7 @@ type Props = {
   rows: RejectRow[];
   /** 还没下结论的条数；>0 时服务端不收 /complete，确认按钮挡住。 */
   pending?: number;
+  held?: number;
   busy: boolean;
   /** 失败提示文案；null = 没失败。 */
   failed: string | null;
@@ -16,7 +17,7 @@ type Props = {
 };
 
 /** 签字/退回确认框；文案按 deviations.md 第 33–35b 行（已批 2026-10-11）。提交失败不关框、不清补充说明。 */
-export function ReviewSubmitDialog({ kind, rows, pending = 0, busy, failed, onCancel, onConfirm }: Props) {
+export function ReviewSubmitDialog({ kind, rows, pending = 0, held = 0, busy, failed, onCancel, onConfirm }: Props) {
   const [extra, setExtra] = useState("");
   const reject = kind === "reject";
   const blocked = pending > 0;
@@ -36,6 +37,7 @@ export function ReviewSubmitDialog({ kind, rows, pending = 0, busy, failed, onCa
     >
       {reject && blocked ? <p id="review-reject-blocked" className="review-submit-error review-reject-blocked" role="status">{REVIEW_COPY.rejectBlockedByPending(pending)}</p> : null}
       <p>{reject ? REVIEW_COPY.rejectBody(rows.length) : REVIEW_COPY.signBody}</p>
+      {!reject && held > 0 ? <p data-testid="review-sign-held">{REVIEW_COPY.heldLine(held)}</p> : null}
       {reject ? (
         <>
           <ul className="review-reject-list" aria-label="有错清单">
