@@ -87,6 +87,17 @@ export function boxTooLarge(box: PixelBox, page: PageMetrics, ratio = 0.3): bool
   return boxAreaRatio(box, page) >= ratio;
 }
 
+/** 漏字框豁免 30% 面积限制。宽和高都超过页的 90% 才不画。 */
+export function missBoxUnusable(box: PixelBox, page: PageMetrics): boolean {
+  if (!(page.width > 1) || !(page.height > 1)) return false;
+  return box.width > page.width * 0.9 && box.height > page.height * 0.9;
+}
+
+function rejectBox(box: PixelBox, page: PageMetrics): boolean {
+  if (box.role === "miss_anchor") return missBoxUnusable(box, page);
+  return boxTooLarge(box, page);
+}
+
 function pct(n: number): string {
   const clamped = Math.min(100, Math.max(0, n));
   return `${clamped}%`;
@@ -152,12 +163,26 @@ export function pickHitBox(
     .filter((b): b is PixelBox => {
       if (!b) return false;
       if (b.page && pageNo && b.page !== pageNo) return false;
-      if (page && boxTooLarge(b, page)) return false;
+      if (page && rejectBox(b, page)) return false;
       return true;
     });
   if (!boxes.length) return null;
   boxes.sort((a, b) => (ROLE_RANK[a.role] ?? 8) - (ROLE_RANK[b.role] ?? 8));
   return boxes[0];
+}
+
+export function missLineUnboxed(
+  bboxes: Array<Record<string, unknown>> | undefined,
+  pageNo: number,
+  page?: PageMetrics | null,
+): boolean {
+  if (!page) return false;
+  return (bboxes || []).some((raw) => {
+    const box = boxPixels(raw);
+    if (!box || box.role !== "miss_anchor") return false;
+    if (box.page && pageNo && box.page !== pageNo) return false;
+    return missBoxUnusable(box, page);
+  });
 }
 
 export function overlayFromBox(box: PixelBox, page: PageMetrics): OverlayBox | null {
@@ -198,7 +223,7 @@ export function overlaysForHit(
     const box = boxPixels(raw);
     if (!box) continue;
     if (box.page && pageNo && box.page !== pageNo) continue;
-    if (boxTooLarge(box, page)) continue;
+    if (page && rejectBox(box, page)) continue;
     const ov = overlayFromBox(box, page);
     if (ov) out.push(ov);
   }

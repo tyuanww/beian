@@ -5,7 +5,7 @@ import { ApiError, api, type Decision, type FieldHit, type TaskDetail, type Task
 import { WaitCard } from "../chrome/WaitCard";
 import { forgetReviewHandoff, reviewHandoffFor } from "../jobHandoff";
 import { fittedPage, panBy, panToBoxAt, resetZoom, zoomAt, zoomCss } from "./canvasZoom";
-import { locateBoxesForHit, locationPageForHit, overlayFromBox, overlaysForHit, pickHitBox, pinHitGroupsForPage, resolvePageMetrics, visiblePinGroups } from "./pinBox";
+import { locateBoxesForHit, locationPageForHit, missLineUnboxed, overlayFromBox, overlaysForHit, pickHitBox, pinHitGroupsForPage, resolvePageMetrics, visiblePinGroups } from "./pinBox";
 import {
   enterElementFullscreen,
   exitElementFullscreen,
@@ -887,6 +887,7 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
             onNoteChange={(value) => { if (current?.id) setNote(current.id, value); }}
             verbatim={task?.verbatim_check === true}
             fscNote={task?.fsc_note}
+            locationCopy={current && missLineUnboxed(locateBoxesForHit(current), pageNo, metrics) ? REVIEW_COPY.lineNotBoxed : REVIEW_COPY.noBox}
           />
         }
       >
@@ -1038,6 +1039,7 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
         rows={issueRows}
         pending={counts.pending}
         held={heldCount}
+        fscNote={task?.fsc_note}
         busy={busy}
         failed={submitFailed}
         onCancel={() => { if (!busy) { setDialog(null); setSubmitFailed(null); } }}

@@ -241,6 +241,11 @@ def _private_bytes(pdf: Path) -> bytes | None:
     return data if isinstance(data, bytes) else None
 
 
+def _skewed(matrix: list[float]) -> bool:
+    _a, b, c, _d, _e, _f = matrix
+    return abs(b) > 1e-3 or abs(c) > 1e-3
+
+
 def _matrix_of(page: dict) -> list[float]:
     matrix = page.get("matrix")
     if not isinstance(matrix, list) or len(matrix) != 6:
@@ -401,6 +406,8 @@ def compare_pdf(pdf: Path, xlsx: Path, model_dir: Path, pages: list[dict]) -> di
             if status in SPACE_ERRORS:
                 box = _cover_neighbors(box, page_size)
             hits.append(_hit(len(hits) + 1, status, blocking, op, box, 1))
+            if _skewed(matrix):
+                hits[-1]["page_skew"] = True
     doc.close()
     out: dict[str, Any] = {"hits": hits, "engine": "rapidocr:ppocrv6-medium"}
     if _fsc("\n".join(joined)):
