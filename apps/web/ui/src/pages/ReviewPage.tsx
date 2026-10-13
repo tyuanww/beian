@@ -287,7 +287,7 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
   useEffect(() => {
     if (locked) message.destroy("review-undo");
   }, [locked]);
-  const gate = submitGate(hits, reviewable, Boolean(locked));
+  const gate = submitGate(hits, reviewable, Boolean(locked), task?.verbatim_check === true);
   const counts = verdictCounts(hits);
   const tabList = tabIndices(hits, tab, active);
   /** 有 SVG 却只显示了 PNG：高清（矢量）没加载出来，保留 PNG 并给重试。 */
@@ -772,6 +772,11 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
         {/* 手机 <720 不显示「审稿台 /」面包屑（底部导航已有「审稿台」）。 */}
         {!phone ? <button type="button" className="review-crumb" onClick={onBack}>审稿台 /</button> : null}
         <h1 className="review-title">{task?.product_name || task?.title || "审核页"}</h1>
+        {task?.verbatim_check ? (
+          <p className="review-held-line" data-testid="review-held-line">
+            {REVIEW_COPY.heldLine(hits.filter((hit) => hit.status === "待人工确认").length)}
+          </p>
+        ) : null}
         {Array.isArray(task?.pages_v2) && task.pages_v2.length > 0 ? (
           <span className="review-ver">
             <Tag className="review-version-current" color={useV2 ? "processing" : "default"}>{reviewVersionToggle(useV2).current}</Tag>
@@ -828,7 +833,13 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
       {phone ? (
         <section className="review-phone-sum">
           <p className="review-phone-note">{REVIEW_COPY.phoneOnly}</p>
-          {counts.total === 0 ? <p className="review-zero">{REVIEW_COPY.zeroIssues}</p> : (
+          {task?.verbatim_check ? (
+            <details className="review-phone-held" data-testid="review-phone-held">
+              <summary>{REVIEW_COPY.heldButton(hits.filter((hit) => hit.status === "待人工确认").length)}</summary>
+              <ul>{hits.filter((hit) => hit.status === "待人工确认").map((hit) => <li key={hit.id || hit.field}>{hit.field} · 第{hit.page ?? "?"}页</li>)}</ul>
+            </details>
+          ) : null}
+          {counts.total === 0 && !hits.some((hit) => hit.status === "待人工确认") ? <p className="review-zero">{REVIEW_COPY.zeroIssues}</p> : (
             <details open={phoneListOpen} onToggle={(e) => setPhoneListOpen((e.currentTarget as HTMLDetailsElement).open)}>
               <summary>{REVIEW_COPY.phoneIssues(counts.issue)} · 待确认 {counts.pending}</summary>
               <ul>{issueRows.map((r) => <li key={r.index}><b>#{r.no} {r.field}</b> {r.missingReason ? <span className="review-miss">{REVIEW_COPY.missingReason}</span> : r.reason}</li>)}</ul>
@@ -840,6 +851,7 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
       <ReviewWorkspace
         layout={layout}
         panelOpen={panelOpen}
+        held={hits.filter((hit) => hit.status === "待人工确认").length}
         pending={counts.pending}
         onPanelOpen={setPanelOpen}
         thumbs={thumbs.map((t) => (
@@ -863,10 +875,13 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
             onNoteCommit={(hit, decision, note) => void decide(hit, decision, note, { undoable: false })}
             onCopy={() => void copyList()}
             onNoteChange={(value) => { if (current?.id) setNote(current.id, value); }}
+            verbatim={task?.verbatim_check === true}
+            fscNote={task?.fsc_note}
           />
         }
       >
         <div className="canvas">
+          {task?.verbatim_warning ? <p className="review-verbatim-warning" role="status" data-testid="review-verbatim-warning">{task.verbatim_warning}</p> : null}
           {hiResFailed ? (
             <p className="review-media-hint" role="status">
               {REVIEW_COPY.hiResFailed} · <button type="button" onClick={() => setMediaRetry((n) => n + 1)}>{REVIEW_COPY.retry}</button>

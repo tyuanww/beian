@@ -40,6 +40,17 @@ describe("partitionReviewHits", () => {
       ["manual", 2],
     ]);
     assert.deepEqual(result.consistent.map(({ hit, index }) => [hit.id, index]), [["ok", 0]]);
+    assert.deepEqual(result.held, []);
+  });
+
+  it("keeps 待人工确认 out of the red and green columns", () => {
+    const result = partitionReviewHits([
+      { id: "held", field: "待人工确认", status: "待人工确认" },
+      { id: "miss", field: "漏字", status: "漏字", decision: "pending" },
+    ]);
+    assert.deepEqual(result.held.map(({ hit }) => hit.id), ["held"]);
+    assert.deepEqual(result.issues.map(({ hit }) => hit.id), ["miss"]);
+    assert.equal(result.consistent.length, 0);
   });
 
   it("treats concrete coverage misses as issues even when the coarse status says consistent", () => {

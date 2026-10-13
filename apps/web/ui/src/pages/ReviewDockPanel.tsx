@@ -29,6 +29,8 @@ type Props = {
   tab: FlatTab;
   onTab: (tab: FlatTab) => void;
   onNoteChange: (value: string) => void;
+  verbatim?: boolean;
+  fscNote?: string;
 };
 
 /** 标签文字用加深色（deviations 第 13 行）：状态既有文字也有颜色，不只靠颜色。 */
@@ -59,9 +61,12 @@ function EvidenceBlock({ title, value, tone }: { title: string; value: EvidenceT
 export function ReviewDockPanel({
   hits, active, current, currentHasBox, pageNo, reviewable, busy, note, emptyMessage, reworkCheck,
   nativeTaskEvidence, ocrMeta, onPick, onDecide, onNoteCommit, onCopy, onNoteChange, onCollapse, tab, onTab,
+  verbatim = false, fscNote,
 }: Props) {
   const [tipOpen, setTipOpen] = useState(false);
+  const [heldOpen, setHeldOpen] = useState(false);
   const counts = verdictCounts(hits);
+  const held = hits.filter((hit) => hit.status === "待人工确认");
   const list = tabIndices(hits, tab, active);
   const evidence = current ? reviewEvidence(current) : null;
   const nativeEvidence = nativeEvidenceView(current?.native_text_evidence);
@@ -86,10 +91,21 @@ export function ReviewDockPanel({
         {onCollapse ? <button type="button" className="review-pcollapse" aria-label="收起右栏" onClick={onCollapse}>{REVIEW_COPY.collapse}</button> : null}
       </div>
       {taskNote ? <p className="review-native-evidence" role="status">{taskNote}</p> : null}
+      {verbatim ? (
+        <button type="button" className="review-held-bar" data-testid="review-held-bar" onClick={() => setHeldOpen((open) => !open)}>
+          {REVIEW_COPY.heldButton(held.length)}
+        </button>
+      ) : null}
+      {heldOpen ? (
+        <ul className="review-held-list" data-testid="review-held-group">
+          {held.map((hit) => <li key={hit.id || hit.field}>{hit.field} · 第{hit.page ?? "?"}页</li>)}
+        </ul>
+      ) : null}
+      {fscNote ? <p className="review-fsc-note" role="note">{fscNote}</p> : null}
       {ocrMeta?.skipped && ocrMeta.reason === "native_coverage" ? (
         <p className="review-native-evidence" role="status">已直接读取原稿文字</p>
       ) : null}
-      {counts.total === 0 && reviewable ? <p className="review-zero" role="status">{REVIEW_COPY.zeroIssues}</p> : null}
+      {counts.total === 0 && held.length === 0 && reviewable ? <p className="review-zero" role="status">{REVIEW_COPY.zeroIssues}</p> : null}
       <ol className="review-flat-list" aria-label="疑点列表">
         {list.map((index) => {
           const hit = hits[index];

@@ -3,11 +3,20 @@ import { existsSync } from "node:fs";
 import { DATA_DIR, PACKAGING, PYTHON, PYTHON_APP } from "./config.js";
 import { pythonBin } from "./settings.js";
 
+const MEMORY_SIGNALS = new Set(["SIGKILL", "SIGSEGV", "SIGBUS"]);
+
+/** 只有内存类信号记超内存。SIGTERM 这类手动停止不改写成 oom。 */
+export function verbatimMemoryFailure(signal: string | undefined): string | null {
+  if (!signal || !MEMORY_SIGNALS.has(signal)) return null;
+  return "这一单认字超出内存";
+}
+
 export type RunPythonResult = {
   code: number;
   stdout: string;
   stderr: string;
   timedOut: boolean;
+  signal?: string;
   pid?: number;
 };
 
@@ -240,12 +249,13 @@ export function runPython(opts: RunPythonOpts): Promise<RunPythonResult> {
     const stderr = new ByteTail();
     let stderrRest = "";
     let timedOut = false;
+    let exitSignal = "";
     let settled = false;
     const finish = (code: number) => {
       if (settled) return;
       settled = true;
       if (spawnError) reject(spawnError);
-      else resolve({ code, stdout: stdout.text(), stderr: stderr.text(), timedOut, pid });
+      else resolve({ code, stdout: stdout.text(), stderr: stderr.text(), timedOut, signal: exitSignal || undefined, pid });
     };
     const timer = setTimeout(() => {
       timedOut = true;
@@ -271,8 +281,9 @@ export function runPython(opts: RunPythonOpts): Promise<RunPythonResult> {
         reject(err);
       }
     });
-    child.on("close", (code) => {
+    child.on("close", (code, signal) => {
       clearTimeout(timer);
+      exitSignal = signal || "";
       if (stderrRest.trim() && opts.onStderrLine) opts.onStderrLine(stderrRest.trim());
       finish(code ?? 1);
     });
@@ -285,9 +296,49 @@ export function runPython(opts: RunPythonOpts): Promise<RunPythonResult> {
   });
 }
 
+export function compareArgs(opts: {
+  nativeDir?: string;
+  nativeAttempted?: boolean;
+  tid: string;
+  excel: string;
+  pdf: string;
+  productName: string;
+  title: string;
+  surface: string;
+  actor: string;
+}, verbatim?: { modelDir: string }): string[] {
+  const args = [
+    "-m",
+    "app.cli",
+    "compare",
+    "--tid",
+    opts.tid,
+    "--excel",
+    opts.excel,
+    "--pdf",
+    opts.pdf,
+    "--product-name",
+    opts.productName,
+    "--title",
+    opts.title,
+    "--surface",
+    opts.surface,
+    "--actor",
+    opts.actor,
+    "--data-dir",
+    DATA_DIR,
+    ...(opts.nativeDir ? ["--native-dir", opts.nativeDir] : []),
+    ...(opts.nativeAttempted ? ["--native-attempted"] : []),
+  ];
+  if (verbatim) args.push("--verbatim-check", "--max-pages", "4", "--model-dir", verbatim.modelDir);
+  return args;
+}
+
 export async function compareTask(opts: {
   nativeDir?: string;
   nativeAttempted?: boolean;
+  verbatimCheck?: boolean;
+  modelDir?: string;
   tid: string;
   excel: string;
   pdf: string;
@@ -299,38 +350,44 @@ export async function compareTask(opts: {
   onSpawn?: (pid: number) => void;
 }): Promise<RunPythonResult> {
   return runPython({
-    args: [
-      "-m",
-      "app.cli",
-      "compare",
-      "--tid",
-      opts.tid,
-      "--excel",
-      opts.excel,
-      "--pdf",
-      opts.pdf,
-      "--product-name",
-      opts.productName,
-      "--title",
-      opts.title,
-      "--surface",
-      opts.surface,
-      "--actor",
-      opts.actor,
-      "--data-dir",
-      DATA_DIR,
-      ...(opts.nativeDir ? ["--native-dir", opts.nativeDir] : []),
-      ...(opts.nativeAttempted ? ["--native-attempted"] : []),
-    ],
+    args: compareArgs(opts, opts.verbatimCheck ? { modelDir: opts.modelDir || "" } : undefined),
     timeoutMs: 180_000,
     onStderrLine: opts.onStderrLine,
     onSpawn: opts.onSpawn,
   });
 }
 
+export function reworkArgs(opts: {
+  nativeDir?: string;
+  nativeAttempted?: boolean;
+  tid: string;
+  pdf: string;
+  actor: string;
+}, verbatim?: { modelDir: string }): string[] {
+  const args = [
+    "-m",
+    "app.cli",
+    "rework",
+    "--tid",
+    opts.tid,
+    "--pdf",
+    opts.pdf,
+    "--actor",
+    opts.actor,
+    "--data-dir",
+    DATA_DIR,
+    ...(opts.nativeDir ? ["--native-dir", opts.nativeDir] : []),
+    ...(opts.nativeAttempted ? ["--native-attempted"] : []),
+  ];
+  if (verbatim) args.push("--verbatim-check", "--max-pages", "4", "--model-dir", verbatim.modelDir);
+  return args;
+}
+
 export async function reworkTask(opts: {
   nativeDir?: string;
   nativeAttempted?: boolean;
+  verbatimCheck?: boolean;
+  modelDir?: string;
   tid: string;
   pdf: string;
   actor: string;
@@ -338,21 +395,7 @@ export async function reworkTask(opts: {
   onSpawn?: (pid: number) => void;
 }): Promise<RunPythonResult> {
   return runPython({
-    args: [
-      "-m",
-      "app.cli",
-      "rework",
-      "--tid",
-      opts.tid,
-      "--pdf",
-      opts.pdf,
-      "--actor",
-      opts.actor,
-      "--data-dir",
-      DATA_DIR,
-      ...(opts.nativeDir ? ["--native-dir", opts.nativeDir] : []),
-      ...(opts.nativeAttempted ? ["--native-attempted"] : []),
-    ],
+    args: reworkArgs(opts, opts.verbatimCheck ? { modelDir: opts.modelDir || "" } : undefined),
     timeoutMs: 180_000,
     onStderrLine: opts.onStderrLine,
     onSpawn: opts.onSpawn,

@@ -167,6 +167,7 @@ import {
   isReworkableTask,
   isValidHitReviewState,
   listTasks,
+  newCompareVerbatimFlag,
   loadTask,
   newTid,
   nowIso,
@@ -179,7 +180,7 @@ type NodeBindings = HttpBindings | Http2Bindings;
 type Env = { Bindings: NodeBindings; Variables: { session: Session } };
 
 const app = new Hono<Env>();
-const VERSION = "0.31.1.19";
+const VERSION = "0.31.1.20";
 
 const STRUCTURE_INPUT_BODY_BYTES = 16 * 1024;
 
@@ -891,6 +892,7 @@ app.post("/api/tasks/start", async (c) => {
         job_kind: "compare",
         job_status: "queued",
         source_receipt: receiptId,
+        ...newCompareVerbatimFlag(),
       });
     } catch (err) {
       rmSync(dir, { recursive: true, force: true });
@@ -1247,7 +1249,10 @@ app.post("/api/tasks/:tid/complete", async (c) => {
     throw new HTTPException(400, { message: `有 ${invalid.length} 条审核数据状态异常，请重新对照` });
   }
   const pending = hits.filter(hitNeedsDecision);
-  if (pending.length) throw new HTTPException(400, { message: `仍有 ${pending.length} 条疑点/缺失未处理` });
+  if (pending.length) {
+    const words = [...new Set(pending.map((hit) => String(hit.status || "未决")))].join("、");
+    throw new HTTPException(400, { message: `仍有 ${pending.length} 条${words}未处理` });
+  }
   const conclusion = (body.conclusion || "").trim();
   if (!conclusion) throw new HTTPException(400, { message: "请写下结论" });
   const issues = hits.filter((h) => h.decision === "issue");

@@ -119,6 +119,7 @@ function num(v: unknown): number {
 
 export function boxPixels(b: Record<string, unknown> | null | undefined): PixelBox | null {
   if (!b || typeof b !== "object") return null;
+  if (typeof b.bbox_space === "string" && b.bbox_space !== "page_px") return null;
   const left = num(b.left ?? b.x);
   const top = num(b.top ?? b.y);
   const width = num(b.width);

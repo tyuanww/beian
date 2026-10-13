@@ -22,7 +22,6 @@
     {"tool":"knip","kind":"exports","path":"apps/web/server/src/settings.ts","symbol":"CATALOG","line":29,"confidence":100},
     {"tool":"knip","kind":"exports","path":"apps/web/server/src/settings.ts","symbol":"applyToEnv","line":285,"confidence":100},
     {"tool":"knip","kind":"exports","path":"apps/web/server/src/settings.ts","symbol":"loadStore","line":263,"confidence":100},
-    {"tool":"knip","kind":"exports","path":"apps/web/server/src/tasks.ts","symbol":"HIT_DECISIONS","line":280,"confidence":100},
     {"tool":"knip","kind":"exports","path":"apps/web/server/src/tasks.ts","symbol":"REVIEWABLE_STATUSES","line":279,"confidence":100},
     {"tool":"knip","kind":"exports","path":"apps/web/server/src/uploads.ts","symbol":"MAX_PENDING_RECEIPTS_GLOBAL","line":86,"confidence":100},
     {"tool":"knip","kind":"exports","path":"apps/web/server/src/uploads.ts","symbol":"UPLOAD_BUSY","line":89,"confidence":100},

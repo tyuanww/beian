@@ -23,9 +23,14 @@ def _ok(payload: dict) -> int:
     return 0
 
 
-def _err(msg: str, code: int = 2) -> int:
+def _err(msg: str, code: int = 2, *, problem: str = "", cause: str = "", fix: str = "") -> int:
     text = str(msg).strip()[:80]
-    print(json.dumps({"ok": False, "error": text}, ensure_ascii=False), file=sys.stderr)
+    body: dict = {"ok": False, "error": text}
+    if problem:
+        body["code"] = problem
+        body["cause"] = str(cause).strip()[:240]
+        body["fix"] = str(fix).strip()[:240]
+    print(json.dumps(body, ensure_ascii=False), file=sys.stderr)
     return code
 
 
@@ -62,7 +67,30 @@ def cmd_probe(args: argparse.Namespace) -> int:
     return _err("未知探测")
 
 
+def _verbatim_fail(exc: Exception) -> int:
+    from app.verbatim_check import VerbatimFail
+
+    if isinstance(exc, VerbatimFail):
+        return _err(exc.error, problem=exc.code, cause=exc.cause, fix=exc.fix)
+    return _err(str(exc).strip() or type(exc).__name__)
+
+
+def _verbatim_ready(args: argparse.Namespace) -> int | None:
+    if not getattr(args, "verbatim_check", False):
+        return None
+    from app.verbatim_check import VerbatimFail, prepare
+
+    try:
+        prepare(Path(getattr(args, "model_dir", "") or ""))
+    except VerbatimFail as exc:
+        return _verbatim_fail(exc)
+    return None
+
+
 def cmd_compare(args: argparse.Namespace) -> int:
+    failed = _verbatim_ready(args)
+    if failed is not None:
+        return failed
     data = Path(args.data_dir).expanduser().resolve() if args.data_dir else None
     compare_core.init_paths(data)
     compare_core.NATIVE_DIR = Path(args.native_dir).resolve() if getattr(args, "native_dir", None) else None
@@ -86,16 +114,25 @@ def cmd_compare(args: argparse.Namespace) -> int:
         shutil.copy2(excel, ep)
     if pdf != pp:
         shutil.copy2(pdf, pp)
-    task = compare_core.run_excel_pdf_job(
-        tid,
-        ep,
-        pp,
-        compare_core.clamp_max_pages(int(args.max_pages or 2)),
-        title,
-        pdf_pouch=None,
-        surface_a_label=surface,
-        surface_b_label="膜袋",
-    )
+    try:
+        task = compare_core.run_excel_pdf_job(
+            tid,
+            ep,
+            pp,
+            compare_core.clamp_max_pages(int(args.max_pages or 2)),
+            title,
+            pdf_pouch=None,
+            surface_a_label=surface,
+            surface_b_label="膜袋",
+            verbatim_check=bool(getattr(args, "verbatim_check", False)),
+            model_dir=getattr(args, "model_dir", "") or "",
+        )
+    except Exception as exc:
+        from app.verbatim_check import VerbatimFail
+
+        if not isinstance(exc, VerbatimFail):
+            raise
+        return _verbatim_fail(exc)
     task["product_name"] = product
     task["title"] = title
     task["pack_surface"] = surface
@@ -106,6 +143,13 @@ def cmd_compare(args: argparse.Namespace) -> int:
     task.setdefault("audit", []).append(
         {"at": compare_core.now_iso(), "actor": args.actor or "", "action": "create", "via": "ts-cli"}
     )
+    if getattr(args, "verbatim_check", False):
+        from app.verbatim_check import guard_stdout
+
+        try:
+            guard_stdout(json.dumps({k: v for k, v in task.items() if k != "ocr_text"}, ensure_ascii=False))
+        except Exception as exc:
+            return _verbatim_fail(exc)
     return _result(task)
 
 
@@ -116,6 +160,11 @@ def cmd_rework(args: argparse.Namespace) -> int:
     compare_core.NATIVE_ATTEMPTED = bool(getattr(args, "native_attempted", False))
     tid = (args.tid or "").strip()
     task = compare_core.load_task(tid)
+    if task.get("verbatim_check") is True:
+        args.verbatim_check = True
+    failed = _verbatim_ready(args)
+    if failed is not None:
+        return failed
     pdf = Path(args.pdf).resolve()
     if not pdf.is_file():
         return _err("新 PDF 不存在")
@@ -126,6 +175,39 @@ def cmd_rework(args: argparse.Namespace) -> int:
     excel = compare_core.UPLOADS / tid / "source.xlsx"
     if not excel.is_file():
         return _err("找不到原 Excel")
+    if getattr(args, "verbatim_check", False):
+        try:
+            built = compare_core.verbatim_rework(
+                tid,
+                dest,
+                excel,
+                compare_core.clamp_max_pages(int(args.max_pages or 2)),
+                getattr(args, "model_dir", "") or "",
+            )
+        except Exception as exc:
+            return _verbatim_fail(exc)
+        task["round"] = 2
+        task["artwork_v2"] = "artwork_v2.pdf"
+        task["pages_v2"] = built.get("pages") or []
+        task["hits_v2"] = built.get("hits") if isinstance(built.get("hits"), list) else []
+        task["verbatim_check"] = True
+        task["engine"] = built.get("engine") or task.get("engine")
+        task["status"] = "in_review"
+        if built.get("verbatim_warning"):
+            task["verbatim_warning"] = built["verbatim_warning"]
+        if built.get("fsc_note"):
+            task["fsc_note"] = built["fsc_note"]
+        task.setdefault("audit", []).append(
+            {"at": compare_core.now_iso(), "actor": args.actor or "", "action": "rework_v2"}
+        )
+        from app.verbatim_check import guard_stdout
+
+        body = json.dumps({k: v for k, v in task.items() if k != "ocr_text"}, ensure_ascii=False)
+        try:
+            guard_stdout(body)
+        except Exception as exc:
+            return _verbatim_fail(exc)
+        return _result(task)
     from app.fields import parse_excel_fields
 
     fields = parse_excel_fields(str(excel))
@@ -197,6 +279,8 @@ def main() -> int:
 
     c.add_argument("--native-dir", default="")
     c.add_argument("--native-attempted", action="store_true")
+    c.add_argument("--verbatim-check", action="store_true")
+    c.add_argument("--model-dir", default="")
 
     r = sub.add_parser("rework", help="对红第二轮 PDF；stdout 最后一行结果 JSON")
     r.add_argument("--tid", required=True)
@@ -207,6 +291,8 @@ def main() -> int:
 
     r.add_argument("--native-dir", default="")
     r.add_argument("--native-attempted", action="store_true")
+    r.add_argument("--verbatim-check", action="store_true")
+    r.add_argument("--model-dir", default="")
 
     pr = sub.add_parser("probe")
     pr.add_argument("--target", required=True, choices=("python", "baidu"))

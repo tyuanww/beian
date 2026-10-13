@@ -10,6 +10,7 @@ type Props = {
   panel: ReactNode;
   panelOpen: boolean;
   pending: number;
+  held?: number;
   onPanelOpen: (open: boolean) => void;
 };
 
@@ -17,7 +18,7 @@ type Props = {
  * A 通铺三栏（deviations 第 6/7/10 行，已批 2026-10-11）：缩略图条 52 | 稿件 | 右栏 320。
  * <1440 右栏默认收起，展开时 320 浮层盖在稿件右侧；<720 手机只留稿件（第 16 行）。
  */
-export function ReviewWorkspace({ layout, thumbs, children, panel, panelOpen, pending, onPanelOpen }: Props) {
+export function ReviewWorkspace({ layout, thumbs, children, panel, panelOpen, pending, held = 0, onPanelOpen }: Props) {
   const wide = layout === "wide";
   const phone = layout === "phone";
   const columns = phone ? "minmax(0, 1fr)" : wide && panelOpen ? `${FLAT_THUMB_WIDTH}px minmax(0, 1fr) ${FLAT_PANEL_WIDTH}px` : `${FLAT_THUMB_WIDTH}px minmax(0, 1fr)`;
@@ -31,7 +32,7 @@ export function ReviewWorkspace({ layout, thumbs, children, panel, panelOpen, pe
         </aside>
       ) : (
         <button type="button" data-testid="review-dock" className="review-panel-tab" aria-expanded={false} onClick={() => onPanelOpen(true)}>
-          {REVIEW_COPY.expand(pending)}
+          {REVIEW_COPY.expand(pending)}{held > 0 ? ` · ${REVIEW_COPY.heldButton(held)}` : ""}
         </button>
       )}
     </div>
