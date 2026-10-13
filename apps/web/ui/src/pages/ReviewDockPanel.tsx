@@ -5,7 +5,7 @@ import type { Decision, FieldHit, TaskDetail } from "../api";
 import { spokenAsk } from "./hitText";
 import { nativeEvidenceView, nativeTaskNote } from "./nativeTextEvidence";
 import { reviewProgress } from "./reviewNav";
-import { tabIndices, verdictCounts, type FlatTab } from "./reviewFlat";
+import { tabIndices, verdictCounts, isOpenHeld, type FlatTab } from "./reviewFlat";
 import { reviewEvidence, type EvidenceText } from "./reviewEvidence";
 
 type Props = {
@@ -39,7 +39,10 @@ function verdictTag(hit: FieldHit) {
   if (d === "issue") return <Tag className="t-err">{REVIEW_COPY.verdict.issue}</Tag>;
   if (d === "confirm") return <Tag className="t-ok">{REVIEW_COPY.verdict.confirm}</Tag>;
   if (d === "ignore") return <Tag className="t-ign">{REVIEW_COPY.verdict.ignore}</Tag>;
-  if (/疑|缺|待人工|不清/.test(hit.status || "")) return <Tag className="t-pend">{REVIEW_COPY.tabs.pending}</Tag>;
+  if (hit.status === "待人工确认" && hit.decision !== "issue" && hit.decision !== "ignore") {
+    return <Tag className="t-pend">待人工</Tag>;
+  }
+  if (/疑|缺|不清/.test(hit.status || "")) return <Tag className="t-pend">{REVIEW_COPY.tabs.pending}</Tag>;
   return <Tag className="t-ok">{hit.status || REVIEW_COPY.verdict.confirm}</Tag>;
 }
 
@@ -64,9 +67,9 @@ export function ReviewDockPanel({
   verbatim = false, fscNote,
 }: Props) {
   const [tipOpen, setTipOpen] = useState(false);
-  const [heldOpen, setHeldOpen] = useState(false);
   const counts = verdictCounts(hits);
-  const held = hits.filter((hit) => hit.status === "待人工确认");
+  const held = hits.filter(isOpenHeld);
+  const [heldOpen, setHeldOpen] = useState(counts.pending === 0 && held.length > 0);
   const list = tabIndices(hits, tab, active);
   const evidence = current ? reviewEvidence(current) : null;
   const nativeEvidence = nativeEvidenceView(current?.native_text_evidence);
@@ -84,7 +87,7 @@ export function ReviewDockPanel({
     <div className="review-dock-panel review-flat-panel">
       <div className="review-ptabs" role="tablist" aria-label={REVIEW_COPY.doubts}>
         {(["pending", "issue", "all"] as FlatTab[]).map((key) => (
-          <button key={key} type="button" role="tab" aria-selected={tab === key} className={tab === key ? "review-ptab is-on" : "review-ptab"} onClick={() => onTab(key)}>
+          <button key={key} type="button" role="tab" aria-selected={tab === key && !heldOpen} className={tab === key && !heldOpen ? "review-ptab is-on" : "review-ptab"} onClick={() => { setHeldOpen(false); onTab(key); }}>
             {REVIEW_COPY.tabs[key]} <i>{tabCount[key]}</i>
           </button>
         ))}
@@ -92,22 +95,23 @@ export function ReviewDockPanel({
       </div>
       {taskNote ? <p className="review-native-evidence" role="status">{taskNote}</p> : null}
       {verbatim ? (
-        <button type="button" className="review-held-bar" data-testid="review-held-bar" onClick={() => setHeldOpen((open) => !open)}>
-          {REVIEW_COPY.heldButton(held.length)}
+        <button type="button" className="review-held-bar" data-testid="review-held-bar" aria-pressed={heldOpen} onClick={() => setHeldOpen((open) => !open)}>
+          {REVIEW_COPY.heldBar(held.length)}
         </button>
-      ) : null}
-      {heldOpen ? (
-        <ul className="review-held-list" data-testid="review-held-group">
-          {held.map((hit) => <li key={hit.id || hit.field}>{hit.field} · 第{hit.page ?? "?"}页</li>)}
-        </ul>
       ) : null}
       {fscNote ? <p className="review-fsc-note" role="note">{fscNote}</p> : null}
       {ocrMeta?.skipped && ocrMeta.reason === "native_coverage" ? (
         <p className="review-native-evidence" role="status">已直接读取原稿文字</p>
       ) : null}
-      {counts.total === 0 && held.length === 0 && reviewable ? <p className="review-zero" role="status">{REVIEW_COPY.zeroIssues}</p> : null}
-      <ol className="review-flat-list" aria-label="疑点列表">
-        {list.map((index) => {
+      {verbatim && counts.total === 0 && held.length === 0 ? (
+        <div className="review-verbatim-none" data-testid="review-verbatim-none">
+          <p>{REVIEW_COPY.verbatimNoneLead}</p>
+          <p>{REVIEW_COPY.verbatimNoneNote}</p>
+        </div>
+      ) : null}
+      {counts.total === 0 && held.length === 0 && reviewable && !verbatim ? <p className="review-zero" role="status">{REVIEW_COPY.zeroIssues}</p> : null}
+      <ol className="review-flat-list" aria-label="疑点列表" data-testid={heldOpen ? "review-held-group" : undefined}>
+        {(heldOpen ? held.map((hit) => hits.indexOf(hit)) : list).map((index) => {
           const hit = hits[index];
           const on = index === active;
           return (
@@ -132,11 +136,18 @@ export function ReviewDockPanel({
                     <EvidenceBlock title="稿上读到" value={evidence.observed} />
                   </div>
                   <div className="review-verdicts" role="group" aria-label="审核结果">
-                    {(["confirm", "issue", "ignore"] as const).map((d, k) => {
+                    {(current.status === "待人工确认" ? (["issue", "ignore"] as const) : (["confirm", "issue", "ignore"] as const)).map((d) => {
+                      const keyNo = d === "confirm" ? 1 : d === "issue" ? 2 : 3;
                       const button = (
                         <button key={d} type="button" aria-pressed={selected === d} className={selected === d ? "is-on" : undefined}
-                          disabled={!reviewable || !current.id || busy} onClick={() => onDecide(current, d, note)}>
-                          {REVIEW_COPY.verdict[d]} <kbd>{k + 1}</kbd>
+                          disabled={!reviewable || !current.id || busy} onClick={() => {
+                            if (current.status === "待人工确认" && d === "issue") {
+                              setHeldOpen(false);
+                              onTab("issue");
+                            }
+                            onDecide(current, d, note);
+                          }}>
+                          {REVIEW_COPY.verdict[d]} <kbd>{keyNo}</kbd>
                         </button>
                       );
                       return d === "ignore" ? (
@@ -180,7 +191,7 @@ export function ReviewDockPanel({
             </li>
           );
         })}
-        {!list.length ? <li className="review-dock-none">{hits.length ? (tab === "pending" ? REVIEW_COPY.pendingEmpty : REVIEW_COPY.allDecided) : emptyMessage}</li> : null}
+        {!heldOpen && !list.length ? <li className="review-dock-none">{hits.length ? (tab === "pending" || held.length > 0 ? REVIEW_COPY.pendingEmpty : REVIEW_COPY.allDecided) : emptyMessage}</li> : null}
       </ol>
       <div className="review-pfoot">
         <span aria-live="polite">{REVIEW_COPY.footer(counts.pending, progress.pageLeft)}</span>

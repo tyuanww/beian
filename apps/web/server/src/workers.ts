@@ -8,7 +8,7 @@ const MEMORY_SIGNALS = new Set(["SIGKILL", "SIGSEGV", "SIGBUS"]);
 /** 只有内存类信号记超内存。SIGTERM 这类手动停止不改写成 oom。 */
 export function verbatimMemoryFailure(signal: string | undefined): string | null {
   if (!signal || !MEMORY_SIGNALS.has(signal)) return null;
-  return "这一单认字超出内存";
+  return "这一单认字超出内存，没有结果";
 }
 
 export type RunPythonResult = {

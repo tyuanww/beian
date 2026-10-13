@@ -32,7 +32,7 @@ export function ReviewWorkspace({ layout, thumbs, children, panel, panelOpen, pe
         </aside>
       ) : (
         <button type="button" data-testid="review-dock" className="review-panel-tab" aria-expanded={false} onClick={() => onPanelOpen(true)}>
-          {REVIEW_COPY.expand(pending)}{held > 0 ? ` · ${REVIEW_COPY.heldButton(held)}` : ""}
+          {held > 0 ? REVIEW_COPY.heldCollapse(held) : REVIEW_COPY.expand(pending)}
         </button>
       )}
     </div>
