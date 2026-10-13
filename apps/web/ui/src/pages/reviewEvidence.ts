@@ -18,7 +18,7 @@ export type IndexedReviewHit = { hit: FieldHit; index: number };
 const BLOCKING = new Set([...statuses.true_errors, "疑点", "缺失"]);
 const SPACE = new Set(statuses.space_errors);
 
-export function isHeldHit(hit: FieldHit): boolean {
+function isHeldHit(hit: FieldHit): boolean {
   return hit.status === "待人工确认";
 }
 
