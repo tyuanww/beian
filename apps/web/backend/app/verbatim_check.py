@@ -84,12 +84,12 @@ def rss_used_bytes() -> int:
 
 
 def cap_rss() -> None:
-    """Child only. This Mac raises ValueError for any finite RSS limit. That is not a Baidu fallback, and RLIMIT_AS is not used."""
+    """Child only. Missing on Windows. This Mac raises ValueError for any finite RSS limit. That is not a Baidu fallback, and RLIMIT_AS is not used."""
     try:
         import resource
 
         resource.setrlimit(resource.RLIMIT_RSS, (RSS_CAP, RSS_CAP))
-    except (AttributeError, OSError, ValueError):
+    except (AttributeError, ImportError, OSError, ValueError):
         return
 
 
