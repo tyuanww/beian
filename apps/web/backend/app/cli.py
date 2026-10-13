@@ -81,7 +81,7 @@ def _verbatim_ready(args: argparse.Namespace) -> int | None:
     from app.verbatim_check import VerbatimFail, prepare
 
     try:
-        prepare(Path(args.model_dir or ""))
+        prepare(Path(getattr(args, "model_dir", "") or ""))
     except VerbatimFail as exc:
         return _verbatim_fail(exc)
     return None
@@ -125,7 +125,7 @@ def cmd_compare(args: argparse.Namespace) -> int:
             surface_a_label=surface,
             surface_b_label="膜袋",
             verbatim_check=bool(getattr(args, "verbatim_check", False)),
-            model_dir=args.model_dir or "",
+            model_dir=getattr(args, "model_dir", "") or "",
         )
     except Exception as exc:
         from app.verbatim_check import VerbatimFail
@@ -182,7 +182,7 @@ def cmd_rework(args: argparse.Namespace) -> int:
                 dest,
                 excel,
                 compare_core.clamp_max_pages(int(args.max_pages or 2)),
-                args.model_dir or "",
+                getattr(args, "model_dir", "") or "",
             )
         except Exception as exc:
             return _verbatim_fail(exc)
