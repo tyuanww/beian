@@ -109,6 +109,8 @@ export const REVIEW_COPY = {
   hiResFailed: "高清没加载出来",
   lowResFailed: "稿件没加载出来",
   zeroIssues: "✓ 没发现问题",
+  heldLine: (n: number) => `另有 ${n} 处机器没读准，签了表示人认这些字。`,
+  heldButton: (n: number) => `机器没读准 ${n}`,
   allDecided: "全部已下结论",
   /** 右栏「待确认」列表空态（产品哥 2026-10-11；核对栏一行提示不带句号）。 */
   pendingEmpty: "没有待确认的了",

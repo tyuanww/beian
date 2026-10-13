@@ -128,6 +128,23 @@ describe("taskCompleteText", () => {
     assert.doesNotMatch(signed + returned, /待设计改稿|已通过/);
   });
 
+  it("verbatim completion keeps type and page, not the manuscript", () => {
+    const text = taskCompleteText({
+      id: "t3",
+      title: "某喷雾",
+      verbatim_check: true,
+      complete_kind: "rework",
+      conclusion: "稿上印了不该出现的句子",
+      hits: [{ field: "漏字", status: "一致", decision: "confirm" }],
+      hits_v2: [{ field: "江东四路漏了东", status: "漏字", decision: "issue", page: 1, pdf: "江四路" }],
+    }, "审核员");
+    assert.match(text, /漏字 第1页/);
+    assert.equal(text.includes("江东"), false);
+    assert.equal(text.includes("江四路"), false);
+    assert.equal(text.includes("稿上印了"), false);
+    assert.match(text, /结论已记下/);
+  });
+
   it("falls back to issue hits for legacy tasks without complete_kind", () => {
     assert.equal(taskCompleteHeadline({}), "已签字");
     assert.equal(taskCompleteHeadline({ hits: [{ decision: "confirm" }] }), "已签字");

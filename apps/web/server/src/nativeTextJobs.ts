@@ -48,6 +48,7 @@ function fallback(task: Task, reason: NativeReason) {
 export function prepareNativeRequests(hostReady: boolean, now = Date.now()) {
   for (const task of loadAllTasks()) {
     if (task.job_status !== "queued" || !["compare", "rework"].includes(task.job_kind || "")) continue;
+    if (task.verbatim_check === true) continue;
     const existing = nativeRequest(task);
     if (existing?.status === "running") continue;
     if (existing?.source_name === source(task) && existing.version === "native-text/1") {

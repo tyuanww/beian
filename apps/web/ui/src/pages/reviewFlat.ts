@@ -47,17 +47,19 @@ export type SubmitGate = {
  * 服务端 /complete 只有一个入口：有「有错」→ 已退回，没有 → 已签字，且都要求没有待确认。
  * 所以签字要「无待确认且无有错」，退回要「无待确认且至少一条有错」。
  */
-export function submitGate(hits: FieldHit[], reviewable: boolean, locked = false): SubmitGate {
+export function submitGate(hits: FieldHit[], reviewable: boolean, locked = false, releaseHeld = false): SubmitGate {
   const c = verdictCounts(hits);
+  const held = hits.filter((hit) => hit.status === "待人工确认" && hit.decision !== "confirm" && hit.decision !== "issue" && hit.decision !== "ignore").length;
+  const pending = c.pending + (releaseHeld ? 0 : held);
   if (!reviewable || locked) return { canSign: false, canReject: false, hint: "", title: "" };
-  if (c.pending > 0) {
+  if (pending > 0) {
     return {
       canSign: false,
       // 老板 2026-10-11 已批：签字禁用时退回不禁用。服务端 /complete 仍要求先下完结论，
       // 所以确认框里「确认退回」会挡住并写「还有 N 条没下结论」（不改后端）。
       canReject: true,
-      hint: REVIEW_COPY.pendingHint(c.pending),
-      title: REVIEW_COPY.pendingTitle(c.pending),
+      hint: REVIEW_COPY.pendingHint(pending),
+      title: REVIEW_COPY.pendingTitle(pending),
     };
   }
   if (c.issue > 0) return { canSign: false, canReject: true, hint: "", title: REVIEW_COPY.signBlockedByIssue(c.issue) };

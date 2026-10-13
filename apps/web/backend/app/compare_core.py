@@ -568,6 +568,86 @@ def _surface_job(
     }
 
 
+def _verbatim_summary(hits: list[dict]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for hit in hits:
+        status = str(hit.get("status") or "")
+        if not status:
+            continue
+        counts[status] = counts.get(status, 0) + 1
+    return counts
+
+
+def _verbatim_pages(tid: str, rendered: list[dict]) -> list[dict]:
+    pages = []
+    for meta in rendered:
+        name = meta.get("name") or ""
+        pages.append(
+            {
+                "url": f"/api/tasks/{tid}/pages/{name}",
+                "name": name,
+                "page": meta.get("page"),
+                "width": meta.get("width"),
+                "height": meta.get("height"),
+            }
+        )
+    return pages
+
+
+def _verbatim_payload(tid: str, pdf: Path, excel: Path, max_pages: int, model_dir: str, pages_dir: Path) -> dict[str, Any]:
+    from app.verbatim_check import compare_pdf, render_or_fail
+
+    rendered = render_or_fail(pdf, pages_dir, max_pages)
+    try:
+        compared = compare_pdf(pdf, excel, Path(model_dir), rendered)
+    except MemoryError as exc:
+        from app.verbatim_check import oom_fail
+
+        raise oom_fail() from exc
+    hits = compared.get("hits")
+    if not isinstance(hits, list):
+        hits = []
+    payload: dict[str, Any] = {
+        "hits": hits,
+        "pages": _verbatim_pages(tid, rendered),
+        "engine": compared.get("engine") or "rapidocr:ppocrv6-medium",
+        "summary": _verbatim_summary(hits),
+        "verbatim_check": True,
+        "render": {"pages_rendered": len(rendered), "max_pages": max_pages},
+    }
+    if compared.get("verbatim_warning"):
+        payload["verbatim_warning"] = compared["verbatim_warning"]
+    if compared.get("fsc_note"):
+        payload["fsc_note"] = compared["fsc_note"]
+    return payload
+
+
+def _verbatim_excel_job(tid: str, excel: Path, pdf: Path, max_pages: int, title: str, model_dir: str) -> dict[str, Any]:
+    payload = _verbatim_payload(tid, pdf, excel, max_pages, model_dir, UPLOADS / tid / "pages")
+    return {
+        "id": tid,
+        "title": title,
+        "type": "excel_pdf",
+        "status": "pending_review",
+        "created_at": now_iso(),
+        "engine": payload["engine"],
+        "verbatim_check": True,
+        "hits": payload["hits"],
+        "pages": payload["pages"],
+        "summary": payload["summary"],
+        "render": payload["render"],
+        **({"verbatim_warning": payload["verbatim_warning"]} if payload.get("verbatim_warning") else {}),
+        **({"fsc_note": payload["fsc_note"]} if payload.get("fsc_note") else {}),
+        "audit": [],
+        "actor": "审核员",
+    }
+
+
+def verbatim_rework(tid: str, pdf: Path, excel: Path, max_pages: int, model_dir: str) -> dict[str, Any]:
+    payload = _verbatim_payload(tid, pdf, excel, max_pages, model_dir, UPLOADS / tid / "pages" / "v2")
+    return payload
+
+
 def run_excel_pdf_job(
     tid: str,
     excel: Path,
@@ -579,11 +659,15 @@ def run_excel_pdf_job(
     pdf_pouch: Path | None = None,
     surface_a_label: str = "花盒",
     surface_b_label: str = "膜袋",
+    verbatim_check: bool = False,
+    model_dir: str = "",
 ) -> dict[str, Any]:
     """
     Text Verification 2.1：
     PDF 分型 · 原生文字优先 · 按页选源 · 单 OCR 引擎 · 区域路由 · 单钉证据 · 金标评测
     """
+    if verbatim_check:
+        return _verbatim_excel_job(tid, excel, pdf, max_pages, title, model_dir)
     tdir = UPLOADS / tid
     tdir.mkdir(parents=True, exist_ok=True)
     fields = parse_excel_fields(str(excel))

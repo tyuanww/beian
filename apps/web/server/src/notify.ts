@@ -8,8 +8,19 @@ type TaskLike = {
   title?: string;
   conclusion?: string;
   complete_kind?: string;
-  hits?: Array<{ field?: string; status?: string; decision?: string }>;
+  verbatim_check?: boolean;
+  hits?: Array<{ field?: string; status?: string; decision?: string; page?: number | string }>;
+  hits_v2?: Array<{ field?: string; status?: string; decision?: string; page?: number | string }>;
 };
+
+function selectedHits(task: TaskLike): NonNullable<TaskLike["hits"]> {
+  if (task.verbatim_check === true) {
+    if (Array.isArray(task.hits_v2)) return task.hits_v2;
+    return Array.isArray(task.hits) ? task.hits : [];
+  }
+  if (Array.isArray(task.hits_v2) && task.hits_v2.length > 0) return task.hits_v2;
+  return task.hits || [];
+}
 
 function clipText(text: string): string {
   return text.length <= 3500 ? text : `${text.slice(0, 3400)}\n…(截断)`;
@@ -176,19 +187,21 @@ export function sendText(
 export function taskCompleteHeadline(task: TaskLike): "已签字" | "已退回" {
   if (task.complete_kind === "rework") return "已退回";
   if (task.complete_kind === "signed") return "已签字";
-  return (task.hits || []).some((h) => h.decision === "issue") ? "已退回" : "已签字";
+  return selectedHits(task).some((h) => h.decision === "issue") ? "已退回" : "已签字";
 }
 
 export function taskCompleteText(task: TaskLike, actor: string): string {
-  const issues = (task.hits || []).filter((h) => h.decision === "issue");
+  const issues = selectedHits(task).filter((h) => h.decision === "issue");
   const headline = taskCompleteHeadline(task);
-  const lines = issues.slice(0, 12).map((h) => `· ${h.field || "字段"}`);
+  const lines = task.verbatim_check === true
+    ? issues.slice(0, 12).map((h) => `· ${h.status || "类型"} 第${h.page || "?"}页`)
+    : issues.slice(0, 12).map((h) => `· ${h.field || "字段"}`);
   const more = issues.length > 12 ? `\n…另有 ${issues.length - 12} 条` : "";
   return [
     `【备案审核】${headline}`,
     `任务：${task.title || task.id || ""}`,
     `审核人：${actor}`,
-    `结论：${task.conclusion || "—"}`,
+    task.verbatim_check === true ? "结论已记下" : `结论：${task.conclusion || "—"}`,
     issues.length ? `改稿 ${issues.length} 条` : "无改稿项",
     ...lines,
     more,

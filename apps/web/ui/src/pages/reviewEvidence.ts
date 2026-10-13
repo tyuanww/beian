@@ -1,4 +1,5 @@
 import type { FieldHit } from "../api";
+import statuses from "../../../backend/app/verbatim_statuses.json" with { type: "json" };
 import { coverageTally, doubtLines, excelText, humanMissLines, NOT_READ, pdfText, spokenAsk } from "./hitText";
 
 export type EvidenceText = {
@@ -14,24 +15,34 @@ export type ReviewEvidence = {
 
 export type IndexedReviewHit = { hit: FieldHit; index: number };
 
+const BLOCKING = new Set([...statuses.true_errors, "疑点", "缺失"]);
+const SPACE = new Set(statuses.space_errors);
+
+export function isHeldHit(hit: FieldHit): boolean {
+  return hit.status === "待人工确认";
+}
+
 export function isReviewIssue(hit: FieldHit): boolean {
-  return (
-    hit.decision === "issue" ||
-    /待人工|不清|疑|缺|误/.test(String(hit.status || "")) ||
-    doubtLines(hit).length > 0
-  );
+  if (isHeldHit(hit)) return false;
+  if (hit.decision === "issue") return true;
+  if (BLOCKING.has(String(hit.status || ""))) return true;
+  if (SPACE.has(String(hit.status || "")) && hit.decision === "pending") return true;
+  return /不清|误/.test(String(hit.status || "")) || doubtLines(hit).length > 0;
 }
 
 export function partitionReviewHits(hits: FieldHit[]): {
   issues: IndexedReviewHit[];
   consistent: IndexedReviewHit[];
+  held: IndexedReviewHit[];
 } {
   const issues: IndexedReviewHit[] = [];
   const consistent: IndexedReviewHit[] = [];
+  const held: IndexedReviewHit[] = [];
   hits.forEach((hit, index) => {
-    (isReviewIssue(hit) ? issues : consistent).push({ hit, index });
+    if (isHeldHit(hit)) held.push({ hit, index });
+    else (isReviewIssue(hit) ? issues : consistent).push({ hit, index });
   });
-  return { issues, consistent };
+  return { issues, consistent, held };
 }
 
 export function withLocalNotes(hits: FieldHit[], notes: Record<string, string>): FieldHit[] {

@@ -1,7 +1,8 @@
 import type { NativeRequest } from "./nativeTextJobs.js";
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { DATA_DIR } from "./config.js";
 import { guardErrorFields } from "./pathRedact.js";
 import { cleanCompleteKind, forgetHistory, noteHistoryReview } from "./historyIndex.js";
@@ -54,6 +55,10 @@ export type Task = {
   native_text_request?: NativeRequest;
   /** 仅服务端用于把已失败的 Illustrator 尝试传给 OCR worker，不返回前端。 */
   native_text_attempted?: boolean;
+  /** 新包装核对单才有。空 hits_v2 表示这轮没有错，不得回退第一轮。 */
+  verbatim_check?: boolean;
+  verbatim_warning?: string;
+  fsc_note?: string;
   id: string;
   title: string;
   product_name?: string;
@@ -308,8 +313,25 @@ export function listTasks(q: string, viewer: Viewer): Record<string, unknown>[] 
 
 export const REVIEWABLE_STATUSES = ["pending_review", "in_review"] as const;
 export const HIT_DECISIONS = ["confirm", "issue", "ignore"] as const;
-const HIT_STATUSES = ["一致", "疑点", "缺失", "跳过"] as const;
+const VERBATIM_STATUS_FILE = join(dirname(fileURLToPath(import.meta.url)), "../../backend/app/verbatim_statuses.json");
+export const VERBATIM_STATUSES = JSON.parse(readFileSync(VERBATIM_STATUS_FILE, "utf8")) as {
+  statuses: string[];
+  true_errors: string[];
+  space_errors: string[];
+  warning: string;
+  fsc_note: string;
+};
+const HIT_STATUSES = ["一致", "疑点", "缺失", "跳过", ...VERBATIM_STATUSES.statuses] as const;
 export type HitDecision = (typeof HIT_DECISIONS)[number];
+
+const VERBATIM_MODELS = ["PP-OCRv6_det_small.onnx", "PP-OCRv6_rec_medium.onnx", "PP-OCRv6_rec_small.onnx"];
+
+/** 模型目录、NOTICE 和三份权重都在时，才给新建核对单写标记。缺一就不写，旧路径保持今天的 argv。 */
+export function newCompareVerbatimFlag(modelDir = process.env.VERBATIM_MODEL_DIR): { verbatim_check: true } | Record<string, never> {
+  if (!modelDir || !existsSync(modelDir) || !existsSync(join(modelDir, "NOTICE"))) return {};
+  if (!VERBATIM_MODELS.every((name) => existsSync(join(modelDir, name)))) return {};
+  return { verbatim_check: true };
+}
 
 export function isReviewableStatus(status: string): boolean {
   return (REVIEWABLE_STATUSES as readonly string[]).includes(status);
@@ -330,7 +352,9 @@ export function isReworkableTask(task: { status: string; complete_kind?: string;
 }
 
 export function activeHits(task: Task): Hit[] {
-  const hits = Array.isArray(task.hits_v2) && task.hits_v2.length > 0 ? task.hits_v2 : task.hits || [];
+  const hits = task.verbatim_check === true
+    ? (Array.isArray(task.hits_v2) ? task.hits_v2 : (Array.isArray(task.hits) ? task.hits : []))
+    : (Array.isArray(task.hits_v2) && task.hits_v2.length > 0 ? task.hits_v2 : task.hits || []);
   return hits.filter((hit) => !skipPackSheetField(hit.field));
 }
 
@@ -344,8 +368,14 @@ export function isValidHitReviewState(hit: Hit): boolean {
   return decision == null || decision === "pending" || isHitDecision(decision);
 }
 
+const TRUE_ERRORS = new Set([...VERBATIM_STATUSES.true_errors, "疑点", "缺失"]);
+const SPACE_ERRORS = new Set(VERBATIM_STATUSES.space_errors);
+
 export function hitNeedsDecision(hit: Hit): boolean {
-  return (hit.status === "疑点" || hit.status === "缺失") && !isHitDecision(hit.decision);
+  if (isHitDecision(hit.decision)) return false;
+  if (hit.status === "待人工确认") return false;
+  if (TRUE_ERRORS.has(String(hit.status || ""))) return true;
+  return SPACE_ERRORS.has(String(hit.status || "")) && hit.decision === "pending";
 }
 
 export type BoardColumn = "comparing" | "failed" | "review" | "done";

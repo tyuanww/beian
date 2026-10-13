@@ -1,6 +1,6 @@
 import { nativeRequest, prepareNativeRun, prepareNativeRequests, nativeBlocksOcr, nativeQueue, nativePublic, recoverNativeRequests, nativeDirectory, startNative } from "./nativeTextJobs.js";
 import { rewriteLegacyHits } from "./legacyCopy.js";
-import { runNativeText } from "./workers.js";
+import { runNativeText, verbatimMemoryFailure } from "./workers.js";
 import { createHash, randomBytes } from "node:crypto";
 import { closeSync, copyFileSync, existsSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
@@ -57,6 +57,7 @@ import {
   loadTask,
   nowIso,
   saveTask,
+  VERBATIM_STATUSES,
   assertCanAccessTask,
   taskOwner,
   taskStoreSnapshot,
@@ -134,6 +135,9 @@ const STAGE_LABEL: Record<string, string> = {
 const MERGE_ALLOW = new Set([
   "hits",
   "hits_v2",
+  "verbatim_check",
+  "verbatim_warning",
+  "fsc_note",
   "pages",
   "pages_b",
   "pages_v2",
@@ -417,8 +421,8 @@ export function publicTask(task: Task, viewer?: Viewer): Record<string, unknown>
     ...rest,
     // 最后一步兜底：脱敏后仍有本机路径 / 凭据特征时整条隐藏，加 error_hidden / error_ticket（单号 = task.id）。
     ...(redact ? guardErrorFields(task.id, { job_error: rest.job_error, error: rest.error }) : {}),
-    ...(rest.hits ? { hits: rewriteLegacyHits(rest.hits) } : {}),
-    ...(rest.hits_v2 ? { hits_v2: rewriteLegacyHits(rest.hits_v2) } : {}),
+    ...(Array.isArray(rest.hits) ? { hits: rewriteLegacyHits(rest.hits) } : {}),
+    ...(Array.isArray(rest.hits_v2) ? { hits_v2: rewriteLegacyHits(rest.hits_v2) } : {}),
     ...(nativePublic(task) ? { native_text: nativePublic(task) } : {}),
     queue_ahead: queueAheadFrom(queueRanks(), task.id, task.job_kind, task.job_status),
   };
@@ -3275,6 +3279,8 @@ async function runOcr(id: string, startedAt: string): Promise<void> {
         tid: id,
         nativeDir: nativeDirectory(task),
         nativeAttempted,
+        verbatimCheck: task.verbatim_check === true,
+        modelDir: process.env.VERBATIM_MODEL_DIR || "",
         pdf: join(DATA_DIR, "uploads", id, "artwork_v2.pdf"),
         actor: taskOwner(task),
         onSpawn,
@@ -3286,6 +3292,8 @@ async function runOcr(id: string, startedAt: string): Promise<void> {
         tid: id,
         nativeDir: nativeDirectory(task),
         nativeAttempted,
+        verbatimCheck: task.verbatim_check === true,
+        modelDir: process.env.VERBATIM_MODEL_DIR || "",
         excel: join(DATA_DIR, "uploads", id, "source.xlsx"),
         pdf: join(DATA_DIR, "uploads", id, "artwork.pdf"),
         productName: String(task.product_name || task.title || ""),
@@ -3319,6 +3327,11 @@ function finishOcr(id: string, startedAt: string, result: RunPythonResult): void
   task.job_finished_at = nowIso();
   if (result.timedOut) {
     markOcrFailed(task, "超时");
+    return;
+  }
+  const memoryFailure = verbatimMemoryFailure(result.signal);
+  if (task.verbatim_check === true && memoryFailure) {
+    markOcrFailed(task, memoryFailure);
     return;
   }
   if (result.code !== 0) {
@@ -3498,6 +3511,9 @@ function compareSurface(task: Task): string {
 function mergeResult(task: Task, payload: Record<string, unknown>): void {
   for (const [key, value] of Object.entries(payload)) {
     if (!MERGE_ALLOW.has(key)) continue;
+    if (key === "verbatim_warning" && value !== VERBATIM_STATUSES.warning) continue;
+    if (key === "fsc_note" && value !== VERBATIM_STATUSES.fsc_note) continue;
+    if (key === "verbatim_check" && value !== true) continue;
     (task as Record<string, unknown>)[key] = value;
   }
 }

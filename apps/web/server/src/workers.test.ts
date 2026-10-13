@@ -10,8 +10,28 @@ const {
   killTree,
   pidAlive,
   runPython,
+  compareArgs,
+  reworkArgs,
+  verbatimMemoryFailure,
   workerCommandMatches,
 } = await import("./workers.js");
+
+describe("verbatim argv", () => {
+  const base = { tid: "0123456789ab", excel: "/tmp/a.xlsx", pdf: "/tmp/a.pdf", productName: "品", title: "品", surface: "carton", actor: "审" };
+  it("leaves the off switch identical to today", () => {
+    const args = compareArgs(base);
+    assert.equal(args.includes("--max-pages"), false);
+    assert.equal(args.includes("--verbatim-check"), false);
+    assert.deepEqual(args.slice(0, 4), ["-m", "app.cli", "compare", "--tid"]);
+  });
+  it("adds max-pages 4 only when the switch is on", () => {
+    const args = compareArgs(base, { modelDir: "/opt/models" });
+    assert.deepEqual(args.slice(-5), ["--verbatim-check", "--max-pages", "4", "--model-dir", "/opt/models"]);
+    assert.equal(reworkArgs({ tid: base.tid, pdf: base.pdf, actor: base.actor }).includes("--max-pages"), false);
+    assert.equal(verbatimMemoryFailure("SIGKILL"), "这一单认字超出内存");
+    assert.equal(verbatimMemoryFailure("SIGTERM"), null);
+  });
+});
 
 describe("killTree", () => {
   it("no-ops on missing pids", () => {

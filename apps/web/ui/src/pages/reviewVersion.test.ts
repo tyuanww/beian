@@ -35,4 +35,13 @@ describe("review version selection", () => {
     assert.equal(shouldUseReworkView(current), true);
     assert.equal(reviewHits(current, true)[0]?.id, "v1");
   });
+
+  it("a marked empty hits_v2 is this round's clean result", () => {
+    const current = task({
+      verbatim_check: true,
+      pages_v2: [{ page: 1, name: "page_01.png", url: "/v2/page_01.png" }],
+      hits_v2: [],
+    });
+    assert.equal(reviewHits(current, true).length, 0);
+  });
 });

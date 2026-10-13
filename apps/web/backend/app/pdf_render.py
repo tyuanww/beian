@@ -144,9 +144,8 @@ def render_pdf_pages(
         pix = page.get_pixmap(matrix=pymupdf.Matrix(zoom, zoom), alpha=False)
         if max(pix.width, pix.height) > max_side:
             scale = max_side / max(pix.width, pix.height)
-            pix = page.get_pixmap(
-                matrix=pymupdf.Matrix(zoom * scale, zoom * scale), alpha=False
-            )
+            zoom *= scale
+            pix = page.get_pixmap(matrix=pymupdf.Matrix(zoom, zoom), alpha=False)
         # PNG 无损；大图用优化压缩级别
         p = out_dir / f"page_{i+1:02d}.png"
         p.write_bytes(pix.tobytes("png"))
@@ -157,6 +156,7 @@ def render_pdf_pages(
             "height": pix.height,
             "page": i + 1,
             "dpi": dpi,
+            "matrix": [zoom, 0.0, 0.0, zoom, 0.0, 0.0],
         }
         review_path = out_dir / f"page_{i+1:02d}.svg"
         if _render_review_svg(

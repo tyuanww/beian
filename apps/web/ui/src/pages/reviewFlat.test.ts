@@ -24,6 +24,10 @@ describe("reviewFlat", () => {
     assert.equal(submitGate([hit("a", "ignore")], true).canSign, true);
     assert.equal(submitGate([], true).canSign, true, "零疑点可直接签字");
     assert.equal(submitGate([], true, true).canSign, false, "锁定后不可签");
+    const held = [hit("h", "pending", 1, "待人工确认")];
+    assert.equal(submitGate(held, true).canSign, false, "四条可见条件没齐就不放开");
+    assert.equal(submitGate(held, true, false, true).canSign, true, "待人工确认不挡签字");
+    assert.equal(submitGate([hit("e", "pending", 1, "漏字")], true, false, true).canSign, false, "漏字仍挡签字");
   });
   it("缩略图符号不只靠颜色", () => {
     const m = thumbMarks([{ page: 1 }, { page: 2 }, { page: 3 }], [hit("a", "issue", 2), hit("b", "issue", 2)], new Set([1]));

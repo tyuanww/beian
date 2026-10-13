@@ -596,6 +596,7 @@ export type FieldHit = {
   page?: number | string;
   note?: string;
   decision?: string;
+  bbox_space?: string;
   bboxes?: Array<Record<string, unknown>>;
   qrcode_boxes?: Array<Record<string, unknown>>;
   bilingual_pair_id?: string;
@@ -661,6 +662,9 @@ export type TaskDetail = TaskSummary & {
   };
   hits?: FieldHit[];
   hits_v2?: FieldHit[];
+  verbatim_check?: boolean;
+  verbatim_warning?: string;
+  fsc_note?: string;
   disclaimer?: string;
   pack_surface?: string;
   pages?: TaskPage[];
