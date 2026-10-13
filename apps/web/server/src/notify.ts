@@ -9,8 +9,8 @@ type TaskLike = {
   conclusion?: string;
   complete_kind?: string;
   verbatim_check?: boolean;
-  hits?: Array<{ field?: string; status?: string; decision?: string; page?: number | string }>;
-  hits_v2?: Array<{ field?: string; status?: string; decision?: string; page?: number | string }>;
+  hits?: Array<{ field?: string; status?: string; decision?: string; page?: number | string; pdf?: string }>;
+  hits_v2?: Array<{ field?: string; status?: string; decision?: string; page?: number | string; pdf?: string }>;
 };
 
 function selectedHits(task: TaskLike): NonNullable<TaskLike["hits"]> {
