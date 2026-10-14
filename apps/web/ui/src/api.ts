@@ -598,6 +598,7 @@ export type FieldHit = {
   decision?: string;
   bbox_space?: string;
   bboxes?: Array<Record<string, unknown>>;
+  page_skew?: boolean;
   qrcode_boxes?: Array<Record<string, unknown>>;
   bilingual_pair_id?: string;
   field_group?: string;

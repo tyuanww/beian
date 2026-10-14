@@ -35,6 +35,9 @@ html[data-theme="dark"] .review-thumbs { background: #1f1a24; }
 .review-th-w { font-size: 13px; color: var(--muted); }
 .review-ccol { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .review-verbatim-warning { flex: none; width: 100%; margin: 0; padding: 8px 16px; border-bottom: 1px solid var(--line); background: var(--stage); color: var(--ink); font-size: 13px; line-height: 1.4; }
+.review-space-box { display: inline-block; width: 1em; height: 1em; margin: 0 1px; border: 1px solid var(--warn, #d48806); vertical-align: text-bottom; position: relative; }
+.review-space-box i { position: absolute; left: 50%; top: 50%; width: 4px; height: 4px; margin: -2px 0 0 -2px; border-radius: 50%; background: var(--warn, #d48806); }
+.review-held-title { padding: 8px 16px 0; color: var(--muted); font-size: 13px; }
 .review-ccol > .canvas { flex: 1; min-height: 0; border: 0; border-radius: 0; background: var(--stage); }
 .review-ccol .canvas-view { min-height: 0; justify-content: center; }
 .review-tbar { flex: none; min-height: 52px; display: flex; align-items: center; gap: 4px; padding: 4px 16px; border-top: 1px solid var(--line); position: relative; flex-wrap: wrap; }

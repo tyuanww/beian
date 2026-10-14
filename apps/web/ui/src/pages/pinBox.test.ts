@@ -3,6 +3,8 @@ import { describe, it } from "node:test";
 import {
   boxTooLarge,
   hitOnPage,
+  missBoxUnusable,
+  missLineUnboxed,
   overlayFromBox,
   overlaysForHit,
   pinHitGroupsForPage,
@@ -102,6 +104,17 @@ describe("pickHitBox", () => {
       1,
     );
     assert.equal(miss?.role, "miss_anchor");
+  });
+
+  it("keeps a large miss anchor unless both sides exceed 90 percent", () => {
+    const page = { width: 100, height: 100 };
+    const wide = { role: "miss_anchor", left: 0, top: 0, width: 80, height: 40, page: 1 };
+    assert.equal(missBoxUnusable(wide, page), false);
+    assert.equal(pickHitBox([wide], 1, page)?.role, "miss_anchor");
+    const full = { role: "miss_anchor", left: 0, top: 0, width: 95, height: 95, page: 1 };
+    assert.equal(missBoxUnusable(full, page), true);
+    assert.equal(pickHitBox([full], 1, page), null);
+    assert.equal(missLineUnboxed([full], 1, page), true);
   });
 
   it("accepts x/y aliases", () => {

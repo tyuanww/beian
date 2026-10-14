@@ -140,4 +140,10 @@ export const REVIEW_COPY = {
   lockedNote: "只能查看，不能再改",
   footer: (left: number, page: number) => `这单还剩 ${left} 条待确认 · 本页还有 ${page} 条`,
   noBox: "没找到位置，请看整页",
+  lineNotBoxed: "没框住这一行",
+  pageSkew: "这一页方向对不上，框不准",
+  heldUnread: "认不准的字",
+  heldNote: "备注没对上",
+  excelMissing: "确认单没有这段",
+  spaceLabel: "空格",
 } as const;

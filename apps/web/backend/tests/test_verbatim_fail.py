@@ -169,3 +169,23 @@ print(before == after)
     proc = _run([PY, "-c", script])
     assert proc.returncode == 0, proc.stderr
     assert proc.stdout.strip() == "True"
+
+
+def test_windows_missing_resource_does_not_fail_the_job() -> None:
+    script = """
+import builtins
+from app.verbatim_check import enforce_rss
+real = builtins.__import__
+
+def hidden(name, *args, **kwargs):
+    if name == "resource":
+        raise ModuleNotFoundError("No module named 'resource'")
+    return real(name, *args, **kwargs)
+
+builtins.__import__ = hidden
+enforce_rss()
+print("ok")
+"""
+    proc = _run([PY, "-c", script])
+    assert proc.returncode == 0, proc.stderr
+    assert proc.stdout.strip() == "ok"

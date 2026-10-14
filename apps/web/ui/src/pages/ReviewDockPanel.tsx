@@ -31,6 +31,7 @@ type Props = {
   onNoteChange: (value: string) => void;
   verbatim?: boolean;
   fscNote?: string;
+  locationCopy?: string;
 };
 
 /** 标签文字用加深色（deviations 第 13 行）：状态既有文字也有颜色，不只靠颜色。 */
@@ -46,12 +47,27 @@ function verdictTag(hit: FieldHit) {
   return <Tag className="t-ok">{hit.status || REVIEW_COPY.verdict.confirm}</Tag>;
 }
 
-function EvidenceBlock({ title, value, tone }: { title: string; value: EvidenceText; tone?: "issue" }) {
+function SpacedReading({ text }: { text: string }) {
+  const parts = text.split(/(\s+)/u);
+  return (
+    <p className="review-evidence-value mono">
+      {parts.map((part, index) => (
+        /\s/u.test(part) ? (
+          <span key={index} className="review-space-box" role="img" aria-label={REVIEW_COPY.spaceLabel}>
+            <i aria-hidden="true" />
+          </span>
+        ) : <span key={index}>{part}</span>
+      ))}
+    </p>
+  );
+}
+
+function EvidenceBlock({ title, value, tone, spaced }: { title: string; value: EvidenceText; tone?: "issue"; spaced?: boolean }) {
   return (
     <section className={tone === "issue" ? "review-evidence-cell is-issue" : "review-evidence-cell"}>
       <p className="review-evidence-label">{title}</p>
-      <p className="review-evidence-value mono">{value.summary}</p>
-      {value.expandable ? (
+      {spaced ? <SpacedReading text={value.full} /> : <p className="review-evidence-value mono">{value.summary}</p>}
+      {value.expandable && !spaced ? (
         <details className="review-evidence-details">
           <summary>查看全部</summary>
           <p className="mono">{value.full}</p>
@@ -64,7 +80,7 @@ function EvidenceBlock({ title, value, tone }: { title: string; value: EvidenceT
 export function ReviewDockPanel({
   hits, active, current, currentHasBox, pageNo, reviewable, busy, note, emptyMessage, reworkCheck,
   nativeTaskEvidence, ocrMeta, onPick, onDecide, onNoteCommit, onCopy, onNoteChange, onCollapse, tab, onTab,
-  verbatim = false, fscNote,
+  verbatim = false, fscNote, locationCopy = REVIEW_COPY.noBox,
 }: Props) {
   const [tipOpen, setTipOpen] = useState(false);
   const counts = verdictCounts(hits);
@@ -111,6 +127,8 @@ export function ReviewDockPanel({
       ) : null}
       {counts.total === 0 && held.length === 0 && reviewable && !verbatim ? <p className="review-zero" role="status">{REVIEW_COPY.zeroIssues}</p> : null}
       <ol className="review-flat-list" aria-label="疑点列表" data-testid={heldOpen ? "review-held-group" : undefined}>
+        {heldOpen && held.some((hit) => !/备注/u.test(`${hit.field || ""}${hit.status || ""}`)) ? <li className="review-held-title">{REVIEW_COPY.heldUnread}</li> : null}
+        {heldOpen && held.some((hit) => /备注/u.test(`${hit.field || ""}${hit.status || ""}`)) ? <li className="review-held-title">{REVIEW_COPY.heldNote}</li> : null}
         {(heldOpen ? held.map((hit) => hits.indexOf(hit)) : list).map((index) => {
           const hit = hits[index];
           const on = index === active;
@@ -132,8 +150,11 @@ export function ReviewDockPanel({
                     </section>
                   ) : null}
                   <div className="review-evidence-grid">
-                    <EvidenceBlock title="Excel 应印" value={evidence.expected} />
-                    <EvidenceBlock title="稿上读到" value={evidence.observed} />
+                    <EvidenceBlock
+                      title="Excel 应印"
+                      value={current.status === "稿件有但确认单没有" ? { summary: REVIEW_COPY.excelMissing, full: REVIEW_COPY.excelMissing, expandable: false } : evidence.expected}
+                    />
+                    <EvidenceBlock title="稿上读到" value={evidence.observed} spaced={verbatim} tone={current.status && current.status !== "一致" ? "issue" : undefined} />
                   </div>
                   <div className="review-verdicts" role="group" aria-label="审核结果">
                     {(current.status === "待人工确认" ? (["issue", "ignore"] as const) : (["confirm", "issue", "ignore"] as const)).map((d) => {
@@ -185,7 +206,8 @@ export function ReviewDockPanel({
                       ) : null}
                     </section>
                   ) : null}
-                  {!currentHasBox ? <p className="review-evidence-location">{REVIEW_COPY.noBox}</p> : null}
+                  {current.page_skew ? <p className="review-evidence-location">{REVIEW_COPY.pageSkew}</p> : null}
+                  {!currentHasBox ? <p className="review-evidence-location">{locationCopy}</p> : null}
                 </div>
               ) : null}
             </li>

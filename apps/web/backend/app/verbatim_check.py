@@ -84,12 +84,12 @@ def rss_used_bytes() -> int:
 
 
 def cap_rss() -> None:
-    """Child only. This Mac raises ValueError for any finite RSS limit. That is not a Baidu fallback, and RLIMIT_AS is not used."""
+    """Child only. Missing on Windows. This Mac raises ValueError for any finite RSS limit. That is not a Baidu fallback, and RLIMIT_AS is not used."""
     try:
         import resource
 
         resource.setrlimit(resource.RLIMIT_RSS, (RSS_CAP, RSS_CAP))
-    except (AttributeError, OSError, ValueError):
+    except (AttributeError, ImportError, OSError, ValueError):
         return
 
 
@@ -239,6 +239,11 @@ def _private_bytes(pdf: Path) -> bytes | None:
     if data is None:
         return None
     return data if isinstance(data, bytes) else None
+
+
+def _skewed(matrix: list[float]) -> bool:
+    _a, b, c, _d, _e, _f = matrix
+    return abs(b) > 1e-3 or abs(c) > 1e-3
 
 
 def _matrix_of(page: dict) -> list[float]:
@@ -401,6 +406,8 @@ def compare_pdf(pdf: Path, xlsx: Path, model_dir: Path, pages: list[dict]) -> di
             if status in SPACE_ERRORS:
                 box = _cover_neighbors(box, page_size)
             hits.append(_hit(len(hits) + 1, status, blocking, op, box, 1))
+            if _skewed(matrix):
+                hits[-1]["page_skew"] = True
     doc.close()
     out: dict[str, Any] = {"hits": hits, "engine": "rapidocr:ppocrv6-medium"}
     if _fsc("\n".join(joined)):
