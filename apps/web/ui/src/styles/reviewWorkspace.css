@@ -68,6 +68,27 @@ html[data-theme="dark"] .review-thumbs { background: #1f1a24; }
 .review-flat-row strong { overflow-wrap: anywhere; font-weight: 500; }
 .review-flat-row small { color: var(--muted); font-size: 13px; }
 .review-flat-detail { padding: 0 16px 16px; display: grid; gap: 8px; }
+.review-workspace .hit-box.hit-range { pointer-events: auto; cursor: pointer; }
+.review-spot-card {
+  position: absolute;
+  z-index: 4;
+  max-height: min(420px, 70%);
+  overflow: auto;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--stage);
+  box-shadow: 0 8px 24px rgba(28, 26, 31, 0.16);
+  user-select: text;
+  -webkit-user-select: text;
+  visibility: hidden;
+}
+.review-spot-card.is-placed { visibility: visible; }
+.review-spot-head { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; min-width: 0; }
+.review-spot-head strong { overflow-wrap: anywhere; font-weight: 650; }
+.review-spot-head small { margin-left: auto; color: var(--muted); }
+.review-spot-card .review-flat-detail { padding: 0; }
+.review-spot-card .review-flat-detail .review-evidence-grid { grid-template-columns: 1fr; }
 /* visual-check #2：核对要点正文跟外观字号（--ui-font，默认 16px）。 */
 .review-flat-detail .review-spoken p { margin: 2px 0; font-size: var(--ui-font, 16px); }
 .review-flat-detail .review-evidence-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }

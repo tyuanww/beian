@@ -153,12 +153,12 @@ const ROLE_RANK: Record<string, number> = {
   hit: 2,
 };
 
-export function pickHitBox(
+function usableBoxes(
   bboxes: Array<Record<string, unknown>> | undefined,
   pageNo: number,
   page?: PageMetrics | null,
-): PixelBox | null {
-  const boxes = (bboxes || [])
+): PixelBox[] {
+  return (bboxes || [])
     .map(boxPixels)
     .filter((b): b is PixelBox => {
       if (!b) return false;
@@ -166,9 +166,42 @@ export function pickHitBox(
       if (page && rejectBox(b, page)) return false;
       return true;
     });
+}
+
+export function pickHitBox(
+  bboxes: Array<Record<string, unknown>> | undefined,
+  pageNo: number,
+  page?: PageMetrics | null,
+): PixelBox | null {
+  const boxes = usableBoxes(bboxes, pageNo, page);
   if (!boxes.length) return null;
   boxes.sort((a, b) => (ROLE_RANK[a.role] ?? 8) - (ROLE_RANK[b.role] ?? 8));
   return boxes[0];
+}
+
+/** 一条疑点的全部分框合成一个范围。合成后铺得太大就退回原来的主框。 */
+export function unionHitBox(
+  bboxes: Array<Record<string, unknown>> | undefined,
+  pageNo: number,
+  page?: PageMetrics | null,
+): PixelBox | null {
+  const boxes = usableBoxes(bboxes, pageNo, page);
+  if (!boxes.length) return null;
+  const left = Math.min(...boxes.map((box) => box.left));
+  const top = Math.min(...boxes.map((box) => box.top));
+  const right = Math.max(...boxes.map((box) => box.left + Math.max(box.width, 0)));
+  const bottom = Math.max(...boxes.map((box) => box.top + Math.max(box.height, 0)));
+  const ranked = [...boxes].sort((a, b) => (ROLE_RANK[a.role] ?? 8) - (ROLE_RANK[b.role] ?? 8));
+  const union: PixelBox = {
+    left,
+    top,
+    width: right - left,
+    height: bottom - top,
+    role: ranked[0]?.role || "hit",
+    page: pageNo,
+  };
+  if (page && boxTooLarge(union, page)) return pickHitBox(bboxes, pageNo, page);
+  return union;
 }
 
 export function missLineUnboxed(

@@ -79,6 +79,45 @@ export function zoomToBox(
   };
 }
 
+/**
+ * 就地对照：把这条范围框进视口，并在右侧留出对照窗。
+ * 范围已经铺满画面时保持整页。
+ */
+export function frameRangeForCard(
+  box: PixelBox,
+  page: { width: number; height: number },
+  view: { width: number; height: number },
+  reserve: { width: number; gap: number },
+): ZoomState {
+  const pw = Number(page.width);
+  const ph = Number(page.height);
+  const vw = Number(view.width);
+  const vh = Number(view.height);
+  if (!(pw > 1) || !(ph > 1) || !(vw > 1) || !(vh > 1)) return resetZoom();
+  const laid = fittedPage(page, view);
+  const boxW = Math.max((Number(box.width) / pw) * laid.imgW, 8);
+  const boxH = Math.max((Number(box.height) / ph) * laid.imgH, 8);
+  const roomW = Math.max(80, vw - reserve.width - reserve.gap - 32);
+  const roomH = Math.max(80, vh - 32);
+  const scale = clampScale(Math.min((roomW * 0.72) / boxW, (roomH * 0.72) / boxH));
+  if (!(scale > ZOOM_MIN)) return resetZoom();
+  const cx = (Number(box.left) + Number(box.width) / 2) / pw * laid.imgW;
+  const cy = (Number(box.top) + Number(box.height) / 2) / ph * laid.imgH;
+  const rightLaid = (Number(box.left) + Number(box.width)) / pw * laid.imgW;
+  const leftLaid = Number(box.left) / pw * laid.imgW;
+  const targetRight = vw - reserve.width - reserve.gap;
+  let x = targetRight - laid.offsetX - rightLaid * scale;
+  let y = vh / 2 - laid.offsetY - cy * scale;
+  const boxLeft = laid.offsetX + leftLaid * scale + x;
+  if (boxLeft < 16) x += 16 - boxLeft;
+  const boxRight = laid.offsetX + rightLaid * scale + x;
+  if (boxRight > vw - 16) {
+    x = vw / 2 - laid.offsetX - cx * scale;
+    y = vh / 2 - laid.offsetY - cy * scale;
+  }
+  return { scale, x, y };
+}
+
 /** 保持当前缩放，只平移让框居中（默认整页适配，用户放大后才跟着框走）。 */
 export function panToBoxAt(
   box: PixelBox,

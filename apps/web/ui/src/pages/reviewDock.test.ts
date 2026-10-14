@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { readPinsOn, readBoxesOn, writePinsOn, writeBoxesOn, skipPackSheetField } from "./reviewDock.js";
+import { readPinsOn, readBoxesOn, readSpotOn, writePinsOn, writeBoxesOn, writeSpotOn, skipPackSheetField } from "./reviewDock.js";
 
 describe("review markers", () => {
   it("preserves independent pin and box visibility", () => {
@@ -15,6 +15,12 @@ describe("review markers", () => {
     writePinsOn(store, true);
     assert.equal(readPinsOn(store), true);
     assert.equal(readBoxesOn(store), false);
+    assert.equal(readSpotOn(null), true);
+    assert.equal(readSpotOn(store), true);
+    writeSpotOn(store, false);
+    assert.equal(readSpotOn(store), false);
+    writeSpotOn(store, true);
+    assert.equal(readSpotOn(store), true);
   });
   it("skips only pack-sheet metadata fields", () => {
     assert.equal(skipPackSheetField("工艺说明"), true);

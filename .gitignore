@@ -31,6 +31,7 @@ data/tasks/
 **/backend/data/settings.json
 **/backend/data/settings.secrets.json
 **/backend/data/mockups/
+**/backend/data/runtime/
 
 # Artwork / office samples
 *.ai

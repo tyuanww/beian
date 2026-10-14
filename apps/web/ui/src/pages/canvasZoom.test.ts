@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { clampScale, fittedPage, panBy, panToBoxAt, resetZoom, zoomAt, zoomCss, zoomToBox } from "./canvasZoom.js";
+import { clampScale, fittedPage, frameRangeForCard, panBy, panToBoxAt, resetZoom, zoomAt, zoomCss, zoomToBox } from "./canvasZoom.js";
 
 describe("clampScale", () => {
   it("stays between 1 and 6", () => {
@@ -104,6 +104,53 @@ describe("zoomToBox", () => {
   it("does nothing without real sizes", () => {
     assert.deepEqual(
       zoomToBox({ left: 1, top: 1, width: 2, height: 2 }, { width: 1, height: 1 }, { width: 400, height: 400 }),
+      resetZoom(),
+    );
+  });
+});
+
+describe("frameRangeForCard", () => {
+  it("把范围框进视口，并在右侧留出对照窗", () => {
+    const view = { width: 800, height: 600 };
+    const page = { width: 2000, height: 1000 };
+    const box = { left: 200, top: 200, width: 80, height: 40 };
+    const reserve = { width: 300, gap: 16 };
+    const z = frameRangeForCard(box, page, view, reserve);
+    assert.ok(z.scale > 1);
+    const laid = fittedPage(page, view);
+    const right = laid.offsetX + z.x + ((box.left + box.width) / page.width) * laid.imgW * z.scale;
+    const left = laid.offsetX + z.x + (box.left / page.width) * laid.imgW * z.scale;
+    assert.ok(right <= view.width - reserve.width - reserve.gap + 1);
+    assert.ok(left >= 15);
+  });
+
+  it("预留加宽时仍按整块视口适配页图", () => {
+    const view = { width: 800, height: 600 };
+    const page = { width: 2000, height: 1000 };
+    const box = { left: 200, top: 200, width: 80, height: 40 };
+    const reserve = { width: 300 + 320, gap: 12 };
+    const z = frameRangeForCard(box, page, view, reserve);
+    const laid = fittedPage(page, view);
+    const shrunk = fittedPage(page, { width: view.width - 320, height: view.height });
+    assert.notEqual(laid.imgW, shrunk.imgW);
+    assert.ok(z.scale > 1);
+    const right = laid.offsetX + z.x + ((box.left + box.width) / page.width) * laid.imgW * z.scale;
+    assert.ok(right <= view.width - reserve.width - reserve.gap + 1);
+  });
+
+  it("范围铺满画面时保持整页", () => {
+    const z = frameRangeForCard(
+      { left: 0, top: 0, width: 1800, height: 800 },
+      { width: 2000, height: 1000 },
+      { width: 800, height: 600 },
+      { width: 300, gap: 16 },
+    );
+    assert.deepEqual(z, resetZoom());
+  });
+
+  it("没有真实页尺寸时不动", () => {
+    assert.deepEqual(
+      frameRangeForCard({ left: 1, top: 1, width: 2, height: 2 }, { width: 1, height: 1 }, { width: 400, height: 400 }, { width: 300, gap: 12 }),
       resetZoom(),
     );
   });

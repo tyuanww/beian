@@ -9,6 +9,7 @@ import {
   overlaysForHit,
   pinHitGroupsForPage,
   pickHitBox,
+  unionHitBox,
   resolvePageMetrics,
   visiblePinGroups,
   locateBoxesForHit,
@@ -139,6 +140,40 @@ describe("pickHitBox", () => {
     );
     assert.equal(box?.role, "hit");
     assert.equal(box?.left, 800);
+  });
+});
+
+describe("unionHitBox", () => {
+  it("合成这一条的全部分框", () => {
+    const box = unionHitBox(
+      [
+        { role: "hit", left: 10, top: 10, width: 20, height: 10, page: 1 },
+        { role: "hit", left: 40, top: 12, width: 10, height: 20, page: 1 },
+        { role: "hit", left: 5, top: 5, width: 10, height: 10, page: 2 },
+      ],
+      1,
+      { width: 1000, height: 1000 },
+    );
+    assert.deepEqual(box, { left: 10, top: 10, width: 40, height: 22, role: "hit", page: 1 });
+  });
+
+  it("合成后铺得太大就退回主框", () => {
+    const page = { width: 1000, height: 1000 };
+    const box = unionHitBox(
+      [
+        { role: "hit", left: 0, top: 0, width: 400, height: 400, page: 1 },
+        { role: "hit", left: 400, top: 0, width: 400, height: 400, page: 1 },
+      ],
+      1,
+      page,
+    );
+    assert.ok(box);
+    assert.ok(box.width < 800);
+    assert.equal(box.left, 0);
+  });
+
+  it("没有可用框时不编造范围", () => {
+    assert.equal(unionHitBox([], 1, { width: 1000, height: 1000 }), null);
   });
 });
 
