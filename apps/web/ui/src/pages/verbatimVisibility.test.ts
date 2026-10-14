@@ -14,6 +14,11 @@ describe("verbatim visibility", () => {
     assert.match(dock, /onTab\("issue"\)/);
     assert.match(page, /REVIEW_COPY\.heldBar\(heldCount\)/);
     assert.match(page, /data-testid="review-phone-held"/);
+    assert.match(page, /data-testid="review-phone-pending"/);
+    assert.match(page, /phonePendingLines\(hits, releaseHeld\)/);
+    assert.match(page, /counts\.total > 0 \|\| \(!releaseHeld && heldCount > 0\)/);
+    assert.match(page, /data-testid="review-reject-note"/);
+    assert.match(dock, /openHeldAfterPending\(pendingRef\.current, counts\.pending, held\.length\)/);
     assert.match(page, /data-testid="review-verbatim-warning"/);
   });
 });

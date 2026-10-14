@@ -121,7 +121,7 @@ import {
   publicIllustratorAgentStatus,
   readIllustratorAgentStatus,
 } from "./illustratorAgent.js";
-import { confirmPackagingStructure } from "./workers.js";
+import { confirmPackagingStructure, probeVerbatimReady } from "./workers.js";
 import { UnfoldedPrintHttpError } from "./unfoldedPrint.js";
 import { skipPackSheetField } from "./sheetSkip.js";
 import { CompressionProblem } from "./compressionModel.js";
@@ -180,7 +180,7 @@ type NodeBindings = HttpBindings | Http2Bindings;
 type Env = { Bindings: NodeBindings; Variables: { session: Session } };
 
 const app = new Hono<Env>();
-const VERSION = "0.31.1.22";
+const VERSION = "0.31.1.23";
 
 const STRUCTURE_INPUT_BODY_BYTES = 16 * 1024;
 
@@ -860,6 +860,11 @@ app.post("/api/tasks/start", async (c) => {
     if (!peeked.files.some((f) => f.field === "excel") || !peeked.files.some((f) => f.field === "pdf")) {
       throw new HTTPException(400, { message: "需要 excel + 包装 PDF" });
     }
+    const verbatim = newCompareVerbatimFlag();
+    if ("verbatim_check" in verbatim && verbatim.verbatim_check === true) {
+      const blocked = await probeVerbatimReady(process.env.VERBATIM_MODEL_DIR || "");
+      if (blocked) throw new HTTPException(400, { message: blocked });
+    }
     const claim = claimReceipt(receiptId, owner);
     if (!claim) {
       const recovered = findTaskBySourceReceipt(receiptId, owner);
@@ -892,7 +897,7 @@ app.post("/api/tasks/start", async (c) => {
         job_kind: "compare",
         job_status: "queued",
         source_receipt: receiptId,
-        ...newCompareVerbatimFlag(),
+        ...verbatim,
       });
     } catch (err) {
       rmSync(dir, { recursive: true, force: true });
@@ -1316,21 +1321,35 @@ app.post(
     if (pdfBuf.length < 5 || pdfBuf.subarray(0, 4).toString("utf8") !== "%PDF") {
       throw new HTTPException(400, { message: "不是有效的 PDF" });
     }
+    // 认字单缺运行依赖时停在写新稿之前：不覆盖 artwork_v2.pdf，不入队，不改走旧核对。
+    let current = task;
+    if (current.verbatim_check === true) {
+      const blocked = await probeVerbatimReady(process.env.VERBATIM_MODEL_DIR || "");
+      if (blocked) throw new HTTPException(400, { message: blocked });
+      current = loadTask(tid);
+      assertCanAccessTask(current, viewerFromSession(s));
+      if (current.job_status === "queued" || current.job_status === "running") {
+        throw new HTTPException(409, { message: "对红还在排队或正在跑" });
+      }
+      if (!isReworkableTask(current)) {
+        throw new HTTPException(400, { message: "当前状态不可对红" });
+      }
+    }
     const dir = join(DATA_DIR, "uploads", tid);
     mkdirSync(dir, { recursive: true });
     const pdfPath = join(dir, "artwork_v2.pdf");
     writeFileSync(pdfPath, pdfBuf);
-    task.status_before_job = task.status;
-    task.status = "comparing";
-    task.job_kind = "rework";
-    task.job_status = "queued";
-    task.job_error = undefined;
-    task.reclaim_count = 0;
-    delete task.job_pid;
-    delete task.job_finished_at;
-    task.notify_job_id = undefined;
-    task.notify_sent = false;
-    saveTask(task);
+    current.status_before_job = current.status;
+    current.status = "comparing";
+    current.job_kind = "rework";
+    current.job_status = "queued";
+    current.job_error = undefined;
+    current.reclaim_count = 0;
+    delete current.job_pid;
+    delete current.job_finished_at;
+    current.notify_job_id = undefined;
+    current.notify_sent = false;
+    saveTask(current);
     try {
       enqueue({ kind: "rework", id: tid });
     } catch (err) {

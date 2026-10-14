@@ -80,6 +80,14 @@ describe("reviewEvidence", () => {
     assert.doesNotMatch(evidence.observed.full, /亮泽/);
   });
 
+  it("draws a space box when 多空格 reading is only a space", () => {
+    const onlySpace = reviewEvidence({ field: "多空格", status: "多空格", pdf: " " });
+    assert.equal(onlySpace.observed.full, " ");
+    const withContext = reviewEvidence({ field: "多空格", status: "多空格", pdf: " ", evidence: "左右" });
+    assert.match(withContext.observed.full, /^\s/);
+    assert.match(withContext.observed.full, /左右/);
+  });
+
   it("hides the word tally until 查看全部", () => {
     const evidence = reviewEvidence({
       field: "文案",

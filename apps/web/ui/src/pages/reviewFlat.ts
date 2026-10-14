@@ -39,8 +39,12 @@ export type SubmitGate = {
   canReject: boolean;
   /** 签字左侧的说明；为空时不显示。 */
   hint: string;
-  /** 悬停说明。 */
+  /** 签字按钮的悬停说明。 */
   title: string;
+  /** 退回按钮的悬停说明。待确认没下完时不复用签字那句。 */
+  rejectTitle: string;
+  /** 和确认框用同一个数。逐字单的待人工确认不计入。 */
+  pending: number;
 };
 
 /**
@@ -51,23 +55,30 @@ export function isOpenHeld(hit: FieldHit): boolean {
   return hit.status === "待人工确认" && hit.decision !== "confirm" && hit.decision !== "issue" && hit.decision !== "ignore";
 }
 
+/** 待确认刚清完、还留着待人工确认时展开那一组。已经是 0 时不再打开，避免盖住人手动收起。 */
+export function openHeldAfterPending(previousPending: number, pending: number, held: number): boolean {
+  return previousPending > 0 && pending === 0 && held > 0;
+}
+
 export function submitGate(hits: FieldHit[], reviewable: boolean, locked = false, releaseHeld = false): SubmitGate {
   const c = verdictCounts(hits);
   const held = hits.filter(isOpenHeld).length;
   const pending = c.pending + (releaseHeld ? 0 : held);
-  if (!reviewable || locked) return { canSign: false, canReject: false, hint: "", title: "" };
+  if (!reviewable || locked) return { canSign: false, canReject: false, hint: "", title: "", rejectTitle: "", pending };
   if (pending > 0) {
     return {
       canSign: false,
       // 老板 2026-10-11 已批：签字禁用时退回不禁用。服务端 /complete 仍要求先下完结论，
-      // 所以确认框里「确认退回」会挡住并写「还有 N 条没下结论」（不改后端）。
+      // 确认框里「确认退回」会挡住。退回按钮的悬停用同一句，不写「才能签字」。
       canReject: true,
       hint: REVIEW_COPY.pendingHint(pending),
       title: REVIEW_COPY.pendingTitle(pending),
+      rejectTitle: REVIEW_COPY.rejectBlockedByPending(pending),
+      pending,
     };
   }
-  if (c.issue > 0) return { canSign: false, canReject: true, hint: "", title: REVIEW_COPY.signBlockedByIssue(c.issue) };
-  return { canSign: true, canReject: false, hint: "", title: "" };
+  if (c.issue > 0) return { canSign: false, canReject: true, hint: "", title: REVIEW_COPY.signBlockedByIssue(c.issue), rejectTitle: "", pending: 0 };
+  return { canSign: true, canReject: false, hint: "", title: "", rejectTitle: "", pending: 0 };
 }
 
 type ThumbState = "err" | "done" | "new";
@@ -115,6 +126,21 @@ export function isTypingTarget(target: unknown): boolean {
 
 export type RejectRow = { index: number; no: number; field: string; reason: string; missingReason: boolean };
 
+export type PhonePendingLine = { key: string; text: string };
+
+/** 手机不能逐条下结论。待确认只列状态和页码，不带稿句。逐字单的待人工确认另有自己的列表。 */
+export function phonePendingLines(hits: FieldHit[], releaseHeld = false): PhonePendingLine[] {
+  const { issues, held } = partitionReviewHits(hits);
+  const rows = [
+    ...issues.filter(({ hit }) => isPendingDecision(hit.decision)),
+    ...(releaseHeld ? [] : held.filter(({ hit }) => isOpenHeld(hit))),
+  ];
+  return rows.map(({ hit, index }) => ({
+    key: hit.id || String(index),
+    text: `${hit.status || "未决"} · 第${hit.page ?? "?"}页`,
+  }));
+}
+
 /** 退回确认框预填的有错清单；没写原因只提醒，不挡提交。 */
 export function rejectRows(hits: FieldHit[], notes: Record<string, string>): RejectRow[] {
   return hits
@@ -129,10 +155,15 @@ export function rejectRows(hits: FieldHit[], notes: Record<string, string>): Rej
 /**
  * 服务端 /complete 要求非空 conclusion；确认框里「补充说明」选填。审核人写了就原样用他的，
  * 不再拼自动文案；空时才补固定结论（签字「无改稿项」/ 退回「退回：N 条有错，见清单」）。
+ * 签字且还有待人工确认时，默认结论后面带「另有 N 处机器没读准」。审核人自己写了补充说明就原样保留。
  */
-export function conclusionFor(kind: "sign" | "reject", extra: string, rows: RejectRow[]): string {
+export function conclusionFor(kind: "sign" | "reject", extra: string, rows: RejectRow[], held = 0): string {
   const text = extra.trim();
-  if (kind === "sign") return text || REVIEW_COPY.signConclusion;
+  if (kind === "sign") {
+    const base = text || REVIEW_COPY.signConclusion;
+    if (held > 0 && !text) return `${base} ${REVIEW_COPY.heldLine(held)}`;
+    return base;
+  }
   return text || REVIEW_COPY.rejectConclusion(rows.length);
 }
 

@@ -119,6 +119,7 @@ html[data-theme="dark"] .review-miss { color: #F2B44C; background: #43332E; }
 .review-phone-sum { padding: 8px 16px; border-bottom: 1px solid var(--line); font-size: 14px; }
 .review-phone-sum summary { min-height: 44px; display: flex; align-items: center; cursor: pointer; font-weight: 600; }
 .review-phone-note { margin: 0; color: var(--muted); font-size: 13px; }
+.review-reject-note { margin: 0; padding: 4px 16px 0; color: var(--muted); font-size: 13px; }
 .review-flat-page.is-phone .review-ccol { min-height: 60dvh; }
 
 @media (prefers-reduced-motion: no-preference) {

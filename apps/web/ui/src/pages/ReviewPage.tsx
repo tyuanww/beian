@@ -16,7 +16,7 @@ import { readBoxesOn, readPinsOn, skipPackSheetField, writeBoxesOn, writePinsOn 
 import { ReviewSubmitDialog } from "./ReviewSubmitDialog";
 import {
   conclusionFor, decisionFailureText, reworkUploadBlocked, submitFailureText, flatLayout, isTypingTarget, lockedBy, markShortcutsSeen, markerOutsideCorner, nextPendingAfter,
-  panToClearPanel, positionLabel, rejectRows, shouldShowShortcutsOnOpen, submitGate, tabIndices, thumbMarks, verdictCounts, verdictForKey, isOpenHeld,
+  panToClearPanel, phonePendingLines, positionLabel, rejectRows, shouldShowShortcutsOnOpen, submitGate, tabIndices, thumbMarks, verdictCounts, verdictForKey, isOpenHeld,
   type FlatLayout, type FlatTab,
 } from "./reviewFlat";
 import { ReviewWorkspace } from "./ReviewWorkspace";
@@ -616,7 +616,8 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
         setSubmitFailed(REVIEW_COPY.submitFailed);
         return;
       }
-      const next = await api.complete(task.id, { conclusion: conclusionFor(kind, extra, rejectRows(hits, notes)) });
+      const heldOpen = kind === "sign" ? hits.filter(isOpenHeld).length : 0;
+      const next = await api.complete(task.id, { conclusion: conclusionFor(kind, extra, rejectRows(hits, notes), heldOpen) });
       setTask(next);
       setDialog(null);
       setSubmitFailed(null);
@@ -755,6 +756,8 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
   const failedJob = task?.status === "compare_failed" || task?.job_status === "failed";
   const thumbs = thumbMarks(pages, hits, seenPages);
   const issueRows = rejectRows(hits, notes);
+  const releaseHeld = task?.verbatim_check === true;
+  const pendingLines = phonePendingLines(hits, releaseHeld);
   const phone = layout === "phone";
   const noteFor = (h?: FieldHit) => (h?.id ? notes[h.id] ?? h.note ?? "" : "");
   const zoomBy = (factor: number) => {
@@ -816,7 +819,7 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
           </button>
         ) : null}
         {gate.hint ? <span className="review-signhint" id="review-sign-hint" title={gate.title} aria-live="polite">{gate.hint}</span> : null}
-        {failedJob ? null : <button type="button" className="btn-ghost review-reject" disabled={!gate.canReject || busy || hasUnsavedNotes} title={gate.title || undefined} onClick={() => { setSubmitFailed(null); setDialog("reject"); }}>
+        {failedJob ? null : <button type="button" className="btn-ghost review-reject" disabled={!gate.canReject || busy || hasUnsavedNotes} title={gate.rejectTitle || gate.title || undefined} aria-describedby={gate.rejectTitle ? "review-reject-note" : undefined} onClick={() => { setSubmitFailed(null); setDialog("reject"); }}>
           {REVIEW_COPY.reject}
         </button>}
         {failedJob ? null : <button type="button" className="btn-primary review-sign" disabled={!gate.canSign || busy || hasUnsavedNotes} title={gate.title || undefined} aria-describedby={gate.hint ? "review-sign-hint" : undefined} onClick={() => { setSubmitFailed(null); setDialog("sign"); }}>
@@ -825,6 +828,7 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
         </span>
       </header>
 
+      {gate.rejectTitle ? <p className="review-reject-note" id="review-reject-note" data-testid="review-reject-note">{gate.rejectTitle}</p> : null}
       {locked ? <Alert className="review-lock" type="warning" title={`🔒 ${locked}`} description={REVIEW_COPY.lockedNote} /> : null}
       {error ? <Alert type="error" title={error} /> : null}
       {task?.error || task?.job_error ? (
@@ -849,10 +853,16 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
             </div>
           ) : null}
           {!task?.verbatim_check && counts.total === 0 && heldCount === 0 ? <p className="review-zero">{REVIEW_COPY.zeroIssues}</p> : null}
-          {counts.total > 0 || heldCount > 0 ? (
+          {/* 逐字单的待人工确认在上面单独一组，不在这里再开一条「待确认 0」。 */}
+          {counts.total > 0 || (!releaseHeld && heldCount > 0) ? (
             <details open={phoneListOpen} onToggle={(e) => setPhoneListOpen((e.currentTarget as HTMLDetailsElement).open)}>
-              <summary>{REVIEW_COPY.phoneIssues(counts.issue)} · 待确认 {counts.pending}</summary>
+              <summary>{REVIEW_COPY.phoneIssues(counts.issue)} · 待确认 {gate.pending}</summary>
               <ul>{issueRows.map((r) => <li key={r.index}><b>#{r.no} {r.field}</b> {r.missingReason ? <span className="review-miss">{REVIEW_COPY.missingReason}</span> : r.reason}</li>)}</ul>
+              {pendingLines.length > 0 ? (
+                <ul data-testid="review-phone-pending">
+                  {pendingLines.map((row) => <li key={row.key}>{row.text}</li>)}
+                </ul>
+              ) : null}
             </details>
           ) : null}
         </section>
@@ -1037,7 +1047,7 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
         key={dialog || "closed"}
         kind={dialog}
         rows={issueRows}
-        pending={counts.pending}
+        pending={gate.pending}
         held={heldCount}
         fscNote={task?.fsc_note}
         busy={busy}
