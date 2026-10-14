@@ -4,7 +4,7 @@ import type { FieldHit } from "../api";
 import { PUBLIC_UPLOAD_BYTES, UPLOAD_TOO_LARGE, setUploadLimitFromMe } from "../uploadLimit";
 import {
   completedAtLabel, completedByText, conclusionFor, decisionFailureText, reworkUploadBlocked, submitFailureText, flatLayout, isTypingTarget, lockedBy, markerOutsideCorner, nextPendingAfter,
-  panToClearPanel, positionLabel, rejectRows, shouldShowShortcutsOnOpen, submitGate, tabIndices, thumbMarks, verdictCounts, verdictForKey,
+  openHeldAfterPending, panToClearPanel, phonePendingLines, positionLabel, rejectRows, shouldShowShortcutsOnOpen, submitGate, tabIndices, thumbMarks, verdictCounts, verdictForKey,
 } from "./reviewFlat.js";
 
 const hit = (id: string, decision = "pending", page = 1, status = "疑点", note = ""): FieldHit => ({ id, field: id, status, decision, page, note });
@@ -20,6 +20,9 @@ describe("reviewFlat", () => {
     assert.deepEqual(verdictCounts(pend), { pending: 1, issue: 0, total: 2 });
     const g = submitGate(pend, true);
     assert.equal(g.canSign, false); assert.equal(g.canReject, true); assert.equal(g.hint, "还有 1 条没下结论");
+    assert.equal(g.title, "还有 1 条没下结论，下完才能签字");
+    assert.equal(g.rejectTitle, "还有 1 条待确认，处理完才能退回");
+    assert.equal(g.pending, 1);
     assert.deepEqual([submitGate([hit("a", "issue")], true).canSign, submitGate([hit("a", "issue")], true).canReject], [false, true]);
     assert.equal(submitGate([hit("a", "ignore")], true).canSign, true);
     assert.equal(submitGate([], true).canSign, true, "零疑点可直接签字");
@@ -27,7 +30,11 @@ describe("reviewFlat", () => {
     const held = [hit("h", "pending", 1, "待人工确认")];
     assert.equal(submitGate(held, true).canSign, false, "四条可见条件没齐就不放开");
     assert.equal(submitGate(held, true, false, true).canSign, true, "待人工确认不挡签字");
+    assert.equal(submitGate(held, true, false, true).pending, 0);
     assert.equal(submitGate([hit("e", "pending", 1, "漏字")], true, false, true).canSign, false, "漏字仍挡签字");
+    assert.equal(openHeldAfterPending(2, 0, 1), true);
+    assert.equal(openHeldAfterPending(0, 0, 1), false);
+    assert.equal(openHeldAfterPending(1, 0, 0), false);
   });
   it("缩略图符号不只靠颜色", () => {
     const m = thumbMarks([{ page: 1 }, { page: 2 }, { page: 3 }], [hit("a", "issue", 2), hit("b", "issue", 2)], new Set([1]));
@@ -49,12 +56,25 @@ describe("reviewFlat", () => {
     assert.equal(isTypingTarget({ tagName: "DIV", isContentEditable: true }), true);
     assert.equal(isTypingTarget({ tagName: "BUTTON" }), false);
   });
+  it("手机待确认只列状态和页码", () => {
+    const lines = phonePendingLines([
+      hit("a", "pending", 2, "漏字"),
+      hit("b", "issue", 1, "多字"),
+      hit("c", "pending", 3, "待人工确认"),
+      { ...hit("d", "pending", 4, "多空格"), pdf: "不该出现的句子", excel: "也不该出现" },
+    ], true);
+    assert.deepEqual(lines.map((line) => line.text), ["漏字 · 第2页", "多空格 · 第4页"]);
+    assert.deepEqual(phonePendingLines([hit("c", "pending", 3, "待人工确认")]).map((line) => line.text), ["待人工确认 · 第3页"]);
+    assert.equal(JSON.stringify(lines).includes("不该出现"), false);
+  });
   it("退回清单：没写原因只提醒；结论自动补齐", () => {
     const rows = rejectRows([hit("a", "issue"), hit("b", "issue", 1, "疑点", "错字"), hit("c", "confirm")], { a: "" });
     assert.deepEqual(rows.map((r) => r.missingReason), [true, false]);
     assert.equal(conclusionFor("reject", "", rows), "退回：2 条有错，见清单");
     assert.equal(conclusionFor("reject", "找受委托方", rows), "找受委托方");
     assert.equal(conclusionFor("sign", " ", []), "无改稿项");
+    assert.equal(conclusionFor("sign", "", [], 1), "无改稿项 另有 1 处机器没读准，签了表示人认这些字。");
+    assert.equal(conclusionFor("sign", "看过了", [], 1), "看过了");
   });
   it("已被他人签字锁定只看 completed_by", () => {
     assert.equal(lockedBy({ status: "completed", completed_by: "天元", complete_kind: "signed" }, "籽烨"), "这一单已被天元签字");

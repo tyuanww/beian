@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import { makeTestTempDir } from "./testTemp.js";
@@ -13,6 +13,7 @@ const { app } = await import("./index.js");
 const { issueSessionForTest } = await import("./auth.js");
 const { loadTask, saveTask } = await import("./tasks.js");
 const { resetJobsTestHooks, setJobsTestHooks } = await import("./jobs.js");
+const { setVerbatimProbeForTest } = await import("./workers.js");
 const { saveSettings } = await import("./settings.js");
 
 type SeedHit = {
@@ -36,6 +37,7 @@ type SeedTask = {
   pages_v2?: Array<{ url?: string }>;
   owner?: string;
   job_status?: "queued" | "running" | "succeeded" | "failed";
+  verbatim_check?: boolean;
 };
 
 function authHeader() {
@@ -318,6 +320,114 @@ describe("review http", () => {
     assert.equal(res.status, 400);
     const body = (await res.json()) as { detail?: string };
     assert.match(String(body.detail || ""), /需要改稿后的 PDF/);
+  });
+
+  it("stops a verbatim rework before writing the new pdf when glyphs are not ready", async () => {
+    const tid = "232323232323";
+    seed({
+      id: tid,
+      title: "认字退回",
+      product_name: "认字退回",
+      type: "excel_pdf",
+      status: "completed",
+      complete_kind: "rework",
+      conclusion: "待设计改稿",
+      verbatim_check: true,
+      hits: [hit({ decision: "issue" })],
+    });
+    const dir = join(process.env.WB_DATA_DIR as string, "uploads", tid);
+    mkdirSync(dir, { recursive: true });
+    const pdfPath = join(dir, "artwork_v2.pdf");
+    writeFileSync(pdfPath, "keep");
+    let calls = 0;
+    setJobsTestHooks({ runRework: () => new Promise(() => { /* hang */ }) });
+    setVerbatimProbeForTest(async () => {
+      calls += 1;
+      return "认字组件没装上，没有结果";
+    });
+    try {
+      const fd = new FormData();
+      fd.set("pdf", new File([Buffer.from("%PDF-1.4\n")], "v2.pdf", { type: "application/pdf" }));
+      const res = await app.request(`/api/tasks/${tid}/rework`, { method: "POST", headers: authHeader(), body: fd });
+      assert.equal(res.status, 400);
+      const body = (await res.json()) as { detail?: string };
+      assert.equal(body.detail, "认字组件没装上，没有结果");
+      assert.equal(calls, 1);
+      assert.equal(readFileSync(pdfPath, "utf8"), "keep");
+      const saved = loadTask(tid);
+      assert.equal(saved.status, "completed");
+      assert.equal(saved.job_status, undefined);
+    } finally {
+      setVerbatimProbeForTest(null);
+      resetJobsTestHooks();
+    }
+  });
+
+  it("queues a verbatim rework after the glyph probe passes", async () => {
+    const tid = "242424242424";
+    seed({
+      id: tid,
+      title: "认字对红",
+      product_name: "认字对红",
+      type: "excel_pdf",
+      status: "completed",
+      complete_kind: "rework",
+      conclusion: "待设计改稿",
+      verbatim_check: true,
+      hits: [hit({ decision: "issue" })],
+    });
+    let calls = 0;
+    setJobsTestHooks({ runRework: () => new Promise(() => { /* hang */ }) });
+    setVerbatimProbeForTest(async () => {
+      calls += 1;
+      return null;
+    });
+    try {
+      const fd = new FormData();
+      fd.set("pdf", new File([Buffer.from("%PDF-1.4\n")], "v2.pdf", { type: "application/pdf" }));
+      const res = await app.request(`/api/tasks/${tid}/rework`, { method: "POST", headers: authHeader(), body: fd });
+      assert.equal(res.status, 200);
+      assert.equal(calls, 1);
+      const body = (await res.json()) as { status?: string; job_kind?: string };
+      assert.equal(body.status, "comparing");
+      assert.equal(body.job_kind, "rework");
+      assert.equal(existsSync(join(process.env.WB_DATA_DIR as string, "uploads", tid, "artwork_v2.pdf")), true);
+    } finally {
+      setVerbatimProbeForTest(null);
+      resetJobsTestHooks();
+    }
+  });
+
+  it("does not probe glyphs on a rework that is not verbatim", async () => {
+    const tid = "252525252525";
+    seed({
+      id: tid,
+      title: "旧对红",
+      product_name: "旧对红",
+      type: "excel_pdf",
+      status: "completed",
+      complete_kind: "rework",
+      conclusion: "待设计改稿",
+      hits: [hit({ decision: "issue" })],
+    });
+    let calls = 0;
+    setJobsTestHooks({ runRework: () => new Promise(() => { /* hang */ }) });
+    setVerbatimProbeForTest(async () => {
+      calls += 1;
+      return "认字组件没装上，没有结果";
+    });
+    try {
+      const fd = new FormData();
+      fd.set("pdf", new File([Buffer.from("%PDF-1.4\n")], "v2.pdf", { type: "application/pdf" }));
+      const res = await app.request(`/api/tasks/${tid}/rework`, { method: "POST", headers: authHeader(), body: fd });
+      assert.equal(res.status, 200);
+      assert.equal(calls, 0);
+      const body = (await res.json()) as { job_kind?: string };
+      assert.equal(body.job_kind, "rework");
+    } finally {
+      setVerbatimProbeForTest(null);
+      resetJobsTestHooks();
+    }
   });
 
   it("rejects rework on a compare_failed task", async () => {

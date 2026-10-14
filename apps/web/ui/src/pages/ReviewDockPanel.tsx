@@ -1,11 +1,11 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Input, Tag, Tooltip } from "antd";
 import { REVIEW_COPY } from "../copy/labels";
 import type { Decision, FieldHit, TaskDetail } from "../api";
 import { spokenAsk } from "./hitText";
 import { nativeEvidenceView, nativeTaskNote } from "./nativeTextEvidence";
 import { reviewProgress } from "./reviewNav";
-import { tabIndices, verdictCounts, isOpenHeld, type FlatTab } from "./reviewFlat";
+import { tabIndices, verdictCounts, isOpenHeld, openHeldAfterPending, type FlatTab } from "./reviewFlat";
 import { reviewEvidence, type EvidenceText } from "./reviewEvidence";
 
 type Props = {
@@ -86,6 +86,11 @@ export function ReviewDockPanel({
   const counts = verdictCounts(hits);
   const held = hits.filter(isOpenHeld);
   const [heldOpen, setHeldOpen] = useState(counts.pending === 0 && held.length > 0);
+  const pendingRef = useRef(counts.pending);
+  useEffect(() => {
+    if (openHeldAfterPending(pendingRef.current, counts.pending, held.length)) setHeldOpen(true);
+    pendingRef.current = counts.pending;
+  }, [counts.pending, held.length]);
   const list = tabIndices(hits, tab, active);
   const evidence = current ? reviewEvidence(current) : null;
   const nativeEvidence = nativeEvidenceView(current?.native_text_evidence);

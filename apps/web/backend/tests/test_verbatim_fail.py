@@ -171,6 +171,17 @@ print(before == after)
     assert proc.stdout.strip() == "True"
 
 
+def test_unconfirmed_space_waits_for_a_person() -> None:
+    from app.verbatim_check import _status
+
+    assert _status({"type": "多空格", "verdict": "confirmed"}) == ("多空格", True)
+    assert _status({"type": "缺空格", "verdict": "confirmed"}) == ("缺空格", True)
+    assert _status({"type": "多空格", "verdict": "review"}) == ("待人工确认", False)
+    assert _status({"type": "缺空格", "verdict": "review"}) == ("待人工确认", False)
+    assert _status({"type": "漏字", "verdict": "confirmed"}) == ("漏字", True)
+    assert _status({"type": "漏识", "verdict": "review"}) == ("待人工确认", False)
+
+
 def test_windows_missing_resource_does_not_fail_the_job() -> None:
     script = """
 import builtins

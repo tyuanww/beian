@@ -145,6 +145,22 @@ describe("taskCompleteText", () => {
     assert.match(text, /结论已记下/);
   });
 
+  it("names unread glyphs by count when a verbatim sign accepts them", () => {
+    const text = taskCompleteText({
+      id: "t4",
+      title: "某喷雾",
+      verbatim_check: true,
+      complete_kind: "signed",
+      hits_v2: [
+        { status: "待人工确认", decision: "", page: 1, pdf: "不该出现的句子" },
+        { status: "漏字", decision: "ignore", page: 1, pdf: "另一句" },
+      ],
+    }, "审核员");
+    assert.match(text, /另有 1 处机器没读准，签了表示人认这些字。/);
+    assert.equal(text.includes("不该出现"), false);
+    assert.equal(text.includes("另一句"), false);
+  });
+
   it("falls back to issue hits for legacy tasks without complete_kind", () => {
     assert.equal(taskCompleteHeadline({}), "已签字");
     assert.equal(taskCompleteHeadline({ hits: [{ decision: "confirm" }] }), "已签字");

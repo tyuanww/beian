@@ -213,6 +213,108 @@ export function killTree(pid: number, force = false): void {
   }
 }
 
+/**
+ * 登记强制结束。调用方必须先拿到取消函数，再 killTree。
+ * 子进程若在第一次信号里退出，取消函数清掉这次定时器，避免打到后来被系统重用的 pid。
+ * 请求已经返回不能取消它，只有进程退出才取消。
+ */
+export function scheduleForcedStop(pid: number | undefined, hasExited: () => boolean, forceDelayMs = 5_000): () => void {
+  if (!pid || pid <= 0) return () => {};
+  const force = setTimeout(() => {
+    if (hasExited()) return;
+    killTree(pid, true);
+  }, forceDelayMs);
+  if (typeof force.unref === "function") force.unref();
+  return () => clearTimeout(force);
+}
+
+const VERBATIM_PROBE_FALLBACK = "认字组件没装上，没有结果";
+const VERBATIM_PROBE = `
+from pathlib import Path
+import os, sys
+from app.verbatim_check import VerbatimFail, prepare
+try:
+    prepare(Path(os.environ.get("VERBATIM_MODEL_DIR") or ""))
+except VerbatimFail as exc:
+    sys.stderr.write(exc.error)
+    raise SystemExit(2)
+`;
+
+/** 子进程退出码和 stderr 末行 → 给用户的那一句。成功返回 null。路径不外传。 */
+export function verbatimProbeSentence(code: number, stderr: string): string | null {
+  if (code === 0) return null;
+  const line = stderr.trim().split(/\r?\n/).filter(Boolean).pop() || "";
+  if (code === 2 && line.length > 0 && line.length <= 80 && !/[\\/]/.test(line)) return line;
+  return VERBATIM_PROBE_FALLBACK;
+}
+
+type VerbatimProbe = (modelDir: string) => Promise<string | null>;
+let verbatimProbeOverride: VerbatimProbe | null = null;
+
+/** 测试替换预检。生产路径不设这个钩子，仍跑 prepare()。 */
+export function setVerbatimProbeForTest(probe: VerbatimProbe | null): void {
+  if (process.env.VITEST !== "1") throw new Error("认字预检测试钩子只能在 VITEST 使用");
+  verbatimProbeOverride = probe;
+}
+
+/** 模型齐套之后、建单之前跑 prepare()。缺依赖就返回原来的那句，不建单、不改走旧核对。 */
+export function probeVerbatimReady(modelDir: string): Promise<string | null> {
+  if (verbatimProbeOverride) return verbatimProbeOverride(modelDir);
+  return new Promise((resolve) => {
+    let settled = false;
+    let exited = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let cancelForce: (() => void) | undefined;
+    const finish = (sentence: string | null) => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      resolve(sentence);
+    };
+    const markExited = () => {
+      exited = true;
+      cancelForce?.();
+      cancelForce = undefined;
+    };
+    const child = spawn(pythonExecutable(), ["-c", VERBATIM_PROBE], {
+      cwd: PYTHON_APP,
+      env: {
+        ...process.env,
+        PYTHONPATH: PYTHON_APP,
+        VERBATIM_MODEL_DIR: modelDir,
+        PYTHONUTF8: "1",
+        PYTHONDONTWRITEBYTECODE: "1",
+      },
+      // 与 runPython 一样另开进程组，超时才能结束整棵进程，而不是只打到这一个 pid。
+      detached: process.platform !== "win32",
+      stdio: ["ignore", "ignore", "pipe"],
+      windowsHide: true,
+    });
+    let stderr = "";
+    timer = setTimeout(() => {
+      const pid = child.pid;
+      if (pid) {
+        cancelForce = scheduleForcedStop(pid, () => exited || child.exitCode !== null || child.signalCode != null);
+        killTree(pid, false);
+      } else {
+        child.kill();
+      }
+      finish(VERBATIM_PROBE_FALLBACK);
+    }, 60_000);
+    child.stderr?.on("data", (buf: Buffer) => {
+      if (stderr.length < 400) stderr += buf.toString("utf8");
+    });
+    child.on("error", () => {
+      markExited();
+      finish(VERBATIM_PROBE_FALLBACK);
+    });
+    child.on("close", (code) => {
+      markExited();
+      finish(verbatimProbeSentence(code ?? 1, stderr));
+    });
+  });
+}
+
 function pythonExecutable(): string {
   const configured = pythonBin();
   if (existsSync(configured)) return configured;

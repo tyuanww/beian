@@ -84,8 +84,16 @@ export function compactEvidence(value: string, limit = 180): EvidenceText {
   return { summary: `${clipped}…`, full, expandable: true };
 }
 
+/** 多空格的读数常常只有一个空格。展示前的 trim 会把它收成「没读到」，空格盒就画不出来。 */
+function keepSpaceBox(hit: FieldHit, observed: EvidenceText): EvidenceText {
+  if (hit.status !== "多空格" || /\s/u.test(observed.full)) return observed;
+  const context = observed.full === "—" || observed.full === NOT_READ ? "" : observed.full;
+  const full = context ? ` ${context}` : " ";
+  return { summary: full, full, expandable: false };
+}
+
 export function reviewEvidence(hit: FieldHit): ReviewEvidence {
-  const observed = compactEvidence(pdfText(hit, hit.field));
+  const observed = keepSpaceBox(hit, compactEvidence(pdfText(hit, hit.field)));
   const tally = coverageTally(hit);
   return {
     expected: compactEvidence(excelText(hit)),

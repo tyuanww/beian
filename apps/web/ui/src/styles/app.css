@@ -2583,6 +2583,9 @@ html[data-theme="dark"] .history-bulkbar {
 .hit-box {
   position: absolute;
   box-sizing: border-box;
+  /* 页像素下限 8 在 5600 宽的页上只有一两像素。屏幕上至少 12px，小框才看得见，也不会铺成整页。 */
+  min-width: 12px;
+  min-height: 12px;
   border: 2px solid var(--pin);
   background: color-mix(in srgb, var(--pin) 16%, transparent);
   border-radius: 2px;

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
 import { describe, it } from "node:test";
 import { makeTestTempDir } from "./testTemp.js";
 
@@ -10,9 +11,11 @@ const {
   killTree,
   pidAlive,
   runPython,
+  scheduleForcedStop,
   compareArgs,
   reworkArgs,
   verbatimMemoryFailure,
+  verbatimProbeSentence,
   workerCommandMatches,
 } = await import("./workers.js");
 
@@ -33,6 +36,16 @@ describe("verbatim argv", () => {
   });
 });
 
+describe("verbatim probe sentence", () => {
+  it("keeps the public sentence and drops paths", () => {
+    assert.equal(verbatimProbeSentence(0, ""), null);
+    assert.equal(verbatimProbeSentence(2, "认字组件没装上，没有结果"), "认字组件没装上，没有结果");
+    assert.equal(verbatimProbeSentence(2, "认字依赖没装齐"), "认字依赖没装齐");
+    assert.equal(verbatimProbeSentence(2, "D:\\modules\\missing"), "认字组件没装上，没有结果");
+    assert.equal(verbatimProbeSentence(1, "Traceback"), "认字组件没装上，没有结果");
+  });
+});
+
 describe("killTree", () => {
   it("no-ops on missing pids", () => {
     killTree(0);
@@ -43,6 +56,77 @@ describe("killTree", () => {
 
   it("does not throw when the pid is already gone", () => {
     assert.doesNotThrow(() => killTree(999_999_991, true));
+  });
+});
+
+describe("verbatim probe stop", () => {
+  function liveChild(script: string) {
+    return spawn(process.execPath, ["-e", script], {
+      detached: process.platform !== "win32",
+      stdio: "ignore",
+      windowsHide: true,
+    });
+  }
+
+  async function untilSpawn(child: ReturnType<typeof spawn>): Promise<number> {
+    await new Promise<void>((resolve, reject) => {
+      child.once("spawn", () => resolve());
+      child.once("error", reject);
+    });
+    assert.ok(child.pid);
+    return child.pid;
+  }
+
+  it("ends the process on the first signal and cancels the follow-up", async () => {
+    const child = liveChild("setInterval(() => {}, 1000);");
+    try {
+      const pid = await untilSpawn(child);
+      let exited = false;
+      child.once("exit", () => { exited = true; });
+      const cancel = scheduleForcedStop(pid, () => exited, 2_000);
+      killTree(pid, false);
+      await new Promise<void>((resolve) => child.once("close", () => resolve()));
+      cancel();
+      assert.equal(exited, true);
+      assert.equal(pidAlive(pid), false);
+    } finally {
+      if (child.pid && pidAlive(child.pid)) killTree(child.pid, true);
+    }
+  });
+
+  it("force-stops a process that ignores the first signal", async () => {
+    const child = spawn(process.execPath, ["-e", "process.on('SIGTERM', () => {}); process.stdout.write('ready'); setInterval(() => {}, 500);"], {
+      detached: process.platform !== "win32",
+      stdio: ["ignore", "pipe", "ignore"],
+      windowsHide: true,
+    });
+    try {
+      const pid = await untilSpawn(child);
+      await new Promise<void>((resolve, reject) => {
+        let text = "";
+        child.stdout?.on("data", (buf: Buffer) => {
+          text += buf.toString("utf8");
+          if (text.includes("ready")) resolve();
+        });
+        child.once("error", reject);
+        child.once("exit", () => reject(new Error("进程在忽略信号之前就退出了")));
+      });
+      let exited = false;
+      child.once("exit", () => { exited = true; });
+      const started = Date.now();
+      const cancel = scheduleForcedStop(pid, () => exited, 200);
+      killTree(pid, false);
+      await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error("进程没有在强制结束后退出")), 4_000);
+        child.once("close", () => { clearTimeout(timer); resolve(); });
+      });
+      cancel();
+      assert.ok(Date.now() - started >= 150);
+      assert.equal(exited, true);
+      assert.equal(pidAlive(pid), false);
+    } finally {
+      if (child.pid && pidAlive(child.pid)) killTree(child.pid, true);
+    }
   });
 });
 

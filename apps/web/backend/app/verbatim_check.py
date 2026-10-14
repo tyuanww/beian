@@ -289,7 +289,10 @@ def _status(op: dict) -> tuple[str, bool] | None:
     if verdict == "ok":
         return None
     if kind in SPACE_ERRORS:
-        return kind, verdict == "confirmed"
+        # 字距不够有把握时原型标 review。不把它写成不挡签字的「多空格」，否则会进一致列。
+        if verdict == "confirmed":
+            return kind, True
+        return "待人工确认", False
     if kind == "漏识" or verdict == "review":
         return "待人工确认", False
     if verdict == "nomatch" or kind == "片段无对应":

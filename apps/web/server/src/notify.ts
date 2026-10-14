@@ -190,6 +190,16 @@ export function taskCompleteHeadline(task: TaskLike): "已签字" | "已退回" 
   return selectedHits(task).some((h) => h.decision === "issue") ? "已退回" : "已签字";
 }
 
+function openHeldCount(task: TaskLike): number {
+  if (task.verbatim_check !== true) return 0;
+  return selectedHits(task).filter((hit) => (
+    hit.status === "待人工确认"
+    && hit.decision !== "confirm"
+    && hit.decision !== "issue"
+    && hit.decision !== "ignore"
+  )).length;
+}
+
 export function taskCompleteText(task: TaskLike, actor: string): string {
   const issues = selectedHits(task).filter((h) => h.decision === "issue");
   const headline = taskCompleteHeadline(task);
@@ -197,12 +207,19 @@ export function taskCompleteText(task: TaskLike, actor: string): string {
     ? issues.slice(0, 12).map((h) => `· ${h.status || "类型"} 第${h.page || "?"}页`)
     : issues.slice(0, 12).map((h) => `· ${h.field || "字段"}`);
   const more = issues.length > 12 ? `\n…另有 ${issues.length - 12} 条` : "";
+  const held = openHeldCount(task);
+  const heldLine = held === 0
+    ? ""
+    : headline === "已签字"
+      ? `另有 ${held} 处机器没读准，签了表示人认这些字。`
+      : `另有 ${held} 处待人工确认`;
   return [
     `【备案审核】${headline}`,
     `任务：${task.title || task.id || ""}`,
     `审核人：${actor}`,
     task.verbatim_check === true ? "结论已记下" : `结论：${task.conclusion || "—"}`,
     issues.length ? `改稿 ${issues.length} 条` : "无改稿项",
+    heldLine,
     ...lines,
     more,
     `打开：${publicBase()}/`,
