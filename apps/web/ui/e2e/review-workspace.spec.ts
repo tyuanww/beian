@@ -5,7 +5,10 @@ import { expect, reviewTask, test } from "./fixtures";
 // A 通铺核对页（2026-10-11 已批）：默认 1440 宽三栏常驻；快捷键条已看过。
 test.use({ viewport: { width: 1440, height: 900 } });
 test.beforeEach(async ({ page }) => {
-  await page.addInitScript(() => { if (!sessionStorage.getItem("ra-once")) localStorage.setItem("wb_review_shortcuts_seen_v1", "1"); });
+  await page.addInitScript(() => {
+    if (!sessionStorage.getItem("ra-once")) localStorage.setItem("wb_review_shortcuts_seen_v1", "1");
+    localStorage.setItem("wb_review_spot", "off");
+  });
 });
 
 const decisions = (api: { calls: Array<{ path: string; body?: unknown }> }) => api.calls.filter((item) => item.path.endsWith("/decision"));
@@ -322,7 +325,7 @@ test("<1440 右栏默认收起，展开为 320 浮层并平移让当前标记露
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.goto(`/review/${task.id}`);
   const tab = page.getByTestId("review-dock");
-  await expect(tab).toHaveText("展开疑点 · 待确认 1");
+  await expect(tab).toHaveText("展开疑点 · 待人工确认 1");
   // 已批第 40 行：1280 宽稿件列 1176px（1280 − 主侧栏 52 − 缩略图条 52）。
   expect((await page.locator(".review-ccol").boundingBox())!.width).toBeCloseTo(1176, 0);
   await tab.click();
@@ -738,4 +741,57 @@ test("锁页后收起撤销提示", async ({ page, syntheticApi }) => {
   await expect(page.locator(".review-lock")).toBeVisible();
   // 撤销提示本身 5 秒才自动消失；这里 1 秒内就得没了。
   await expect(page.getByTestId("review-undo-toast")).toHaveCount(0, { timeout: 1000 });
+});
+
+test("就地对照：每条框出范围，对照窗贴在当前框右侧，右栏只留清单", async ({ page, syntheticApi }) => {
+  await page.addInitScript(() => localStorage.setItem("wb_review_spot", "on"));
+  const task = reviewTask("e5969b58cdb8");
+  task.hits = [
+    {
+      id: "hit_name", field: "中文品名", status: "疑点", excel: "合成核对单", pdf: "合成核对", page: 1, decision: "pending",
+      bboxes: [
+        { page: 1, left: 40, top: 80, width: 80, height: 24, role: "hit" },
+        { page: 1, left: 140, top: 80, width: 60, height: 24, role: "hit" },
+      ],
+    },
+    {
+      id: "hit_net", field: "净含量", status: "疑点", excel: "30ml", pdf: "30 ml", page: 1, decision: "pending",
+      bboxes: [{ page: 1, left: 40, top: 130, width: 90, height: 28, role: "hit" }],
+    },
+    {
+      id: "hit_note", field: "生产批号", status: "疑点", excel: "无", pdf: "", page: 1, decision: "pending", bboxes: [],
+    },
+  ];
+  syntheticApi.tasks.push(task);
+  await page.goto(`/review/${task.id}`);
+
+  const dock = page.getByTestId("review-dock");
+  const card = page.getByTestId("review-spot");
+  await expect(page.getByRole("button", { name: "就地对照" })).toHaveAttribute("aria-pressed", "true");
+  await expect(dock.getByLabel("疑点列表")).toBeVisible();
+  await expect(dock.locator(".review-flat-detail")).toHaveCount(0);
+  await expect(card.getByText("Excel 应印", { exact: true })).toBeVisible();
+  await expect(card.getByText("稿上读到", { exact: true })).toBeVisible();
+  await expect(card).toContainText("中文品名");
+  await expect(page.locator(".hit-range")).toHaveCount(2);
+  await expect.poll(async () => {
+    const box = await page.locator(".hit-range.is-on").boundingBox();
+    const spot = await card.boundingBox();
+    if (!box || !spot) return false;
+    return spot.x >= box.x + box.width - 2 && spot.y < box.y + box.height;
+  }).toBe(true);
+
+  await page.locator(".hit-range.is-dim").click();
+  await expect(card).toContainText("净含量");
+  await expect(page.locator(".hit-range.is-on")).toHaveCount(1);
+
+  await dock.getByRole("button", { name: /生产批号/ }).click();
+  await expect(card).toHaveCount(0);
+  await expect(dock.getByText("Excel 应印", { exact: true })).toBeVisible();
+  await expect(dock.locator(".review-evidence-location")).toHaveText("没找到位置，请看整页");
+
+  await dock.getByRole("button", { name: /中文品名/ }).click();
+  await card.getByRole("button", { name: /^有错/ }).click();
+  await expect.poll(() => decisions(syntheticApi).length).toBe(1);
+  await expect(page.getByTestId("review-undo-toast")).toHaveText("已标为有错，撤销");
 });

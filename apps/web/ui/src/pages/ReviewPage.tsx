@@ -4,18 +4,18 @@ import { REVIEW_COPY, NAV_LABEL } from "../copy/labels";
 import { ApiError, api, type Decision, type FieldHit, type TaskDetail, type TaskPage } from "../api";
 import { WaitCard } from "../chrome/WaitCard";
 import { forgetReviewHandoff, reviewHandoffFor } from "../jobHandoff";
-import { fittedPage, panBy, panToBoxAt, resetZoom, zoomAt, zoomCss } from "./canvasZoom";
-import { locateBoxesForHit, locationPageForHit, missLineUnboxed, overlayFromBox, overlaysForHit, pickHitBox, pinHitGroupsForPage, resolvePageMetrics, visiblePinGroups } from "./pinBox";
+import { fittedPage, frameRangeForCard, panBy, panToBoxAt, resetZoom, zoomAt, zoomCss } from "./canvasZoom";
+import { locateBoxesForHit, locationPageForHit, missLineUnboxed, overlayFromBox, overlaysForHit, pickHitBox, pinHitGroupsForPage, resolvePageMetrics, unionHitBox, visiblePinGroups } from "./pinBox";
 import {
   enterElementFullscreen,
   exitElementFullscreen,
   fullscreenFailureMessage,
   isElementFullscreen,
 } from "./mockupFullscreen";
-import { readBoxesOn, readPinsOn, skipPackSheetField, writeBoxesOn, writePinsOn } from "./reviewDock";
+import { readBoxesOn, readPinsOn, readSpotOn, skipPackSheetField, writeBoxesOn, writePinsOn, writeSpotOn } from "./reviewDock";
 import { ReviewSubmitDialog } from "./ReviewSubmitDialog";
 import {
-  conclusionFor, decisionFailureText, reworkUploadBlocked, submitFailureText, flatLayout, isTypingTarget, lockedBy, markShortcutsSeen, markerOutsideCorner, nextPendingAfter,
+  FLAT_PANEL_WIDTH, conclusionFor, decisionFailureText, reworkUploadBlocked, submitFailureText, flatLayout, isTypingTarget, lockedBy, markShortcutsSeen, markerOutsideCorner, nextPendingAfter,
   panToClearPanel, phonePendingLines, positionLabel, rejectRows, shouldShowShortcutsOnOpen, submitGate, tabIndices, thumbMarks, verdictCounts, verdictForKey, isOpenHeld,
   type FlatLayout, type FlatTab,
 } from "./reviewFlat";
@@ -24,6 +24,8 @@ import { useReviewSession } from "./useReviewSession";
 import { detailLoadState, shouldShowWaitCard } from "./waitCard";
 import { reviewHits, shouldUseReworkView } from "./reviewVersion";
 import { ReviewDockPanel } from "./ReviewDockPanel";
+import { ReviewHitDetail } from "./ReviewHitDetail";
+import { SPOT_CARD_GAP, SPOT_CARD_MARGIN, SPOT_CARD_WIDTH, placeSpotCard } from "./spotCard";
 import { firstPendingIssueIndex, pageIndexForHit } from "./reviewNav";
 import { customerCopy } from "./customerCopy";
 import { reviewVersionToggle } from "./reviewStatus";
@@ -101,8 +103,16 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
   const [zoom, setZoom] = useState(resetZoom);
   const [pinsOn, setPinsOn] = useState(() => readPinsOn(browserStore()));
   const [boxesOn, setBoxesOn] = useState(() => readBoxesOn(browserStore()));
+  const [spotOn, setSpotOn] = useState(() => readSpotOn(browserStore()));
+  const [spotPlaced, setSpotPlaced] = useState(false);
+  const [closeHeldPulse, setCloseHeldPulse] = useState(0);
   const [reviewFullscreen, setReviewFullscreen] = useState(false);
   const viewRef = useRef<HTMLDivElement>(null);
+  const canvasRef = useRef<HTMLDivElement>(null);
+  const cardRef = useRef<HTMLElement>(null);
+  const spotPlacedRef = useRef(false);
+  const placeSpotRef = useRef<() => void>(() => undefined);
+  const spotUiRef = useRef({ layout: "wide" as FlatLayout, panelOpen: false, showSpot: false });
   const pageRef = useRef<HTMLElement>(null);
   const zoomElRef = useRef<HTMLDivElement>(null);
   const zoomRef = useRef(zoom);
@@ -144,6 +154,7 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
       el.style.transform = zoomCss(next);
       el.style.setProperty("--review-pin-scale", String(1 / next.scale));
     }
+    placeSpotRef.current();
   }
 
   function commitZoom(next: typeof zoom) {
@@ -295,13 +306,58 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
   const metrics = resolvePageMetrics(page, nat);
   const laid = metrics && viewSize ? fittedPage(metrics, viewSize) : { imgW: 0, imgH: 0, offsetX: 0, offsetY: 0 };
   laidRef.current = laid;
+  const spotActive = spotOn && layout !== "phone";
   const pinHits = useMemo(() => {
-    return visiblePinGroups(pinHitGroupsForPage(hits, pageNo), signed ? -1 : active);
-  }, [hits, pageNo, active, signed]);
-  const currentBox = current
-    ? pickHitBox(locateBoxesForHit(current), pageNo, metrics)
-    : null;
+    const groups = pinHitGroupsForPage(hits, pageNo);
+    if (!spotActive) return visiblePinGroups(groups, signed ? -1 : active);
+    const parted = partitionReviewHits(hits);
+    const shown = new Set([...parted.issues, ...parted.held].map((row) => row.index));
+    if (active >= 0) shown.add(active);
+    return groups.filter((group) => group.indices.some((index) => shown.has(index)));
+  }, [hits, pageNo, active, signed, spotActive]);
+  const currentLocate = current ? locateBoxesForHit(current) : [];
+  const currentBox = current ? pickHitBox(currentLocate, pageNo, metrics) : null;
   const currentHasBox = Boolean(currentBox);
+  const showSpot = Boolean(spotActive && boxesOn && reviewMedia && unionHitBox(currentLocate, pageNo, metrics));
+  spotUiRef.current = { layout, panelOpen, showSpot };
+  function markSpotPlaced(on: boolean) {
+    if (spotPlacedRef.current === on) return;
+    spotPlacedRef.current = on;
+    setSpotPlaced(on);
+  }
+  placeSpotRef.current = () => {
+    const ui = spotUiRef.current;
+    const card = cardRef.current;
+    if (!ui.showSpot || !card) {
+      markSpotPlaced(false);
+      return;
+    }
+    const canvas = canvasRef.current;
+    const box = canvas?.querySelector(".hit-range.is-on");
+    if (!canvas || !(box instanceof HTMLElement)) return;
+    const c = canvas.getBoundingClientRect();
+    const b = box.getBoundingClientRect();
+    const cover = ui.layout === "overlay" && ui.panelOpen ? FLAT_PANEL_WIDTH : 0;
+    const pos = placeSpotCard(
+      { left: b.left - c.left, top: b.top - c.top, width: b.width, height: b.height },
+      { width: card.offsetWidth || SPOT_CARD_WIDTH, height: card.offsetHeight || 180 },
+      { width: Math.max(160, c.width - cover), height: c.height },
+      SPOT_CARD_GAP,
+      SPOT_CARD_MARGIN,
+    );
+    card.style.left = `${Math.round(pos.left)}px`;
+    card.style.top = `${Math.round(pos.top)}px`;
+    card.dataset.side = pos.side;
+    markSpotPlaced(true);
+  };
+
+  useLayoutEffect(() => {
+    const card = cardRef.current;
+    if (!card || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => placeSpotRef.current());
+    ro.observe(card);
+    return () => ro.disconnect();
+  }, [showSpot, active, reviewMedia?.url]);
 
   useEffect(() => {
     let cancelled = false;
@@ -436,9 +492,9 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
     }
   }, []);
 
-  /** <1440 浮层展开后，当前标记若被右栏盖住就平移画布（第 7 行）。 */
+  /** <1440 浮层展开后，当前标记若被右栏盖住就平移画布（第 7 行）。就地对照改为重新框进可见区域。 */
   useEffect(() => {
-    if (layout !== "overlay" || !panelOpen) return;
+    if (layout !== "overlay" || !panelOpen || spotOn) return;
     const id = window.requestAnimationFrame(() => {
       const pin = viewRef.current?.querySelector(".pin.is-on") || viewRef.current?.querySelector(".hit-box.is-on");
       const aside = pageRef.current?.querySelector(".review-sidebar.is-overlay");
@@ -447,7 +503,13 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
       if (dx < 0) commitZoom(panBy(zoomRef.current, dx, 0));
     });
     return () => window.cancelAnimationFrame(id);
-  }, [layout, panelOpen, active, reviewMedia?.url, zoom.scale]);
+  }, [layout, panelOpen, active, reviewMedia?.url, zoom.scale, spotOn]);
+
+  useEffect(() => {
+    if (!spotOn || layout !== "overlay" || !panelOpen) return;
+    const id = window.requestAnimationFrame(() => fitHitRef.current(activeRef.current));
+    return () => window.cancelAnimationFrame(id);
+  }, [spotOn, layout, panelOpen, active, reviewMedia?.url]);
 
   const keyHandlerRef = useRef<(e: KeyboardEvent) => void>(() => undefined);
   useEffect(() => {
@@ -672,15 +734,35 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
     const h = hits[i];
     const el = viewRef.current;
     if (!h || !metrics || !el) return;
-    const box = pickHitBox(locateBoxesForHit(h), pageNo, metrics);
+    const boxes = locateBoxesForHit(h);
+    const box = spotActive ? unionHitBox(boxes, pageNo, metrics) : pickHitBox(boxes, pageNo, metrics);
     if (!box) {
       commitZoom(resetZoom());
+      return;
+    }
+    if (spotActive) {
+      // 页图按整块画布适配。浮层右栏盖住右侧时，只把预留加宽，不能先缩小视口再算 fittedPage。
+      const cover = layout === "overlay" && panelOpen ? FLAT_PANEL_WIDTH : 0;
+      commitZoom(frameRangeForCard(
+        box,
+        metrics,
+        { width: el.clientWidth, height: el.clientHeight },
+        { width: SPOT_CARD_WIDTH + cover, gap: SPOT_CARD_GAP },
+      ));
       return;
     }
     // 产品哥：默认整页适配进画布，切条时不自动放大；用户自己放大过才保持倍数、平移到这条的框。
     commitZoom(panToBoxAt(box, metrics, { width: el.clientWidth, height: el.clientHeight }, zoomRef.current.scale));
   }
   fitHitRef.current = fitHit;
+
+  function publishDecision(hit: FieldHit, decision: Decision, note: string, undoable = true) {
+    if (hit.status === "待人工确认" && decision === "issue") {
+      setTab("issue");
+      setCloseHeldPulse((n) => n + 1);
+    }
+    void decide(hit, decision, note, { undoable });
+  }
 
   function pickHit(i: number) {
     if (!hits[i]) return;
@@ -707,7 +789,7 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
     if (verdict && current && reviewable && !busy && !locked) {
       if (current.status === "待人工确认" && verdict === "confirm") return;
       e.preventDefault();
-      void decide(current, verdict, current.id ? notes[current.id] ?? current.note ?? "" : "");
+      publishDecision(current, verdict, current.id ? notes[current.id] ?? current.note ?? "" : "");
     }
   };
 
@@ -891,18 +973,20 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
             note={noteFor(current)}
             emptyMessage={task?.status === "compare_failed" || task?.job_status === "failed" ? "检查未完成，暂时没有结果" : "暂时没有检查结果，请翻页查看"}
             nativeTaskEvidence={task?.native_text} ocrMeta={task?.ocr_meta} reworkCheck={task?.rework_check} onPick={pickHit}
-            onDecide={(hit, decision, note) => void decide(hit, decision, note)}
-            onNoteCommit={(hit, decision, note) => void decide(hit, decision, note, { undoable: false })}
+            onDecide={(hit, decision, note) => publishDecision(hit, decision, note)}
+            onNoteCommit={(hit, decision, note) => publishDecision(hit, decision, note, false)}
             onCopy={() => void copyList()}
             onNoteChange={(value) => { if (current?.id) setNote(current.id, value); }}
             verbatim={task?.verbatim_check === true}
             fscNote={task?.fsc_note}
             locationCopy={current && missLineUnboxed(locateBoxesForHit(current), pageNo, metrics) ? REVIEW_COPY.lineNotBoxed : REVIEW_COPY.noBox}
+            showDetail={!showSpot}
+            closeHeldPulse={closeHeldPulse}
           />
         }
       >
         {task?.verbatim_warning ? <p className="review-verbatim-warning" role="status" data-testid="review-verbatim-warning">{task.verbatim_warning}</p> : null}
-        <div className="canvas">
+        <div className="canvas" ref={canvasRef}>
           {hiResFailed ? (
             <p className="review-media-hint" role="status">
               {REVIEW_COPY.hiResFailed} · <button type="button" onClick={() => setMediaRetry((n) => n + 1)}>{REVIEW_COPY.retry}</button>
@@ -971,23 +1055,35 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
                   </div>
                 )}
                 {(reviewMedia ? pinHits : []).map(({ h, i, indices }) => {
-                  const locateBoxes = locateBoxesForHit(h);
-                  const overlays = overlaysForHit(locateBoxes, pageNo, metrics);
-                  const preferred = pickHitBox(locateBoxes, pageNo, metrics);
-                  const ov = preferred && metrics ? overlayFromBox(preferred, metrics) : null;
-                  const pin = ov
-                    ? markerOutsideCorner({ left: parseFloat(ov.left), top: parseFloat(ov.top), width: parseFloat(ov.width), height: parseFloat(ov.height) }, pinSize)
-                    : null;
                   const pairActive = indices.includes(active);
+                  const source = pairActive ? (hits[active] ?? h) : h;
+                  const locateBoxes = locateBoxesForHit(source);
+                  const preferred = pickHitBox(locateBoxes, pageNo, metrics);
+                  const range = spotActive ? unionHitBox(locateBoxes, pageNo, metrics) : null;
+                  const rangeOverlay = range && metrics ? overlayFromBox(range, metrics) : null;
+                  const overlays = spotActive ? (rangeOverlay ? [rangeOverlay] : []) : overlaysForHit(locateBoxes, pageNo, metrics);
+                  const anchor = spotActive ? rangeOverlay : (preferred && metrics ? overlayFromBox(preferred, metrics) : null);
+                  const pin = anchor
+                    ? markerOutsideCorner({ left: parseFloat(anchor.left), top: parseFloat(anchor.top), width: parseFloat(anchor.width), height: parseFloat(anchor.height) }, pinSize)
+                    : null;
                   const pinNo = (pairActive ? active : i) + 1;
+                  const openThis = () => { if (layout === "overlay") setPanelOpen(true); pickHit(pairActive ? active : i); };
                   return (
                     <Fragment key={h.id || i}>
                       {boxesOn
                         ? overlays.map((box, k) => (
                             <span
                               key={`${h.id || i}-box-${k}`}
-                              className={`hit-box ${box.kind === "warn" ? "is-warn" : ""} ${pairActive ? "is-on" : "is-dim"}`.trim()}
+                              role={spotActive ? "button" : undefined}
+                              tabIndex={spotActive ? 0 : undefined}
+                              aria-label={spotActive ? `${REVIEW_COPY.marker} ${pinNo} 范围` : undefined}
+                              className={`hit-box${spotActive ? " hit-range" : ""} ${box.kind === "warn" ? "is-warn" : ""} ${pairActive ? "is-on" : "is-dim"}`.trim()}
                               style={{ left: box.left, top: box.top, width: box.width, height: box.height }}
+                              onPointerDown={spotActive ? (e) => e.stopPropagation() : undefined}
+                              onClick={spotActive ? openThis : undefined}
+                              onKeyDown={spotActive ? (e) => {
+                                if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openThis(); }
+                              } : undefined}
                             />
                           ))
                         : null}
@@ -998,7 +1094,7 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
                           aria-label={`${REVIEW_COPY.marker} ${pinNo}`}
                           style={{ left: `${pin.left}%`, top: `${pin.top}%` }}
                           onPointerDown={(e) => e.stopPropagation()}
-                          onClick={() => { if (layout === "overlay") setPanelOpen(true); pickHit(pairActive ? active : i); }}
+                          onClick={openThis}
                         >
                           {pinNo}
                         </button>
@@ -1019,6 +1115,33 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
               style={{ padding: 48 }}
             />
           )}
+          {showSpot && current ? (
+            <aside
+              ref={cardRef}
+              className={spotPlaced ? "review-spot-card is-placed" : "review-spot-card"}
+              data-testid="review-spot"
+              aria-label={REVIEW_COPY.spotTitle}
+              style={{ width: SPOT_CARD_WIDTH }}
+            >
+              <div className="review-spot-head">
+                <span className="hit-no">{active + 1}</span>
+                <strong>{current.field || "项目"}</strong>
+                <small>P{current.page ?? pageNo}</small>
+              </div>
+              <ReviewHitDetail
+                hit={current}
+                hasBox
+                verbatim={task?.verbatim_check === true}
+                reviewable={reviewable && !locked}
+                busy={busy}
+                note={noteFor(current)}
+                locationCopy={missLineUnboxed(currentLocate, pageNo, metrics) ? REVIEW_COPY.lineNotBoxed : REVIEW_COPY.noBox}
+                onDecide={(hit, decision, note) => publishDecision(hit, decision, note)}
+                onNoteCommit={(hit, decision, note) => publishDecision(hit, decision, note, false)}
+                onNoteChange={(value) => { if (current.id) setNote(current.id, value); }}
+              />
+            </aside>
+          ) : null}
         </div>
         <div className="review-tbar" role="toolbar" aria-label="稿件工具">
           <button type="button" aria-label="缩小" title="缩小 −" onClick={() => zoomBy(1 / 1.25)}>−</button>
@@ -1030,6 +1153,22 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
           <button type="button" aria-pressed={pinsOn} title={pinsOn ? `隐藏本项目${REVIEW_COPY.marker}` : `显示本项目${REVIEW_COPY.marker}`} onClick={() => { const next = !pinsOn; setPinsOn(next); writePinsOn(browserStore(), next); }}>
             {pinsOn ? `隐藏${REVIEW_COPY.marker}` : `显示${REVIEW_COPY.marker}`}
           </button>
+          {!phone ? (
+            <button
+              type="button"
+              aria-pressed={spotOn}
+              title={REVIEW_COPY.spotTitle}
+              onClick={() => {
+                const next = !spotOn;
+                setSpotOn(next);
+                writeSpotOn(browserStore(), next);
+                if (next) window.requestAnimationFrame(() => fitHitRef.current(activeRef.current));
+                else commitZoom(resetZoom());
+              }}
+            >
+              {REVIEW_COPY.spot}
+            </button>
+          ) : null}
           <button type="button" className="review-fullscreen-toggle" aria-pressed={reviewFullscreen} onClick={() => void toggleReviewFullscreen()}>
             {reviewFullscreen ? "退出" : "全屏"}
           </button>
