@@ -13,6 +13,19 @@ export function spotPhoneDiscardId(
   return activeId;
 }
 
+/** 只在刚进入手机时卸当前这一条。已经停在手机上再换条，不卸。 */
+export function phoneDiscardOnEnter(
+  previousLayout: string | null,
+  layout: string,
+  spotOn: boolean,
+  activeId: string | undefined,
+  draft: string | null | undefined,
+  saved: string | null | undefined,
+): string | null {
+  if (previousLayout === "phone" || layout !== "phone") return null;
+  return spotPhoneDiscardId(layout, spotOn, activeId, draft, saved);
+}
+
 import { reviewStorage, readReviewSession, reviewSessionKey, writeReviewSession, type ReviewSession } from "./reviewWorkspaceState";
 
 export function useReviewSession(user: string | null, task: string | null, version: boolean) {

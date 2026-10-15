@@ -20,12 +20,12 @@ import {
   type FlatLayout, type FlatTab,
 } from "./reviewFlat";
 import { ReviewWorkspace } from "./ReviewWorkspace";
-import { spotPhoneDiscardId, useReviewSession } from "./useReviewSession";
+import { phoneDiscardOnEnter, useReviewSession } from "./useReviewSession";
 import { detailLoadState, shouldShowWaitCard } from "./waitCard";
 import { reviewHits, shouldUseReworkView } from "./reviewVersion";
 import { ReviewDockPanel } from "./ReviewDockPanel";
 import { ReviewHitDetail } from "./ReviewHitDetail";
-import { SPOT_CARD_GAP, SPOT_CARD_MARGIN, SPOT_CARD_WIDTH, clampSpotCard, placeSpotCard, resolveSpotPosition, spotDragStarted } from "./spotCard";
+import { SPOT_CARD_GAP, SPOT_CARD_MARGIN, SPOT_CARD_WIDTH, avoidSpotObstacle, placeSpotCard, resolveSpotPosition, spotDragStarted, type SpotObstacle } from "./spotCard";
 import { spotHeaderText, spotNavTarget, spotPendingEmptyLine } from "./spotCopy";
 import { firstPendingIssueIndex, pageIndexForHit } from "./reviewNav";
 import { customerCopy } from "./customerCopy";
@@ -73,6 +73,17 @@ function pageList(task: TaskDetail | null): TaskPage[] {
 
 function viewportLayout(): FlatLayout {
   return typeof window === "undefined" ? "wide" : flatLayout(window.innerWidth);
+}
+
+/** 收起钮相对稿面的矩形。右栏开着时没有这个钮。 */
+function spotTabObstacle(canvas: HTMLElement): SpotObstacle | null {
+  const tab = canvas.closest(".review-workspace")?.querySelector(".review-panel-tab");
+  if (!(tab instanceof HTMLElement)) return null;
+  const c = canvas.getBoundingClientRect();
+  const t = tab.getBoundingClientRect();
+  const obstacle = { left: t.left - c.left, top: t.top - c.top, right: t.right - c.left, bottom: t.bottom - c.top };
+  if (obstacle.right <= 0 || obstacle.bottom <= 0 || obstacle.left >= c.width || obstacle.top >= c.height) return null;
+  return obstacle;
 }
 
 export function ReviewPage({ taskId, userId, displayName = null, onBack, onHistory }: Props) {
@@ -349,13 +360,14 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
     const box = bounds
       ? { left: bounds.left - c.left, top: bounds.top - c.top, width: bounds.width, height: bounds.height }
       : { left: 0, top: 0, width: 0, height: 0 };
-    const pos = dragged
+    const placed = dragged
       ? resolveSpotPosition(dragged, box, cardSize, view)
       : placeSpotCard(box, cardSize, view, SPOT_CARD_GAP, SPOT_CARD_MARGIN);
+    const pos = avoidSpotObstacle(placed, cardSize, view, spotTabObstacle(canvas), SPOT_CARD_MARGIN, SPOT_CARD_GAP);
     if (dragged) spotPosRef.current = { left: pos.left, top: pos.top };
     card.style.left = `${Math.round(pos.left)}px`;
     card.style.top = `${Math.round(pos.top)}px`;
-    card.dataset.side = pos.side;
+    card.dataset.side = placed.side;
     markSpotPlaced(true);
   };
 
@@ -527,11 +539,14 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
   }, []);
 
   const activeHit = hits[active];
-  const phoneDiscardId = spotPhoneDiscardId(layout, spotOn, activeHit?.id, activeHit?.id ? notes[activeHit.id] : undefined, activeHit?.note);
+  const phoneLayoutWas = useRef<string | null>(null);
+  const activeHitId = activeHit?.id;
+  const activeDraft = activeHitId ? notes[activeHitId] : undefined;
   useEffect(() => {
-    if (!phoneDiscardId) return;
-    discardDraftRef.current(phoneDiscardId);
-  }, [phoneDiscardId]);
+    const id = phoneDiscardOnEnter(phoneLayoutWas.current, layout, spotOn, activeHitId, activeDraft, activeHit?.note);
+    phoneLayoutWas.current = layout;
+    if (id) discardDraftRef.current(id);
+  }, [layout, spotOn, activeHitId, activeDraft, activeHit?.note]);
 
   if (!taskId) {
     return (
@@ -1182,11 +1197,15 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
                     setSpotDragged(true);
                   }
                   const bounds = canvas.getBoundingClientRect();
-                  const next = clampSpotCard(
+                  const cardSize = { width: card.offsetWidth || SPOT_CARD_WIDTH, height: card.offsetHeight || 180 };
+                  const view = { width: Math.max(160, bounds.width), height: bounds.height };
+                  const next = avoidSpotObstacle(
                     { left: drag.left + dx, top: drag.top + dy },
-                    { width: card.offsetWidth || SPOT_CARD_WIDTH, height: card.offsetHeight || 180 },
-                    { width: Math.max(160, bounds.width), height: bounds.height },
+                    cardSize,
+                    view,
+                    spotTabObstacle(canvas),
                     SPOT_CARD_MARGIN,
+                    SPOT_CARD_GAP,
                   );
                   spotPosRef.current = next;
                   card.style.left = `${Math.round(next.left)}px`;

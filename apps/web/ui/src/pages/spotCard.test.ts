@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { placeSpotCard, resolveSpotPosition, SPOT_CARD_WIDTH, spotDragStarted } from "./spotCard.js";
+import { avoidSpotObstacle, placeSpotCard, resolveSpotPosition, SPOT_CARD_WIDTH, spotDragStarted } from "./spotCard.js";
 
 describe("placeSpotCard", () => {
   it("贴在框的右侧", () => {
@@ -85,6 +85,30 @@ describe("resolveSpotPosition", () => {
       { width: 400, height: 360 },
     );
     assert.deepEqual(pos, { side: "right", left: 72, top: 30 });
+  });
+
+  it("lets a card clear the collapsed expand tab without changing z-index", () => {
+    const moved = avoidSpotObstacle(
+      { left: 280, top: 8 },
+      { width: 100, height: 80 },
+      { width: 400, height: 360 },
+      { left: 300, top: 0, right: 390, bottom: 60 },
+    );
+    assert.deepEqual(moved, { left: 188, top: 8 });
+    const dropped = avoidSpotObstacle(
+      { left: 12, top: 8 },
+      { width: 180, height: 80 },
+      { width: 200, height: 360 },
+      { left: 40, top: 0, right: 190, bottom: 60 },
+    );
+    assert.deepEqual(dropped, { left: 12, top: 72 });
+    const clear = avoidSpotObstacle(
+      { left: 20, top: 80 },
+      { width: 100, height: 80 },
+      { width: 400, height: 360 },
+      { left: 300, top: 0, right: 390, bottom: 60 },
+    );
+    assert.deepEqual(clear, { left: 20, top: 80 });
   });
 
   it("counts a drag only at 4px", () => {

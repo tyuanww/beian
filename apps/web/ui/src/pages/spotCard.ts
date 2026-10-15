@@ -42,6 +42,42 @@ export function placeSpotCard(
   };
 }
 
+export type SpotObstacle = { left: number; top: number; right: number; bottom: number };
+
+function hitsSpotObstacle(
+  left: number,
+  top: number,
+  card: { width: number; height: number },
+  obstacle: SpotObstacle,
+): boolean {
+  return left < obstacle.right
+    && left + card.width > obstacle.left
+    && top < obstacle.bottom
+    && top + card.height > obstacle.top;
+}
+
+/** 先夹进视口。和展开钮重叠时先往左让，左边不够再往下让。不改层级。 */
+export function avoidSpotObstacle(
+  pos: { left: number; top: number },
+  card: { width: number; height: number },
+  view: { width: number; height: number },
+  obstacle: SpotObstacle | null,
+  margin = SPOT_CARD_MARGIN,
+  gap = SPOT_CARD_GAP,
+): { left: number; top: number } {
+  const clamped = clampSpotCard(pos, card, view, margin);
+  if (!obstacle || !hitsSpotObstacle(clamped.left, clamped.top, card, obstacle)) return clamped;
+  const candidates = [
+    { left: obstacle.left - gap - card.width, top: clamped.top },
+    { left: clamped.left, top: obstacle.bottom + gap },
+  ];
+  for (const candidate of candidates) {
+    const next = clampSpotCard(candidate, card, view, margin);
+    if (!hitsSpotObstacle(next.left, next.top, card, obstacle)) return next;
+  }
+  return clamped;
+}
+
 /** 只把已放下的位置夹进同一套 margin，不重选左右或上下。 */
 export function clampSpotCard(
   pos: { left: number; top: number },
