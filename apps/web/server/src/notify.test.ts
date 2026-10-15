@@ -129,6 +129,8 @@ describe("taskCompleteText", () => {
   });
 
   it("verbatim completion keeps type and page, not the manuscript", () => {
+    const sentence = "合成整句不该进飞书";
+    const row = { field: "江东四路漏了东", status: "漏字", decision: "issue", page: 1, pdf: "江四路", manuscript: sentence };
     const text = taskCompleteText({
       id: "t3",
       title: "某喷雾",
@@ -136,11 +138,12 @@ describe("taskCompleteText", () => {
       complete_kind: "rework",
       conclusion: "稿上印了不该出现的句子",
       hits: [{ field: "漏字", status: "一致", decision: "confirm" }],
-      hits_v2: [{ field: "江东四路漏了东", status: "漏字", decision: "issue", page: 1, pdf: "江四路" }],
+      hits_v2: [row],
     }, "审核员");
     assert.match(text, /漏字 第1页/);
     assert.equal(text.includes("江东"), false);
     assert.equal(text.includes("江四路"), false);
+    assert.equal(text.includes(sentence), false);
     assert.equal(text.includes("稿上印了"), false);
     assert.match(text, /结论已记下/);
   });

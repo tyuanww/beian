@@ -36,7 +36,11 @@ export function zoomCss(state: ZoomState): string {
 
 export type PixelBox = { left: number; top: number; width: number; height: number };
 
-/** Contain the page in the view and park it on the right (empty left for the dock). */
+/**
+ * Contain the page in the view. The review canvas centers it
+ * (`.review-ccol .canvas-view { justify-content: center }`), so leftover
+ * space is split on both axes. Zoom math must use this same origin.
+ */
 export function fittedPage(
   page: { width: number; height: number },
   view: { width: number; height: number },
@@ -51,7 +55,7 @@ export function fittedPage(
   const fit = Math.min(vw / pw, vh / ph);
   const imgW = pw * fit;
   const imgH = ph * fit;
-  return { imgW, imgH, offsetX: Math.max(0, vw - imgW), offsetY: Math.max(0, (vh - imgH) / 2) };
+  return { imgW, imgH, offsetX: Math.max(0, (vw - imgW) / 2), offsetY: Math.max(0, (vh - imgH) / 2) };
 }
 
 /** Fit a page-pixel box into the visible canvas (~62% of the view). */

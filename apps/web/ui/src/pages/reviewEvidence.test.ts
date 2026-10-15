@@ -177,4 +177,23 @@ describe("revision list with empty ask", () => {
     assert.match(result.text, /疑点：确认单要「30ml」$/m);
     assert.doesNotMatch(result.text, /；；|；\s*\/|疑点：\s*\//);
   });
+
+  it("does not copy an independent manuscript sentence", () => {
+    const sentence = "合成整句不该进清单";
+    const standard = "合成标准不该进清单";
+    const result = buildRevisionList("海葡萄喷雾", [{
+      id: "copy-sentence",
+      field: "文案",
+      status: "错字",
+      decision: "issue",
+      excel_value: "甲",
+      pdf: "乙",
+      manuscript: sentence,
+      excel_standard: standard,
+    }]);
+    assert.equal(result.text.includes(sentence), false);
+    assert.equal(result.text.includes(standard), false);
+    assert.match(result.text, /表格：甲/);
+    assert.match(result.text, /稿件：乙/);
+  });
 });

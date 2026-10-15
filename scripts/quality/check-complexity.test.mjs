@@ -344,6 +344,7 @@ describe("repository quality policy", () => {
     assert.ok(entries.includes("scripts/resource-stress/test_probes.mjs"));
     assert.ok(entries.includes("scripts/resource-stress/test_ship_probes.mjs"));
     assert.ok(!entries.some((entry) => entry.includes("resource-stress/**") || entry.includes("probes/*.mjs")));
+    assert.ok(entries.includes("scripts/pregate-lane.mjs!"));
     assert.ok(entries.includes("scripts/windows/release-dependency-check.mjs!"));
     assert.ok(entries.includes("workers/packaging/ppt/build_product_ppt.mjs!"));
     assert.ok(entries.includes("workers/packaging/illustrator/export_ai.jsx!"));

@@ -629,6 +629,15 @@ export type FieldHit = {
   };
   evidence?: string;
   sequence_diff?: { only_in_excel?: string[] };
+  /** 新逐字核对才有。旧单没有这把键。 */
+  manuscript?: string;
+  excel_standard?: string;
+  item?: string;
+  excel_row_count?: number;
+  pdf_span?: [number, number];
+  excel_span?: [number, number];
+  pdf_span_omit?: "duplicate" | "unmatched";
+  excel_span_omit?: "duplicate" | "unmatched";
 };
 
 export type TaskPage = {

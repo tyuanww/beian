@@ -1,4 +1,31 @@
 import { useMemo, useState } from "react";
+
+/** 手机卸卡只退当前这一条。就地对照关着时，右栏草稿留着。 */
+export function spotPhoneDiscardId(
+  layout: string,
+  spotOn: boolean,
+  activeId: string | undefined,
+  draft: string | null | undefined,
+  saved: string | null | undefined,
+): string | null {
+  if (layout !== "phone" || !spotOn || !activeId) return null;
+  if (draft == null || draft === (saved ?? "")) return null;
+  return activeId;
+}
+
+/** 只在刚进入手机时卸当前这一条。已经停在手机上再换条，不卸。 */
+export function phoneDiscardOnEnter(
+  previousLayout: string | null,
+  layout: string,
+  spotOn: boolean,
+  activeId: string | undefined,
+  draft: string | null | undefined,
+  saved: string | null | undefined,
+): string | null {
+  if (previousLayout === "phone" || layout !== "phone") return null;
+  return spotPhoneDiscardId(layout, spotOn, activeId, draft, saved);
+}
+
 import { reviewStorage, readReviewSession, reviewSessionKey, writeReviewSession, type ReviewSession } from "./reviewWorkspaceState";
 
 export function useReviewSession(user: string | null, task: string | null, version: boolean) {
@@ -20,6 +47,13 @@ export function useReviewSession(user: string | null, task: string | null, versi
     setNote: (id: string, note: string) => update((previous) => ({ ...previous, drafts: { ...previous.drafts, [id]: note } })),
     clearNote: (id: string, saved: string) => update((previous) => {
       if (previous.drafts[id] !== saved) return previous;
+      const drafts = { ...previous.drafts };
+      delete drafts[id];
+      return { ...previous, drafts };
+    }),
+    /** 丢掉未提交的本地原因，让 noteFor 回到已保存的 hit.note。 */
+    discardDraft: (id: string) => update((previous) => {
+      if (!Object.prototype.hasOwnProperty.call(previous.drafts, id)) return previous;
       const drafts = { ...previous.drafts };
       delete drafts[id];
       return { ...previous, drafts };

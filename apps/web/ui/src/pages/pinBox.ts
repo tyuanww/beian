@@ -245,6 +245,65 @@ export function locateBoxesForHit(hit: {
   return [...recordBoxes(hit.bboxes), ...extra];
 }
 
+export function boxesExceptRange(
+  bboxes: Array<Record<string, unknown>> | undefined,
+): Array<Record<string, unknown>> {
+  return (bboxes || []).filter((box) => String(box.role || "") !== "range");
+}
+
+/** 段落框：宽和高同时超过页的 90% 才不画。不套 hit 的 30% 面积。 */
+export function drawableRange(
+  bboxes: Array<Record<string, unknown>> | undefined,
+  pageNo: number,
+  page?: PageMetrics | null,
+): PixelBox | null {
+  const range = (bboxes || [])
+    .map(boxPixels)
+    .find((box): box is PixelBox => {
+      if (!box || box.role !== "range") return false;
+      if (box.page && pageNo && box.page !== pageNo) return false;
+      return true;
+    });
+  if (!range) return null;
+  if (page && missBoxUnusable(range, page)) return null;
+  return range;
+}
+
+/** 画框、镜头、未拖动贴边共用这一只。没有会画的 range 时退回错点框。 */
+export function spotFrameBox(
+  bboxes: Array<Record<string, unknown>> | undefined,
+  pageNo: number,
+  page?: PageMetrics | null,
+): PixelBox | null {
+  return drawableRange(bboxes, pageNo, page) ?? pickHitBox(boxesExceptRange(bboxes), pageNo, page);
+}
+
+export function spotDrawBoxes(
+  bboxes: Array<Record<string, unknown>> | undefined,
+  pageNo: number,
+  page?: PageMetrics | null,
+): Array<{ box: PixelBox; frame: boolean }> {
+  const range = drawableRange(bboxes, pageNo, page);
+  const hit = pickHitBox(boxesExceptRange(bboxes), pageNo, page);
+  const rows: Array<{ box: PixelBox; frame: boolean }> = [];
+  if (range) rows.push({ box: range, frame: true });
+  if (hit) rows.push({ box: hit, frame: !range });
+  return rows;
+}
+
+/** 标记钉错点。check、miss_anchor 和 hit 都算，段落框不钉。 */
+export function spotMarkerBox(draws: Array<{ box: PixelBox }>): PixelBox | null {
+  return draws.find((draw) => draw.box.role !== "range")?.box ?? null;
+}
+
+/** 悬浮打开时只留当前下标。双语组里的另一条也不画。 */
+export function groupsForSpot<T extends { indices: number[]; i: number }>(groups: T[], active: number): T[] {
+  if (!Number.isFinite(active) || active < 0) return [];
+  return groups
+    .filter((group) => group.indices.includes(active))
+    .map((group) => ({ ...group, i: active, indices: [active] }));
+}
+
 export function overlaysForHit(
   bboxes: Array<Record<string, unknown>> | undefined,
   pageNo: number,
@@ -255,6 +314,7 @@ export function overlaysForHit(
   for (const raw of bboxes || []) {
     const box = boxPixels(raw);
     if (!box) continue;
+    if (box.role === "range") continue;
     if (box.page && pageNo && box.page !== pageNo) continue;
     if (page && rejectBox(box, page)) continue;
     const ov = overlayFromBox(box, page);
