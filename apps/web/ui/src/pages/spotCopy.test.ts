@@ -7,6 +7,7 @@ import {
   spanOmitReason,
   spotColumns,
   spotHeaderText,
+  spotLocus,
   spotNavTarget,
   spotPendingEmptyLine,
 } from "./spotCopy.js";
@@ -142,6 +143,81 @@ describe("spotPendingEmptyLine", () => {
     assert.equal(spotPendingEmptyLine(1, "confirm"), false);
     assert.equal(spotPendingEmptyLine(0, "pending"), false);
     assert.equal(spotPendingEmptyLine(0, null), false);
+  });
+});
+
+describe("spotLocus", () => {
+  it("points at the missing character between the two readings", () => {
+    const locus = spotLocus(hit({
+      status: "漏字",
+      manuscript: "角鲨烷其他微量",
+      excel_standard: "角鲨烷、其他微量",
+      excel_row_count: 1,
+      excel_span: [3, 4],
+      excel_value: "、",
+    }));
+    assert.equal(locus?.kind, "miss");
+    assert.equal(locus?.title, REVIEW_COPY.missHere);
+    assert.equal(locus?.detail, "少了「、」");
+    assert.equal(locus?.standard?.mark, "、");
+    assert.equal(locus?.standard?.before, "角鲨烷");
+    assert.equal(locus?.manuscript?.gap, true);
+    assert.equal(locus?.manuscript?.before, "角鲨烷");
+    assert.equal(locus?.manuscript?.after, "其他微量");
+  });
+
+  it("points at the extra characters on the manuscript", () => {
+    const locus = spotLocus(hit({
+      status: "多字",
+      manuscript: "角鲨烷、其他微量",
+      excel_standard: "角鲨烷其他微量",
+      excel_row_count: 1,
+      pdf_span: [3, 4],
+      pdf: "、",
+    }));
+    assert.equal(locus?.kind, "extra");
+    assert.equal(locus?.detail, "多了「、」");
+    assert.equal(locus?.manuscript?.mark, "、");
+    assert.equal(locus?.manuscript?.gap, false);
+    assert.equal(locus?.standard?.gap, true);
+    assert.equal(locus?.standard?.before, "角鲨烷");
+    assert.equal(locus?.standard?.after, "其他微量");
+  });
+
+  it("shrinks a long span to the first absent run", () => {
+    const excel = "角鲨烷其他微量成分：糖类同分异构体、长茎葡萄藻还有很多后面的字";
+    const manuscript = "角鲨烷其他微量成分：糖类同分异构体长茎葡萄藻还有很多后面的字";
+    const locus = spotLocus(hit({
+      status: "漏字",
+      manuscript,
+      excel_standard: excel,
+      excel_row_count: 1,
+      excel_span: [0, Array.from(excel).length],
+      excel_value: excel,
+    }));
+    assert.equal(locus?.detail, "少了「、」");
+    assert.equal(locus?.standard?.mark, "、");
+    assert.equal(locus?.manuscript?.gap, true);
+  });
+
+  it("不把缺口标到更早的同一段上", () => {
+    const excel = "同词、同词、尾";
+    const locus = spotLocus(hit({
+      status: "漏字",
+      manuscript: "同词同词尾",
+      excel_standard: excel,
+      excel_row_count: 1,
+      excel_span: [5, 6],
+      excel_value: "、",
+    }));
+    assert.equal(locus?.standard?.mark, "、");
+    assert.equal(locus?.standard?.before.endsWith("同词"), true);
+    assert.equal(locus?.manuscript, null);
+  });
+
+  it("stays quiet for other statuses", () => {
+    assert.equal(spotLocus(hit({ status: "错字", manuscript: "甲", excel_standard: "乙", excel_row_count: 1 })), null);
+    assert.equal(spotLocus(hit({ status: "漏字" })), null);
   });
 });
 

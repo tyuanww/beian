@@ -20,6 +20,8 @@ describe("spot frame paint", () => {
   it("lets the current frame take clicks and darkens the difference mark", () => {
     const workspace = readFileSync(resolve(here, "../styles/reviewWorkspace.css"), "utf8");
     assert.match(workspace, /\.review-workspace \.hit-box\[data-spot-frame\] \{[^}]*pointer-events:\s*auto/s);
+    assert.match(workspace, /\.review-workspace \.hit-box\.hit-underline \{[^}]*box-shadow:\s*0 max\(0\.5px, calc\(2px \/ var\(--spot-zoom, 1\)\)\) 0 0 var\(--pin\)/s);
+    assert.match(workspace, /\.review-workspace \.hit-box\.hit-range \{[^}]*outline:/s);
     assert.match(workspace, /\.review-spot-mark \{[^}]*color-mix\(in srgb, var\(--pin\) 72%, transparent\)/s);
     assert.match(workspace, /html\[data-theme="dark"\] \.review-spot-mark \{[^}]*color-mix\(in srgb, var\(--pin\) 46%, transparent\)/s);
   });

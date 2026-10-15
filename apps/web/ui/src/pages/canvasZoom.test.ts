@@ -139,6 +139,20 @@ describe("frameRangeForCard", () => {
     assert.ok(right <= view.width - reserve.width - reserve.gap + 1);
   });
 
+  it("大框靠右时把对照窗的空档留在左侧", () => {
+    const view = { width: 800, height: 600 };
+    const page = { width: 2000, height: 1000 };
+    const box = { left: 1400, top: 200, width: 80, height: 40 };
+    const reserve = { width: 300, gap: 16 };
+    const z = frameRangeForCard(box, page, view, reserve, "left");
+    assert.ok(z.scale > 1);
+    const laid = fittedPage(page, view);
+    const left = laid.offsetX + z.x + (box.left / page.width) * laid.imgW * z.scale;
+    const right = laid.offsetX + z.x + ((box.left + box.width) / page.width) * laid.imgW * z.scale;
+    assert.ok(left >= reserve.width + reserve.gap - 1);
+    assert.ok(right <= view.width - 15);
+  });
+
   it("范围铺满画面时保持整页", () => {
     const z = frameRangeForCard(
       { left: 0, top: 0, width: 1800, height: 800 },

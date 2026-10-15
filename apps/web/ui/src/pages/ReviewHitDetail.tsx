@@ -1,11 +1,11 @@
-import { useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { Input, Tooltip } from "antd";
 import { REVIEW_COPY } from "../copy/labels";
 import type { Decision, FieldHit } from "../api";
 import { spokenAsk } from "./hitText";
 import { nativeEvidenceView } from "./nativeTextEvidence";
 import { reviewEvidence, type EvidenceText } from "./reviewEvidence";
-import { markedSlices, spanOmitReason, spotColumns, type SpotColumn, type SpotSpan } from "./spotCopy";
+import { markedSlices, spanOmitReason, spotColumns, spotLocus, type LocusClip, type SpotColumn, type SpotSpan } from "./spotCopy";
 
 type Props = {
   hit: FieldHit;
@@ -60,6 +60,21 @@ function MarkedReading({ text, span }: { text: string; span: SpotSpan | null }) 
           ? <span key={key} className="review-spot-mark">{part}</span>
           : <span key={key}>{part}</span>;
       }))}
+    </p>
+  );
+}
+
+function LocusLine({ label, clip }: { label: string; clip: LocusClip }) {
+  return (
+    <p className="review-spot-locus-line">
+      <span className="review-evidence-label">{label}</span>
+      {clip.before}
+      {clip.gap ? (
+        <i className="review-spot-gap" aria-label={REVIEW_COPY.locusGap} />
+      ) : (
+        <span className="review-spot-mark">{clip.mark}</span>
+      )}
+      {clip.after}
     </p>
   );
 }
@@ -129,16 +144,40 @@ export function ReviewHitDetail({
   surface = "rail", onPrev, onNext, prevDisabled = false, nextDisabled = false, pendingEmpty = false,
 }: Props) {
   const [tipOpen, setTipOpen] = useState(false);
+  const bodyRef = useRef<HTMLDivElement>(null);
   const evidence = reviewEvidence(hit);
+  const spanKey = `${hit.id ?? ""}:${hit.status ?? ""}:${hit.pdf_span?.join(",") ?? ""}:${hit.excel_span?.join(",") ?? ""}`;
+  useLayoutEffect(() => {
+    if (surface !== "card") return;
+    const body = bodyRef.current;
+    if (!body) return;
+    if (body.querySelector(".review-spot-locus")) {
+      body.scrollTop = 0;
+      return;
+    }
+    const mark = body.querySelector(".review-spot-mark");
+    if (!(mark instanceof HTMLElement)) return;
+    const delta = mark.getBoundingClientRect().top - body.getBoundingClientRect().top;
+    body.scrollTop += delta - 8;
+  }, [surface, spanKey]);
   const spoken = spokenAsk(hit, hit.field, hasBox);
   const nativeEvidence = nativeEvidenceView(hit.native_text_evidence);
   const selected = hit.decision === "confirm" || hit.decision === "issue" || hit.decision === "ignore" ? hit.decision : undefined;
   const noteDirty = note !== (hit.note ?? "");
   if (surface === "card") {
     const columns = spotColumns(hit);
+    const locus = spotLocus(hit);
     return (
       <>
-        <div className="review-spot-body">
+        <div className="review-spot-body" ref={bodyRef}>
+          {locus ? (
+            <section className="review-spot-locus" aria-label={locus.title}>
+              <h3>{locus.title}</h3>
+              <p className="review-spot-locus-detail">{locus.detail}</p>
+              {locus.manuscript ? <LocusLine label={REVIEW_COPY.manuscriptRead} clip={locus.manuscript} /> : null}
+              {locus.standard ? <LocusLine label={REVIEW_COPY.excelStandard} clip={locus.standard} /> : null}
+            </section>
+          ) : null}
           <div className="review-evidence-grid">
             <SpotColumnView column={columns.left} />
             <SpotColumnView column={columns.right} />

@@ -84,7 +84,7 @@ export function zoomToBox(
 }
 
 /**
- * 就地对照：把这条范围框进视口，并在右侧留出对照窗。
+ * 就地对照：把这条范围框进视口，并在空档较大的一侧留出对照窗。
  * 范围已经铺满画面时保持整页。
  */
 export function frameRangeForCard(
@@ -92,6 +92,7 @@ export function frameRangeForCard(
   page: { width: number; height: number },
   view: { width: number; height: number },
   reserve: { width: number; gap: number },
+  side: "left" | "right" = "right",
 ): ZoomState {
   const pw = Number(page.width);
   const ph = Number(page.height);
@@ -110,8 +111,21 @@ export function frameRangeForCard(
   const rightLaid = (Number(box.left) + Number(box.width)) / pw * laid.imgW;
   const leftLaid = Number(box.left) / pw * laid.imgW;
   const targetRight = vw - reserve.width - reserve.gap;
-  let x = targetRight - laid.offsetX - rightLaid * scale;
+  const targetLeft = reserve.width + reserve.gap;
+  let x = side === "left"
+    ? targetLeft - laid.offsetX - leftLaid * scale
+    : targetRight - laid.offsetX - rightLaid * scale;
   let y = vh / 2 - laid.offsetY - cy * scale;
+  if (side === "left") {
+    let boxRight = laid.offsetX + rightLaid * scale + x;
+    if (boxRight > vw - 16) x -= boxRight - (vw - 16);
+    const boxLeft = laid.offsetX + leftLaid * scale + x;
+    if (boxLeft < targetLeft - 1) {
+      x = vw / 2 - laid.offsetX - cx * scale;
+      y = vh / 2 - laid.offsetY - cy * scale;
+    }
+    return { scale, x, y };
+  }
   const boxLeft = laid.offsetX + leftLaid * scale + x;
   if (boxLeft < 16) x += 16 - boxLeft;
   const boxRight = laid.offsetX + rightLaid * scale + x;
