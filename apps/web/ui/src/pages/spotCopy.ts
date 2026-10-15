@@ -121,6 +121,213 @@ export function spotPendingEmptyLine(pending: number, decision: string | null | 
 
 type MarkSlice = { text: string; mark: boolean };
 
+const LOCUS_RADIUS = 16;
+
+function pointsOf(text: string): string[] {
+  return Array.from(text);
+}
+
+function indexOfPoints(haystack: string[], needle: string[], from = 0): number {
+  if (!needle.length || from < 0) return -1;
+  outer: for (let i = from; i <= haystack.length - needle.length; i += 1) {
+    for (let j = 0; j < needle.length; j += 1) {
+      if (haystack[i + j] !== needle[j]) continue outer;
+    }
+    return i;
+  }
+  return -1;
+}
+
+function slicePoints(text: string, start: number, end: number): string {
+  return pointsOf(text).slice(start, end).join("");
+}
+
+function uniqueLocate(text: string, needle: string): SpotSpan | null {
+  const hay = pointsOf(text);
+  const pin = pointsOf(needle);
+  if (!pin.length) return null;
+  const first = indexOfPoints(hay, pin, 0);
+  if (first < 0) return null;
+  if (indexOfPoints(hay, pin, first + 1) >= 0) return null;
+  return [first, first + pin.length];
+}
+
+/** 同一小段出现两次就不取第一处，避免把缺口标到更早的重复上。 */
+function uniquePointIndex(hay: string[], needle: string[]): number | null {
+  if (!needle.length) return null;
+  const first = indexOfPoints(hay, needle, 0);
+  if (first < 0) return null;
+  if (indexOfPoints(hay, needle, first + 1) >= 0) return null;
+  return first;
+}
+
+function findTail(haystack: string, context: string): number | null {
+  const hay = pointsOf(haystack);
+  const ctx = pointsOf(context.replace(/^…/u, ""));
+  if (!ctx.length || !hay.length) return null;
+  for (const n of [12, 8, 6, 4, 2]) {
+    if (ctx.length < n) continue;
+    const at = uniquePointIndex(hay, ctx.slice(ctx.length - n));
+    if (at != null) return at + n;
+  }
+  return null;
+}
+
+function findHead(haystack: string, context: string): number | null {
+  const hay = pointsOf(haystack);
+  const ctx = pointsOf(context.replace(/…$/u, ""));
+  if (!ctx.length || !hay.length) return null;
+  for (const n of [12, 8, 6, 4, 2]) {
+    if (ctx.length < n) continue;
+    const at = uniquePointIndex(hay, ctx.slice(0, n));
+    if (at != null) return at;
+  }
+  return null;
+}
+
+/** 短跨度原样用。长跨度对齐到另一侧，只留下第一处对不上的那几个字。 */
+function focusSpan(source: string, span: SpotSpan, other: string): SpotSpan {
+  const chars = pointsOf(source);
+  const start = Math.max(0, Math.min(span[0], chars.length));
+  const end = Math.max(start, Math.min(span[1], chars.length));
+  if (end - start <= 24) return [start, end];
+  const exp = chars.slice(start, end);
+  const left = chars.slice(Math.max(0, start - 12), start).join("");
+  const caret = findTail(other, left);
+  const present = pointsOf(other);
+  const anchor = caret == null && start === 0 ? 0 : caret;
+  if (anchor == null) return [start, Math.min(end, start + 24)];
+  let i = 0;
+  while (i < exp.length && anchor + i < present.length && exp[i] === present[anchor + i]) i += 1;
+  if (i >= exp.length) return [start, Math.min(end, start + 24)];
+  let j = i + 1;
+  while (j < exp.length && j - i < 24) {
+    const ahead = exp.slice(j, j + 4).join("");
+    const nearby = present.slice(anchor + i, anchor + i + 10).join("");
+    if (ahead.length >= 2 && nearby.includes(ahead)) break;
+    j += 1;
+  }
+  return [start + i, start + j];
+}
+
+function clipAround(text: string, start: number, end: number): { before: string; mark: string; after: string } {
+  const chars = pointsOf(text);
+  const from = Math.max(0, Math.min(start, chars.length));
+  const to = Math.max(from, Math.min(end, chars.length));
+  const b0 = Math.max(0, from - LOCUS_RADIUS);
+  const a1 = Math.min(chars.length, to + LOCUS_RADIUS);
+  return {
+    before: (b0 > 0 ? "…" : "") + chars.slice(b0, from).join(""),
+    mark: chars.slice(from, to).join(""),
+    after: chars.slice(to, a1).join("") + (a1 < chars.length ? "…" : ""),
+  };
+}
+
+function quoteOf(text: string): string {
+  const chars = pointsOf(text);
+  const shown = chars.slice(0, 40).join("");
+  if (shown !== "" && /^\s+$/u.test(shown)) return "空格";
+  return chars.length > 40 ? `${shown}…` : shown;
+}
+
+export type LocusClip = {
+  before: string;
+  mark: string;
+  after: string;
+  gap: boolean;
+};
+
+export type SpotLocus = {
+  kind: "miss" | "extra";
+  title: string;
+  detail: string;
+  manuscript: LocusClip | null;
+  standard: LocusClip | null;
+};
+
+function gapClip(text: string, caret: number | null): LocusClip | null {
+  if (!text || caret == null) return null;
+  const at = Math.max(0, Math.min(caret, pointsOf(text).length));
+  return { ...clipAround(text, at, at), mark: "", gap: true };
+}
+
+function markClip(text: string, span: SpotSpan | null): LocusClip | null {
+  if (!text || !span) return null;
+  const clip = clipAround(text, span[0], span[1]);
+  if (!clip.mark) return null;
+  return { ...clip, gap: false };
+}
+
+function bareMark(text: string): LocusClip {
+  const chars = pointsOf(text);
+  return {
+    before: "",
+    mark: chars.slice(0, 40).join(""),
+    after: chars.length > 40 ? "…" : "",
+    gap: false,
+  };
+}
+
+/** 漏字、多字在两列全文上面点出少在哪、多在哪。其它状态不造这个板块。 */
+export function spotLocus(hit: FieldHit): SpotLocus | null {
+  if (hit.status !== "漏字" && hit.status !== "多字") return null;
+  const columns = spotColumns(hit);
+  const manuscript = columns.left.sentence || columns.left.body || "";
+  const standard = columns.right.sentence || "";
+  if (hit.status === "漏字") {
+    let span = columns.right.span ?? (standard ? uniqueLocate(standard, String(hit.excel_value ?? "")) : null);
+    if (!span || !standard) {
+      const exp = String(hit.excel_value ?? "");
+      if (!exp) return null;
+      return {
+        kind: "miss",
+        title: REVIEW_COPY.missHere,
+        detail: REVIEW_COPY.missedText(quoteOf(exp)),
+        manuscript: null,
+        standard: bareMark(exp),
+      };
+    }
+    const focused = focusSpan(standard, span, manuscript);
+    const quote = slicePoints(standard, focused[0], focused[1]);
+    if (!quote) return null;
+    const left = slicePoints(standard, Math.max(0, focused[0] - 12), focused[0]);
+    const right = slicePoints(standard, focused[1], focused[1] + 12);
+    const caret = findTail(manuscript, left) ?? findHead(manuscript, right);
+    return {
+      kind: "miss",
+      title: REVIEW_COPY.missHere,
+      detail: REVIEW_COPY.missedText(quoteOf(quote)),
+      manuscript: gapClip(manuscript, caret),
+      standard: markClip(standard, focused),
+    };
+  }
+  let span = columns.left.span ?? (manuscript ? uniqueLocate(manuscript, String(hit.pdf ?? "")) : null);
+  if (!span || !manuscript) {
+    const got = String(hit.pdf ?? "");
+    if (!got) return null;
+    return {
+      kind: "extra",
+      title: REVIEW_COPY.extraHere,
+      detail: REVIEW_COPY.extraText(quoteOf(got)),
+      manuscript: bareMark(got),
+      standard: null,
+    };
+  }
+  const focused = focusSpan(manuscript, span, standard);
+  const quote = slicePoints(manuscript, focused[0], focused[1]);
+  if (!quote) return null;
+  const left = slicePoints(manuscript, Math.max(0, focused[0] - 12), focused[0]);
+  const right = slicePoints(manuscript, focused[1], focused[1] + 12);
+  const caret = standard ? findTail(standard, left) ?? findHead(standard, right) : null;
+  return {
+    kind: "extra",
+    title: REVIEW_COPY.extraHere,
+    detail: REVIEW_COPY.extraText(quoteOf(quote)),
+    manuscript: markClip(manuscript, focused),
+    standard: gapClip(standard, caret),
+  };
+}
+
 /** 按原句的 Unicode 码位切片。后端下标是码位，不用 JS 的 UTF-16 length。调用方用文本节点画，不拼 HTML。 */
 export function markedSlices(sentence: string, span: SpotSpan | null): MarkSlice[] {
   if (!sentence) return [];

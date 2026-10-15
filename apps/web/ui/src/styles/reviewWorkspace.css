@@ -68,7 +68,31 @@ html[data-theme="dark"] .review-thumbs { background: #1f1a24; }
 .review-flat-row strong { overflow-wrap: anywhere; font-weight: 500; }
 .review-flat-row small { color: var(--muted); font-size: 13px; }
 .review-flat-detail { padding: 0 16px 16px; display: grid; gap: 8px; }
-.review-workspace .hit-box.hit-range { pointer-events: auto; cursor: pointer; background: transparent; }
+.review-workspace .hit-box.hit-range {
+  pointer-events: auto;
+  cursor: pointer;
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+  min-width: 0;
+  min-height: 0;
+  /* 描边画在字外，并按缩放收回成屏幕上的细线，避免框线把字切断。 */
+  outline: max(0.5px, calc(1.5px / var(--spot-zoom, 1))) solid var(--pin);
+  outline-offset: max(1px, calc(4px / var(--spot-zoom, 1)));
+}
+.review-workspace .hit-box.hit-range.is-on { box-shadow: none; }
+.review-workspace .hit-box.hit-underline {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  min-width: 0;
+  min-height: 0;
+  /* 线画在框外，不占字的底边。粗细按缩放收回成屏幕上的细线。 */
+  box-shadow: 0 max(0.5px, calc(2px / var(--spot-zoom, 1))) 0 0 var(--pin);
+}
+.review-workspace .hit-box.hit-underline.is-warn {
+  box-shadow: 0 max(0.5px, calc(2px / var(--spot-zoom, 1))) 0 0 var(--warn);
+}
 .review-workspace .hit-box[data-spot-frame] { pointer-events: auto; cursor: pointer; }
 .review-spot-card {
   position: absolute;
@@ -77,7 +101,7 @@ html[data-theme="dark"] .review-thumbs { background: #1f1a24; }
   flex-direction: column;
   max-height: min(520px, 70%);
   overflow: hidden;
-  padding: 12px;
+  padding: 12px 12px 18px;
   border: 1px solid var(--line);
   border-radius: 12px;
   background: var(--stage);
@@ -85,6 +109,26 @@ html[data-theme="dark"] .review-thumbs { background: #1f1a24; }
   user-select: text;
   -webkit-user-select: text;
   visibility: hidden;
+}
+.review-spot-card.is-sized { max-height: none; }
+.review-spot-resize {
+  position: absolute;
+  right: 2px;
+  bottom: 2px;
+  width: 16px;
+  height: 16px;
+  cursor: nwse-resize;
+  touch-action: none;
+}
+.review-spot-resize::after {
+  content: "";
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  width: 8px;
+  height: 8px;
+  border-right: 2px solid var(--muted);
+  border-bottom: 2px solid var(--muted);
 }
 .review-spot-card.is-placed { visibility: visible; }
 .review-spot-head { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; min-width: 0; cursor: grab; user-select: none; -webkit-user-select: none; }
@@ -102,7 +146,31 @@ html[data-theme="dark"] .review-thumbs { background: #1f1a24; }
 /* 整句对照由卡身滚动。右栏证据仍用 app.css 的 7.5em。 */
 .review-spot-card .review-evidence-value { max-height: none; overflow: visible; }
 .review-spot-aside, .review-spot-omit, .review-spot-empty { margin: 4px 0 0; color: var(--muted); font-size: 13px; }
-.review-spot-mark { background: color-mix(in srgb, var(--pin) 72%, transparent); }
+.review-spot-mark {
+  background: color-mix(in srgb, var(--pin) 72%, transparent);
+  border-radius: 3px;
+  padding: 0 2px;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+.review-spot-locus {
+  margin: 0 0 8px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--pin) 14%, var(--stage));
+}
+.review-spot-locus h3 { margin: 0; font-size: 14px; font-weight: 650; }
+.review-spot-locus-detail { margin: 2px 0 6px; font-weight: 650; }
+.review-spot-locus-line { margin: 2px 0; line-height: 1.55; overflow-wrap: anywhere; }
+.review-spot-gap {
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  margin: 0 1px;
+  background: var(--pin);
+  vertical-align: text-bottom;
+  border-radius: 1px;
+}
 /* 深色里 --pin 是浅色。混太满会压住浅字，所以比浅色主题更淡。 */
 html[data-theme="dark"] .review-spot-mark { background: color-mix(in srgb, var(--pin) 46%, transparent); }
 /* visual-check #2：核对要点正文跟外观字号（--ui-font，默认 16px）。 */

@@ -25,7 +25,7 @@ import { detailLoadState, shouldShowWaitCard } from "./waitCard";
 import { reviewHits, shouldUseReworkView } from "./reviewVersion";
 import { ReviewDockPanel } from "./ReviewDockPanel";
 import { ReviewHitDetail } from "./ReviewHitDetail";
-import { SPOT_CARD_GAP, SPOT_CARD_MARGIN, SPOT_CARD_WIDTH, avoidSpotObstacle, placeSpotCard, resolveSpotPosition, spotDragStarted, type SpotObstacle } from "./spotCard";
+import { SPOT_CARD_GAP, SPOT_CARD_MARGIN, SPOT_CARD_MIN_HEIGHT, SPOT_CARD_MIN_WIDTH, SPOT_CARD_WIDTH, avoidSpotObstacle, placeSpotCard, resolveSpotPosition, spotDragStarted, spotLane, spotSideRoom, type SpotObstacle } from "./spotCard";
 import { spotHeaderText, spotNavTarget, spotPendingEmptyLine } from "./spotCopy";
 import { firstPendingIssueIndex, pageIndexForHit } from "./reviewNav";
 import { customerCopy } from "./customerCopy";
@@ -131,6 +131,12 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
   const discardDraftRef = useRef(discardDraft);
   discardDraftRef.current = discardDraft;
   const [spotDragged, setSpotDragged] = useState(false);
+  const [spotSize, setSpotSize] = useState<{ width: number; height: number | null }>({ width: SPOT_CARD_WIDTH, height: null });
+  const spotSizeRef = useRef(spotSize);
+  spotSizeRef.current = spotSize;
+  const spotUserSizedRef = useRef(false);
+  const spotUserWidthRef = useRef<number | null>(null);
+  const spotResizeRef = useRef<{ id: number; x: number; y: number; width: number; height: number } | null>(null);
   const pageRef = useRef<HTMLElement>(null);
   const zoomElRef = useRef<HTMLDivElement>(null);
   const zoomRef = useRef(zoom);
@@ -171,6 +177,7 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
     if (el) {
       el.style.transform = zoomCss(next);
       el.style.setProperty("--review-pin-scale", String(1 / next.scale));
+      el.style.setProperty("--spot-zoom", String(next.scale || 1));
     }
     placeSpotRef.current();
   }
@@ -352,7 +359,9 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
     if (!canvas) return;
     const c = canvas.getBoundingClientRect();
     const view = { width: Math.max(160, c.width), height: c.height };
-    const cardSize = { width: card.offsetWidth || SPOT_CARD_WIDTH, height: card.offsetHeight || 180 };
+    const wantW = spotUserSizedRef.current ? (spotUserWidthRef.current ?? SPOT_CARD_WIDTH) : SPOT_CARD_WIDTH;
+    const cardHeight = card.offsetHeight || spotSizeRef.current.height || 180;
+    const measure = { width: wantW, height: cardHeight };
     const frame = canvas.querySelector("[data-spot-frame].is-on");
     const dragged = spotDraggedRef.current ? spotPosRef.current : null;
     if (!dragged && !(frame instanceof HTMLElement)) return;
@@ -361,12 +370,26 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
       ? { left: bounds.left - c.left, top: bounds.top - c.top, width: bounds.width, height: bounds.height }
       : { left: 0, top: 0, width: 0, height: 0 };
     const placed = dragged
-      ? resolveSpotPosition(dragged, box, cardSize, view)
-      : placeSpotCard(box, cardSize, view, SPOT_CARD_GAP, SPOT_CARD_MARGIN);
-    const pos = avoidSpotObstacle(placed, cardSize, view, spotTabObstacle(canvas), SPOT_CARD_MARGIN, SPOT_CARD_GAP);
+      ? resolveSpotPosition(dragged, box, measure, view)
+      : placeSpotCard(box, measure, view, SPOT_CARD_GAP, SPOT_CARD_MARGIN);
+    const pos = avoidSpotObstacle(
+      placed,
+      { width: placed.width, height: cardHeight },
+      view,
+      spotTabObstacle(canvas),
+      SPOT_CARD_MARGIN,
+      SPOT_CARD_GAP,
+      dragged ? null : box,
+    );
+    if (!dragged && Math.abs(placed.width - spotSizeRef.current.width) >= 1) {
+      const next = { width: placed.width, height: spotSizeRef.current.height };
+      spotSizeRef.current = next;
+      setSpotSize(next);
+    }
     if (dragged) spotPosRef.current = { left: pos.left, top: pos.top };
     card.style.left = `${Math.round(pos.left)}px`;
     card.style.top = `${Math.round(pos.top)}px`;
+    card.style.maxHeight = !dragged && placed.maxHeight ? `${placed.maxHeight}px` : "";
     card.dataset.side = placed.side;
     markSpotPlaced(true);
   };
@@ -774,11 +797,13 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
     }
     if (spotActive) {
       // 卡可见时不把 320 浮层加进预留，否则段落会被挤进 80px。
+      const want = spotUserSizedRef.current ? (spotUserWidthRef.current ?? SPOT_CARD_WIDTH) : SPOT_CARD_WIDTH;
       commitZoom(frameRangeForCard(
         box,
         metrics,
         { width: el.clientWidth, height: el.clientHeight },
-        { width: SPOT_CARD_WIDTH, gap: SPOT_CARD_GAP },
+        { width: want, gap: SPOT_CARD_GAP },
+        spotLane(box, metrics.width),
       ));
       return;
     }
@@ -1064,6 +1089,7 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
                   transform: zoomCss(zoom),
                   width: laid.imgW > 1 ? laid.imgW : undefined,
                   height: laid.imgH > 1 ? laid.imgH : undefined,
+                  ["--spot-zoom" as string]: String(zoom.scale || 1),
                 }}
               >
                 {reviewMedia ? (
@@ -1123,7 +1149,7 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
                               tabIndex={spotActive ? 0 : undefined}
                               aria-label={spotActive ? `${REVIEW_COPY.marker} ${pinNo} ${box.range ? "范围" : "错点"}` : undefined}
                               data-spot-frame={box.frame ? "1" : undefined}
-                              className={`hit-box${box.range ? " hit-range" : ""} ${box.kind === "warn" ? "is-warn" : ""} ${pairActive ? "is-on" : "is-dim"}`.trim()}
+                              className={`hit-box${box.range ? " hit-range" : ""}${spotActive && !box.range ? " hit-underline" : ""} ${box.kind === "warn" ? "is-warn" : ""} ${pairActive ? "is-on" : "is-dim"}`.trim()}
                               style={{ left: box.left, top: box.top, width: box.width, height: box.height }}
                               onPointerDown={spotActive ? (e) => e.stopPropagation() : undefined}
                               onClick={spotActive ? openThis : undefined}
@@ -1164,10 +1190,10 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
           {showSpot && current ? (
             <aside
               ref={cardRef}
-              className={spotPlaced ? "review-spot-card is-placed" : "review-spot-card"}
+              className={`review-spot-card${spotPlaced ? " is-placed" : ""}${spotSize.height ? " is-sized" : ""}`}
               data-testid="review-spot"
               aria-label={REVIEW_COPY.spotTitle}
-              style={{ width: SPOT_CARD_WIDTH }}
+              style={{ width: spotSize.width, height: spotSize.height ?? undefined }}
               onWheel={(event) => event.stopPropagation()}
             >
               <div
@@ -1253,6 +1279,66 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
                 prevDisabled={spotNavTarget(locked ? tabIndices(hits, "all", active) : tabList, active, -1) == null}
                 nextDisabled={spotNavTarget(locked ? tabIndices(hits, "all", active) : tabList, active, 1) == null}
                 pendingEmpty={spotPendingEmptyLine(counts.pending, current.decision)}
+              />
+              <div
+                className="review-spot-resize"
+                title="拖动调整大小"
+                onPointerDown={(event) => {
+                  if (event.button !== 0) return;
+                  const card = cardRef.current;
+                  if (!card) return;
+                  event.stopPropagation();
+                  event.preventDefault();
+                  spotResizeRef.current = {
+                    id: event.pointerId,
+                    x: event.clientX,
+                    y: event.clientY,
+                    width: card.offsetWidth,
+                    height: card.offsetHeight,
+                  };
+                  event.currentTarget.setPointerCapture(event.pointerId);
+                }}
+                onPointerMove={(event) => {
+                  const drag = spotResizeRef.current;
+                  const card = cardRef.current;
+                  const canvas = canvasRef.current;
+                  if (!drag || drag.id !== event.pointerId || !card || !canvas) return;
+                  const bounds = canvas.getBoundingClientRect();
+                  const view = { width: Math.max(160, bounds.width), height: bounds.height };
+                  const frame = canvas.querySelector("[data-spot-frame].is-on");
+                  let maxW = view.width - SPOT_CARD_MARGIN * 2;
+                  let maxH = Math.max(SPOT_CARD_MIN_HEIGHT, view.height - SPOT_CARD_MARGIN * 2);
+                  if (!spotDraggedRef.current && frame instanceof HTMLElement) {
+                    const rect = frame.getBoundingClientRect();
+                    const box = {
+                      left: rect.left - bounds.left,
+                      top: rect.top - bounds.top,
+                      width: rect.width,
+                      height: rect.height,
+                    };
+                    const dock = card.dataset.side;
+                    if (dock === "left" || dock === "right") maxW = spotSideRoom(box, view).room;
+                    else if (dock === "below") maxH = Math.max(0, view.height - SPOT_CARD_MARGIN - (box.top + box.height + SPOT_CARD_GAP));
+                    else if (dock === "above") maxH = Math.max(0, box.top - SPOT_CARD_GAP - SPOT_CARD_MARGIN);
+                  }
+                  const minW = Math.min(SPOT_CARD_MIN_WIDTH, Math.max(0, maxW));
+                  const width = Math.round(Math.min(Math.max(0, maxW), Math.max(minW, drag.width + event.clientX - drag.x)));
+                  const minH = Math.min(SPOT_CARD_MIN_HEIGHT, Math.max(0, maxH));
+                  const height = Math.round(Math.min(Math.max(0, maxH), Math.max(minH, drag.height + event.clientY - drag.y)));
+                  spotUserSizedRef.current = true;
+                  spotUserWidthRef.current = width;
+                  const next = { width, height };
+                  spotSizeRef.current = next;
+                  setSpotSize(next);
+                }}
+                onPointerUp={(event) => {
+                  if (spotResizeRef.current?.id !== event.pointerId) return;
+                  spotResizeRef.current = null;
+                  if (!spotDraggedRef.current) placeSpotRef.current();
+                }}
+                onPointerCancel={(event) => {
+                  if (spotResizeRef.current?.id === event.pointerId) spotResizeRef.current = null;
+                }}
               />
             </aside>
           ) : null}
