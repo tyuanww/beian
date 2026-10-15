@@ -230,6 +230,29 @@ export function markerOutsideCorner(box: PctBox, marker: { w: number; h: number 
   return { left: Math.min(100 - r, Math.max(r, left)), top: Math.min(100 - v, Math.max(v, top)) };
 }
 
+/**
+ * 编号钉跟着页图缩放，画布又裁掉溢出。外角落到可见区域外时，把钉心拉回视口内。
+ * pad 是屏幕像素，对应 28px 钉的半径。坐标仍写回页面百分比。
+ */
+export function clampPinToView(
+  pin: { left: number; top: number },
+  laid: { imgW: number; imgH: number; offsetX: number; offsetY: number },
+  zoom: { scale: number; x: number; y: number },
+  view: { width: number; height: number },
+  pad = 14,
+): { left: number; top: number } {
+  const scale = zoom.scale > 0 ? zoom.scale : 1;
+  if (!(laid.imgW > 1) || !(laid.imgH > 1) || !(view.width > pad * 2) || !(view.height > pad * 2)) return pin;
+  const viewX = laid.offsetX + zoom.x + (pin.left / 100) * laid.imgW * scale;
+  const viewY = laid.offsetY + zoom.y + (pin.top / 100) * laid.imgH * scale;
+  const nextX = Math.min(view.width - pad, Math.max(pad, viewX));
+  const nextY = Math.min(view.height - pad, Math.max(pad, viewY));
+  return {
+    left: ((nextX - laid.offsetX - zoom.x) / (laid.imgW * scale)) * 100,
+    top: ((nextY - laid.offsetY - zoom.y) / (laid.imgH * scale)) * 100,
+  };
+}
+
 /** 右栏浮层打开后，当前标记若被盖住就把画布往左平移，留 margin 像素。返回需要的 dx（≤0）。 */
 export function panToClearPanel(markerRight: number, panelLeft: number, margin = 24): number {
   const over = markerRight + margin - panelLeft;

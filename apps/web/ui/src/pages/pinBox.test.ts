@@ -6,9 +6,14 @@ import {
   missBoxUnusable,
   missLineUnboxed,
   overlayFromBox,
+  drawableRange,
+  groupsForSpot,
   overlaysForHit,
   pinHitGroupsForPage,
   pickHitBox,
+  spotDrawBoxes,
+  spotFrameBox,
+  spotMarkerBox,
   unionHitBox,
   resolvePageMetrics,
   visiblePinGroups,
@@ -233,6 +238,91 @@ describe("overlaysForHit", () => {
     const page = { width: 1000, height: 1000 };
     assert.equal(boxTooLarge({ left: 0, top: 0, width: 300, height: 1000, role: "hit", page: 1 }, page), true);
     assert.equal(boxTooLarge({ left: 0, top: 0, width: 299, height: 1000, role: "hit", page: 1 }, page), false);
+  });
+
+  it("drops a paragraph range and keeps the hit", () => {
+    const page = { width: 1000, height: 1000 };
+    const ovs = overlaysForHit(
+      [
+        { role: "range", left: 0, top: 0, width: 40, height: 40, page: 1 },
+        { role: "hit", left: 10, top: 10, width: 20, height: 20, page: 1 },
+      ],
+      1,
+      page,
+    );
+    assert.equal(ovs.length, 1);
+    assert.equal(ovs[0]?.left, "1%");
+  });
+});
+
+describe("drawableRange", () => {
+  const page = { width: 1000, height: 1000 };
+
+  it("keeps a range at 40 percent of the page", () => {
+    const range = { role: "range", left: 0, top: 0, width: 632, height: 632, page: 1 };
+    assert.equal(boxTooLarge({ ...range, role: "hit" }, page), true);
+    assert.equal(drawableRange([range], 1, page)?.role, "range");
+  });
+
+  it("keeps a range when only one side is 89 percent", () => {
+    assert.equal(drawableRange([{ role: "range", left: 0, top: 0, width: 890, height: 100, page: 1 }], 1, page)?.width, 890);
+    assert.equal(drawableRange([{ role: "range", left: 0, top: 0, width: 100, height: 890, page: 1 }], 1, page)?.height, 890);
+  });
+
+  it("falls back to the hit when width and height both exceed 90 percent", () => {
+    const boxes = [
+      { role: "range", left: 0, top: 0, width: 910, height: 910, page: 1 },
+      { role: "hit", left: 12, top: 14, width: 20, height: 16, page: 1 },
+    ];
+    assert.equal(drawableRange(boxes, 1, page), null);
+    const frame = spotFrameBox(boxes, 1, page);
+    assert.equal(frame?.role, "hit");
+    assert.equal(frame?.left, 12);
+    const draws = spotDrawBoxes(boxes, 1, page);
+    assert.equal(draws.length, 1);
+    assert.equal(draws[0]?.frame, true);
+    assert.equal(draws[0]?.box.role, "hit");
+  });
+
+  it("draws the paragraph as the frame and the hit beside it", () => {
+    const draws = spotDrawBoxes(
+      [
+        { role: "range", left: 0, top: 0, width: 100, height: 40, page: 1 },
+        { role: "hit", left: 10, top: 10, width: 8, height: 8, page: 1 },
+      ],
+      1,
+      page,
+    );
+    assert.deepEqual(draws.map((draw) => [draw.box.role, draw.frame]), [["range", true], ["hit", false]]);
+  });
+
+  it("pins the check box, not the paragraph", () => {
+    const draws = spotDrawBoxes(
+      [
+        { role: "range", left: 0, top: 0, width: 100, height: 40, page: 1 },
+        { role: "hit", left: 30, top: 10, width: 8, height: 8, page: 1 },
+        { role: "check", left: 12, top: 12, width: 16, height: 10, page: 1 },
+      ],
+      1,
+      page,
+    );
+    assert.equal(spotMarkerBox(draws)?.role, "check");
+    assert.equal(spotMarkerBox(draws)?.left, 12);
+    assert.equal(spotMarkerBox([{ box: draws[0]!.box }]), null);
+  });
+});
+
+describe("groupsForSpot", () => {
+  it("keeps only the active index", () => {
+    const groups = [
+      { i: 0, indices: [0, 1] },
+      { i: 2, indices: [2] },
+    ];
+    const kept = groupsForSpot(groups, 1);
+    assert.equal(kept.length, 1);
+    assert.equal(kept[0]?.i, 1);
+    assert.deepEqual(kept[0]?.indices, [1]);
+    assert.deepEqual(groups[0]?.indices, [0, 1]);
   });
 });
 

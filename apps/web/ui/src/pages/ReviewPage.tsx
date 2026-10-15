@@ -5,7 +5,7 @@ import { ApiError, api, type Decision, type FieldHit, type TaskDetail, type Task
 import { WaitCard } from "../chrome/WaitCard";
 import { forgetReviewHandoff, reviewHandoffFor } from "../jobHandoff";
 import { fittedPage, frameRangeForCard, panBy, panToBoxAt, resetZoom, zoomAt, zoomCss } from "./canvasZoom";
-import { locateBoxesForHit, locationPageForHit, missLineUnboxed, overlayFromBox, overlaysForHit, pickHitBox, pinHitGroupsForPage, resolvePageMetrics, unionHitBox, visiblePinGroups } from "./pinBox";
+import { boxesExceptRange, drawableRange, groupsForSpot, locateBoxesForHit, locationPageForHit, missLineUnboxed, overlayFromBox, overlaysForHit, pickHitBox, pinHitGroupsForPage, resolvePageMetrics, spotDrawBoxes, spotFrameBox, spotMarkerBox, visiblePinGroups } from "./pinBox";
 import {
   enterElementFullscreen,
   exitElementFullscreen,
@@ -15,17 +15,18 @@ import {
 import { readBoxesOn, readPinsOn, readSpotOn, skipPackSheetField, writeBoxesOn, writePinsOn, writeSpotOn } from "./reviewDock";
 import { ReviewSubmitDialog } from "./ReviewSubmitDialog";
 import {
-  FLAT_PANEL_WIDTH, conclusionFor, decisionFailureText, reworkUploadBlocked, submitFailureText, flatLayout, isTypingTarget, lockedBy, markShortcutsSeen, markerOutsideCorner, nextPendingAfter,
+  clampPinToView, conclusionFor, decisionFailureText, reworkUploadBlocked, submitFailureText, flatLayout, isTypingTarget, lockedBy, markShortcutsSeen, markerOutsideCorner, nextPendingAfter,
   panToClearPanel, phonePendingLines, positionLabel, rejectRows, shouldShowShortcutsOnOpen, submitGate, tabIndices, thumbMarks, verdictCounts, verdictForKey, isOpenHeld,
   type FlatLayout, type FlatTab,
 } from "./reviewFlat";
 import { ReviewWorkspace } from "./ReviewWorkspace";
-import { useReviewSession } from "./useReviewSession";
+import { spotPhoneDiscardId, useReviewSession } from "./useReviewSession";
 import { detailLoadState, shouldShowWaitCard } from "./waitCard";
 import { reviewHits, shouldUseReworkView } from "./reviewVersion";
 import { ReviewDockPanel } from "./ReviewDockPanel";
 import { ReviewHitDetail } from "./ReviewHitDetail";
-import { SPOT_CARD_GAP, SPOT_CARD_MARGIN, SPOT_CARD_WIDTH, placeSpotCard } from "./spotCard";
+import { SPOT_CARD_GAP, SPOT_CARD_MARGIN, SPOT_CARD_WIDTH, clampSpotCard, placeSpotCard, resolveSpotPosition, spotDragStarted } from "./spotCard";
+import { spotHeaderText, spotNavTarget, spotPendingEmptyLine } from "./spotCopy";
 import { firstPendingIssueIndex, pageIndexForHit } from "./reviewNav";
 import { customerCopy } from "./customerCopy";
 import { reviewVersionToggle } from "./reviewStatus";
@@ -94,7 +95,7 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
   const [phoneListOpen, setPhoneListOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [useV2, setUseV2] = useState(false);
-  const { notes, setNote, clearNote, savedHitId, rememberHit } = useReviewSession(userId, taskId, useV2);
+  const { notes, setNote, clearNote, discardDraft, savedHitId, rememberHit } = useReviewSession(userId, taskId, useV2);
   const [decisionError, setDecisionError] = useState<string | null>(null);
   const [nat, setNat] = useState<{ width: number; height: number } | null>(null);
   const [reviewMedia, setReviewMedia] = useState<PreparedReviewMedia | null>(null);
@@ -113,6 +114,12 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
   const spotPlacedRef = useRef(false);
   const placeSpotRef = useRef<() => void>(() => undefined);
   const spotUiRef = useRef({ layout: "wide" as FlatLayout, panelOpen: false, showSpot: false });
+  const spotDraggedRef = useRef(false);
+  const spotPosRef = useRef<{ left: number; top: number } | null>(null);
+  const spotDragRef = useRef<{ id: number; x: number; y: number; left: number; top: number; moved: boolean } | null>(null);
+  const discardDraftRef = useRef(discardDraft);
+  discardDraftRef.current = discardDraft;
+  const [spotDragged, setSpotDragged] = useState(false);
   const pageRef = useRef<HTMLElement>(null);
   const zoomElRef = useRef<HTMLDivElement>(null);
   const zoomRef = useRef(zoom);
@@ -309,16 +316,14 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
   const spotActive = spotOn && layout !== "phone";
   const pinHits = useMemo(() => {
     const groups = pinHitGroupsForPage(hits, pageNo);
-    if (!spotActive) return visiblePinGroups(groups, signed ? -1 : active);
-    const parted = partitionReviewHits(hits);
-    const shown = new Set([...parted.issues, ...parted.held].map((row) => row.index));
-    if (active >= 0) shown.add(active);
-    return groups.filter((group) => group.indices.some((index) => shown.has(index)));
+    if (spotActive) return groupsForSpot(groups, active);
+    return visiblePinGroups(groups, signed ? -1 : active);
   }, [hits, pageNo, active, signed, spotActive]);
   const currentLocate = current ? locateBoxesForHit(current) : [];
-  const currentBox = current ? pickHitBox(currentLocate, pageNo, metrics) : null;
+  const currentBox = current ? pickHitBox(boxesExceptRange(currentLocate), pageNo, metrics) : null;
   const currentHasBox = Boolean(currentBox);
-  const showSpot = Boolean(spotActive && boxesOn && reviewMedia && unionHitBox(currentLocate, pageNo, metrics));
+  const spotRange = current ? drawableRange(currentLocate, pageNo, metrics) : null;
+  const showSpot = Boolean(spotActive && boxesOn && reviewMedia && current && (spotRange || currentBox));
   spotUiRef.current = { layout, panelOpen, showSpot };
   function markSpotPlaced(on: boolean) {
     if (spotPlacedRef.current === on) return;
@@ -333,18 +338,21 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
       return;
     }
     const canvas = canvasRef.current;
-    const box = canvas?.querySelector(".hit-range.is-on");
-    if (!canvas || !(box instanceof HTMLElement)) return;
+    if (!canvas) return;
     const c = canvas.getBoundingClientRect();
-    const b = box.getBoundingClientRect();
-    const cover = ui.layout === "overlay" && ui.panelOpen ? FLAT_PANEL_WIDTH : 0;
-    const pos = placeSpotCard(
-      { left: b.left - c.left, top: b.top - c.top, width: b.width, height: b.height },
-      { width: card.offsetWidth || SPOT_CARD_WIDTH, height: card.offsetHeight || 180 },
-      { width: Math.max(160, c.width - cover), height: c.height },
-      SPOT_CARD_GAP,
-      SPOT_CARD_MARGIN,
-    );
+    const view = { width: Math.max(160, c.width), height: c.height };
+    const cardSize = { width: card.offsetWidth || SPOT_CARD_WIDTH, height: card.offsetHeight || 180 };
+    const frame = canvas.querySelector("[data-spot-frame].is-on");
+    const dragged = spotDraggedRef.current ? spotPosRef.current : null;
+    if (!dragged && !(frame instanceof HTMLElement)) return;
+    const bounds = frame instanceof HTMLElement ? frame.getBoundingClientRect() : null;
+    const box = bounds
+      ? { left: bounds.left - c.left, top: bounds.top - c.top, width: bounds.width, height: bounds.height }
+      : { left: 0, top: 0, width: 0, height: 0 };
+    const pos = dragged
+      ? resolveSpotPosition(dragged, box, cardSize, view)
+      : placeSpotCard(box, cardSize, view, SPOT_CARD_GAP, SPOT_CARD_MARGIN);
+    if (dragged) spotPosRef.current = { left: pos.left, top: pos.top };
     card.style.left = `${Math.round(pos.left)}px`;
     card.style.top = `${Math.round(pos.top)}px`;
     card.dataset.side = pos.side;
@@ -517,6 +525,13 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
+
+  const activeHit = hits[active];
+  const phoneDiscardId = spotPhoneDiscardId(layout, spotOn, activeHit?.id, activeHit?.id ? notes[activeHit.id] : undefined, activeHit?.note);
+  useEffect(() => {
+    if (!phoneDiscardId) return;
+    discardDraftRef.current(phoneDiscardId);
+  }, [phoneDiscardId]);
 
   if (!taskId) {
     return (
@@ -735,19 +750,20 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
     const el = viewRef.current;
     if (!h || !metrics || !el) return;
     const boxes = locateBoxesForHit(h);
-    const box = spotActive ? unionHitBox(boxes, pageNo, metrics) : pickHitBox(boxes, pageNo, metrics);
+    const box = spotActive
+      ? spotFrameBox(boxes, pageNo, metrics)
+      : pickHitBox(boxesExceptRange(boxes), pageNo, metrics);
     if (!box) {
       commitZoom(resetZoom());
       return;
     }
     if (spotActive) {
-      // 页图按整块画布适配。浮层右栏盖住右侧时，只把预留加宽，不能先缩小视口再算 fittedPage。
-      const cover = layout === "overlay" && panelOpen ? FLAT_PANEL_WIDTH : 0;
+      // 卡可见时不把 320 浮层加进预留，否则段落会被挤进 80px。
       commitZoom(frameRangeForCard(
         box,
         metrics,
         { width: el.clientWidth, height: el.clientHeight },
-        { width: SPOT_CARD_WIDTH + cover, gap: SPOT_CARD_GAP },
+        { width: SPOT_CARD_WIDTH, gap: SPOT_CARD_GAP },
       ));
       return;
     }
@@ -1058,16 +1074,29 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
                   const pairActive = indices.includes(active);
                   const source = pairActive ? (hits[active] ?? h) : h;
                   const locateBoxes = locateBoxesForHit(source);
-                  const preferred = pickHitBox(locateBoxes, pageNo, metrics);
-                  const range = spotActive ? unionHitBox(locateBoxes, pageNo, metrics) : null;
-                  const rangeOverlay = range && metrics ? overlayFromBox(range, metrics) : null;
-                  const overlays = spotActive ? (rangeOverlay ? [rangeOverlay] : []) : overlaysForHit(locateBoxes, pageNo, metrics);
-                  const anchor = spotActive ? rangeOverlay : (preferred && metrics ? overlayFromBox(preferred, metrics) : null);
+                  const preferred = pickHitBox(boxesExceptRange(locateBoxes), pageNo, metrics);
+                  const draws = spotActive ? spotDrawBoxes(locateBoxes, pageNo, metrics) : [];
+                  const overlays = spotActive
+                    ? draws.flatMap((draw) => {
+                        const ov = metrics ? overlayFromBox(draw.box, metrics) : null;
+                        return ov ? [{ ...ov, frame: draw.frame, range: draw.box.role === "range" }] : [];
+                      })
+                    : overlaysForHit(locateBoxes, pageNo, metrics).map((ov) => ({ ...ov, frame: false, range: false }));
+                  const markerBox = spotActive ? spotMarkerBox(draws) : preferred;
+                  const anchor = markerBox && metrics ? overlayFromBox(markerBox, metrics) : null;
                   const pin = anchor
-                    ? markerOutsideCorner({ left: parseFloat(anchor.left), top: parseFloat(anchor.top), width: parseFloat(anchor.width), height: parseFloat(anchor.height) }, pinSize)
+                    ? clampPinToView(
+                        markerOutsideCorner({ left: parseFloat(anchor.left), top: parseFloat(anchor.top), width: parseFloat(anchor.width), height: parseFloat(anchor.height) }, pinSize),
+                        laid,
+                        zoom,
+                        viewSize ?? { width: 0, height: 0 },
+                      )
                     : null;
                   const pinNo = (pairActive ? active : i) + 1;
-                  const openThis = () => { if (layout === "overlay") setPanelOpen(true); pickHit(pairActive ? active : i); };
+                  const openThis = () => {
+                    if (!spotActive && layout === "overlay") setPanelOpen(true);
+                    pickHit(pairActive ? active : i);
+                  };
                   return (
                     <Fragment key={h.id || i}>
                       {boxesOn
@@ -1076,8 +1105,9 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
                               key={`${h.id || i}-box-${k}`}
                               role={spotActive ? "button" : undefined}
                               tabIndex={spotActive ? 0 : undefined}
-                              aria-label={spotActive ? `${REVIEW_COPY.marker} ${pinNo} 范围` : undefined}
-                              className={`hit-box${spotActive ? " hit-range" : ""} ${box.kind === "warn" ? "is-warn" : ""} ${pairActive ? "is-on" : "is-dim"}`.trim()}
+                              aria-label={spotActive ? `${REVIEW_COPY.marker} ${pinNo} ${box.range ? "范围" : "错点"}` : undefined}
+                              data-spot-frame={box.frame ? "1" : undefined}
+                              className={`hit-box${box.range ? " hit-range" : ""} ${box.kind === "warn" ? "is-warn" : ""} ${pairActive ? "is-on" : "is-dim"}`.trim()}
                               style={{ left: box.left, top: box.top, width: box.width, height: box.height }}
                               onPointerDown={spotActive ? (e) => e.stopPropagation() : undefined}
                               onClick={spotActive ? openThis : undefined}
@@ -1122,13 +1152,72 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
               data-testid="review-spot"
               aria-label={REVIEW_COPY.spotTitle}
               style={{ width: SPOT_CARD_WIDTH }}
+              onWheel={(event) => event.stopPropagation()}
             >
-              <div className="review-spot-head">
-                <span className="hit-no">{active + 1}</span>
-                <strong>{current.field || "项目"}</strong>
-                <small>P{current.page ?? pageNo}</small>
+              <div
+                className="review-spot-head"
+                onPointerDown={(event) => {
+                  if (event.button !== 0) return;
+                  const target = event.target;
+                  if (target instanceof Element && target.closest("button")) return;
+                  const card = cardRef.current;
+                  if (!card) return;
+                  event.stopPropagation();
+                  const origin = spotPosRef.current ?? { left: card.offsetLeft, top: card.offsetTop };
+                  spotDragRef.current = { id: event.pointerId, x: event.clientX, y: event.clientY, left: origin.left, top: origin.top, moved: false };
+                  event.currentTarget.setPointerCapture(event.pointerId);
+                }}
+                onPointerMove={(event) => {
+                  const drag = spotDragRef.current;
+                  const card = cardRef.current;
+                  const canvas = canvasRef.current;
+                  if (!drag || drag.id !== event.pointerId || !card || !canvas) return;
+                  const dx = event.clientX - drag.x;
+                  const dy = event.clientY - drag.y;
+                  if (!drag.moved && !spotDragStarted(dx, dy)) return;
+                  drag.moved = true;
+                  if (!spotDraggedRef.current) {
+                    spotDraggedRef.current = true;
+                    setSpotDragged(true);
+                  }
+                  const bounds = canvas.getBoundingClientRect();
+                  const next = clampSpotCard(
+                    { left: drag.left + dx, top: drag.top + dy },
+                    { width: card.offsetWidth || SPOT_CARD_WIDTH, height: card.offsetHeight || 180 },
+                    { width: Math.max(160, bounds.width), height: bounds.height },
+                    SPOT_CARD_MARGIN,
+                  );
+                  spotPosRef.current = next;
+                  card.style.left = `${Math.round(next.left)}px`;
+                  card.style.top = `${Math.round(next.top)}px`;
+                  card.dataset.side = "held";
+                  markSpotPlaced(true);
+                }}
+                onPointerUp={(event) => {
+                  if (spotDragRef.current?.id === event.pointerId) spotDragRef.current = null;
+                }}
+                onPointerCancel={(event) => {
+                  if (spotDragRef.current?.id === event.pointerId) spotDragRef.current = null;
+                }}
+              >
+                <strong>{spotHeaderText(current.status || current.field || "项目", current.item, REVIEW_COPY.tabs[locked ? "all" : tab], locked ? positionLabel(tabIndices(hits, "all", active), active, undefined, heldCount) : positionLabel(tabList, active, tab === "pending" ? counts.pending : undefined, heldCount))}</strong>
+                {spotDragged ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      spotDraggedRef.current = false;
+                      spotPosRef.current = null;
+                      setSpotDragged(false);
+                      placeSpotRef.current();
+                    }}
+                  >
+                    {REVIEW_COPY.backToFrame}
+                  </button>
+                ) : null}
+                {spotDragged ? <span className="review-spot-away">{REVIEW_COPY.cardLeftFrame}</span> : null}
               </div>
               <ReviewHitDetail
+                surface="card"
                 hit={current}
                 hasBox
                 verbatim={task?.verbatim_check === true}
@@ -1139,6 +1228,11 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
                 onDecide={(hit, decision, note) => publishDecision(hit, decision, note)}
                 onNoteCommit={(hit, decision, note) => publishDecision(hit, decision, note, false)}
                 onNoteChange={(value) => { if (current.id) setNote(current.id, value); }}
+                onPrev={() => { const target = spotNavTarget(locked ? tabIndices(hits, "all", active) : tabList, active, -1); if (target != null) pickHit(target); }}
+                onNext={() => { const target = spotNavTarget(locked ? tabIndices(hits, "all", active) : tabList, active, 1); if (target != null) pickHit(target); }}
+                prevDisabled={spotNavTarget(locked ? tabIndices(hits, "all", active) : tabList, active, -1) == null}
+                nextDisabled={spotNavTarget(locked ? tabIndices(hits, "all", active) : tabList, active, 1) == null}
+                pendingEmpty={spotPendingEmptyLine(counts.pending, current.decision)}
               />
             </aside>
           ) : null}
@@ -1162,6 +1256,11 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
                 const next = !spotOn;
                 setSpotOn(next);
                 writeSpotOn(browserStore(), next);
+                if (!next) {
+                  spotDraggedRef.current = false;
+                  spotPosRef.current = null;
+                  setSpotDragged(false);
+                }
                 if (next) window.requestAnimationFrame(() => fitHitRef.current(activeRef.current));
                 else commitZoom(resetZoom());
               }}

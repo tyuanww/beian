@@ -1,8 +1,10 @@
 /** 就地对照窗：贴在范围框外侧，屏幕坐标，不跟着稿件缩放。 */
 
-export const SPOT_CARD_WIDTH = 300;
+export const SPOT_CARD_WIDTH = 440;
 export const SPOT_CARD_GAP = 12;
 export const SPOT_CARD_MARGIN = 8;
+/** 抬头移动满 4px 才算拖，小于 4px 算点击。 */
+const SPOT_DRAG_PX = 4;
 
 export type SpotSide = "right" | "left" | "below";
 
@@ -38,4 +40,37 @@ export function placeSpotCard(
     top: Math.min(maxTop, Math.max(margin, chosen.top)),
     side: chosen.side,
   };
+}
+
+/** 只把已放下的位置夹进同一套 margin，不重选左右或上下。 */
+export function clampSpotCard(
+  pos: { left: number; top: number },
+  card: { width: number; height: number },
+  view: { width: number; height: number },
+  margin = SPOT_CARD_MARGIN,
+): { left: number; top: number } {
+  const maxLeft = Math.max(margin, view.width - card.width - margin);
+  const maxTop = Math.max(margin, view.height - card.height - margin);
+  return {
+    left: Math.min(maxLeft, Math.max(margin, pos.left)),
+    top: Math.min(maxTop, Math.max(margin, pos.top)),
+  };
+}
+
+/** 拖过之后忽略框的新位置。未拖动仍走 placeSpotCard。 */
+export function resolveSpotPosition(
+  dragged: { left: number; top: number } | null,
+  box: Rect,
+  card: { width: number; height: number },
+  view: { width: number; height: number },
+): { left: number; top: number; side: SpotSide | "held" } {
+  if (dragged) {
+    const held = clampSpotCard(dragged, card, view);
+    return { left: held.left, top: held.top, side: "held" };
+  }
+  return placeSpotCard(box, card, view);
+}
+
+export function spotDragStarted(dx: number, dy: number, threshold = SPOT_DRAG_PX): boolean {
+  return Math.hypot(dx, dy) >= threshold;
 }

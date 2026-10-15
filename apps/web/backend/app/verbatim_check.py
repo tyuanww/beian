@@ -10,6 +10,7 @@ import json
 import os
 import sys
 import threading
+import unicodedata
 from pathlib import Path
 from typing import Any
 
@@ -332,6 +333,206 @@ def _hit(index: int, status: str, blocking: bool, op: dict, box: dict[str, int] 
     return hit
 
 
+def _row_ids(raw: object) -> list[int]:
+    """compare_block 放进 result['rows'] 的是工作表行号，不是 load_excel 的列表下标。"""
+    if not isinstance(raw, list):
+        return []
+    seen: list[int] = []
+    for item in raw:
+        if isinstance(item, bool) or not isinstance(item, int):
+            continue
+        if item not in seen:
+            seen.append(item)
+    return seen
+
+
+def _excel_from_rows(rows: list, row_ids: list[int]) -> dict[str, Any]:
+    """恰好一个工作表行号时按 row 字段回查。零个或多于一个不拼接。"""
+    count = len(row_ids)
+    if count != 1:
+        return {"text": "", "item": None, "count": count}
+    wanted = row_ids[0]
+    for row in rows:
+        if isinstance(row, dict) and row.get("row") == wanted:
+            text = row.get("text")
+            item = row.get("item")
+            return {
+                "text": "" if text is None else str(text),
+                "item": None if item is None else str(item),
+                "count": 1,
+            }
+    return {"text": "", "item": None, "count": 1}
+
+
+def _is_punct(ch: str) -> bool:
+    return bool(ch) and unicodedata.category(ch).startswith("P")
+
+
+def _span_in_sentence(sentence: str, needle: str, *, drop_space: bool) -> tuple[list[int] | None, str | None]:
+    """去掉标点后唯一出现才映射回原句。空串不搜。零次 unmatched，两次以上 duplicate。"""
+    if needle == "":
+        return None, "unmatched"
+
+    def norm(text: str) -> tuple[str, list[int]]:
+        chars: list[str] = []
+        index: list[int] = []
+        for i, ch in enumerate(text):
+            if _is_punct(ch):
+                continue
+            if drop_space and ch.isspace():
+                continue
+            chars.append(ch)
+            index.append(i)
+        return "".join(chars), index
+
+    hay, index = norm(sentence)
+    pin, _pin_index = norm(needle)
+    if pin == "":
+        return None, "unmatched"
+    found: list[int] = []
+    start = 0
+    while True:
+        at = hay.find(pin, start)
+        if at < 0:
+            break
+        found.append(at)
+        if len(found) > 1:
+            return None, "duplicate"
+        start = at + 1
+    if not found:
+        return None, "unmatched"
+    at = found[0]
+    begin = index[at]
+    end = index[at + len(pin) - 1] + 1
+    return [begin, end], None
+
+
+def _positive_area(a: object, b: object) -> bool:
+    """加宽前的错点框。正的相交面积才算重叠，只贴边不算。"""
+
+    def rect(box: object) -> tuple[float, float, float, float] | None:
+        if not isinstance(box, (list, tuple)) or len(box) < 4:
+            return None
+        try:
+            x0, y0, x1, y1 = (float(box[0]), float(box[1]), float(box[2]), float(box[3]))
+        except (TypeError, ValueError):
+            return None
+        if x1 < x0:
+            x0, x1 = x1, x0
+        if y1 < y0:
+            y0, y1 = y1, y0
+        return x0, y0, x1, y1
+
+    left = rect(a)
+    right = rect(b)
+    if left is None or right is None:
+        return False
+    ix0, iy0 = max(left[0], right[0]), max(left[1], right[1])
+    ix1, iy1 = min(left[2], right[2]), min(left[3], right[3])
+    return ix1 > ix0 and iy1 > iy0
+
+
+def _same_duplicate(a: dict, b: dict) -> bool:
+    if len(a["row_ids"]) != 1 or a["row_ids"] != b["row_ids"]:
+        return False
+    if a["status"] != b["status"]:
+        return False
+    if str(a["op"].get("got") or "") != str(b["op"].get("got") or ""):
+        return False
+    if str(a["op"].get("exp") or "") != str(b["op"].get("exp") or ""):
+        return False
+    return _positive_area(a["raw_box"], b["raw_box"])
+
+
+def _collect_hits(pieces: list[dict], matrix: list[float]) -> list[dict]:
+    found: list[dict] = []
+    for piece in pieces:
+        manuscript = str(piece.get("manuscript") if piece.get("manuscript") is not None else "")
+        row_ids = _row_ids(piece.get("row_ids"))
+        range_box = _page_px(piece.get("bbox"), matrix)
+        for op in piece.get("ops") or []:
+            if not isinstance(op, dict):
+                continue
+            mapped = _status(op)
+            if mapped is None:
+                continue
+            status, blocking = mapped
+            found.append({
+                "op": op,
+                "status": status,
+                "blocking": blocking,
+                "raw_box": op.get("box"),
+                "manuscript": manuscript,
+                "range_box": range_box,
+                "row_ids": row_ids,
+            })
+    return found
+
+
+def _merge_duplicate_hits(cands: list[dict]) -> list[dict]:
+    kept: list[dict] = []
+    for cand in cands:
+        if any(_same_duplicate(prev, cand) for prev in kept):
+            continue
+        kept.append(cand)
+    return kept
+
+
+def _attach_spans(hit: dict[str, Any], op: dict, manuscript: str, excel_text: str) -> None:
+    kind = str(op.get("type") or "")
+    if kind in SPACE_ERRORS:
+        return
+    pdf_span, pdf_omit = _span_in_sentence(manuscript, str(op.get("got") or ""), drop_space=False)
+    excel_span, excel_omit = _span_in_sentence(excel_text, str(op.get("exp") or ""), drop_space=True)
+    if pdf_span is not None:
+        hit["pdf_span"] = pdf_span
+    elif pdf_omit:
+        hit["pdf_span_omit"] = pdf_omit
+    if excel_span is not None:
+        hit["excel_span"] = excel_span
+    elif excel_omit:
+        hit["excel_span_omit"] = excel_omit
+
+
+def _emit_hit(index: int, cand: dict, rows: list, matrix: list[float], page_size: tuple[int, int]) -> dict[str, Any]:
+    op = cand["op"]
+    status = cand["status"]
+    box = _page_px(op.get("box"), matrix)
+    if status in SPACE_ERRORS:
+        box = _cover_neighbors(box, page_size)
+    hit = _hit(index, status, cand["blocking"], op, box, 1)
+    range_box = cand["range_box"]
+    if range_box is not None:
+        hit["bboxes"] = [{**range_box, "page": 1, "role": "range", "bbox_space": "page_px"}, *hit["bboxes"]]
+    hit["no_bbox"] = not hit["bboxes"]
+    hit["manuscript"] = cand["manuscript"]
+    excel = _excel_from_rows(rows, cand["row_ids"])
+    hit["excel_standard"] = excel["text"]
+    hit["excel_row_count"] = excel["count"]
+    if excel["item"] is not None:
+        hit["item"] = excel["item"]
+    _attach_spans(hit, op, cand["manuscript"], excel["text"])
+    return hit
+
+
+def assemble_hits(pieces: list[dict], rows: list, matrix: list[float], page_size: tuple[int, int]) -> list[dict[str, Any]]:
+    """合成命中：段落框、错点框、整句、行号回查、加宽前合并。不跑 OCR。"""
+    hits: list[dict[str, Any]] = []
+    for cand in _merge_duplicate_hits(_collect_hits(pieces, matrix)):
+        hits.append(_emit_hit(len(hits) + 1, cand, rows, matrix, page_size))
+    return hits
+
+
+def _mark_warning_hit(hit: dict[str, Any]) -> dict[str, Any]:
+    """无私有数据的警告不编造段落框。manuscript 键仍在，可以是空串。"""
+    hit["manuscript"] = ""
+    hit["excel_standard"] = ""
+    hit["excel_row_count"] = 0
+    hit["bboxes"] = [box for box in hit.get("bboxes") or [] if box.get("role") != "range"]
+    hit["no_bbox"] = not hit["bboxes"]
+    return hit
+
+
 def _fsc(text: str) -> bool:
     return "FSC" in text or "认证码" in text or "★" in text or "☆" in text
 
@@ -347,7 +548,7 @@ def _warning_hits(doc: Any, matrix: list[float], page_size: tuple[int, int]) -> 
         box = _page_px(block[:4], matrix)
         if box and width > 1 and height > 1 and box["width"] > width * 0.9 and box["height"] > height * 0.9:
             box = None
-        hits.append(_hit(index, "待人工确认", False, {"exp": "", "got": "", "p": 0}, box, 1))
+        hits.append(_mark_warning_hit(_hit(index, "待人工确认", False, {"exp": "", "got": "", "p": 0}, box, 1)))
         index += 1
         if index > 40:
             break
@@ -392,25 +593,27 @@ def compare_pdf(pdf: Path, xlsx: Path, model_dir: Path, pages: list[dict]) -> di
         "".join(char["c"] for char in block["chars"] if not char.get("punct")) for block in blocks
     ).lower()
     joined = []
-    hits: list[dict[str, Any]] = []
+    pieces: list[dict] = []
     for block in blocks:
         draft = "".join(char["c"] for char in block["chars"])
         joined.append(draft)
         core = "".join(char["c"] for char in block["chars"] if not char.get("blank") and not char.get("punct"))
-        result = {"status": "nontext", "ops": []} if len(core) < 2 else prototype.compare_block(block, corpus, rows, _rec, _canvas)
+        result = {"status": "nontext", "ops": [], "rows": []} if len(core) < 2 else prototype.compare_block(block, corpus, rows, _rec, _canvas)
         if result.get("status") in ("nontext", "skip", "noncopy"):
             continue
-        for op in result.get("ops") or []:
-            mapped = _status(op)
-            if mapped is None:
-                continue
-            status, blocking = mapped
-            box = _page_px(op.get("box"), matrix)
-            if status in SPACE_ERRORS:
-                box = _cover_neighbors(box, page_size)
-            hits.append(_hit(len(hits) + 1, status, blocking, op, box, 1))
-            if _skewed(matrix):
-                hits[-1]["page_skew"] = True
+        ops = [op for op in (result.get("ops") or []) if isinstance(op, dict) and _status(op) is not None]
+        if not ops:
+            continue
+        pieces.append({
+            "manuscript": draft,
+            "bbox": block.get("bbox"),
+            "row_ids": result.get("rows") or [],
+            "ops": ops,
+        })
+    hits = assemble_hits(pieces, rows, matrix, page_size)
+    if _skewed(matrix):
+        for hit in hits:
+            hit["page_skew"] = True
     doc.close()
     out: dict[str, Any] = {"hits": hits, "engine": "rapidocr:ppocrv6-medium"}
     if _fsc("\n".join(joined)):

@@ -3,7 +3,7 @@ import { describe, it } from "node:test";
 import type { FieldHit } from "../api";
 import { PUBLIC_UPLOAD_BYTES, UPLOAD_TOO_LARGE, setUploadLimitFromMe } from "../uploadLimit";
 import {
-  completedAtLabel, completedByText, conclusionFor, decisionFailureText, reworkUploadBlocked, submitFailureText, flatLayout, isTypingTarget, lockedBy, markerOutsideCorner, nextPendingAfter,
+  clampPinToView, completedAtLabel, completedByText, conclusionFor, decisionFailureText, reworkUploadBlocked, submitFailureText, flatLayout, isTypingTarget, lockedBy, markerOutsideCorner, nextPendingAfter,
   openHeldAfterPending, panToClearPanel, phonePendingLines, positionLabel, rejectRows, shouldShowShortcutsOnOpen, submitGate, tabIndices, thumbMarks, verdictCounts, verdictForKey,
 } from "./reviewFlat.js";
 
@@ -92,6 +92,18 @@ describe("reviewFlat", () => {
     assert.deepEqual(markerOutsideCorner({ left: 10, top: 10, width: 20, height: 5 }, { w: 4, h: 3 }), { left: 32, top: 8.5 });
     const edge = markerOutsideCorner({ left: 80, top: 0, width: 19, height: 5 }, { w: 4, h: 3 });
     assert.equal(edge.left, 78); assert.equal(edge.top, 6.5);
+  });
+  it("放大后把钉心拉回可见画布", () => {
+    const laid = { imgW: 400, imgH: 400, offsetX: 0, offsetY: 0 };
+    const view = { width: 400, height: 400 };
+    const inside = clampPinToView({ left: 50, top: 50 }, laid, { scale: 1, x: 0, y: 0 }, view);
+    assert.equal(inside.left, 50);
+    assert.equal(inside.top, 50);
+    const clipped = clampPinToView({ left: 90, top: 10 }, laid, { scale: 2, x: -300, y: 0 }, view);
+    assert.ok(clipped.left < 90);
+    const screenX = laid.offsetX - 300 + (clipped.left / 100) * laid.imgW * 2;
+    assert.ok(screenX <= view.width - 14);
+    assert.ok(screenX >= 14);
   });
   it("浮层盖住标记时平移", () => {
     assert.equal(panToClearPanel(1000, 960), -64);

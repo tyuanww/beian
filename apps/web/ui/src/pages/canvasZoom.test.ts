@@ -66,11 +66,12 @@ describe("zoomToBox", () => {
     assert.equal(Math.round(z.y + laid.offsetY + imgCy * z.scale), 200);
   });
 
-  it("parks a tall page on the right of the view", () => {
+  it("centers a tall page in the view", () => {
     const laid = fittedPage({ width: 1000, height: 2000 }, { width: 400, height: 400 });
     assert.equal(laid.imgW, 200);
     assert.equal(laid.imgH, 400);
-    assert.equal(laid.offsetX, 200);
+    assert.equal(laid.offsetX, 100);
+    assert.equal(laid.offsetY, 0);
   });
 
   it("centers a box on a wide parked page", () => {

@@ -65,6 +65,25 @@ except VerbatimFail as exc:
     assert body["code"] == "result_truncated"
 
 
+def test_manuscript_over_limit_is_truncated() -> None:
+    script = """
+import json
+from app.cli import _verbatim_fail
+from app.verbatim_check import VerbatimFail, guard_stdout
+payload = json.dumps({"hits": [{"manuscript": "合成整句" * 40}]}, ensure_ascii=False)
+try:
+    guard_stdout(payload)
+except VerbatimFail as exc:
+    raise SystemExit(_verbatim_fail(exc))
+print(payload)
+"""
+    proc = _run([PY, "-c", script], {"VERBATIM_STDOUT_LIMIT": "8"})
+    body = _fail_json(proc)
+    assert body["code"] == "result_truncated"
+    assert "合成整句" not in proc.stdout
+    assert "合成整句" not in proc.stderr
+
+
 def test_egress_is_blocked() -> None:
     script = """
 import sys
