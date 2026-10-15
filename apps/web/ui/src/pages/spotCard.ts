@@ -79,7 +79,7 @@ export function avoidSpotObstacle(
 }
 
 /** 只把已放下的位置夹进同一套 margin，不重选左右或上下。 */
-export function clampSpotCard(
+function clampSpotCard(
   pos: { left: number; top: number },
   card: { width: number; height: number },
   view: { width: number; height: number },
