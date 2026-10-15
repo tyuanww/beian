@@ -1,4 +1,4 @@
-/** 对照卡两列、抬头、翻页和没标红的原因。右栏不走这里。 */
+/** 对照卡两列、抬头、翻页和没标出的原因。右栏不走这里。 */
 import type { FieldHit } from "../api";
 import { REVIEW_COPY } from "../copy/labels";
 import { excelText } from "./hitText";
@@ -9,7 +9,7 @@ type SpanOmit = "duplicate" | "unmatched";
 export type SpotColumn = {
   title: string;
   body: string;
-  /** 非空才是整句，才允许标红和没标红的原因。 */
+  /** 非空才是整句，才允许标出和没标出的原因。 */
   sentence: string;
   span: SpotSpan | null;
   omit: SpanOmit | null;
@@ -90,7 +90,7 @@ export function spotColumns(hit: FieldHit): { left: SpotColumn; right: SpotColum
   return { left, right };
 }
 
-/** 整句在显示、又没有 span 时才解释没标红。空稿不刷这句。 */
+/** 整句在显示、又没有 span 时才解释没标出。空稿不刷这句。 */
 export function spanOmitReason(column: Pick<SpotColumn, "sentence" | "span" | "omit">): string | null {
   if (!column.sentence || column.span) return null;
   if (column.omit === "duplicate") return REVIEW_COPY.spanDuplicate;

@@ -16,4 +16,11 @@ describe("spot frame paint", () => {
     assert.match(workspace, /\.review-sidebar\.is-overlay \{[^}]*z-index:\s*6/s);
     assert.match(workspace, /\.review-panel-tab \{[^}]*z-index:\s*8/s);
   });
+
+  it("lets the current frame take clicks and darkens the difference mark", () => {
+    const workspace = readFileSync(resolve(here, "../styles/reviewWorkspace.css"), "utf8");
+    assert.match(workspace, /\.review-workspace \.hit-box\[data-spot-frame\] \{[^}]*pointer-events:\s*auto/s);
+    assert.match(workspace, /\.review-spot-mark \{[^}]*color-mix\(in srgb, var\(--pin\) 72%, transparent\)/s);
+    assert.match(workspace, /html\[data-theme="dark"\] \.review-spot-mark \{[^}]*color-mix\(in srgb, var\(--pin\) 46%, transparent\)/s);
+  });
 });
