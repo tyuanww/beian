@@ -153,4 +153,14 @@ describe("markedSlices", () => {
       { text: "c", mark: false },
     ]);
   });
+
+  it("marks a supplementary-plane character by code point", () => {
+    const sentence = "甲𠀀丙";
+    assert.equal(sentence.length, 4);
+    assert.deepEqual(markedSlices(sentence, [1, 2]), [
+      { text: "甲", mark: false },
+      { text: "𠀀", mark: true },
+      { text: "丙", mark: false },
+    ]);
+  });
 });

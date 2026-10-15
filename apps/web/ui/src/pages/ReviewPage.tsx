@@ -813,7 +813,8 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
     const k = tabList.indexOf(active);
     const target = tabList[k < 0 ? (dir > 0 ? 0 : tabList.length - 1) : k + dir];
     if (target == null) return;
-    if (layout === "overlay") setPanelOpen(true);
+    // 对照开着时栏内详情是藏的，展开只会盖住稿面。点框已经不展开。
+    if (layout === "overlay" && !spotActive) setPanelOpen(true);
     pickHit(target);
   }
 

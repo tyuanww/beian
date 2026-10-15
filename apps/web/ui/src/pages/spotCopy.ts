@@ -121,15 +121,16 @@ export function spotPendingEmptyLine(pending: number, decision: string | null | 
 
 type MarkSlice = { text: string; mark: boolean };
 
-/** 按原句切片。调用方用文本节点画，不拼 HTML。 */
+/** 按原句的 Unicode 码位切片。后端下标是码位，不用 JS 的 UTF-16 length。调用方用文本节点画，不拼 HTML。 */
 export function markedSlices(sentence: string, span: SpotSpan | null): MarkSlice[] {
   if (!sentence) return [];
   if (!span) return [{ text: sentence, mark: false }];
+  const chars = Array.from(sentence);
   const [start, end] = span;
-  if (start < 0 || end > sentence.length || start >= end) return [{ text: sentence, mark: false }];
+  if (start < 0 || end > chars.length || start >= end) return [{ text: sentence, mark: false }];
   const out: MarkSlice[] = [];
-  if (start > 0) out.push({ text: sentence.slice(0, start), mark: false });
-  out.push({ text: sentence.slice(start, end), mark: true });
-  if (end < sentence.length) out.push({ text: sentence.slice(end), mark: false });
+  if (start > 0) out.push({ text: chars.slice(0, start).join(""), mark: false });
+  out.push({ text: chars.slice(start, end).join(""), mark: true });
+  if (end < chars.length) out.push({ text: chars.slice(end).join(""), mark: false });
   return out;
 }

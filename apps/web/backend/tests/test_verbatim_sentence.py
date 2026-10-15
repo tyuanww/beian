@@ -305,7 +305,7 @@ def test_missing_worksheet_row_does_not_borrow_another_sentence() -> None:
 
 
 def test_overlap_merges_only_the_same_reading() -> None:
-    # Value: protects=overlap merges only when status and both readings match, including a reversed box; fails_when=status or got is ignored, or x1<x0 is treated as no area; why_new=merge fixtures repeat one identical op and only use ordered boxes; seam=none; no_claim=widened space boxes are not covered here
+    # Value: protects=overlap merges only when status, got, and exp match, including a reversed box; fails_when=status, got, or exp is ignored, or x1<x0 is treated as no area; why_new=merge fixtures repeat one identical op and only use ordered boxes; seam=none; no_claim=widened space boxes are not covered here
     rows = [{"row": 15, "item": "合成乙", "text": "甲乙丙"}]
     different_status = assemble_hits(
         [_piece("甲乙", [15], [
@@ -339,6 +339,17 @@ def test_overlap_merges_only_the_same_reading() -> None:
     )
     assert len(reversed_box) == 1
     assert reversed_box[0]["status"] == "错字"
+    different_exp = assemble_hits(
+        [_piece("甲乙丙", [15], [
+            _op("错字", "甲", "乙", [0, 0, 10, 10]),
+            _op("错字", "甲", "丙", [4, 4, 14, 14]),
+        ])],
+        rows,
+        MATRIX,
+        PAGE,
+    )
+    assert len(different_exp) == 2
+    assert {hit["excel_value"] for hit in different_exp} == {"乙", "丙"}
 
 
 def test_warning_hit_keeps_manuscript_key_and_drops_range() -> None:
