@@ -1,4 +1,4 @@
-/** 就地对照窗：贴在范围框外侧，屏幕坐标，不跟着稿件缩放。 */
+/** 就地对照窗。未拖动贴在当前框旁；拖开后留在放下处。坐标是屏幕坐标，不跟稿件缩放。 */
 
 export const SPOT_CARD_WIDTH = 440;
 export const SPOT_CARD_GAP = 12;

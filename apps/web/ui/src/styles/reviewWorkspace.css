@@ -101,7 +101,6 @@ html[data-theme="dark"] .review-thumbs { background: #1f1a24; }
 .review-spot-mark { background: color-mix(in srgb, var(--pin) 72%, transparent); }
 /* 深色里 --pin 是浅色。混太满会压住浅字，所以比浅色主题更淡。 */
 html[data-theme="dark"] .review-spot-mark { background: color-mix(in srgb, var(--pin) 46%, transparent); }
-.review-spot-card .review-flat-detail { padding: 0; }
 /* visual-check #2：核对要点正文跟外观字号（--ui-font，默认 16px）。 */
 .review-flat-detail .review-spoken p { margin: 2px 0; font-size: var(--ui-font, 16px); }
 .review-flat-detail .review-evidence-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }

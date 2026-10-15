@@ -93,7 +93,7 @@ function EvidenceBlock({ title, value, tone, spaced }: { title: string; value: E
   );
 }
 
-/** 一条疑点的对照：要点、应印、稿上读到、结论。右栏和就地对照窗共用。 */
+/** 结论按钮。右栏和对照卡共用这组按钮。 */
 function VerdictButtons({
   hit, reviewable, busy, note, selected, onDecide, tipOpen, setTipOpen,
 }: {
