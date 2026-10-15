@@ -3,6 +3,7 @@
   "workspaces": {
     ".": {
       "entry": [
+        "scripts/pregate-lane.mjs!",
         "scripts/quality/check-complexity.mjs!",
         "scripts/quality/*.test.mjs",
         "scripts/monitoring/replay.mjs!",

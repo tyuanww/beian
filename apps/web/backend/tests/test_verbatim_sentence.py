@@ -252,6 +252,95 @@ def test_different_rows_do_not_merge() -> None:
     assert len(hits) == 2
 
 
+def test_excel_span_crosses_spaces_pdf_span_does_not() -> None:
+    # Value: protects=Excel span maps through spaces while the PDF span does not, and a punctuation-only needle stays unmatched; fails_when=drop_space flags are swapped or a punct-only needle is searched; why_new=the punctuation fixture has no spaces, so both flags return the same span; seam=none; no_claim=no OCR and no browser highlight
+    pdf_span, pdf_omit = _span_in_sentence("甲 乙丙", "甲乙", drop_space=False)
+    excel_span, excel_omit = _span_in_sentence("甲 乙丙", "甲乙", drop_space=True)
+    assert pdf_span is None and pdf_omit == "unmatched"
+    assert excel_span == [0, 3] and excel_omit is None
+    punct_span, punct_omit = _span_in_sentence("甲，乙", "，", drop_space=False)
+    assert punct_span is None and punct_omit == "unmatched"
+    hits = assemble_hits(
+        [_piece("甲 乙丙", [15], [_op("错字", "甲乙", "甲乙", [10, 10, 20, 20])])],
+        [{"row": 15, "item": "合成乙", "text": "甲 乙丙"}],
+        MATRIX,
+        PAGE,
+    )
+    hit = hits[0]
+    assert "pdf_span" not in hit
+    assert hit["pdf_span_omit"] == "unmatched"
+    assert hit["excel_span"] == [0, 3]
+    assert "excel_span_omit" not in hit
+
+
+def test_bool_and_repeated_row_ids_stay_one_worksheet_row() -> None:
+    # Value: protects=bool row ids are dropped and a repeated worksheet row stays one sentence; fails_when=True is kept as row 1 or [15, 15] is treated as two rows; why_new=existing fixtures use distinct real ints, so the bool filter and dedupe never run; seam=none; no_claim=no Excel file is opened
+    hits = assemble_hits(
+        [_piece("甲，乙丙", [True, 15, 15], [_op("错字", "甲乙", "甲乙", [10, 10, 20, 20])])],
+        ROWS,
+        MATRIX,
+        PAGE,
+    )
+    hit = hits[0]
+    assert hit["excel_row_count"] == 1
+    assert hit["excel_standard"] == "甲，乙丙"
+    assert hit["item"] == "合成乙"
+    assert hit["excel_standard"] != ROWS[0]["text"]
+
+
+def test_missing_worksheet_row_does_not_borrow_another_sentence() -> None:
+    # Value: protects=one unmatched worksheet row stays count 1 with an empty standard; fails_when=the lookup falls back to another row or reports zero rows; why_new=existing tests only cover a found row, zero ids, or several ids; seam=none; no_claim=no list-index fallback is implied to be safe
+    hits = assemble_hits(
+        [_piece("甲乙", [99], [_op("错字", "甲", "乙", [10, 10, 20, 20])])],
+        ROWS,
+        MATRIX,
+        PAGE,
+    )
+    hit = hits[0]
+    assert hit["excel_row_count"] == 1
+    assert hit["excel_standard"] == ""
+    assert "item" not in hit
+    assert ROWS[0]["text"] not in hit["excel_standard"]
+    assert ROWS[1]["text"] not in hit["excel_standard"]
+
+
+def test_overlap_merges_only_the_same_reading() -> None:
+    # Value: protects=overlap merges only when status and both readings match, including a reversed box; fails_when=status or got is ignored, or x1<x0 is treated as no area; why_new=merge fixtures repeat one identical op and only use ordered boxes; seam=none; no_claim=widened space boxes are not covered here
+    rows = [{"row": 15, "item": "合成乙", "text": "甲乙丙"}]
+    different_status = assemble_hits(
+        [_piece("甲乙", [15], [
+            _op("错字", "甲乙", "甲乙", [0, 0, 10, 10]),
+            _op("漏字", "甲乙", "甲乙", [4, 4, 14, 14]),
+        ])],
+        rows,
+        MATRIX,
+        PAGE,
+    )
+    assert len(different_status) == 2
+    assert {hit["status"] for hit in different_status} == {"错字", "漏字"}
+    different_got = assemble_hits(
+        [_piece("甲乙丙", [15], [
+            _op("错字", "甲", "乙", [0, 0, 10, 10]),
+            _op("错字", "丙", "乙", [4, 4, 14, 14]),
+        ])],
+        rows,
+        MATRIX,
+        PAGE,
+    )
+    assert len(different_got) == 2
+    reversed_box = assemble_hits(
+        [_piece("甲乙", [15], [
+            _op("错字", "甲乙", "甲乙", [10, 10, 0, 0]),
+            _op("错字", "甲乙", "甲乙", [4, 4, 14, 14]),
+        ])],
+        rows,
+        MATRIX,
+        PAGE,
+    )
+    assert len(reversed_box) == 1
+    assert reversed_box[0]["status"] == "错字"
+
+
 def test_warning_hit_keeps_manuscript_key_and_drops_range() -> None:
     raw = _hit(1, "待人工确认", False, {"exp": "", "got": "", "p": 0}, {"left": 3, "top": 4, "width": 5, "height": 6}, 1)
     raw["bboxes"].append({"left": 0, "top": 0, "width": 9, "height": 9, "page": 1, "role": "range"})

@@ -7,7 +7,7 @@ describe("placeSpotCard", () => {
     const pos = placeSpotCard(
       { left: 20, top: 30, width: 40, height: 20 },
       { width: 100, height: 80 },
-      { width: 400, height: 300 },
+      { width: 400, height: 360 },
     );
     assert.deepEqual(pos, { side: "right", left: 72, top: 30 });
   });
@@ -16,7 +16,7 @@ describe("placeSpotCard", () => {
     const pos = placeSpotCard(
       { left: 320, top: 40, width: 50, height: 20 },
       { width: 100, height: 80 },
-      { width: 400, height: 300 },
+      { width: 400, height: 360 },
     );
     assert.equal(pos.side, "left");
     assert.equal(pos.left, 208);
@@ -27,7 +27,7 @@ describe("placeSpotCard", () => {
     const pos = placeSpotCard(
       { left: 20, top: 0, width: 40, height: 20 },
       { width: 100, height: 80 },
-      { width: 400, height: 300 },
+      { width: 400, height: 360 },
     );
     assert.equal(pos.side, "below");
     assert.equal(pos.left, 20);
@@ -53,7 +53,7 @@ describe("resolveSpotPosition", () => {
   it("stays where it was dropped when the frame or the height changes", () => {
     const held = resolveSpotPosition(
       { left: 40, top: 50 },
-      { left: 300, top: 10, width: 20, height: 20 },
+      { left: 280, top: 10, width: 20, height: 20 },
       { width: 440, height: 200 },
       { width: 800, height: 600 },
     );
@@ -72,9 +72,9 @@ describe("resolveSpotPosition", () => {
       { left: -20, top: 900 },
       { left: 0, top: 0, width: 1, height: 1 },
       { width: 100, height: 80 },
-      { width: 400, height: 300 },
+      { width: 400, height: 360 },
     );
-    assert.deepEqual(pos, { side: "held", left: 8, top: 212 });
+    assert.deepEqual(pos, { side: "held", left: 8, top: 272 });
   });
 
   it("places an undragged card beside the frame", () => {
@@ -82,7 +82,7 @@ describe("resolveSpotPosition", () => {
       null,
       { left: 20, top: 30, width: 40, height: 20 },
       { width: 100, height: 80 },
-      { width: 400, height: 300 },
+      { width: 400, height: 360 },
     );
     assert.deepEqual(pos, { side: "right", left: 72, top: 30 });
   });

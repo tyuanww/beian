@@ -269,6 +269,19 @@ describe("drawableRange", () => {
     assert.equal(drawableRange([{ role: "range", left: 0, top: 0, width: 100, height: 890, page: 1 }], 1, page)?.height, 890);
   });
 
+  it("ignores a range on another page and frames the hit", () => {
+    // Value: protects=a paragraph on another page does not become the spot frame; fails_when=drawableRange drops the page check and spotFrameBox sticks to that range; why_new=range fixtures are all on page 1, so the page filter never fails; seam=none; no_claim=no browser and no zoom
+    const boxes = [
+      { role: "range", left: 0, top: 0, width: 100, height: 40, page: 2 },
+      { role: "hit", left: 12, top: 14, width: 20, height: 16, page: 1 },
+    ];
+    assert.equal(drawableRange(boxes, 1, page), null);
+    const frame = spotFrameBox(boxes, 1, page);
+    assert.equal(frame?.role, "hit");
+    assert.equal(frame?.left, 12);
+    assert.deepEqual(spotDrawBoxes(boxes, 1, page).map((draw) => draw.box.role), ["hit"]);
+  });
+
   it("falls back to the hit when width and height both exceed 90 percent", () => {
     const boxes = [
       { role: "range", left: 0, top: 0, width: 910, height: 910, page: 1 },
