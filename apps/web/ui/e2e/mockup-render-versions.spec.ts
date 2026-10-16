@@ -201,14 +201,18 @@ test("viewer 只读与生产关闭态仍能看历史；窄屏入口可用键盘�
 
 test("出图版本历史 actor_label 为空显示「未记录」",async({page})=>{
   const state=model();state.job.current_render_generation_id=G0;state.job.has_render_generations=true;
+  const G2="g2-legacy-omit-actor-"+"b".repeat(16);
+  // null / "" / 字段省略（undefined，开发哥 API 对 id 形值会省略 actor_label）均显示「未记录」
   state.history.push(
     {generation_id:G0,mode:"legacy_import",profile:"synthetic",quality_status:"unwired",current:true,created_at:"2026-09-06T10:00:00Z",actor_label:null},
     {generation_id:G1,mode:"legacy_relight",profile:"synthetic",quality_status:"runtime_verified",current:false,created_at:"2026-09-06T10:01:00Z",actor_label:""},
+    {generation_id:G2,mode:"legacy_relight",profile:"synthetic",quality_status:"unwired",current:false,created_at:"2026-09-06T10:02:00Z"},
   );
   state.job.render_generation_capabilities!.activate={allowed:true};
   await serve(page,state);await page.goto(`/mockup/${ID}`);await page.getByRole("button",{name:"出图版本",exact:true}).click();
   await expect(page.locator(`[data-generation-id="${G0}"] .mockup-version-actor`)).toHaveText("未记录");
   await expect(page.locator(`[data-generation-id="${G1}"] .mockup-version-actor`)).toHaveText("未记录");
+  await expect(page.locator(`[data-generation-id="${G2}"] .mockup-version-actor`)).toHaveText("未记录");
   expect(state.unknown).toEqual([]);
 });
 
