@@ -38,6 +38,7 @@ type SeedTask = {
   owner?: string;
   job_status?: "queued" | "running" | "succeeded" | "failed";
   verbatim_check?: boolean;
+  verbatim_warning?: string;
 };
 
 function authHeader() {
@@ -343,7 +344,7 @@ describe("review http", () => {
     setJobsTestHooks({ runRework: () => new Promise(() => { /* hang */ }) });
     setVerbatimProbeForTest(async () => {
       calls += 1;
-      return "认字组件没装上，没有结果";
+      return "认字出了问题，请联系管理员";
     });
     try {
       const fd = new FormData();
@@ -351,7 +352,7 @@ describe("review http", () => {
       const res = await app.request(`/api/tasks/${tid}/rework`, { method: "POST", headers: authHeader(), body: fd });
       assert.equal(res.status, 400);
       const body = (await res.json()) as { detail?: string };
-      assert.equal(body.detail, "认字组件没装上，没有结果");
+      assert.equal(body.detail, "认字出了问题，请联系管理员");
       assert.equal(calls, 1);
       assert.equal(readFileSync(pdfPath, "utf8"), "keep");
       const saved = loadTask(tid);
@@ -414,7 +415,7 @@ describe("review http", () => {
     setJobsTestHooks({ runRework: () => new Promise(() => { /* hang */ }) });
     setVerbatimProbeForTest(async () => {
       calls += 1;
-      return "认字组件没装上，没有结果";
+      return "认字出了问题，请联系管理员";
     });
     try {
       const fd = new FormData();
@@ -608,6 +609,57 @@ describe("review http", () => {
     assert.equal(body.status, "in_review");
     assert.equal(body.hits?.[0]?.decision, "confirm");
     assert.equal(body.hits?.[0]?.note, "看过了");
+  });
+
+  it("rejects confirm on 待人工确认 hits", async () => {
+    const tid = seed({
+      id: "a1a1a1a1a1a1",
+      title: "待人工",
+      product_name: "待人工",
+      type: "excel_pdf",
+      status: "pending_review",
+      verbatim_check: true,
+      hits: [hit({ id: "h1", status: "待人工确认", decision: "pending" })],
+    });
+    const res = await app.request(`/api/tasks/${tid}/decision`, {
+      method: "POST",
+      headers: { ...authHeader(), "content-type": "application/json" },
+      body: JSON.stringify({ hit_id: "h1", decision: "confirm" }),
+    });
+    assert.equal(res.status, 400);
+    const body = (await res.json()) as { detail?: string };
+    assert.match(String(body.detail || ""), /待人工确认不能选一致/);
+  });
+
+  it("blocks signing a no-private-data order until order_held_confirm", async () => {
+    const tid = seed({
+      id: "b2b2b2b2b2b2",
+      title: "无私有",
+      product_name: "无私有",
+      type: "excel_pdf",
+      status: "pending_review",
+      verbatim_check: true,
+      verbatim_warning: "稿件未保留 Illustrator 编辑数据，定位精度下降，建议设计师重新导出",
+      hits: [hit({ id: "h1", status: "待人工确认", decision: "pending" })],
+    });
+    const blocked = await app.request(`/api/tasks/${tid}/complete`, {
+      method: "POST",
+      headers: { ...authHeader(), "content-type": "application/json" },
+      body: JSON.stringify({ conclusion: "无改稿项" }),
+    });
+    assert.equal(blocked.status, 400);
+    const blockedBody = (await blocked.json()) as { detail?: string };
+    assert.equal(blockedBody.detail, "整单待人工确认，签字即认可");
+
+    const ok = await app.request(`/api/tasks/${tid}/complete`, {
+      method: "POST",
+      headers: { ...authHeader(), "content-type": "application/json" },
+      body: JSON.stringify({ conclusion: "无改稿项", order_held_confirm: true }),
+    });
+    assert.equal(ok.status, 200);
+    const okBody = (await ok.json()) as { status?: string; complete_kind?: string };
+    assert.equal(okBody.status, "completed");
+    assert.equal(okBody.complete_kind, "signed");
   });
 
   it("GET task hides job_pid from the client", async () => {
