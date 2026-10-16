@@ -36,6 +36,8 @@ type SeedTask = {
   hits_v2?: SeedHit[];
   pages_v2?: Array<{ url?: string }>;
   owner?: string;
+  created_by?: string;
+  actor?: string;
   job_status?: "queued" | "running" | "succeeded" | "failed";
   verbatim_check?: boolean;
   verbatim_warning?: string;
@@ -709,6 +711,65 @@ describe("review http", () => {
     assert.equal(res.status, 400);
     const body = (await res.json()) as { detail?: string };
     assert.equal(body.detail, "整单待人工确认，签字即认可");
+  });
+
+  it("old task without created_by returns null creator, never the actor, after a verdict", async () => {
+    const tid = seed({
+      id: "c5c5c5c5c5c5",
+      title: "旧单",
+      product_name: "旧单",
+      type: "excel_pdf",
+      status: "pending_review",
+      actor: "老审稿",
+      hits: [hit()],
+    });
+    const dec = await app.request(`/api/tasks/${tid}/decision`, {
+      method: "POST",
+      headers: { ...authHeader(), "content-type": "application/json" },
+      body: JSON.stringify({ hit_id: "h1", decision: "issue" }),
+    });
+    assert.equal(dec.status, 200);
+    const decBody = (await dec.json()) as { created_by?: unknown; actor?: string };
+    assert.equal(decBody.actor, "刘籽烨");
+    assert.equal(decBody.created_by, null);
+
+    const one = await app.request(`/api/tasks/${tid}`, { headers: authHeader() });
+    assert.equal(one.status, 200);
+    const oneBody = (await one.json()) as Record<string, unknown>;
+    assert.ok("created_by" in oneBody);
+    assert.equal(oneBody.created_by, null);
+
+    const list = await app.request("/api/tasks", { headers: authHeader() });
+    const rows = (await list.json()) as Array<{ id: string; owner?: unknown }>;
+    const row = rows.find((r) => r.id === tid);
+    assert.ok(row);
+    assert.equal(row.owner, null);
+    assert.notEqual(row.owner, "刘籽烨");
+    assert.notEqual(row.owner, "老审稿");
+  });
+
+  it("new task returns its creator as created_by", async () => {
+    const tid = seed({
+      id: "c6c6c6c6c6c6",
+      title: "新单",
+      product_name: "新单",
+      type: "excel_pdf",
+      status: "pending_review",
+      created_by: "生成人甲",
+      hits: [hit()],
+    });
+    const dec = await app.request(`/api/tasks/${tid}/decision`, {
+      method: "POST",
+      headers: { ...authHeader(), "content-type": "application/json" },
+      body: JSON.stringify({ hit_id: "h1", decision: "issue" }),
+    });
+    assert.equal(dec.status, 200);
+    const one = await app.request(`/api/tasks/${tid}`, { headers: authHeader() });
+    const oneBody = (await one.json()) as { created_by?: unknown };
+    assert.equal(oneBody.created_by, "生成人甲");
+    const list = await app.request("/api/tasks", { headers: authHeader() });
+    const rows = (await list.json()) as Array<{ id: string; owner?: unknown }>;
+    assert.equal(rows.find((r) => r.id === tid)?.owner, "生成人甲");
   });
 
   it("GET task hides job_pid from the client", async () => {

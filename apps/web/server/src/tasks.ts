@@ -318,7 +318,8 @@ export function listTasks(q: string, viewer: Viewer): Record<string, unknown>[] 
     type: t.type,
     status: t.status,
     created_at: t.created_at,
-    owner: t.created_by || t.actor || t.owner,
+    // 生成人只认 created_by；旧单缺失时返回 null，不拿审稿 actor 冒充。
+    owner: t.created_by || null,
     completed_by: t.completed_by,
     complete_kind: t.status === "completed" ? cleanCompleteKind(t.complete_kind) : null,
     round: t.round || 1,

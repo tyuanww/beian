@@ -395,7 +395,7 @@ function fileNames(files: unknown): string[] {
 function projectReview(raw: Record<string, unknown>, id: string): Stored | null {
   if (raw.id !== id || typeof raw.created_at !== "string" || typeof raw.status !== "string") return null;
   const access = typeof raw.owner === "string" ? raw.owner : "";
-  const createdBy = cleanText(raw.created_by, 120) || cleanText(raw.actor, 120);
+  const createdBy = cleanText(raw.created_by, 120);
   return storedFromParts({
     id,
     type: "review",
