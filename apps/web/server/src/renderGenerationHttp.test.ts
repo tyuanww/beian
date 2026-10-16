@@ -243,7 +243,7 @@ process.stdin.on('end',()=>{
   // Tiny protocol fixtures still allocate real credit, without writing the production 4 GiB reserve.
   const clear=registerLocalRenderGenerationRuntime({pythonExecutable:process.execPath,blenderExecutable:process.execPath,
     packagingDir:workerRoot,dataRoot:process.env.WB_DATA_DIR!,timeoutMs:60_000,terminationGraceMs:200,
-    resourcePolicy:{diskBytes:8*1024*1024}});
+    resourcePolicy:{diskBytes:8*1024*1024,memoryBytes:512*1024*1024}});
   try {
     assert.equal(getRenderGenerationRuntime()?.productionEnabled,false);
     const base=`/api/mockups/${f.id}/render-generations`;
@@ -315,7 +315,7 @@ process.stdin.on('end',()=>{
 });`);
   const clear=registerLocalRenderGenerationRuntime({pythonExecutable:process.execPath,blenderExecutable:process.execPath,
     packagingDir:workerRoot,dataRoot:process.env.WB_DATA_DIR!,timeoutMs:60_000,terminationGraceMs:200,
-    resourcePolicy:{diskBytes:8*1024*1024},
+    resourcePolicy:{diskBytes:8*1024*1024,memoryBytes:512*1024*1024},
     upgradeCandidate:{profileId:ISOLATED_UPGRADE_PROFILE_ID,declaredSha256:ISOLATED_UPGRADE_PROFILE_DECLARED_SHA256}});
   try {
     assert.equal(getRenderGenerationRuntime()?.productionEnabled,false);
