@@ -277,11 +277,7 @@ def sequence_diff(
     extra_tok: list[str] = []
     # 非成分字段：滤掉 INCI/警示/工艺噪声，避免串扰到文案/用法
     filter_inci = field_group not in ("成分表",)
-    try:
-        from app.phrase_soft import is_ocr_column_glue
-    except Exception:
-        def is_ocr_column_glue(_t: str) -> bool:  # type: ignore
-            return False
+    from app.phrase_soft import is_ocr_column_glue
 
     for t in extra_raw:
         if is_ocr_column_glue(t):

@@ -219,3 +219,53 @@ print("ok")
     proc = _run([PY, "-c", script])
     assert proc.returncode == 0, proc.stderr
     assert proc.stdout.strip() == "ok"
+
+
+def test_two_page_pdf_reports_page_over(tmp_path: Path) -> None:
+    pdf = tmp_path / "two.pdf"
+    doc = pymupdf.open()
+    doc.new_page()
+    doc.new_page()
+    doc.save(pdf)
+    doc.close()
+    script = f"""
+from pathlib import Path
+from app.verbatim_check import PAGE_OVER, VerbatimFail, render_or_fail
+try:
+    render_or_fail(Path({str(pdf)!r}), Path({str(tmp_path)!r}) / "pages", 4)
+except VerbatimFail as exc:
+    print(exc.code)
+    print(exc.error)
+    raise SystemExit(2)
+raise SystemExit(0)
+"""
+    proc = _run([PY, "-c", script])
+    assert proc.returncode == 2, proc.stdout + proc.stderr
+    assert "page_over_rendered" in proc.stdout
+    assert "这一单页数超过可核对页数" in proc.stdout
+
+
+def test_compare_pdf_two_page_reports_page_over(tmp_path: Path) -> None:
+    pdf = tmp_path / "two.pdf"
+    xlsx = tmp_path / "a.xlsx"
+    doc = pymupdf.open()
+    doc.new_page()
+    doc.new_page()
+    doc.save(pdf)
+    doc.close()
+    xlsx.write_bytes(b"PK")  # not opened when page_over fires first
+    script = f"""
+from pathlib import Path
+from app.verbatim_check import VerbatimFail, compare_pdf
+pages = [{{"name": "p1.png", "page": 1, "width": 100, "height": 100, "matrix": [1, 0, 0, 1, 0, 0]}}]
+try:
+    compare_pdf(Path({str(pdf)!r}), Path({str(xlsx)!r}), Path({str(tmp_path)!r}), pages)
+except VerbatimFail as exc:
+    print(exc.code)
+    raise SystemExit(2)
+raise SystemExit(0)
+"""
+    proc = _run([PY, "-c", script])
+    assert proc.returncode == 2, proc.stdout + proc.stderr
+    assert "page_over_rendered" in proc.stdout
+
