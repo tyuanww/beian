@@ -16,6 +16,9 @@ type SyntheticHit = {
   status: string;
   excel?: string;
   pdf?: string;
+  manuscript?: string;
+  excel_row_count?: number;
+  excel_standard?: string;
   page?: number;
   decision?: string;
   note?: string;
@@ -38,6 +41,7 @@ export type SyntheticTask = {
   title: string;
   product_name?: string;
   type: string;
+  verbatim_check?: boolean;
   status: string;
   created_at?: string;
   owner?: string;
@@ -263,7 +267,7 @@ export function reviewTask(id = "e5969b58cd47"): SyntheticTask {
       {
         id: "hit_name",
         field: "中文品名",
-        status: "待人工确认",
+        status: "疑点",
         evidence: "OCR 没读全，需要人眼确认",
         excel: "合成核对单",
         pdf: "合成核对",
