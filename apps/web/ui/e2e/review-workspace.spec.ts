@@ -773,6 +773,11 @@ test("对照：每条框出范围，对照窗贴在当前框右侧，右栏只�
   await expect(card.getByText("Excel标准", { exact: true })).toBeVisible();
   await expect(card.getByText("稿上读到", { exact: true })).toBeVisible();
   await expect(card).toContainText("合成核对单");
+  // 标题字段名在前：「中文品名 · 疑点 · 待确认 1/3」。
+  const spotTitle = card.getByTestId("review-spot-title");
+  await expect(spotTitle).toHaveText(/^中文品名\s*·\s*疑点 · 待确认 1\/3$/);
+  await expect(spotTitle).toHaveAttribute("aria-label", "中文品名 · 疑点 · 待确认 1/3");
+  await expect(spotTitle.locator(".review-spot-field")).toHaveAttribute("title", "中文品名");
   // 对照只画当前这条：一个范围框 + 一个错点。
   await expect(page.locator(".hit-range")).toHaveCount(1);
   await expect.poll(async () => {
@@ -784,6 +789,7 @@ test("对照：每条框出范围，对照窗贴在当前框右侧，右栏只�
 
   await card.getByRole("button", { name: "下一项" }).click();
   await expect(card).toContainText("30ml");
+  await expect(spotTitle).toHaveAttribute("aria-label", "净含量 · 疑点 · 待确认 2/3");
   await expect(page.locator(".hit-range")).toHaveCount(0);
 
   await dock.getByRole("button", { name: /生产批号/ }).click();
@@ -795,6 +801,24 @@ test("对照：每条框出范围，对照窗贴在当前框右侧，右栏只�
   await card.getByRole("button", { name: /^有错/ }).click();
   await expect.poll(() => decisions(syntheticApi).length).toBe(1);
   await expect(page.getByTestId("review-undo-toast")).toHaveText("已标为有错，撤销");
+});
+
+test("对照：标题字段名过长时截断，悬停能看全名", async ({ page, syntheticApi }) => {
+  await page.addInitScript(() => localStorage.setItem("wb_review_spot", "on"));
+  const task = reviewTask("e5969b58cdb9");
+  const longName = "中文品名（含英文名称及规格型号说明，用于备案核对的超长字段名称示例）";
+  task.hits = [{
+    id: "hit_long", field: longName, status: "疑点", excel: "合成核对单", pdf: "合成核对", page: 1, decision: "pending",
+    bboxes: [{ page: 1, left: 40, top: 80, width: 90, height: 28, role: "hit" }],
+  }];
+  syntheticApi.tasks.push(task);
+  await page.goto(`/review/${task.id}`);
+  const title = page.getByTestId("review-spot").getByTestId("review-spot-title");
+  const field = title.locator(".review-spot-field");
+  await expect(field).toHaveAttribute("title", longName);
+  await expect(title).toHaveAttribute("aria-label", `${longName} · 疑点 · 待确认 1/1`);
+  await expect(title.locator(".review-spot-rest")).toBeVisible();
+  await expect.poll(() => field.evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
 });
 
 test("待人工确认单独一组：不混进待确认列表，审核人能展开看到", async ({ page, syntheticApi }) => {

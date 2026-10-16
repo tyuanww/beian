@@ -104,6 +104,20 @@ export function spotHeaderText(status: string, item: string | undefined, pool: s
   return name ? `${status} · ${name} · ${tail}` : `${status} · ${tail}`;
 }
 
+/** 对照卡标题：字段名在前（过长截断，悬停看全名），后接「疑点 · 待确认 1/3」（产品决定 2026-10-16）。 */
+export function spotTitleParts(
+  field: string | undefined,
+  status: string,
+  item: string | undefined,
+  pool: string,
+  position: string,
+): { field: string; rest: string; full: string } {
+  const name = (field || "").trim();
+  const extra = (item || "").trim();
+  const rest = spotHeaderText(status, extra && extra !== name ? extra : undefined, pool, position);
+  return { field: name, rest, full: name ? `${name} · ${rest}` : rest };
+}
+
 /** 上一项 / 下一项到头停止，不绕回。 */
 export function spotNavTarget(indices: number[], active: number, dir: -1 | 1): number | null {
   const at = indices.indexOf(active);

@@ -133,6 +133,9 @@ html[data-theme="dark"] .review-thumbs { background: #1f1a24; }
 .review-spot-card.is-placed { visibility: visible; }
 .review-spot-head { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; min-width: 0; cursor: grab; user-select: none; -webkit-user-select: none; }
 .review-spot-head strong { overflow-wrap: anywhere; font-weight: 650; }
+.review-spot-title { display: flex; align-items: baseline; gap: 4px; min-width: 0; }
+.review-spot-field { flex: 0 1 auto; min-width: 2em; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; overflow-wrap: normal; }
+.review-spot-rest { flex: 0 0 auto; white-space: nowrap; }
 .review-spot-head button { margin-left: auto; min-height: 44px; border: 0; background: none; color: var(--accent); cursor: pointer; }
 .review-spot-away { color: var(--muted); font-size: 13px; }
 .review-spot-body { overflow: auto; min-height: 0; }

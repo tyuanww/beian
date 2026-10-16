@@ -29,7 +29,7 @@ import { reviewHits, shouldUseReworkView } from "./reviewVersion";
 import { ReviewDockPanel } from "./ReviewDockPanel";
 import { ReviewHitDetail } from "./ReviewHitDetail";
 import { SPOT_CARD_GAP, SPOT_CARD_MARGIN, SPOT_CARD_MIN_HEIGHT, SPOT_CARD_MIN_WIDTH, SPOT_CARD_WIDTH, avoidSpotObstacle, placeSpotCard, resolveSpotPosition, spotDragStarted, spotLane, spotSideRoom, type SpotObstacle } from "./spotCard";
-import { spotHeaderText, spotNavTarget, spotPendingEmptyLine } from "./spotCopy";
+import { spotTitleParts, spotNavTarget, spotPendingEmptyLine } from "./spotCopy";
 import { firstPendingIssueIndex, pageIndexForHit } from "./reviewNav";
 import { reviewErrorCopy, reviewErrorType } from "./reviewErrorCopy";
 import { reviewVersionToggle } from "./reviewStatus";
@@ -1286,7 +1286,16 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
                   if (spotDragRef.current?.id === event.pointerId) spotDragRef.current = null;
                 }}
               >
-                <strong>{spotHeaderText(current.status || current.field || "项目", current.item, REVIEW_COPY.tabs[locked ? "all" : tab], locked ? positionLabel(tabIndices(hits, "all", active), active, undefined, heldCount) : positionLabel(tabList, active, tab === "pending" ? counts.pending : undefined, heldCount))}</strong>
+                {(() => {
+                  const title = spotTitleParts(current.field, current.status || "项目", current.item, REVIEW_COPY.tabs[locked ? "all" : tab], locked ? positionLabel(tabIndices(hits, "all", active), active, undefined, heldCount) : positionLabel(tabList, active, tab === "pending" ? counts.pending : undefined, heldCount));
+                  return (
+                    <strong className="review-spot-title" data-testid="review-spot-title" aria-label={title.full}>
+                      {title.field ? <span className="review-spot-field" title={title.field}>{title.field}</span> : null}
+                      {title.field ? <span aria-hidden="true">·</span> : null}
+                      <span className="review-spot-rest">{title.rest}</span>
+                    </strong>
+                  );
+                })()}
                 {spotDragged ? (
                   <button
                     type="button"
