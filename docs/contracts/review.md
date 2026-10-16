@@ -12,7 +12,7 @@
 
 ## 对照
 
-电脑端核对页工具栏有「对照」按钮，文案在 `labels.ts` 的 `spot` / `spotTitle`（产品已定按钮名为「对照」；当前代码里 `spot` 还是旧名，前端会改）。按钮用 `aria-pressed` 表示开关状态。本机 `localStorage` 键 `wb_review_spot`：缺省或 `on` 为开，只有 `off` 为关（`readSpotOn` / `writeSpotOn`）。视口 <720 不渲染这个开关，也不使用已存的开，也不把键写成 `off`。右栏仍是清单、待确认计数、签字和退回。
+电脑端核对页工具栏有「对照」按钮，文案在 `labels.ts` 的 `spot` / `spotTitle`。按钮用 `aria-pressed` 表示开关状态。本机 `localStorage` 键 `wb_review_spot`：缺省或 `on` 为开，只有 `off` 为关（`readSpotOn` / `writeSpotOn`）。视口 <720 不渲染这个开关，也不使用已存的开，也不把键写成 `off`。右栏仍是清单、待确认计数、签字和退回。
 
 开着且「显示框」开着、当前条有可画的框时，只画这一条：
 
@@ -29,7 +29,7 @@
 
 没有可画的框，或关了「显示框」，详情留在右栏。文案是「没找到位置，请看整页」；漏字框宽高都超过页的 90% 时是「没框住这一行」。已有任务没有段落框，新卡只能退回今天的小框；段落大框只出现在新跑的逐字核对上。已签字的单仍画当前条，结论按钮按原来的不可改规则禁用。逐字核对的「待人工确认」不进待确认条数；没有 `verbatim_warning` 时仍不挡签字。整单勾选只在 `verbatim_check` 单、且有 `verbatim_warning`、且仍有未决「待人工确认」时出现：页头勾「整单待人工确认，签字即认可」；勾上后签字按钮才可用；签字请求带 `order_held_confirm: true`。该勾选只约束签字，不约束退回：退回不需要勾选，退回请求也不传 `order_held_confirm`。没有未决「待人工确认」（含已全部下结论）不显示该勾选，也不挡签字。服务端 `/complete` 对签字在同样条件下未收到该字段时回 400，文案同勾选句；退回豁免该字段。手机宽度小于 720 时，未保存的原因退回已保存的 `hit.note`。
 
-对照卡是 `aside`，`data-testid="review-spot"`，`aria-label` 是 `spotTitle`（「对照卡」）。端到端测试在 `apps/web/ui/e2e/review-workspace.spec.ts` 的对照用例里（用例名还是旧名，前端会改），它自己把 `wb_review_spot` 写成 `on`；同文件其他用例启动前写成 `off`，测的是关闭时的右栏详情。
+对照卡是 `aside`，`data-testid="review-spot"`，`aria-label` 是 `spotTitle`（「对照卡」）。端到端测试在 `apps/web/ui/e2e/review-workspace.spec.ts` 的对照用例里，它自己把 `wb_review_spot` 写成 `on`；同文件其他用例启动前写成 `off`，测的是关闭时的右栏详情。
 
 操作见 [怎么使用对照](../howto-review-spot.md)。取舍见 [为什么对照卡贴在框旁边](../explanation-review-spot.md)。
 
