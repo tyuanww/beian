@@ -1,29 +1,24 @@
 import { useMemo, useState } from "react";
 
-/** 手机卸卡只退当前这一条。就地对照关着时，右栏草稿留着。 */
-export function spotPhoneDiscardId(
-  layout: string,
-  spotOn: boolean,
-  activeId: string | undefined,
-  draft: string | null | undefined,
-  saved: string | null | undefined,
-): string | null {
-  if (layout !== "phone" || !spotOn || !activeId) return null;
-  if (draft == null || draft === (saved ?? "")) return null;
-  return activeId;
-}
-
-/** 只在刚进入手机时卸当前这一条。已经停在手机上再换条，不卸。 */
-export function phoneDiscardOnEnter(
-  previousLayout: string | null,
-  layout: string,
-  spotOn: boolean,
-  activeId: string | undefined,
-  draft: string | null | undefined,
-  saved: string | null | undefined,
-): string | null {
-  if (previousLayout === "phone" || layout !== "phone") return null;
-  return spotPhoneDiscardId(layout, spotOn, activeId, draft, saved);
+/**
+ * 手机看不到逐条备注框。进入手机时不再丢草稿（首次打开也不丢）：
+ * 能存的（这条已有结论）直接带原结论存上；存不了的（还没结论）只能丢，丢之前要人确认。
+ */
+export function phoneDraftPlan(
+  hits: ReadonlyArray<{ id?: string; decision?: string; note?: string | null }>,
+  drafts: Readonly<Record<string, string>>,
+): { save: Array<{ id: string; decision: "confirm" | "issue" | "ignore"; note: string }>; drop: string[] } {
+  const save: Array<{ id: string; decision: "confirm" | "issue" | "ignore"; note: string }> = [];
+  const drop: string[] = [];
+  for (const hit of hits) {
+    if (!hit.id) continue;
+    const draft = drafts[hit.id];
+    if (draft == null || draft === (hit.note ?? "")) continue;
+    const d = hit.decision;
+    if (d === "confirm" || d === "issue" || d === "ignore") save.push({ id: hit.id, decision: d, note: draft });
+    else drop.push(hit.id);
+  }
+  return { save, drop };
 }
 
 import { reviewStorage, readReviewSession, reviewSessionKey, writeReviewSession, type ReviewSession } from "./reviewWorkspaceState";

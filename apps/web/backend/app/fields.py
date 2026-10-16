@@ -705,10 +705,7 @@ def collect_phrase_boxes(
     if not phrases or not ocr_words:
         return boxes, hit_phrases
 
-    try:
-        from app.inci_normalize import expand_query_variants
-    except Exception:
-        expand_query_variants = lambda p: [p]  # type: ignore
+    from app.inci_normalize import expand_query_variants
 
     for phrase in phrases:
         variants = expand_query_variants(phrase)

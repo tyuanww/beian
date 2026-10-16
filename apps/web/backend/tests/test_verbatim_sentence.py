@@ -360,3 +360,44 @@ def test_warning_hit_keeps_manuscript_key_and_drops_range() -> None:
     assert hit["excel_standard"] == ""
     assert hit["excel_row_count"] == 0
     assert [box["role"] for box in hit["bboxes"]] == ["hit"]
+
+
+def test_warning_hits_truncates_with_omitted_note() -> None:
+    from app.verbatim_check import WARNING_HIT_CAP, _warning_hits
+
+    class _Rect:
+        width = 200
+        height = 2000
+
+    class _Page:
+        rect = _Rect()
+
+        def get_text(self, kind: str):
+            assert kind == "blocks"
+            # x0,y0,x1,y1,text,block_no,block_type
+            return [[0, i * 20, 40, i * 20 + 10, f"block-{i}-sample", i, 0] for i in range(WARNING_HIT_CAP + 5)]
+
+    class _Doc:
+        def __getitem__(self, index: int):
+            assert index == 0
+            return _Page()
+
+    hits = _warning_hits(_Doc(), [1, 0, 0, 1, 0, 0], (200, 2000))
+    assert len(hits) == WARNING_HIT_CAP
+    assert hits[-1].get("note") == "另有 5 块未列出"
+
+
+def test_fields_and_text_verify_import_without_silent_stubs() -> None:
+    import inspect
+    from app import fields, text_verify
+    from app.inci_normalize import expand_query_variants
+    from app.phrase_soft import is_ocr_column_glue
+
+    src = inspect.getsource(fields.collect_phrase_boxes)
+    assert "lambda p: [p]" not in src
+    assert "expand_query_variants" in src
+    src2 = inspect.getsource(text_verify.sequence_diff)
+    assert "def is_ocr_column_glue(_t: str)" not in src2
+    assert expand_query_variants("a") == ["a"] or isinstance(expand_query_variants("a"), list)
+    assert is_ocr_column_glue("柔嫩细腻使用方法:①") in (True, False)
+

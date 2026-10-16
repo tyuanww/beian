@@ -861,15 +861,19 @@ app.post("/api/tasks/start", async (c) => {
       throw new HTTPException(400, { message: "需要 excel + 包装 PDF" });
     }
     const verbatim = newCompareVerbatimFlag();
-    if ("verbatim_check" in verbatim && verbatim.verbatim_check === true) {
-      const blocked = await probeVerbatimReady(process.env.VERBATIM_MODEL_DIR || "");
-      if (blocked) throw new HTTPException(400, { message: blocked });
-    }
     const claim = claimReceipt(receiptId, owner);
     if (!claim) {
       const recovered = findTaskBySourceReceipt(receiptId, owner);
       if (recovered) return c.json(publicTask(recovered, viewerFromSession(s)));
       throw expiredUpload();
+    }
+    if ("verbatim_check" in verbatim && verbatim.verbatim_check === true) {
+      const blocked = await probeVerbatimReady(process.env.VERBATIM_MODEL_DIR || "");
+      if (blocked) {
+        console.warn("verbatim probe blocked after claim", { receipt: receiptId, detail: blocked });
+        rollbackReceiptClaim(claim);
+        throw new HTTPException(400, { message: blocked });
+      }
     }
     const rec = claim.receipt;
     const excel = rec.files.find((f) => f.field === "excel");
@@ -1225,6 +1229,9 @@ app.post("/api/tasks/:tid/decision", async (c) => {
   }
   const hit = activeHits(task).find((h) => h.id === body.hit_id);
   if (!hit) throw new HTTPException(404, { message: "字段不存在" });
+  if (hit.status === "待人工确认" && body.decision === "confirm") {
+    throw new HTTPException(400, { message: "待人工确认不能选一致" });
+  }
   hit.decision = body.decision;
   if (body.note != null) hit.note = String(body.note).trim();
   task.status = "in_review";
@@ -1237,7 +1244,7 @@ app.post("/api/tasks/:tid/decision", async (c) => {
 app.post("/api/tasks/:tid/complete", async (c) => {
   const s = need(c, "complete");
   const tid = assertTid(c.req.param("tid"));
-  const body = (await c.req.json().catch(() => ({}))) as { conclusion?: string };
+  const body = (await c.req.json().catch(() => ({}))) as { conclusion?: string; order_held_confirm?: boolean };
   // json() 会让出事件循环；另一标签可能已经开始对红或新一轮对照。
   // 最后一次 await 后再读盘，此后同步落盘，旧对象不能覆盖新的作业状态。
   const task = loadTask(tid);
@@ -1257,6 +1264,17 @@ app.post("/api/tasks/:tid/complete", async (c) => {
   if (pending.length) {
     const words = [...new Set(pending.map((hit) => String(hit.status || "未决")))].join("、");
     throw new HTTPException(400, { message: `仍有 ${pending.length} 条${words}未处理` });
+  }
+  const openHeld = task.verbatim_check === true
+    ? hits.filter((hit) => (
+      hit.status === "待人工确认"
+      && hit.decision !== "confirm"
+      && hit.decision !== "issue"
+      && hit.decision !== "ignore"
+    )).length
+    : 0;
+  if (task.verbatim_warning && openHeld > 0 && body.order_held_confirm !== true) {
+    throw new HTTPException(400, { message: "整单待人工确认，签字即认可" });
   }
   const conclusion = (body.conclusion || "").trim();
   if (!conclusion) throw new HTTPException(400, { message: "请写下结论" });

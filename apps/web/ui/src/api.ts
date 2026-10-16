@@ -754,7 +754,7 @@ export const api = {
       method: "POST",
       body: JSON.stringify(body),
     }),
-  complete: (id: string, body: { conclusion: string }) =>
+  complete: (id: string, body: { conclusion: string; order_held_confirm?: boolean }) =>
     request<TaskDetail>(`/api/tasks/${id}/complete`, {
       method: "POST",
       body: JSON.stringify(body),

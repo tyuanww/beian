@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { Alert, App, Button, Empty, Tag } from "antd";
+import { Alert, App, Button, Checkbox, Empty, Tag } from "antd";
 import { REVIEW_COPY, NAV_LABEL } from "../copy/labels";
 import { ApiError, api, type Decision, type FieldHit, type TaskDetail, type TaskPage } from "../api";
 import { WaitCard } from "../chrome/WaitCard";
@@ -20,7 +20,10 @@ import {
   type FlatLayout, type FlatTab,
 } from "./reviewFlat";
 import { ReviewWorkspace } from "./ReviewWorkspace";
-import { phoneDiscardOnEnter, useReviewSession } from "./useReviewSession";
+import { phoneDraftPlan, useReviewSession } from "./useReviewSession";
+import { isDecisionAllowed, isHeldStatus } from "./reviewDecisions";
+import { completePayload, needsOrderHeldConfirm, signAllowedForOrderHeld } from "./orderHeldConfirm";
+import { unsavedNotesHint } from "./unsavedNotesHint";
 import { detailLoadState, shouldShowWaitCard } from "./waitCard";
 import { reviewHits, shouldUseReworkView } from "./reviewVersion";
 import { ReviewDockPanel } from "./ReviewDockPanel";
@@ -28,7 +31,7 @@ import { ReviewHitDetail } from "./ReviewHitDetail";
 import { SPOT_CARD_GAP, SPOT_CARD_MARGIN, SPOT_CARD_MIN_HEIGHT, SPOT_CARD_MIN_WIDTH, SPOT_CARD_WIDTH, avoidSpotObstacle, placeSpotCard, resolveSpotPosition, spotDragStarted, spotLane, spotSideRoom, type SpotObstacle } from "./spotCard";
 import { spotHeaderText, spotNavTarget, spotPendingEmptyLine } from "./spotCopy";
 import { firstPendingIssueIndex, pageIndexForHit } from "./reviewNav";
-import { customerCopy } from "./customerCopy";
+import { reviewErrorCopy } from "./reviewErrorCopy";
 import { reviewVersionToggle } from "./reviewStatus";
 import { buildRevisionList, partitionReviewHits, withLocalNotes } from "./reviewEvidence";
 import {
@@ -87,7 +90,7 @@ function spotTabObstacle(canvas: HTMLElement): SpotObstacle | null {
 }
 
 export function ReviewPage({ taskId, userId, displayName = null, onBack, onHistory }: Props) {
-  const { message } = App.useApp();
+  const { message, modal } = App.useApp();
   const [task, setTask] = useState<TaskDetail | null>(() => reviewHandoffFor(taskId));
   const [error, setError] = useState<string | null>(null);
   const [pageIdx, setPageIdx] = useState(0);
@@ -97,6 +100,11 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
   const [tab, setTab] = useState<FlatTab>("pending");
   const [seenPages, setSeenPages] = useState<Set<number>>(() => new Set());
   const [dialog, setDialog] = useState<"sign" | "reject" | null>(null);
+  const [orderHeldConfirm, setOrderHeldConfirm] = useState(false);
+  // 换单或不再需要整单确认时清掉勾选，避免带着上一单的勾。
+  useEffect(() => {
+    setOrderHeldConfirm(false);
+  }, [taskId]);
   /** 签字/退回失败的提示文案；null = 没失败。 */
   const [submitFailed, setSubmitFailed] = useState<string | null>(null);
   /** 同步置位，防连点：await 队列之前就挡住第二次提交。 */
@@ -128,8 +136,6 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
   const spotDraggedRef = useRef(false);
   const spotPosRef = useRef<{ left: number; top: number } | null>(null);
   const spotDragRef = useRef<{ id: number; x: number; y: number; left: number; top: number; moved: boolean } | null>(null);
-  const discardDraftRef = useRef(discardDraft);
-  discardDraftRef.current = discardDraft;
   const [spotDragged, setSpotDragged] = useState(false);
   const [spotSize, setSpotSize] = useState<{ width: number; height: number | null }>({ width: SPOT_CARD_WIDTH, height: null });
   const spotSizeRef = useRef(spotSize);
@@ -561,15 +567,8 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  const activeHit = hits[active];
-  const phoneLayoutWas = useRef<string | null>(null);
-  const activeHitId = activeHit?.id;
-  const activeDraft = activeHitId ? notes[activeHitId] : undefined;
-  useEffect(() => {
-    const id = phoneDiscardOnEnter(phoneLayoutWas.current, layout, spotOn, activeHitId, activeDraft, activeHit?.note);
-    phoneLayoutWas.current = layout;
-    if (id) discardDraftRef.current(id);
-  }, [layout, spotOn, activeHitId, activeDraft, activeHit?.note]);
+  // 产品要求：切到手机（含桌面拉窄、首次打开）不丢备注草稿。草稿留在本机会话里，回到桌面还在。
+  // 手机上存不了的草稿，由页头「保存备注」处理：能存就存，存不了先确认再丢。
 
   if (!taskId) {
     return (
@@ -595,6 +594,8 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
   function decide(hit: FieldHit, decision: Decision, note = "", opts: { undoable?: boolean } = {}): Promise<boolean> {
     const targetTaskId = task?.id;
     if (!targetTaskId || !hit.id || !reviewable || locked) return Promise.resolve(false);
+    // 和按钮、快捷键同一条规则：待人工确认不能选一致。服务端也会拒收。
+    if (!isDecisionAllowed(hit, decision)) return Promise.resolve(false);
     const hitId = hit.id;
     const previous = hit.decision;
     const fromIndex = hits.findIndex((h) => h.id === hitId);
@@ -692,6 +693,22 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
     }
   }
 
+  /** 手机上没有逐条备注框：能带原结论存的先存；存不了的确认后再丢，不悄悄丢。 */
+  async function settlePhoneDrafts() {
+    const plan = phoneDraftPlan(hits, notes);
+    for (const item of plan.save) {
+      const hit = hits.find((h) => h.id === item.id);
+      if (hit) await decide(hit, item.decision, item.note, { undoable: false });
+    }
+    if (plan.drop.length === 0) return;
+    modal.confirm({
+      title: REVIEW_COPY.phoneDraftLoseTitle,
+      okText: REVIEW_COPY.phoneDraftLoseOk,
+      cancelText: REVIEW_COPY.phoneDraftLoseCancel,
+      onOk: () => { for (const id of plan.drop) discardDraft(id); },
+    });
+  }
+
   const hasUnsavedNotes = hits.some((hit) => hit.id && notes[hit.id] != null && notes[hit.id] !== (hit.note ?? ""));
 
   async function uploadRework(file: File) {
@@ -732,7 +749,11 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
         return;
       }
       const heldOpen = kind === "sign" ? hits.filter(isOpenHeld).length : 0;
-      const next = await api.complete(task.id, { conclusion: conclusionFor(kind, extra, rejectRows(hits, notes), heldOpen) });
+      const conclusion = conclusionFor(kind, extra, rejectRows(hits, notes), heldOpen);
+      const next = await api.complete(task.id, completePayload(
+        conclusion,
+        kind === "sign" && needsOrderHeldConfirm(task, hits) && orderHeldConfirm,
+      ));
       setTask(next);
       setDialog(null);
       setSubmitFailed(null);
@@ -813,7 +834,7 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
   fitHitRef.current = fitHit;
 
   function publishDecision(hit: FieldHit, decision: Decision, note: string, undoable = true) {
-    if (hit.status === "待人工确认" && decision === "issue") {
+    if (isHeldStatus(hit) && decision === "issue") {
       setTab("issue");
       setCloseHeldPulse((n) => n + 1);
     }
@@ -843,7 +864,7 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
     if (e.key === "j" || e.key === "k") { step(e.key === "j" ? 1 : -1); return; }
     const verdict = verdictForKey(e.key);
     if (verdict && current && reviewable && !busy && !locked) {
-      if (current.status === "待人工确认" && verdict === "confirm") return;
+      if (!isDecisionAllowed(current, verdict)) return;
       e.preventDefault();
       publishDecision(current, verdict, current.id ? notes[current.id] ?? current.note ?? "" : "");
     }
@@ -892,6 +913,9 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
   }
 
   const heldCount = hits.filter(isOpenHeld).length;
+  const orderHeldNeeded = needsOrderHeldConfirm(task, hits);
+  const orderHeldOk = signAllowedForOrderHeld(orderHeldNeeded, orderHeldConfirm);
+  const draftBlock = unsavedNotesHint(hasUnsavedNotes);
   const failedJob = task?.status === "compare_failed" || task?.job_status === "failed";
   const thumbs = thumbMarks(pages, hits, seenPages);
   const issueRows = rejectRows(hits, notes);
@@ -938,7 +962,11 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
           </span>
         ) : null}
         <span className="review-grow" />
-        {hasUnsavedNotes ? <span className="review-draft-status" role="status">先保存备注，再继续。</span> : null}
+        {hasUnsavedNotes && phone ? (
+          <Button className="review-draft-settle" disabled={busy || Boolean(locked)} onClick={() => { void settlePhoneDrafts(); }}>
+            {REVIEW_COPY.phoneDraftSave}
+          </Button>
+        ) : null}
         <span className="review-actions">
         {/* 产品哥：「上传新稿」不放看稿工具条，只在退回后出现在页头。 */}
           {!phone && reworkable && task?.status === "completed" ? (
@@ -957,11 +985,23 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
             上传新稿
           </button>
         ) : null}
+        {draftBlock ? <span className="review-draft-status" role="status" data-testid="review-unsaved-hint">{draftBlock}</span> : null}
         {gate.hint ? <span className="review-signhint" id="review-sign-hint" title={gate.title} aria-live="polite">{gate.hint}</span> : null}
+        {orderHeldNeeded && !failedJob ? (
+          <Checkbox
+            className="review-order-held"
+            data-testid="review-order-held"
+            checked={orderHeldConfirm}
+            disabled={busy || Boolean(locked) || hasUnsavedNotes || !gate.canSign}
+            onChange={(e) => setOrderHeldConfirm(e.target.checked)}
+          >
+            {REVIEW_COPY.orderHeldConfirm}
+          </Checkbox>
+        ) : null}
         {failedJob ? null : <button type="button" className="btn-ghost review-reject" disabled={!gate.canReject || busy || hasUnsavedNotes} title={gate.rejectTitle || gate.title || undefined} aria-describedby={gate.rejectTitle ? "review-reject-note" : undefined} onClick={() => { setSubmitFailed(null); setDialog("reject"); }}>
           {REVIEW_COPY.reject}
         </button>}
-        {failedJob ? null : <button type="button" className="btn-primary review-sign" disabled={!gate.canSign || busy || hasUnsavedNotes} title={gate.title || undefined} aria-describedby={gate.hint ? "review-sign-hint" : undefined} onClick={() => { setSubmitFailed(null); setDialog("sign"); }}>
+        {failedJob ? null : <button type="button" className="btn-primary review-sign" disabled={!gate.canSign || busy || hasUnsavedNotes || !orderHeldOk} title={gate.title || undefined} aria-describedby={gate.hint ? "review-sign-hint" : undefined} onClick={() => { setSubmitFailed(null); setDialog("sign"); }}>
           {REVIEW_COPY.sign}
         </button>}
         </span>
@@ -971,7 +1011,7 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
       {locked ? <Alert className="review-lock" type="warning" title={`🔒 ${locked}`} description={REVIEW_COPY.lockedNote} /> : null}
       {error ? <Alert type="error" title={error} /> : null}
       {task?.error || task?.job_error ? (
-        <Alert type="error" showIcon title={customerCopy(task.error || task.job_error || "") || "检查失败。"} description={failedJob ? REVIEW_COPY.reupload : undefined} />
+        <Alert type="error" showIcon title={reviewErrorCopy(task.error || task.job_error || "") || "检查失败。"} description={failedJob ? REVIEW_COPY.reupload : undefined} />
       ) : failedJob ? <Alert type="error" showIcon title={REVIEW_COPY.reupload} /> : null}
       {signed && !locked ? <Alert type="success" showIcon title={task?.complete_kind === "rework" ? "已退回。" : "已签字。"} /> : null}
       {decisionError ? <Alert type="error" showIcon title={`未保存：${decisionError}`} /> : null}

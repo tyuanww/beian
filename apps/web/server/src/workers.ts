@@ -228,7 +228,7 @@ export function scheduleForcedStop(pid: number | undefined, hasExited: () => boo
   return () => clearTimeout(force);
 }
 
-const VERBATIM_PROBE_FALLBACK = "认字组件没装上，没有结果";
+const VERBATIM_PROBE_FALLBACK = "认字出了问题，请联系管理员";
 const VERBATIM_PROBE = `
 from pathlib import Path
 import os, sys
@@ -240,11 +240,11 @@ except VerbatimFail as exc:
     raise SystemExit(2)
 `;
 
-/** 子进程退出码和 stderr 末行 → 给用户的那一句。成功返回 null。路径不外传。 */
+/** 子进程退出码 → 审稿员可见句。细节只进日志。成功返回 null。 */
 export function verbatimProbeSentence(code: number, stderr: string): string | null {
   if (code === 0) return null;
   const line = stderr.trim().split(/\r?\n/).filter(Boolean).pop() || "";
-  if (code === 2 && line.length > 0 && line.length <= 80 && !/[\\/]/.test(line)) return line;
+  if (line) console.warn("verbatim probe detail", { code, detail: line.slice(0, 240) });
   return VERBATIM_PROBE_FALLBACK;
 }
 
@@ -257,9 +257,12 @@ export function setVerbatimProbeForTest(probe: VerbatimProbe | null): void {
   verbatimProbeOverride = probe;
 }
 
-/** 模型齐套之后、建单之前跑 prepare()。缺依赖就返回原来的那句，不建单、不改走旧核对。 */
-export function probeVerbatimReady(modelDir: string): Promise<string | null> {
-  if (verbatimProbeOverride) return verbatimProbeOverride(modelDir);
+const VERBATIM_PROBE_CACHE_MS = 15_000;
+type VerbatimProbeCache = { modelDir: string; at: number; result: string | null };
+let verbatimProbeCache: VerbatimProbeCache | null = null;
+let verbatimProbeInflight: { modelDir: string; promise: Promise<string | null> } | null = null;
+
+function runVerbatimProbe(modelDir: string): Promise<string | null> {
   return new Promise((resolve) => {
     let settled = false;
     let exited = false;
@@ -313,6 +316,30 @@ export function probeVerbatimReady(modelDir: string): Promise<string | null> {
       finish(verbatimProbeSentence(code ?? 1, stderr));
     });
   });
+}
+
+/** claim 之后跑 prepare()。短时缓存；并发合并成一次。缺依赖返回统一审稿员可见句。 */
+export function probeVerbatimReady(modelDir: string): Promise<string | null> {
+  if (verbatimProbeOverride) return verbatimProbeOverride(modelDir);
+  const now = Date.now();
+  if (
+    verbatimProbeCache
+    && verbatimProbeCache.modelDir === modelDir
+    && now - verbatimProbeCache.at < VERBATIM_PROBE_CACHE_MS
+  ) {
+    return Promise.resolve(verbatimProbeCache.result);
+  }
+  if (verbatimProbeInflight && verbatimProbeInflight.modelDir === modelDir) {
+    return verbatimProbeInflight.promise;
+  }
+  const promise = runVerbatimProbe(modelDir).then((result) => {
+    verbatimProbeCache = { modelDir, at: Date.now(), result };
+    return result;
+  }).finally(() => {
+    if (verbatimProbeInflight?.promise === promise) verbatimProbeInflight = null;
+  });
+  verbatimProbeInflight = { modelDir, promise };
+  return promise;
 }
 
 function pythonExecutable(): string {
@@ -432,7 +459,7 @@ export function compareArgs(opts: {
     ...(opts.nativeDir ? ["--native-dir", opts.nativeDir] : []),
     ...(opts.nativeAttempted ? ["--native-attempted"] : []),
   ];
-  if (verbatim) args.push("--verbatim-check", "--max-pages", "4", "--model-dir", verbatim.modelDir);
+  if (verbatim) args.push("--verbatim-check", "--max-pages", "1", "--model-dir", verbatim.modelDir);
   return args;
 }
 
@@ -481,7 +508,7 @@ export function reworkArgs(opts: {
     ...(opts.nativeDir ? ["--native-dir", opts.nativeDir] : []),
     ...(opts.nativeAttempted ? ["--native-attempted"] : []),
   ];
-  if (verbatim) args.push("--verbatim-check", "--max-pages", "4", "--model-dir", verbatim.modelDir);
+  if (verbatim) args.push("--verbatim-check", "--max-pages", "1", "--model-dir", verbatim.modelDir);
   return args;
 }
 

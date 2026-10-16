@@ -537,21 +537,27 @@ def _fsc(text: str) -> bool:
     return "FSC" in text or "认证码" in text or "★" in text or "☆" in text
 
 
+WARNING_HIT_CAP = 40
+
+
 def _warning_hits(doc: Any, matrix: list[float], page_size: tuple[int, int]) -> list[dict[str, Any]]:
     page = doc[0]
     width, height = page_size
-    hits = []
-    index = 1
+    candidates: list[Any] = []
     for block in page.get_text("blocks") or []:
         if len(block) < 5 or not str(block[4] or "").strip():
             continue
+        candidates.append(block)
+    omitted = max(0, len(candidates) - WARNING_HIT_CAP)
+    hits: list[dict[str, Any]] = []
+    for index, block in enumerate(candidates[:WARNING_HIT_CAP], start=1):
         box = _page_px(block[:4], matrix)
         if box and width > 1 and height > 1 and box["width"] > width * 0.9 and box["height"] > height * 0.9:
             box = None
-        hits.append(_mark_warning_hit(_hit(index, "待人工确认", False, {"exp": "", "got": "", "p": 0}, box, 1)))
-        index += 1
-        if index > 40:
-            break
+        hit = _mark_warning_hit(_hit(index, "待人工确认", False, {"exp": "", "got": "", "p": 0}, box, 1))
+        hits.append(hit)
+    if omitted and hits:
+        hits[-1]["note"] = f"另有 {omitted} 块未列出"
     return hits
 
 
@@ -564,12 +570,18 @@ def compare_pdf(pdf: Path, xlsx: Path, model_dir: Path, pages: list[dict]) -> di
     _strip_forbidden()
     if not pages:
         raise VerbatimFail(PAGE_OVER, "page_over_rendered", "nothing rendered")
+    import pymupdf
+
+    doc = pymupdf.open(pdf)
+    try:
+        if int(doc.page_count) > 1:
+            raise VerbatimFail(PAGE_OVER, "page_over_rendered", "multi-page pdf")
+    finally:
+        doc.close()
     matrix = _matrix_of(pages[0])
     page_size = (int(pages[0].get("width") or 0), int(pages[0].get("height") or 0))
     private = _private_bytes(pdf)
     if private is None:
-        import pymupdf
-
         doc = pymupdf.open(pdf)
         try:
             hits = _warning_hits(doc, matrix, page_size)
@@ -632,6 +644,8 @@ def render_or_fail(pdf: Path, out_dir: Path, max_pages: int) -> list[dict]:
         page_count = doc.page_count
     finally:
         doc.close()
+    if page_count > 1:
+        raise VerbatimFail(PAGE_OVER, "page_over_rendered", "multi-page pdf")
     rendered = render_pdf_pages(pdf, out_dir, max_pages=max_pages)
     if page_count > len(rendered):
         raise VerbatimFail(PAGE_OVER, "page_over_rendered", "pdf longer than rendered pages")

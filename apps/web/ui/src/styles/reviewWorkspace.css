@@ -256,3 +256,25 @@ html[data-theme="dark"] .review-miss { color: #F2B44C; background: #43332E; }
 @media (max-width: 1023px) {
   .review-flat-page:not(.is-phone) .review-signhint { display: none; }
 }
+
+/* 整单待人工确认勾选：跟页头动作同一行，44 热区。 */
+.review-order-held {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  margin: 0;
+  color: var(--ink);
+  font-size: 14px;
+}
+.review-order-held .ant-checkbox + span {
+  padding-inline-end: 0;
+}
+.review-flat-page.is-phone .review-actions .review-order-held {
+  flex: 1 1 100%;
+}
+/* 手机「保存备注」：Ant 默认钮即描边次要按钮，贴合 DESIGN 主/次一对。 */
+.review-flat-page .review-draft-settle.ant-btn {
+  min-height: 40px;
+  border-radius: 20px;
+  padding-inline: 14px;
+}

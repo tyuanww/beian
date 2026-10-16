@@ -140,7 +140,7 @@ export const REVIEW_COPY = {
   lockedNote: "只能查看，不能再改",
   footer: (left: number, page: number) => `这单还剩 ${left} 条待确认 · 本页还有 ${page} 条`,
   spot: "就地对照",
-  spotTitle: "对照贴在这条旁边",
+  spotTitle: "对照卡",
   excelStandard: "Excel标准",
   diffFragment: "差异片段",
   notFullSentence: "不是整句标准",
@@ -164,7 +164,19 @@ export const REVIEW_COPY = {
   noBox: "没找到位置，请看整页",
   lineNotBoxed: "没框住这一行",
   pageSkew: "这一页方向对不上，框不准",
-  heldUnread: "认不准的字",
+  phoneDraftSave: "保存备注",
+  phoneDraftLoseTitle: "备注未保存，切换后会丢失",
+  phoneDraftLoseOk: "丢掉备注",
+  phoneDraftLoseCancel: "再看看",
+  /** 签字旁勾选；与后端 /complete 400 文案一致。 */
+  orderHeldConfirm: "整单待人工确认，签字即认可",
+  /** 签字/退回因未存备注灰掉时旁边的原因。 */
+  unsavedNotesBlock: "备注未保存，请先保存",
+  heldUnread: "认字存疑",
+  /** 审稿员可见的认字报错：不露组件名、路径或堆栈。 */
+  ocrFailed: "认字出了问题，请联系管理员",
+  /** 后端超页（page_over）：只核 1 页。不写「拆分后上传」。 */
+  pageOver: "稿件超过 1 页，暂不支持核对，请联系管理员",
   heldNote: "备注没对上",
   excelMissing: "确认单没有这段",
   spaceLabel: "空格",

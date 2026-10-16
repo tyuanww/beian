@@ -6,6 +6,7 @@ import { nativeTaskNote } from "./nativeTextEvidence";
 import { reviewProgress } from "./reviewNav";
 import { tabIndices, verdictCounts, isOpenHeld, openHeldAfterPending, type FlatTab } from "./reviewFlat";
 import { ReviewHitDetail } from "./ReviewHitDetail";
+import { isHeldStatus } from "./reviewDecisions";
 
 type Props = {
   hits: FieldHit[];
@@ -122,7 +123,7 @@ export function ReviewDockPanel({
                   note={note}
                   locationCopy={locationCopy}
                   onDecide={(hit, decision, nextNote) => {
-                    if (hit.status === "待人工确认" && decision === "issue") {
+                    if (isHeldStatus(hit) && decision === "issue") {
                       setHeldOpen(false);
                       onTab("issue");
                     }

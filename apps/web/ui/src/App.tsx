@@ -1,4 +1,5 @@
-import { lazy, Suspense, useCallback, useEffect, useState, type ReactNode } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { bootOnce } from "./appBoot";
 import { api, brokenApiMessage, type Me } from "./api";
 import { setUploadLimitFromMe, resetUploadLimit } from "./uploadLimit";
 import { authFailureAction, feishuLoginHref, shouldAutoRedirectToFeishu } from "./authGate";
@@ -123,6 +124,7 @@ function bootRoute() {
 
 export function App() {
   const { setActor } = useAppearance();
+  const bootedRef = useRef(false);
   const [me, setMe] = useState<Me | null>(null);
   const boot = bootRoute();
   const [view, setView] = useState<View>(boot.view);
@@ -171,10 +173,9 @@ export function App() {
       url.searchParams.delete("feishu_error");
       window.history.replaceState({}, "", url.pathname + url.search);
     }
-    void refreshMe();
-    // 只在进站时拉一次登录态
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    // 只在进站时拉一次登录态。refreshMe 变了也不重拉，登录后由别处按需刷新。
+    bootOnce(bootedRef, () => { void refreshMe(); });
+  }, [refreshMe]);
 
   useEffect(() => {
     const onPageHide = () => uploadStore.abortAll();
