@@ -199,6 +199,19 @@ test("viewer 只读与生产关闭态仍能看历史；窄屏入口可用键盘�
   expect(state.calls.filter(call=>call.method === "POST")).toHaveLength(0);expect(state.unknown).toEqual([]);
 });
 
+test("出图版本历史 actor_label 为空显示「未记录」",async({page})=>{
+  const state=model();state.job.current_render_generation_id=G0;state.job.has_render_generations=true;
+  state.history.push(
+    {generation_id:G0,mode:"legacy_import",profile:"synthetic",quality_status:"unwired",current:true,created_at:"2026-09-06T10:00:00Z",actor_label:null},
+    {generation_id:G1,mode:"legacy_relight",profile:"synthetic",quality_status:"runtime_verified",current:false,created_at:"2026-09-06T10:01:00Z",actor_label:""},
+  );
+  state.job.render_generation_capabilities!.activate={allowed:true};
+  await serve(page,state);await page.goto(`/mockup/${ID}`);await page.getByRole("button",{name:"出图版本",exact:true}).click();
+  await expect(page.locator(`[data-generation-id="${G0}"] .mockup-version-actor`)).toHaveText("未记录");
+  await expect(page.locator(`[data-generation-id="${G1}"] .mockup-version-actor`)).toHaveText("未记录");
+  expect(state.unknown).toEqual([]);
+});
+
 test("生产执行门关闭只禁新建，历史与原图下载仍可用",async({page})=>{
   const state=model();state.job.current_render_generation_id=G0;state.job.has_render_generations=true;
   state.job.render_generation_capabilities!.legacy_relight={allowed:false,reason:"production_registration_disabled"};

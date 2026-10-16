@@ -1,5 +1,5 @@
-import { actorLabel } from "../copy/labels";
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { actorLabel } from "../copy/labels";
 import { Button, Collapse } from "antd";
 import { api, ApiError, type MockupJob, type RenderGenerationHistory } from "../api";
 import { createRenderRequest, readPendingRenderRequest, savePendingRenderRequest,
