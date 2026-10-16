@@ -30,6 +30,16 @@
 
 操作见 [怎么使用就地对照](../howto-review-spot.md)。取舍见 [为什么对照贴在框旁边](../explanation-review-spot.md)。
 
+## 审稿业务规则
+
+以下规则以本节注明的代码为准。
+
+- 完成时间按北京时间显示。`reviewFlat.ts` 的 `completedAtLabel` 固定用 `Asia/Shanghai` 格式化 `completed_at`：当天写「18:20」，同年写「10月9日 18:20」，跨年带年份。`completed_at` 缺失或无法解析时不写时间，不拿当前时间代替。
+- 离线时不排队、不自动重发。下结论的请求没到服务器（浏览器报离线、`TypeError` 或 `status` 为 0）时，`decisionFailureText` 只提示「没连上网，这条没存上」。前端不把这条结论放进待发队列，恢复联网后也不自动重发，审稿员需要重新点一次。
+- 飞书标题按完成类型写「已签字」或「已退回」。`notify.ts` 的 `taskCompleteHeadline` 读 `complete_kind`：`signed` 写「已签字」，`rework` 写「已退回」。旧任务没有 `complete_kind` 时，有「有错」结论就写「已退回」，否则写「已签字」。`/complete` 按有没有「有错」写 `complete_kind`。
+- 进入已提交状态后不回滚。签字或退回后任务状态是 `completed`，界面写「已提交」。`/decision` 和 `/complete` 只接受 `pending_review` 和 `in_review`，对 `completed` 回 400，所以不能改结论，也不能再签一次。别人已完成的单在核对页锁定，并写明是谁签字或退回。对红新稿失败时，任务回到对红前的状态，已提交的单仍是已提交。
+- 计费失败不影响审稿。对照结束后 `jobs.ts` 调 `compareBookkeeping` 记一笔识别用量。台账写入失败时 `recordCompareAttempt` 只返回 `recorded: false`，不抛错。对照结果、任务状态和飞书通知照常。
+
 ## 逐字核对、结论与落盘
 
 逐字核对只接受 1 页稿。后端在打开 PDF 时看 `page_count`：超过 1 页直接 `page_over` 失败，不按页逐页试核。审稿员可见文案统一为「稿件超过 1 页，暂不支持核对，请联系管理员」（`labels.ts` 的 `pageOver`，经 `reviewErrorCopy` 映射）；内部状态句「这一单页数超过可核对页数」不直接给审稿员。

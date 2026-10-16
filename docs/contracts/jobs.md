@@ -27,6 +27,11 @@ cd apps/web/backend && PYTHONPATH=. .venv/bin/python -m app.cli --help
 
 UI 等待：`shouldShowWaitCard`（`queued` | `running` | `comparing`；`done`/`failed`/`completed` 不当等待）。离开核对页后，看板 `liveJobLine` 和侧栏 `liveNavPulse` 仍显示阶段。打样台只交稿；点进度/已出图进单独打样单（WaitCard 或成片/三图看形，下面印刷面读字），不要在打样台底下摊开结果。唯一「上刀线」（或单层「刀线」/「刀版」）默认黑盒提交识别，候选里唯一「印刷」可随刀线带上，失败对籽烨结案为打样失败，选层只给 admin；单独「印刷」和工艺板不能当刀线。
 
+## 生成人与排队显示
+
+- 生成人始终是任务创建人。审稿列表的 `owner` 取 `created_by`，没有时依次取 `actor`、`owner`。历史记录的「生成人」列和筛选用这个值。签字人记在 `completed_by`，不改写生成人。
+- 排队中的任务不显示预计时间。`job_status` 是 `queued` 时，等待卡、看板和侧栏只写排队位置：「前面还有 N 单」，前面没有单时写「就快轮到」。运行中才写阶段和预计时间。看板紧凑卡对排队中的单显示「0%」，后面跟排队位置。
+
 ## 补印刷面持久队列
 
 `POST /api/mockups/:id/print-faces` 保持既有 create 权限与团队共享范围。首次入队由 jobs 写 `print_faces_request`，立即返回 202；同单在途请求返回既有工作，跨单进入同一打样执行槽串行等待。成片 `status=done`、既有图片和下载保持；公开详情只给 `print_faces_repair.status/error`，不返回 PID、源稿哈希、尝试身份或私有路径。已经完整且成功的请求返回 200，不重复切面。
