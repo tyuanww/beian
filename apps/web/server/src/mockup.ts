@@ -141,6 +141,8 @@ export type RenderGenerationRequestRecord = {
   studio_adjustment?: { product_light: number; background_light: number };
   created_at: string;
   actor_id: string;
+  /** 触发这次出图的人的显示名（请求时会话），只给封版 actor_label 用；旧请求没有。 */
+  actor_name?: string;
   worker_pid?: number;
   /** Private per-spawn identity; never serialized by publicMockup/Summary. */
   worker_execution_id?: string;

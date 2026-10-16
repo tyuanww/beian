@@ -270,6 +270,27 @@ function importG0(store: RenderGenerationStore) {
   });
 }
 
+describe("render actor_label", () => {
+  it("seal accepts null actor_label and the summary omits it", () => {
+    const job = seedJob(); const store = openStore(job);
+    const virtual = store.virtualLegacyCurrentId();
+    store.sealGeneration({ mode: "legacy_import", contractSha256: CONTRACT_SHA, contractBytes: CONTRACT,
+      profile: "compat-legacy-v0", observedCurrentGenerationId: null, expectedCurrentGenerationId: virtual, actorLabel: null });
+    const summary = store.publicSummary(G0_LEGACY_ORIGINAL_ID, G0_LEGACY_ORIGINAL_ID);
+    assert.equal(summary.actor_label, undefined);
+  });
+
+  it("seal still rejects an account id or path as actor_label", () => {
+    for (const bad of ["ou_0123456789abcdef", "/tmp/x", ""]) {
+      const job = seedJob(); const store = openStore(job);
+      const virtual = store.virtualLegacyCurrentId();
+      assert.throws(() => store.sealGeneration({ mode: "legacy_import", contractSha256: CONTRACT_SHA, contractBytes: CONTRACT,
+        profile: "compat-legacy-v0", observedCurrentGenerationId: null, expectedCurrentGenerationId: virtual, actorLabel: bad }),
+      /操作者字段非法/);
+    }
+  });
+});
+
 describe("renderGenerations", () => {
   it("RF-04 history pagination never creates a cursor key or any other file", () => {
     const job = seedJob(); const store = openStore(job); importG0(store);

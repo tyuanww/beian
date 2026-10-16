@@ -206,7 +206,8 @@ type SealGenerationInput = {
   sources?: RenderGenerationSource[];
   observedCurrentGenerationId: string | null;
   expectedCurrentGenerationId: string | null;
-  actorLabel?: string;
+  /** 触发人显示名；未知时 null。 */
+  actorLabel?: string | null;
 };
 
 type OptionalOmitted = { key: string; reason: string };
@@ -387,6 +388,11 @@ function sha256Text(text: string): string {
 
 function isGenerationId(id: string): boolean {
   return id === G0_LEGACY_ORIGINAL_ID || GEN_ID_RE.test(id);
+}
+
+/** 飞书 open_id / union_id / chat id 一类账号 id，不是显示名。 */
+export function isRenderActorAccountId(value: string): boolean {
+  return /^(ou|on|oc|cli)_[0-9a-z]{6,}$/i.test(value.trim());
 }
 
 function looksLikePath(id: string): boolean {
@@ -692,7 +698,7 @@ type Manifest = {
   files: FileRow[];
   optional_omitted: OptionalOmitted[];
   total_bytes: number;
-  actor_label?: string;
+  actor_label?: string | null;
 };
 
 export type RenderActivationFact = {
@@ -799,7 +805,7 @@ function parseManifest(raw: unknown): Manifest {
       return { key: asString(row.key, "optional_omitted[].key"), reason: asString(row.reason, "optional_omitted[].reason") };
     });
   }
-  const actor = obj.actor_label === undefined ? undefined : asString(obj.actor_label, "actor_label");
+  const actor = obj.actor_label === undefined ? undefined : obj.actor_label === null ? null : asString(obj.actor_label, "actor_label");
   if (actor && looksLikePath(actor)) throw invalid("操作者字段不能是路径", "actor_label", "保留当前代");
   const expectedFp = contentFingerprint(
     files.map((f) => ({ key: f.key, sha256: f.sha256 })),
@@ -1612,7 +1618,8 @@ export function openRenderGenerationStore(opts: RenderGenerationStoreOptions): R
       quality_status: manifest.quality.quality_status,
       current: currentGenerationId === manifest.generation_id,
     };
-    if (manifest.actor_label) summary.actor_label = manifest.actor_label;
+    // 旧存档的 actor_label 可能是回落写入的账号 id：不改盘，只是不对外显示。
+    if (manifest.actor_label && !isRenderActorAccountId(manifest.actor_label)) summary.actor_label = manifest.actor_label;
     return summary;
   }
 
@@ -1631,7 +1638,8 @@ export function openRenderGenerationStore(opts: RenderGenerationStoreOptions): R
       const hashed = sha256Buffer(input.contractBytes);
       if (hashed !== input.contractSha256) throw invalid("合同 SHA 与字节不一致", "contract_bytes", "不要自报哈希");
     }
-    if (input.actorLabel !== undefined && (typeof input.actorLabel !== "string" || !input.actorLabel || looksLikePath(input.actorLabel))) {
+    if (input.actorLabel !== undefined && input.actorLabel !== null
+      && (typeof input.actorLabel !== "string" || !input.actorLabel || looksLikePath(input.actorLabel) || isRenderActorAccountId(input.actorLabel))) {
       throw invalid("操作者字段非法", "actor_label", "只传显示名");
     }
     peekGenDir();

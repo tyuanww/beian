@@ -269,6 +269,11 @@ process.stdin.on('end',()=>{
     assert.equal(stale.status,409);assert.equal((await stale.json()).reason,"current_changed");
     clear();
     const history=await (await request(base)).json();assert.equal(history.items.length,2);
+    // 封版操作者 = 触发这次出图的人（owner 会话「合成作者」）；种子单没有 created_by，也绝不写 owner 的 open_id。
+    for (const item of history.items as Array<{actor_label?:string}>) {
+      assert.equal(item.actor_label,"合成作者");
+      assert.notEqual(item.actor_label,owner.open_id);
+    }
     const read=await request(`/api/mockups/${f.id}/files/white_a?generation_id=${current}&download=1`);
     assert.equal(read.status,200);assert.deepEqual(Buffer.from(await read.arrayBuffer()),png());
     assert.equal(getRenderGenerationRuntime(),undefined);
