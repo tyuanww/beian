@@ -342,13 +342,6 @@ export function probeVerbatimReady(modelDir: string): Promise<string | null> {
   return promise;
 }
 
-/** 测试清预检缓存。 */
-export function clearVerbatimProbeCacheForTest(): void {
-  if (process.env.VITEST !== "1") throw new Error("认字预检缓存钩子只能在 VITEST 使用");
-  verbatimProbeCache = null;
-  verbatimProbeInflight = null;
-}
-
 function pythonExecutable(): string {
   const configured = pythonBin();
   if (existsSync(configured)) return configured;
