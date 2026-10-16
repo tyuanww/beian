@@ -11,3 +11,8 @@ export function reviewErrorCopy(raw: string): string {
   if (OCR_FAILED.test(text)) return REVIEW_COPY.ocrFailed;
   return customerCopy(text);
 }
+
+/** 超页是产品限制，不是机器报错：用 warning 级 Alert；其余报错仍用 error。 */
+export function reviewErrorType(raw: string): "warning" | "error" {
+  return PAGE_OVER.test(String(raw || "")) ? "warning" : "error";
+}
