@@ -168,7 +168,7 @@ export function HistoryPage({ owner, canCreate, canDelete, onOpenTask, onOpenMoc
           { title: "记录 / 文件", key: "title", render: (_, row) => <div className="batch-file-name"><button className="history-title-button" aria-label={`打开${historyTypeLabels[row.type]}记录：${row.title}`} onClick={() => void open(row)}>{row.title || row.product_name || "未命名记录"}</button><HistoryFiles key={`${historyKey(row)}:${row.matched_names.join("\n")}`} names={row.names} matched={row.matched_names} query={state.filters.q} />{editing && !historyDeletable(row) ? <small>处理完成后可删除</small> : null}</div> },
           { title: "类型", dataIndex: "type", width: 90, render: (type: HistoryItem["type"]) => historyTypeLabels[type] },
           { title: "状态", dataIndex: "status", width: 130, render: (status: string) => <Tag color={historyStatusColor(status)}>{label(status)}</Tag> },
-          { title: "创建人", dataIndex: "creator_name", width: 160 },
+          { title: "创建人", dataIndex: "creator_name", width: 160, render: (name: string | null) => name || "未记录" },
           { title: "创建时间", dataIndex: "created_at", width: 185, render: (iso: string) => new Date(iso).toLocaleString("zh-CN", { hour12: false, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }) },
         ]} />
       <div className="batch-section-head history-pagination"><span>{data ? `共 ${data.total} 条 · 第 ${state.page + 1} 页 · 每页 10 条` : "每页 10 条"}</span><Space>
