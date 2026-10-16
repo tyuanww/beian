@@ -21,6 +21,7 @@ import {
 } from "./reviewFlat";
 import { ReviewWorkspace } from "./ReviewWorkspace";
 import { phoneDraftPlan, useReviewSession } from "./useReviewSession";
+import { isDecisionAllowed, isHeldStatus } from "./reviewDecisions";
 import { detailLoadState, shouldShowWaitCard } from "./waitCard";
 import { reviewHits, shouldUseReworkView } from "./reviewVersion";
 import { ReviewDockPanel } from "./ReviewDockPanel";
@@ -586,6 +587,8 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
   function decide(hit: FieldHit, decision: Decision, note = "", opts: { undoable?: boolean } = {}): Promise<boolean> {
     const targetTaskId = task?.id;
     if (!targetTaskId || !hit.id || !reviewable || locked) return Promise.resolve(false);
+    // 和按钮、快捷键同一条规则：待人工确认不能选一致。服务端也会拒收。
+    if (!isDecisionAllowed(hit, decision)) return Promise.resolve(false);
     const hitId = hit.id;
     const previous = hit.decision;
     const fromIndex = hits.findIndex((h) => h.id === hitId);
@@ -820,7 +823,7 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
   fitHitRef.current = fitHit;
 
   function publishDecision(hit: FieldHit, decision: Decision, note: string, undoable = true) {
-    if (hit.status === "待人工确认" && decision === "issue") {
+    if (isHeldStatus(hit) && decision === "issue") {
       setTab("issue");
       setCloseHeldPulse((n) => n + 1);
     }
@@ -850,7 +853,7 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
     if (e.key === "j" || e.key === "k") { step(e.key === "j" ? 1 : -1); return; }
     const verdict = verdictForKey(e.key);
     if (verdict && current && reviewable && !busy && !locked) {
-      if (current.status === "待人工确认" && verdict === "confirm") return;
+      if (!isDecisionAllowed(current, verdict)) return;
       e.preventDefault();
       publishDecision(current, verdict, current.id ? notes[current.id] ?? current.note ?? "" : "");
     }

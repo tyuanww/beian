@@ -3,6 +3,7 @@ import { Input, Tooltip } from "antd";
 import { REVIEW_COPY } from "../copy/labels";
 import type { Decision, FieldHit } from "../api";
 import { spokenAsk } from "./hitText";
+import { allowedDecisions } from "./reviewDecisions";
 import { nativeEvidenceView } from "./nativeTextEvidence";
 import { reviewEvidence, type EvidenceText } from "./reviewEvidence";
 import { markedSlices, spanOmitReason, spotColumns, spotLocus, type LocusClip, type SpotColumn, type SpotSpan } from "./spotCopy";
@@ -123,7 +124,7 @@ function VerdictButtons({
 }) {
   return (
     <>
-      {(hit.status === "待人工确认" ? (["issue", "ignore"] as const) : (["confirm", "issue", "ignore"] as const)).map((d) => {
+      {allowedDecisions(hit).map((d) => {
         const keyNo = { confirm: 1, issue: 2, ignore: 3 }[d];
         const button = (
           <button key={d} type="button" aria-pressed={selected === d} className={selected === d ? "is-on" : undefined}
