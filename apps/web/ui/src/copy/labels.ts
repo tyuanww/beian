@@ -139,7 +139,7 @@ export const REVIEW_COPY = {
   /** 锁页横幅第二行（只留 🔒 一个图标）。 */
   lockedNote: "只能查看，不能再改",
   footer: (left: number, page: number) => `这单还剩 ${left} 条待确认 · 本页还有 ${page} 条`,
-  spot: "就地对照",
+  spot: "对照",
   spotTitle: "对照卡",
   excelStandard: "Excel标准",
   diffFragment: "差异片段",

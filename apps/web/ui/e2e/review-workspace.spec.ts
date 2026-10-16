@@ -743,7 +743,7 @@ test("锁页后收起撤销提示", async ({ page, syntheticApi }) => {
   await expect(page.getByTestId("review-undo-toast")).toHaveCount(0, { timeout: 1000 });
 });
 
-test("就地对照：每条框出范围，对照窗贴在当前框右侧，右栏只留清单", async ({ page, syntheticApi }) => {
+test("对照：每条框出范围，对照窗贴在当前框右侧，右栏只留清单", async ({ page, syntheticApi }) => {
   await page.addInitScript(() => localStorage.setItem("wb_review_spot", "on"));
   const task = reviewTask("e5969b58cdb8");
   task.hits = [
@@ -767,7 +767,7 @@ test("就地对照：每条框出范围，对照窗贴在当前框右侧，右�
 
   const dock = page.getByTestId("review-dock");
   const card = page.getByTestId("review-spot");
-  await expect(page.getByRole("button", { name: "就地对照" })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("button", { name: "对照", exact: true })).toHaveAttribute("aria-pressed", "true");
   await expect(dock.getByLabel("疑点列表")).toBeVisible();
   await expect(dock.locator(".review-flat-detail")).toHaveCount(0);
   await expect(card.getByText("Excel 应印", { exact: true })).toBeVisible();

@@ -34,7 +34,7 @@ export function writeBoxesOn(storage: Pick<Storage, "setItem"> | null, on: boole
   }
 }
 
-/** 就地对照默认开。关掉后回到右栏里展开这一条。 */
+/** 对照默认开。关掉后回到右栏里展开这一条。 */
 export function readSpotOn(storage: Pick<Storage, "getItem"> | null): boolean {
   try {
     return storage?.getItem(SPOT_KEY) !== "off";

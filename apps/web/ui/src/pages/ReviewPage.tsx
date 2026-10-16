@@ -541,7 +541,7 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
     }
   }, []);
 
-  /** <1440 浮层展开后，当前标记若被右栏盖住就平移画布（第 7 行）。就地对照改为重新框进可见区域。 */
+  /** <1440 浮层展开后，当前标记若被右栏盖住就平移画布（第 7 行）。对照改为重新框进可见区域。 */
   useEffect(() => {
     if (layout !== "overlay" || !panelOpen || spotOn) return;
     const id = window.requestAnimationFrame(() => {
