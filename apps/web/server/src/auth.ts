@@ -226,7 +226,7 @@ function users(): User[] {
   }
 }
 
-/** 按账号 id（飞书 open_id，或无 open_id 时登录用的显示名）查账号目录里的显示名；查不到、重名或目录不可读返回 null，绝不返回原始 id。 */
+/** 按 created_by 查账号目录里的显示名：先按 open_id，再按显示名；查不到、重名或目录不可读返回 null，绝不返回原始 id。 */
 export function accountDisplayName(id: string): string | null {
   const key = String(id || "").trim();
   if (!key) return null;
@@ -241,8 +241,7 @@ export function accountDisplayName(id: string): string | null {
     const name = byOpenId.length === 1 ? (byOpenId[0].name || "").trim() : "";
     return name && name !== key ? name : null;
   }
-  // 无 open_id 的显示名登录：账号 id 本身就是目录里的显示名。
-  const byName = list.filter((user) => !(user.open_id || "").trim() && (user.name || "").trim() === key);
+  const byName = list.filter((user) => (user.name || "").trim() === key);
   return byName.length === 1 ? key : null;
 }
 

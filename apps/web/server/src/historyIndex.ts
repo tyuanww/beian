@@ -892,12 +892,12 @@ function matches(record: Stored, filter: Filter, now: number): boolean {
   return record.names.some((name) => name.toLowerCase().includes(needle));
 }
 
-// 生成人：只认落盘的 created_by；没有时，owner 是创建时写定、之后不改的创建者账号，
-// 才按账号目录查显示名；查不到就是 null。旧索引里 creator_name 曾回落成账号 id，与 creator_id 相同时视为无记录。
+// 生成人：只从落盘的 created_by 查账号目录；没有 created_by 就是 null，绝不经 creator_id / owner 查名。
+// 旧索引里 creator_name 曾回落成账号 id（与 creator_id 相同），同样视为无记录。查不到也是 null。
 function creatorName(record: Stored, lookup: (id: string) => string | null): string | null {
-  const stored = record.creator_name.trim();
-  if (stored && stored !== record.creator_id) return stored;
-  return record.creator_id ? lookup(record.creator_id) : null;
+  const createdBy = record.creator_name.trim();
+  if (!createdBy || createdBy === record.creator_id) return null;
+  return lookup(createdBy);
 }
 
 function accountNameLookup(): (id: string) => string | null {

@@ -591,7 +591,8 @@ function publicMockupSummaryFields(job: MockupJob, view: MockupErrorView = {}) {
     title: job.title || "",
     error: legacyError || jobError,
     created_at: job.created_at,
-    owner: job.created_by || job.owner,
+    // 生成人只认 created_by；缺失时返回 null，不回落到账号 id。
+    owner: job.created_by || null,
     files: (job.files || []).map((f) => publicMockupFile(job, f)),
     job_kind: job.job_kind || "mockup",
     job_status: job.job_status,

@@ -45,7 +45,7 @@ describe("history creator_name", { concurrency: false }, () => {
     assert.notEqual(row.creator_name, "ou_ghost");
   });
 
-  it("no created_by but owner is a known account → that account's display name", async () => {
+  it("no created_by but owner is a known account → still null (never looked up via owner)", async () => {
     saveTask({
       id: "c7c7c7c7c7c2", title: "旧单有账号", product_name: "旧单", type: "excel_pdf",
       status: "completed", created_at: "2026-10-01T03:00:00.000Z",
@@ -53,17 +53,28 @@ describe("history creator_name", { concurrency: false }, () => {
     });
     const row = (await items()).find((item) => item.id === "c7c7c7c7c7c2");
     assert.ok(row);
-    assert.equal(row.creator_name, "生成人乙");
+    assert.equal(row.creator_name, null);
   });
 
-  it("created_by on record wins", async () => {
+  it("created_by found in the account directory → its display name", async () => {
     saveTask({
       id: "c7c7c7c7c7c3", title: "新单", product_name: "新单", type: "excel_pdf",
       status: "pending_review", created_at: "2026-10-01T04:00:00.000Z",
-      owner: "ou_known", created_by: "甲生成", actor: "审稿丙",
+      owner: "ou_known", created_by: "生成人乙", actor: "审稿丙",
     });
     const row = (await items()).find((item) => item.id === "c7c7c7c7c7c3");
     assert.ok(row);
-    assert.equal(row.creator_name, "甲生成");
+    assert.equal(row.creator_name, "生成人乙");
+  });
+
+  it("created_by not in the account directory → null", async () => {
+    saveTask({
+      id: "c7c7c7c7c7c4", title: "目录外", product_name: "目录外", type: "excel_pdf",
+      status: "pending_review", created_at: "2026-10-01T05:00:00.000Z",
+      owner: "ou_known", created_by: "查无此人", actor: "审稿丙",
+    });
+    const row = (await items()).find((item) => item.id === "c7c7c7c7c7c4");
+    assert.ok(row);
+    assert.equal(row.creator_name, null);
   });
 });
