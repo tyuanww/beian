@@ -1,13 +1,14 @@
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, describe, it } from "node:test";
 import { makeTestTempDir } from "./testTemp.js";
 
 process.env.VITEST = "1";
 process.env.WB_DATA_DIR = makeTestTempDir("beian-jobs-");
 
-const { deleteTask, loadTask, replaceFile, saveTask } = await import("./tasks.js");
+const { deleteTask, loadTask, replaceFile, saveTask, setReplaceFileHooksForTest } = await import("./tasks.js");
 const {
   decorateQueueAhead,
   enqueue,
@@ -2114,11 +2115,48 @@ describe("mockup retry", () => {
 });
 
 describe("replaceFile", () => {
+  afterEach(() => {
+    setReplaceFileHooksForTest(null);
+  });
+
   it("overwrites an existing dest", () => {
     const p = join(process.env.WB_DATA_DIR || "", "replace-target.json");
     replaceFile(p, "{\"a\":1}");
     replaceFile(p, "{\"a\":2}");
     assert.equal(JSON.parse(readFileSync(p, "utf8")).a, 2);
+  });
+
+  it("retries rename EPERM then throws and keeps the old dest without copy fallback", () => {
+    const p = join(process.env.WB_DATA_DIR || "", "replace-no-copy.json");
+    writeFileSync(p, "{\"old\":true}");
+    let renames = 0;
+    setReplaceFileHooksForTest({
+      rename: () => {
+        renames += 1;
+        throw Object.assign(new Error("simulated windows rename"), { code: "EPERM" });
+      },
+      now: (() => {
+        let t = 0;
+        return () => {
+          t += 1000;
+          return t;
+        };
+      })(),
+    });
+    assert.throws(() => replaceFile(p, "{\"new\":true}"));
+    assert.equal(JSON.parse(readFileSync(p, "utf8")).old, true);
+    assert.equal(renames, 8);
+    const leftover = readdirSync(process.env.WB_DATA_DIR || "").filter((name) => name.startsWith("replace-no-copy.json.") && name.endsWith(".tmp"));
+    assert.deepEqual(leftover, []);
+  });
+
+  it("does not keep a copyFileSync rename fallback in replaceFile", () => {
+    const src = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "tasks.ts"), "utf8");
+    const from = src.indexOf("export function replaceFile");
+    const to = src.indexOf("export function saveTask", from);
+    const fn = src.slice(from, to);
+    assert.equal(/\bcopyFileSync\b/.test(fn), false);
+    assert.equal(/\bcopyFile\b/.test(fn), false);
   });
 });
 

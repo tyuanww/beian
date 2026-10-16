@@ -1,5 +1,5 @@
 import type { NativeRequest } from "./nativeTextJobs.js";
-import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -130,33 +130,57 @@ export function loadTaskWithRevision(tid: string): { task: Task; revision: strin
   return { task: JSON.parse(raw.toString("utf8")) as Task, revision: createHash("sha256").update(raw).digest("hex") };
 }
 
-/** POSIX rename is atomic replace. Windows rename cannot overwrite; copyFile overwrites without deleting dest first. */
+const REPLACE_RENAME_ATTEMPTS = 8;
+const REPLACE_RETRY_MS = 15;
+
+type ReplaceFileHooks = { rename?: typeof renameSync; now?: () => number };
+let replaceFileHooks: ReplaceFileHooks = {};
+
+/** 测试替换 rename / 时钟。生产路径不设。 */
+export function setReplaceFileHooksForTest(hooks: ReplaceFileHooks | null): void {
+  if (process.env.VITEST !== "1") throw new Error("replaceFile 测试钩子只能在 VITEST 使用");
+  replaceFileHooks = hooks || {};
+}
+
+function sleepMs(ms: number): void {
+  const now = replaceFileHooks.now || Date.now;
+  const until = now() + ms;
+  while (now() < until) {
+    /* busy wait: replaceFile stays sync like the rest of task IO */
+  }
+}
+
+function unlinkQuietly(path: string): void {
+  try {
+    unlinkSync(path);
+  } catch {
+    /* ignore */
+  }
+}
+
+/** POSIX rename 原子替换。Windows 上 rename 失败只重试，最终失败抛错；绝不 copyFile 覆盖。 */
 export function replaceFile(dest: string, contents: string): void {
   const tmp = `${dest}.${process.pid}.${Date.now()}.tmp`;
   writeFileSync(tmp, contents, "utf8");
-  try {
-    renameSync(tmp, dest);
-    return;
-  } catch (err) {
-    const code = err && typeof err === "object" && "code" in err ? String((err as { code: string }).code) : "";
-    if (code !== "EEXIST" && code !== "EPERM" && process.platform !== "win32") {
-      try {
-        unlinkSync(tmp);
-      } catch {
-        /* ignore */
-      }
-      throw err;
-    }
-  }
-  try {
-    copyFileSync(tmp, dest);
-  } finally {
+  const rename = replaceFileHooks.rename || renameSync;
+  let lastErr: unknown;
+  for (let attempt = 1; attempt <= REPLACE_RENAME_ATTEMPTS; attempt += 1) {
     try {
-      unlinkSync(tmp);
-    } catch {
-      /* ignore */
+      rename(tmp, dest);
+      return;
+    } catch (err) {
+      lastErr = err;
+      const code = err && typeof err === "object" && "code" in err ? String((err as { code: string }).code) : "";
+      const retryable = code === "EEXIST" || code === "EPERM" || code === "EACCES";
+      if (!retryable || attempt >= REPLACE_RENAME_ATTEMPTS) {
+        unlinkQuietly(tmp);
+        throw err;
+      }
+      sleepMs(REPLACE_RETRY_MS * attempt);
     }
   }
+  unlinkQuietly(tmp);
+  throw lastErr instanceof Error ? lastErr : new Error("replaceFile rename failed");
 }
 
 export function saveTask(task: Task): void {
