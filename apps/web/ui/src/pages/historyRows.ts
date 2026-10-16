@@ -1,5 +1,5 @@
 import type { MockupJob, TaskSummary } from "../api";
-import { MOCKUP_STATUS_LABEL, NAV_LABEL, REVIEW_STATUS_LABEL, reviewCompletedLabel } from "../copy/labels";
+import { creatorLabel, MOCKUP_STATUS_LABEL, NAV_LABEL, REVIEW_STATUS_LABEL, reviewCompletedLabel } from "../copy/labels";
 import { liveJobLine } from "./waitCard";
 
 export type HistoryRow = {
@@ -107,7 +107,7 @@ export function historyTaskRow(row: TaskSummary): HistoryRow {
     color,
     at: row.created_at || "",
     // “生成人”始终是建单人；签字人只代表完成动作，不能改写筛选维度。
-    actor: row.owner || "",
+    actor: creatorLabel(row.owner),
     live,
   };
 }
@@ -147,7 +147,7 @@ export function historyMockRow(row: MockupJob): HistoryRow {
     status,
     color,
     at: row.created_at || "",
-    actor: row.owner || "",
+    actor: creatorLabel(row.owner),
     live,
   };
 }

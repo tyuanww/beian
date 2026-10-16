@@ -7,7 +7,7 @@ import { compareBoardProgress, liveJobLine } from "./waitCard";
 import { shouldShowTaskBoard } from "./tasksBoard";
 import { PENDING_REVIEW, deskClock, type DeskCardRow } from "./deskBoard";
 import { DeskCol } from "./DeskCol";
-import { reviewCompletedLabel } from "../copy/labels";
+import { creatorLabel, reviewCompletedLabel } from "../copy/labels";
 import {
   pendingUploadCard,
   pendingUploadOpenAction,
@@ -46,7 +46,7 @@ function toDeskCard(row: TaskSummary): DeskCardRow {
     title: row.product_name || row.title,
     statusText: status.text,
     statusColor: status.color,
-    actor: row.owner,
+    actor: creatorLabel(row.owner),
     at: row.job_started_at || row.created_at,
     live: liveJobLine({
       job_status: row.job_status,

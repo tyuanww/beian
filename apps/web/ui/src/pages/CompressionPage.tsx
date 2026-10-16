@@ -3,7 +3,7 @@ import { Alert, App, Button, Empty, Input, Modal, Progress, Space, Table, Tag } 
 import { api, UploadPausedError, type PendingUploadReceipt } from "../api";
 import type { CompressionBatch, CompressionFile } from "../batchTypes";
 import { customerCopy } from "./customerCopy";
-import { COMPRESSION_STATUS_LABEL } from "../copy/labels";
+import { COMPRESSION_STATUS_LABEL, creatorLabel } from "../copy/labels";
 import { bytesTooLarge, uploadTooLargeText } from "../uploadLimit";
 
 export const compressionStatus: Record<string, string> = {
@@ -178,7 +178,7 @@ function CompressionDetail({ id, canCreate, canExport, canAdmin, onBack, onHisto
     finally { setBusy(false); }
   }
   return <section className="batch-page">
-    <header className="page-head"><div><h1 className="page-title">{batch?.title || "压缩详情"}</h1><p className="page-lead">{batch ? `${batch.files.length} 个文件 · ${new Date(batch.created_at).toLocaleString("zh-CN", { hour12: false })} · ${batch.owner}` : "正在加载…"}</p></div><Space wrap><Button onClick={onBack}>新建压缩</Button><Button onClick={onHistory}>历史</Button></Space></header>
+    <header className="page-head"><div><h1 className="page-title">{batch?.title || "压缩详情"}</h1><p className="page-lead">{batch ? `${batch.files.length} 个文件 · ${new Date(batch.created_at).toLocaleString("zh-CN", { hour12: false })} · ${creatorLabel(batch.owner)}` : "正在加载…"}</p></div><Space wrap><Button onClick={onBack}>新建压缩</Button><Button onClick={onHistory}>历史</Button></Space></header>
     <UnreadableRecovery canAdmin={canAdmin} />
     {error ? <Alert type="error" showIcon title={error} action={<Button onClick={() => setReload(value => value + 1)}>刷新</Button>} /> : null}
     {batch ? <div className="batch-card">

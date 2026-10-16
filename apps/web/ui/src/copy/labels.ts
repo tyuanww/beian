@@ -78,6 +78,15 @@ export const COMPRESSION_STATUS_LABEL: Record<string, string> = {
  * 核对页（A 通铺）文案。出处：prototypes-v2/deviations.md，老板 2026-10-11 已批
  * （第 3b、26–28、29、32、33、33b、34、35、35b 行）。确认框正文一字不改。
  */
+/** 生成人（建单人）。老任务没有记录时接口给 null，显示「未记录」，不拿账号 id 或签字人补。 */
+export const CREATOR_UNRECORDED = "未记录";
+
+/** 生成人显示名：空、null、全空格都显示「未记录」。 */
+export function creatorLabel(name: string | null | undefined): string {
+  const trimmed = typeof name === "string" ? name.trim() : "";
+  return trimmed || CREATOR_UNRECORDED;
+}
+
 export const REVIEW_COPY = {
   reject: "退回",
   sign: "签字",

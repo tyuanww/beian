@@ -564,7 +564,7 @@ export type TaskSummary = {
   status: string;
   created_at?: string;
   summary?: unknown;
-  owner?: string;
+  owner?: string | null;
   completed_by?: string;
   completed_at?: string;
   /** 审稿完成方式：signed 签字通过 / rework 退回改稿。老记录可能没有。 */
@@ -877,7 +877,7 @@ export type MockupJob = {
   title?: string;
   error?: string;
   created_at?: string;
-  owner?: string;
+  owner?: string | null;
   /** 仅 key="glb" 可能带 texture_format：GLB 贴图为 EXT_texture_webp 时 "webp"，否则 "png"；服务端读不出时省略。 */
   files: ({ key: string; name: string } & GlbTextureInfo)[];
   can_repair_print_faces?: boolean;
