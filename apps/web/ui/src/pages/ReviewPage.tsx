@@ -23,6 +23,7 @@ import { ReviewWorkspace } from "./ReviewWorkspace";
 import { phoneDraftPlan, useReviewSession } from "./useReviewSession";
 import { isDecisionAllowed, isHeldStatus } from "./reviewDecisions";
 import { completePayload, needsOrderHeldConfirm, signAllowedForOrderHeld } from "./orderHeldConfirm";
+import { unsavedNotesHint } from "./unsavedNotesHint";
 import { detailLoadState, shouldShowWaitCard } from "./waitCard";
 import { reviewHits, shouldUseReworkView } from "./reviewVersion";
 import { ReviewDockPanel } from "./ReviewDockPanel";
@@ -914,6 +915,7 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
   const heldCount = hits.filter(isOpenHeld).length;
   const orderHeldNeeded = needsOrderHeldConfirm(task, hits);
   const orderHeldOk = signAllowedForOrderHeld(orderHeldNeeded, orderHeldConfirm);
+  const draftBlock = unsavedNotesHint(hasUnsavedNotes);
   const failedJob = task?.status === "compare_failed" || task?.job_status === "failed";
   const thumbs = thumbMarks(pages, hits, seenPages);
   const issueRows = rejectRows(hits, notes);
@@ -960,8 +962,11 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
           </span>
         ) : null}
         <span className="review-grow" />
-        {hasUnsavedNotes ? <span className="review-draft-status" role="status">先保存备注，再继续。</span> : null}
-        {hasUnsavedNotes && phone ? <button type="button" className="btn-ghost review-draft-settle" disabled={busy || Boolean(locked)} onClick={() => { void settlePhoneDrafts(); }}>{REVIEW_COPY.phoneDraftSave}</button> : null}
+        {hasUnsavedNotes && phone ? (
+          <Button className="review-draft-settle" disabled={busy || Boolean(locked)} onClick={() => { void settlePhoneDrafts(); }}>
+            {REVIEW_COPY.phoneDraftSave}
+          </Button>
+        ) : null}
         <span className="review-actions">
         {/* 产品哥：「上传新稿」不放看稿工具条，只在退回后出现在页头。 */}
           {!phone && reworkable && task?.status === "completed" ? (
@@ -980,6 +985,7 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
             上传新稿
           </button>
         ) : null}
+        {draftBlock ? <span className="review-draft-status" role="status" data-testid="review-unsaved-hint">{draftBlock}</span> : null}
         {gate.hint ? <span className="review-signhint" id="review-sign-hint" title={gate.title} aria-live="polite">{gate.hint}</span> : null}
         {orderHeldNeeded && !failedJob ? (
           <Checkbox

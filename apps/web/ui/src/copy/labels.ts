@@ -170,6 +170,8 @@ export const REVIEW_COPY = {
   phoneDraftLoseCancel: "再看看",
   /** 签字旁勾选；与后端 /complete 400 文案一致。 */
   orderHeldConfirm: "整单待人工确认，签字即认可",
+  /** 签字/退回因未存备注灰掉时旁边的原因。 */
+  unsavedNotesBlock: "备注未保存，请先保存",
   heldUnread: "认字存疑",
   /** 审稿员可见的认字报错：不露组件名、路径或堆栈。 */
   ocrFailed: "认字出了问题，请联系管理员",

@@ -272,3 +272,9 @@ html[data-theme="dark"] .review-miss { color: #F2B44C; background: #43332E; }
 .review-flat-page.is-phone .review-actions .review-order-held {
   flex: 1 1 100%;
 }
+/* 手机「保存备注」：Ant 默认钮即描边次要按钮，贴合 DESIGN 主/次一对。 */
+.review-flat-page .review-draft-settle.ant-btn {
+  min-height: 40px;
+  border-radius: 20px;
+  padding-inline: 14px;
+}
