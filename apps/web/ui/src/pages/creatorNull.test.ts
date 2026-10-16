@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { CREATOR_UNRECORDED, creatorLabel } from "../copy/labels.js";
+import { actorLabel, CREATOR_UNRECORDED, creatorLabel } from "../copy/labels.js";
 import { matchesDeskQuery } from "./uploadDesk.js";
 import { filterHistoryRows, historyActors, historyMockRow, historyTaskRow } from "./historyRows.js";
 
@@ -11,6 +11,14 @@ describe("生成人为 null", () => {
     assert.equal(creatorLabel(undefined), "未记录");
     assert.equal(creatorLabel("  "), "未记录");
     assert.equal(creatorLabel(" 籽烨 "), "籽烨");
+  });
+
+  it("actorLabel（出图版本操作者）：null / 缺省 / 空串 / 空白显示「未记录」，有名字原样", () => {
+    assert.equal(actorLabel(null), "未记录");
+    assert.equal(actorLabel(undefined), "未记录");
+    assert.equal(actorLabel(""), "未记录");
+    assert.equal(actorLabel("  "), "未记录");
+    assert.equal(actorLabel(" 籽烨 "), "籽烨");
   });
 
   it("历史行：owner 为 null 不报错，显示「未记录」，可筛选、可排序", () => {

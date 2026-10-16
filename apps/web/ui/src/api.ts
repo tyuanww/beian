@@ -866,7 +866,7 @@ export type RenderGenerationCreate = {client_request_id:string;mode:"legacy_reli
   expected_current_generation_id:string;studio_adjustment:{product_light:number;background_light:number}};
 export type RenderGenerationCreated = {mutation:RenderMutation;current_render_generation_id?:string;has_render_generations:boolean;job_status:MockupJob["status"]};
 export type RenderGenerationRow = {generation_id:string;mode:"legacy_import" | "legacy_relight" | "upgrade";profile:string;
-  created_at:string;actor_label?:string;quality_status:"unwired" | "runtime_verified" | "failed";current:boolean};
+  created_at:string;actor_label?:string | null;quality_status:"unwired" | "runtime_verified" | "failed";current:boolean};
 export type RenderGenerationHistory = {items:RenderGenerationRow[];next_cursor:string | null};
 
 export type MockupJob = {

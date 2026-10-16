@@ -87,6 +87,11 @@ export function creatorLabel(name: string | null | undefined): string {
   return trimmed || CREATOR_UNRECORDED;
 }
 
+/** 操作者显示名（出图版本等）：语义是操作者而非生成人，文案同为「未记录」。 */
+export function actorLabel(name: string | null | undefined): string {
+  return creatorLabel(name);
+}
+
 export const REVIEW_COPY = {
   reject: "退回",
   sign: "签字",
