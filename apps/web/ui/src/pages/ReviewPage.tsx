@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { Alert, App, Button, Empty, Tag } from "antd";
+import { Alert, App, Button, Checkbox, Empty, Tag } from "antd";
 import { REVIEW_COPY, NAV_LABEL } from "../copy/labels";
 import { ApiError, api, type Decision, type FieldHit, type TaskDetail, type TaskPage } from "../api";
 import { WaitCard } from "../chrome/WaitCard";
@@ -22,6 +22,7 @@ import {
 import { ReviewWorkspace } from "./ReviewWorkspace";
 import { phoneDraftPlan, useReviewSession } from "./useReviewSession";
 import { isDecisionAllowed, isHeldStatus } from "./reviewDecisions";
+import { completePayload, needsOrderHeldConfirm, signAllowedForOrderHeld } from "./orderHeldConfirm";
 import { detailLoadState, shouldShowWaitCard } from "./waitCard";
 import { reviewHits, shouldUseReworkView } from "./reviewVersion";
 import { ReviewDockPanel } from "./ReviewDockPanel";
@@ -98,6 +99,11 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
   const [tab, setTab] = useState<FlatTab>("pending");
   const [seenPages, setSeenPages] = useState<Set<number>>(() => new Set());
   const [dialog, setDialog] = useState<"sign" | "reject" | null>(null);
+  const [orderHeldConfirm, setOrderHeldConfirm] = useState(false);
+  // 换单或不再需要整单确认时清掉勾选，避免带着上一单的勾。
+  useEffect(() => {
+    setOrderHeldConfirm(false);
+  }, [taskId]);
   /** 签字/退回失败的提示文案；null = 没失败。 */
   const [submitFailed, setSubmitFailed] = useState<string | null>(null);
   /** 同步置位，防连点：await 队列之前就挡住第二次提交。 */
@@ -742,7 +748,11 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
         return;
       }
       const heldOpen = kind === "sign" ? hits.filter(isOpenHeld).length : 0;
-      const next = await api.complete(task.id, { conclusion: conclusionFor(kind, extra, rejectRows(hits, notes), heldOpen) });
+      const conclusion = conclusionFor(kind, extra, rejectRows(hits, notes), heldOpen);
+      const next = await api.complete(task.id, completePayload(
+        conclusion,
+        kind === "sign" && needsOrderHeldConfirm(task, hits) && orderHeldConfirm,
+      ));
       setTask(next);
       setDialog(null);
       setSubmitFailed(null);
@@ -902,6 +912,8 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
   }
 
   const heldCount = hits.filter(isOpenHeld).length;
+  const orderHeldNeeded = needsOrderHeldConfirm(task, hits);
+  const orderHeldOk = signAllowedForOrderHeld(orderHeldNeeded, orderHeldConfirm);
   const failedJob = task?.status === "compare_failed" || task?.job_status === "failed";
   const thumbs = thumbMarks(pages, hits, seenPages);
   const issueRows = rejectRows(hits, notes);
@@ -969,10 +981,21 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
           </button>
         ) : null}
         {gate.hint ? <span className="review-signhint" id="review-sign-hint" title={gate.title} aria-live="polite">{gate.hint}</span> : null}
+        {orderHeldNeeded && !failedJob ? (
+          <Checkbox
+            className="review-order-held"
+            data-testid="review-order-held"
+            checked={orderHeldConfirm}
+            disabled={busy || Boolean(locked) || hasUnsavedNotes || !gate.canSign}
+            onChange={(e) => setOrderHeldConfirm(e.target.checked)}
+          >
+            {REVIEW_COPY.orderHeldConfirm}
+          </Checkbox>
+        ) : null}
         {failedJob ? null : <button type="button" className="btn-ghost review-reject" disabled={!gate.canReject || busy || hasUnsavedNotes} title={gate.rejectTitle || gate.title || undefined} aria-describedby={gate.rejectTitle ? "review-reject-note" : undefined} onClick={() => { setSubmitFailed(null); setDialog("reject"); }}>
           {REVIEW_COPY.reject}
         </button>}
-        {failedJob ? null : <button type="button" className="btn-primary review-sign" disabled={!gate.canSign || busy || hasUnsavedNotes} title={gate.title || undefined} aria-describedby={gate.hint ? "review-sign-hint" : undefined} onClick={() => { setSubmitFailed(null); setDialog("sign"); }}>
+        {failedJob ? null : <button type="button" className="btn-primary review-sign" disabled={!gate.canSign || busy || hasUnsavedNotes || !orderHeldOk} title={gate.title || undefined} aria-describedby={gate.hint ? "review-sign-hint" : undefined} onClick={() => { setSubmitFailed(null); setDialog("sign"); }}>
           {REVIEW_COPY.sign}
         </button>}
         </span>
