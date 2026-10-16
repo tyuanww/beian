@@ -1273,12 +1273,13 @@ app.post("/api/tasks/:tid/complete", async (c) => {
       && hit.decision !== "ignore"
     )).length
     : 0;
-  if (task.verbatim_warning && openHeld > 0 && body.order_held_confirm !== true) {
+  const issues = hits.filter((h) => h.decision === "issue");
+  // 退回（有 issue）不要求整单确认；只有签字才要 order_held_confirm。
+  if (!issues.length && task.verbatim_warning && openHeld > 0 && body.order_held_confirm !== true) {
     throw new HTTPException(400, { message: "整单待人工确认，签字即认可" });
   }
   const conclusion = (body.conclusion || "").trim();
   if (!conclusion) throw new HTTPException(400, { message: "请写下结论" });
-  const issues = hits.filter((h) => h.decision === "issue");
   task.status = "completed";
   task.completed_at = nowIso();
   task.completed_by = s.display_name;

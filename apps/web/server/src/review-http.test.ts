@@ -662,6 +662,55 @@ describe("review http", () => {
     assert.equal(okBody.complete_kind, "signed");
   });
 
+  it("allows returning an order with open held hits without order_held_confirm", async () => {
+    const tid = seed({
+      id: "b3b3b3b3b3b3",
+      title: "无私有退回",
+      product_name: "无私有退回",
+      type: "excel_pdf",
+      status: "pending_review",
+      verbatim_check: true,
+      verbatim_warning: "稿件未保留 Illustrator 编辑数据，定位精度下降，建议设计师重新导出",
+      hits: [
+        hit({ id: "h1", status: "待人工确认", decision: "pending" }),
+        hit({ id: "h2", decision: "issue" }),
+      ],
+    });
+    const res = await app.request(`/api/tasks/${tid}/complete`, {
+      method: "POST",
+      headers: { ...authHeader(), "content-type": "application/json" },
+      body: JSON.stringify({ conclusion: "退回改稿" }),
+    });
+    assert.equal(res.status, 200);
+    const body = (await res.json()) as { status?: string; complete_kind?: string };
+    assert.equal(body.status, "completed");
+    assert.equal(body.complete_kind, "rework");
+  });
+
+  it("still blocks signing with open held hits when order_held_confirm is absent", async () => {
+    const tid = seed({
+      id: "b4b4b4b4b4b4",
+      title: "无私有签字",
+      product_name: "无私有签字",
+      type: "excel_pdf",
+      status: "pending_review",
+      verbatim_check: true,
+      verbatim_warning: "稿件未保留 Illustrator 编辑数据，定位精度下降，建议设计师重新导出",
+      hits: [
+        hit({ id: "h1", status: "待人工确认", decision: "pending" }),
+        hit({ id: "h2", decision: "confirm" }),
+      ],
+    });
+    const res = await app.request(`/api/tasks/${tid}/complete`, {
+      method: "POST",
+      headers: { ...authHeader(), "content-type": "application/json" },
+      body: JSON.stringify({ conclusion: "无改稿项" }),
+    });
+    assert.equal(res.status, 400);
+    const body = (await res.json()) as { detail?: string };
+    assert.equal(body.detail, "整单待人工确认，签字即认可");
+  });
+
   it("GET task hides job_pid from the client", async () => {
     saveTask({
       id: "121212121212",
