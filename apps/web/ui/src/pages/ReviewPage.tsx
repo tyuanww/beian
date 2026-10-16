@@ -29,7 +29,7 @@ import { ReviewHitDetail } from "./ReviewHitDetail";
 import { SPOT_CARD_GAP, SPOT_CARD_MARGIN, SPOT_CARD_MIN_HEIGHT, SPOT_CARD_MIN_WIDTH, SPOT_CARD_WIDTH, avoidSpotObstacle, placeSpotCard, resolveSpotPosition, spotDragStarted, spotLane, spotSideRoom, type SpotObstacle } from "./spotCard";
 import { spotHeaderText, spotNavTarget, spotPendingEmptyLine } from "./spotCopy";
 import { firstPendingIssueIndex, pageIndexForHit } from "./reviewNav";
-import { customerCopy } from "./customerCopy";
+import { reviewErrorCopy } from "./reviewErrorCopy";
 import { reviewVersionToggle } from "./reviewStatus";
 import { buildRevisionList, partitionReviewHits, withLocalNotes } from "./reviewEvidence";
 import {
@@ -982,7 +982,7 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
       {locked ? <Alert className="review-lock" type="warning" title={`🔒 ${locked}`} description={REVIEW_COPY.lockedNote} /> : null}
       {error ? <Alert type="error" title={error} /> : null}
       {task?.error || task?.job_error ? (
-        <Alert type="error" showIcon title={customerCopy(task.error || task.job_error || "") || "检查失败。"} description={failedJob ? REVIEW_COPY.reupload : undefined} />
+        <Alert type="error" showIcon title={reviewErrorCopy(task.error || task.job_error || "") || "检查失败。"} description={failedJob ? REVIEW_COPY.reupload : undefined} />
       ) : failedJob ? <Alert type="error" showIcon title={REVIEW_COPY.reupload} /> : null}
       {signed && !locked ? <Alert type="success" showIcon title={task?.complete_kind === "rework" ? "已退回。" : "已签字。"} /> : null}
       {decisionError ? <Alert type="error" showIcon title={`未保存：${decisionError}`} /> : null}
