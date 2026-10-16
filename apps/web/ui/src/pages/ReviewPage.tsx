@@ -20,7 +20,7 @@ import {
   type FlatLayout, type FlatTab,
 } from "./reviewFlat";
 import { ReviewWorkspace } from "./ReviewWorkspace";
-import { phoneDiscardOnEnter, useReviewSession } from "./useReviewSession";
+import { phoneDraftPlan, useReviewSession } from "./useReviewSession";
 import { detailLoadState, shouldShowWaitCard } from "./waitCard";
 import { reviewHits, shouldUseReworkView } from "./reviewVersion";
 import { ReviewDockPanel } from "./ReviewDockPanel";
@@ -87,7 +87,7 @@ function spotTabObstacle(canvas: HTMLElement): SpotObstacle | null {
 }
 
 export function ReviewPage({ taskId, userId, displayName = null, onBack, onHistory }: Props) {
-  const { message } = App.useApp();
+  const { message, modal } = App.useApp();
   const [task, setTask] = useState<TaskDetail | null>(() => reviewHandoffFor(taskId));
   const [error, setError] = useState<string | null>(null);
   const [pageIdx, setPageIdx] = useState(0);
@@ -128,8 +128,6 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
   const spotDraggedRef = useRef(false);
   const spotPosRef = useRef<{ left: number; top: number } | null>(null);
   const spotDragRef = useRef<{ id: number; x: number; y: number; left: number; top: number; moved: boolean } | null>(null);
-  const discardDraftRef = useRef(discardDraft);
-  discardDraftRef.current = discardDraft;
   const [spotDragged, setSpotDragged] = useState(false);
   const [spotSize, setSpotSize] = useState<{ width: number; height: number | null }>({ width: SPOT_CARD_WIDTH, height: null });
   const spotSizeRef = useRef(spotSize);
@@ -561,15 +559,8 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  const activeHit = hits[active];
-  const phoneLayoutWas = useRef<string | null>(null);
-  const activeHitId = activeHit?.id;
-  const activeDraft = activeHitId ? notes[activeHitId] : undefined;
-  useEffect(() => {
-    const id = phoneDiscardOnEnter(phoneLayoutWas.current, layout, spotOn, activeHitId, activeDraft, activeHit?.note);
-    phoneLayoutWas.current = layout;
-    if (id) discardDraftRef.current(id);
-  }, [layout, spotOn, activeHitId, activeDraft, activeHit?.note]);
+  // 产品要求：切到手机（含桌面拉窄、首次打开）不丢备注草稿。草稿留在本机会话里，回到桌面还在。
+  // 手机上存不了的草稿，由页头「保存备注」处理：能存就存，存不了先确认再丢。
 
   if (!taskId) {
     return (
@@ -690,6 +681,22 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
     } catch {
       message.error("复制失败，请手动选中文字");
     }
+  }
+
+  /** 手机上没有逐条备注框：能带原结论存的先存；存不了的确认后再丢，不悄悄丢。 */
+  async function settlePhoneDrafts() {
+    const plan = phoneDraftPlan(hits, notes);
+    for (const item of plan.save) {
+      const hit = hits.find((h) => h.id === item.id);
+      if (hit) await decide(hit, item.decision, item.note, { undoable: false });
+    }
+    if (plan.drop.length === 0) return;
+    modal.confirm({
+      title: REVIEW_COPY.phoneDraftLoseTitle,
+      okText: REVIEW_COPY.phoneDraftLoseOk,
+      cancelText: REVIEW_COPY.phoneDraftLoseCancel,
+      onOk: () => { for (const id of plan.drop) discardDraft(id); },
+    });
   }
 
   const hasUnsavedNotes = hits.some((hit) => hit.id && notes[hit.id] != null && notes[hit.id] !== (hit.note ?? ""));
@@ -939,6 +946,7 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
         ) : null}
         <span className="review-grow" />
         {hasUnsavedNotes ? <span className="review-draft-status" role="status">先保存备注，再继续。</span> : null}
+        {hasUnsavedNotes && phone ? <button type="button" className="btn-ghost review-draft-settle" disabled={busy || Boolean(locked)} onClick={() => { void settlePhoneDrafts(); }}>{REVIEW_COPY.phoneDraftSave}</button> : null}
         <span className="review-actions">
         {/* 产品哥：「上传新稿」不放看稿工具条，只在退回后出现在页头。 */}
           {!phone && reworkable && task?.status === "completed" ? (
