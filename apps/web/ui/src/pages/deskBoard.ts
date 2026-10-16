@@ -31,13 +31,21 @@ export type DeskCardRow = {
   live?: string | null;
   error?: string | null;
   progress?: number;
+  /** 后端 job_status=queued：紧凑卡不显示 0%，只写排队与前面单数。 */
+  queued?: boolean;
 };
 
 /**
  * 紧凑卡只留一行状态，但运行中的真实阶段不能丢。ETA/排队信息保留在 title，
  * 行内只取第一个片段，避免长文案挤掉品名。
  */
+const DESK_QUEUED = "排队中";
+
 export function deskCardState(row: DeskCardRow): string {
+  if (row.queued) {
+    const ahead = (row.live || "").trim();
+    return ahead ? `${DESK_QUEUED} · ${ahead}` : DESK_QUEUED;
+  }
   const primary = row.progress == null ? row.statusText : `${Math.round(row.progress)}%`;
   const live = (row.live || "").trim();
   if (!live) return primary;

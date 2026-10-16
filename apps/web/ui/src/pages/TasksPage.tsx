@@ -57,6 +57,7 @@ function toDeskCard(row: TaskSummary): DeskCardRow {
     }),
     error: row.error || row.job_error,
     progress: columnOf(row) === "comparing" ? compareBoardProgress(row) : undefined,
+    queued: row.job_status === "queued",
   };
 }
 

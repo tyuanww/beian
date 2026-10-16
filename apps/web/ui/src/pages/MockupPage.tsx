@@ -201,6 +201,7 @@ function toMockCard(row: MockupJob): DeskCardRow {
     actor: row.owner,
     at: row.job_started_at || row.created_at,
     progress: mockupBoardProgress(row),
+    queued: row.job_status === "queued",
     live: liveJobLine({ ...row, kind: "mockup" }),
     error:
       row.structure_status === "review_required"
