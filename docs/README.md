@@ -18,7 +18,7 @@
 | 交接给下一个 AI（2026-10-12） | [交接文档](handoff-2026-10-12.md) | 现状、架构、发版流程、禁区、待办入口、坑；待办本身只在 TODOS |
 | 发版流程开发者体验评审 | [DX 评审 2026-10-10](designs/devex-review-release-20261010.md) | 评审结论与建议；具体待办只进 TODOS |
 | 本地运维工具操作与设计 | [监控操作指南](howto-local-monitoring.md)、[监控设计说明](explanation-local-monitoring.md)、[R04 资源采证指南](howto-resource-stress.md) | 合成回归与杭州计划任务安装步骤见操作指南；真实掉线（停生产服务）、正式预算仍以 TODO 与对应合同为准 |
-| 核对页就地对照（0.31.1.24） | [怎么使用](howto-review-spot.md)、[为什么对照卡贴在框旁](explanation-review-spot.md)、[审稿合同](contracts/review.md#就地对照) | 电脑端默认开。右栏仍是清单。手机不显示开关，也不使用已保存的开。签字门槛不因此改变 |
+| 核对页「对照」（0.31.1.24） | [怎么使用](howto-review-spot.md)、[为什么对照卡贴在框旁](explanation-review-spot.md)、[审稿合同](contracts/review.md#对照) | 电脑端默认开。右栏仍是清单。手机不显示开关，也不使用已保存的开。签字门槛不因此改变 |
 
 ## 当前进度从哪里读
 
