@@ -559,3 +559,14 @@ RF-10–RF-13 的原始依赖见 [ADR-007 §20.7](docs/adr-007-packaging-render-
 永久例外（不在待清清单里，仍计入 `ALLOWED`，不作为新增例外的先例）：
 
 - `apps/web/ui/src/pages/setupBoard.ts` `probeErrorMessage`（1 行）：认的是浏览器 fetch 自己抛的报错（failed to fetch / networkerror / load failed，请求没到服务器），后端永远给不了码，只能按浏览器文案换成「服务没连上，请稍后重试。」。
+
+## 2026-10-17 签字/退回规则表（第 5 批，`test/pstack-batch5-sign-rules`）
+
+签字 / 退回按钮何时显示、何时可点、确认框能否提交，已做成前后端共用表 `apps/web/server/src/signReturnRules.ts`（零依赖，31 行规则）：服务端 `signReturnRules.test.ts` 逐行对照 `completeGate`（`/complete` 拦截，已从路由抽出，行为不变）+ `hasPerm(role, "complete")`；前端 `signReturnRules.contract.test.ts` 逐行对照 `reviewSubmitButtons`（核对页按钮规则，已从 `ReviewPage.tsx` 抽出，行为不变）；`e2e/sign-return-rules.spec.ts` 按表渲染核对页，hidden 行断言按钮不存在，正常单行断言按钮在。任一边改规则，对应测试变红。
+
+下面 4 种输入前后端结论不一致，未改行为，只在表的 `SIGN_RETURN_DISPUTED` 里各自锁住现状，待产品定了再挪进主表：
+
+- [ ] 复核（对红）失败、单子回到待审且带上一轮条目（`status` 待审 + `job_status: failed`）：前端两个按钮都不在；服务端 `/complete` 不看 `job_status`，照收签字。
+- [ ] 非逐字单出现未决「待人工确认」：前端算进待确认，签字灰、退回框挡住；服务端不要结论，照收签字。
+- [ ] 只读账号（viewer）：核对页不看权限，按钮照常可点；服务端 403。
+- [ ] 条目状态不在已知集合：前端当一致，可签字；服务端 400「审核数据状态异常」。
