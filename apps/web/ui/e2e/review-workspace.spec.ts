@@ -923,8 +923,8 @@ test("compare_failed 带上一轮条目（reclaimTask 边角单）：进度、�
   expect(task.hits?.length).toBeGreaterThan(0);
   await page.goto(`/review/${task.id}`);
   const alert = page.locator(".ant-alert-error").first();
-  await expect(alert).toContainText("检查中断");
-  await expect(alert).toContainText("重新上传这一单");
+  await expect(alert).toHaveText("检查中断了，下面是上一轮的结果，请联系管理员");
+  await expect(page.getByText("重新上传这一单")).toHaveCount(0);
   await expect(page.getByTestId("review-posn")).toBeVisible();
   await expect(page.getByRole("button", { name: "上一条" })).toBeVisible();
   await expect(page.getByRole("button", { name: "下一条" })).toBeVisible();

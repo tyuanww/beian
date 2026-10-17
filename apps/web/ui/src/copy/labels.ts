@@ -192,6 +192,7 @@ export const REVIEW_COPY = {
   /** 后端超页（page_over）：只核 1 页。不写「拆分后上传」。 */
   pageOver: "稿件超过 1 页，暂不支持核对，请联系管理员",
   reworkFailed: "复核出了问题，下面是上一轮的结果，请联系管理员",
+  compareFailedWithHits: "检查中断了，下面是上一轮的结果，请联系管理员",
   reworkPageOver: "稿件超过 1 页，这次复核没做，下面是上一轮的结果，请联系管理员",
   heldNote: "备注没对上",
   excelMissing: "确认单没有这段",
