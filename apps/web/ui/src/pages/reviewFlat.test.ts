@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import type { FieldHit } from "../api";
 import { PUBLIC_UPLOAD_BYTES, UPLOAD_TOO_LARGE, setUploadLimitFromMe } from "../uploadLimit";
 import {
+  rejectNote,
   clampPinToView, completedAtLabel, completedByText, conclusionFor, decisionFailureText, reworkUploadBlocked, submitFailureText, flatLayout, isTypingTarget, lockedBy, markerOutsideCorner, nextPendingAfter,
   openHeldAfterPending, panToClearPanel, phonePendingLines, positionLabel, rejectRows, shouldShowShortcutsOnOpen, submitGate, tabIndices, thumbMarks, verdictCounts, verdictForKey,
 } from "./reviewFlat.js";
@@ -23,6 +24,8 @@ describe("reviewFlat", () => {
     assert.equal(g.title, "还有 1 条没下结论，下完才能签字");
     assert.equal(g.rejectTitle, "还有 1 条待确认，处理完才能退回");
     assert.equal(g.pending, 1);
+    assert.equal(rejectNote(g.rejectTitle, false), "还有 1 条待确认，处理完才能退回");
+    assert.equal(rejectNote(g.rejectTitle, true), null, "失败但带条目：按钮都不在，小字也不显示");
     assert.deepEqual([submitGate([hit("a", "issue")], true).canSign, submitGate([hit("a", "issue")], true).canReject], [false, true]);
     assert.equal(submitGate([hit("a", "ignore")], true).canSign, true);
     assert.equal(submitGate([], true).canSign, true, "零疑点可直接签字");

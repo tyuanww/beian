@@ -16,7 +16,7 @@ import { readBoxesOn, readPinsOn, readSpotOn, skipPackSheetField, writeBoxesOn, 
 import { ReviewSubmitDialog } from "./ReviewSubmitDialog";
 import {
   clampPinToView, conclusionFor, decisionFailureText, reworkUploadBlocked, submitFailureText, flatLayout, isTypingTarget, lockedBy, markShortcutsSeen, markerOutsideCorner, nextPendingAfter,
-  panToClearPanel, phonePendingLines, positionLabel, rejectRows, shouldShowShortcutsOnOpen, submitGate, tabIndices, thumbMarks, verdictCounts, verdictForKey, isOpenHeld,
+  panToClearPanel, phonePendingLines, positionLabel, rejectNote, rejectRows, shouldShowShortcutsOnOpen, submitGate, tabIndices, thumbMarks, verdictCounts, verdictForKey, isOpenHeld,
   type FlatLayout, type FlatTab,
 } from "./reviewFlat";
 import { ReviewWorkspace } from "./ReviewWorkspace";
@@ -1010,7 +1010,7 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
         </span>
       </header>
 
-      {gate.rejectTitle ? <p className="review-reject-note" id="review-reject-note" data-testid="review-reject-note">{gate.rejectTitle}</p> : null}
+      {rejectNote(gate.rejectTitle, Boolean(failedWithHits)) ? <p className="review-reject-note" id="review-reject-note" data-testid="review-reject-note">{gate.rejectTitle}</p> : null}
       {locked ? <Alert className="review-lock" type="warning" title={`🔒 ${locked}`} description={REVIEW_COPY.lockedNote} /> : null}
       {error ? <Alert type="error" title={error} /> : null}
       {task?.error || task?.job_error || task?.job_error_code ? (
