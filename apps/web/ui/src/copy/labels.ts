@@ -78,6 +78,20 @@ export const COMPRESSION_STATUS_LABEL: Record<string, string> = {
  * 核对页（A 通铺）文案。出处：prototypes-v2/deviations.md，老板 2026-10-11 已批
  * （第 3b、26–28、29、32、33、33b、34、35、35b 行）。确认框正文一字不改。
  */
+/** 生成人（建单人）。老任务没有记录时接口给 null，显示「未记录」，不拿账号 id 或签字人补。 */
+export const CREATOR_UNRECORDED = "未记录";
+
+/** 生成人显示名：空、null、全空格都显示「未记录」。 */
+export function creatorLabel(name: string | null | undefined): string {
+  const trimmed = typeof name === "string" ? name.trim() : "";
+  return trimmed || CREATOR_UNRECORDED;
+}
+
+/** 操作者显示名（出图版本等）：语义是操作者而非生成人，文案同为「未记录」。 */
+export function actorLabel(name: string | null | undefined): string {
+  return creatorLabel(name);
+}
+
 export const REVIEW_COPY = {
   reject: "退回",
   sign: "签字",
@@ -139,7 +153,7 @@ export const REVIEW_COPY = {
   /** 锁页横幅第二行（只留 🔒 一个图标）。 */
   lockedNote: "只能查看，不能再改",
   footer: (left: number, page: number) => `这单还剩 ${left} 条待确认 · 本页还有 ${page} 条`,
-  spot: "就地对照",
+  spot: "对照",
   spotTitle: "对照卡",
   excelStandard: "Excel标准",
   diffFragment: "差异片段",

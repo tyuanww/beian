@@ -564,7 +564,7 @@ export type TaskSummary = {
   status: string;
   created_at?: string;
   summary?: unknown;
-  owner?: string;
+  owner?: string | null;
   completed_by?: string;
   completed_at?: string;
   /** 审稿完成方式：signed 签字通过 / rework 退回改稿。老记录可能没有。 */
@@ -866,7 +866,7 @@ export type RenderGenerationCreate = {client_request_id:string;mode:"legacy_reli
   expected_current_generation_id:string;studio_adjustment:{product_light:number;background_light:number}};
 export type RenderGenerationCreated = {mutation:RenderMutation;current_render_generation_id?:string;has_render_generations:boolean;job_status:MockupJob["status"]};
 export type RenderGenerationRow = {generation_id:string;mode:"legacy_import" | "legacy_relight" | "upgrade";profile:string;
-  created_at:string;actor_label?:string;quality_status:"unwired" | "runtime_verified" | "failed";current:boolean};
+  created_at:string;actor_label?:string | null;quality_status:"unwired" | "runtime_verified" | "failed";current:boolean};
 export type RenderGenerationHistory = {items:RenderGenerationRow[];next_cursor:string | null};
 
 export type MockupJob = {
@@ -877,7 +877,7 @@ export type MockupJob = {
   title?: string;
   error?: string;
   created_at?: string;
-  owner?: string;
+  owner?: string | null;
   /** 仅 key="glb" 可能带 texture_format：GLB 贴图为 EXT_texture_webp 时 "webp"，否则 "png"；服务端读不出时省略。 */
   files: ({ key: string; name: string } & GlbTextureInfo)[];
   can_repair_print_faces?: boolean;

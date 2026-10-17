@@ -19,9 +19,9 @@ describe("paragraph card version pin", () => {
     assert.match(index, /const VERSION = "0\.31\.1\.26";/);
     assert.equal(pkg.version, "0.31.1");
     assert.match(read("docs/contracts/review.md"), /宽 440px/);
-    assert.match(read("docs/contracts/interface.md"), /就地对照/);
-    assert.match(read("docs/explanation-review-spot.md"), /贴到当前框旁边/);
-    assert.match(read("docs/howto-review-spot.md"), /怎么使用就地对照/);
+    assert.match(read("docs/contracts/interface.md"), /关掉「对照」时只画当前字段/);
+    assert.match(read("docs/explanation-review-spot.md"), /贴在当前框旁边/);
+    assert.match(read("docs/howto-review-spot.md"), /怎么使用对照/);
     assert.match(read("TODOS.md"), /这一版不勾 B01\.4/);
   });
 });

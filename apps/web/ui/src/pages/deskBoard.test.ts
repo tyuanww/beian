@@ -43,4 +43,12 @@ describe("deskBoard", () => {
       "检查中 · 大约还要 40 秒",
     );
   });
+
+  it("queued compact card drops 0% and shows only queue position", () => {
+    const row = { id: "3", title: "产品", statusText: "检查中", statusColor: "processing" as const, progress: 0, queued: true };
+    assert.equal(deskCardState({ ...row, live: "前面还有 2 单" }), "排队中 · 前面还有 2 单");
+    assert.doesNotMatch(deskCardState({ ...row, live: "前面还有 2 单" }), /0%/);
+    assert.equal(deskCardState({ ...row, live: "就快轮到" }), "排队中 · 就快轮到");
+    assert.equal(deskCardState({ ...row, live: "" }), "排队中");
+  });
 });

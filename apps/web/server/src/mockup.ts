@@ -141,6 +141,8 @@ export type RenderGenerationRequestRecord = {
   studio_adjustment?: { product_light: number; background_light: number };
   created_at: string;
   actor_id: string;
+  /** 触发这次出图的人的显示名（请求时会话），只给封版 actor_label 用；旧请求没有。 */
+  actor_name?: string;
   worker_pid?: number;
   /** Private per-spawn identity; never serialized by publicMockup/Summary. */
   worker_execution_id?: string;
@@ -591,7 +593,8 @@ function publicMockupSummaryFields(job: MockupJob, view: MockupErrorView = {}) {
     title: job.title || "",
     error: legacyError || jobError,
     created_at: job.created_at,
-    owner: job.created_by || job.owner,
+    // 生成人只认 created_by；缺失时返回 null，不回落到账号 id。
+    owner: job.created_by || null,
     files: (job.files || []).map((f) => publicMockupFile(job, f)),
     job_kind: job.job_kind || "mockup",
     job_status: job.job_status,

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { actorLabel } from "../copy/labels";
 import { Button, Collapse } from "antd";
 import { api, ApiError, type MockupJob, type RenderGenerationHistory } from "../api";
 import { createRenderRequest, readPendingRenderRequest, savePendingRenderRequest,
@@ -156,7 +157,7 @@ export function RenderVersions({job,open,productLight,backgroundLight,onJob}: {
       <ul className="mockup-version-list">
         {history.items.map(row=><li key={row.generation_id} data-generation-id={row.generation_id}>
           <time dateTime={row.created_at}>{new Date(row.created_at).toLocaleString("zh-CN",{month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",hour12:false})}</time>
-          <span>{renderVersionLabel(row)}</span><span className="mockup-version-actor">{row.actor_label || "—"}</span>
+          <span>{renderVersionLabel(row)}</span><span className="mockup-version-actor">{actorLabel(row.actor_label)}</span>
           <span>{row.generation_id === job.current_render_generation_id ? "当前" : ""}</span>
           {canManage ? <Button size="small" disabled={writing || !caps?.activate.allowed || row.generation_id === job.current_render_generation_id}
             onClick={()=>void activate(row.generation_id)}>使用此版本</Button> : null}

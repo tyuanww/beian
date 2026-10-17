@@ -46,6 +46,7 @@ import {
 import {
   G0_LEGACY_ORIGINAL_ID,
   RENDER_GENERATION_DIR,
+  isRenderActorAccountId,
   isRenderGenerationError,
   openRenderGenerationStore,
   type QualityVerifier,
@@ -419,6 +420,8 @@ export function publicTask(task: Task, viewer?: Viewer): Record<string, unknown>
   const redact = !viewer?.admin;
   return {
     ...rest,
+    // 生成人只认 created_by；旧单缺失时原样给 null，不回落到 actor。
+    created_by: task.created_by || null,
     // 最后一步兜底：脱敏后仍有本机路径 / 凭据特征时整条隐藏，加 error_hidden / error_ticket（单号 = task.id）。
     ...(redact ? guardErrorFields(task.id, { job_error: rest.job_error, error: rest.error }) : {}),
     ...(Array.isArray(rest.hits) ? { hits: rewriteLegacyHits(rest.hits) } : {}),
@@ -1280,6 +1283,13 @@ function freezeStudioAdjustment(
   return { product_light: value.product_light, background_light: value.background_light };
 }
 
+/** 封版操作者 = 触发这次出图的人的显示名。缺失时为 null；绝不用 created_by、owner 或任何账号 id。 */
+export function renderTriggerActorLabel(request: RenderGenerationRequestRecord | undefined): string | null {
+  const name = typeof request?.actor_name === "string" ? request.actor_name.trim() : "";
+  if (!name || name === request?.actor_id || isRenderActorAccountId(name)) return null;
+  return name;
+}
+
 function freezeRequestIdentity(request: RenderGenerationRequestRecord | undefined): FrozenRequestIdentity | null {
   if (
     !request
@@ -2088,6 +2098,7 @@ function admitRenderGenerationMutation(input: RenderGenerationMutationEnqueueInp
       studio_adjustment: studioAdjustment,
       created_at: nowIso(),
       actor_id: input.viewer.id,
+      ...(input.viewer.name ? { actor_name: input.viewer.name } : {}),
       worker_protocol: (getRenderGenerationRuntime()?.prepare || hooks.prepareRenderGeneration) ? "render-generation/1" : undefined,
       source_plan_sha256: sourcePlanSha,
     };
@@ -2350,7 +2361,7 @@ async function runGenerationMutation(id: string, mutationId: string): Promise<vo
           profile: G0_IMPORT_PROFILE,
           observedCurrentGenerationId: null,
           expectedCurrentGenerationId: frozenRequest.expected_current_generation_id,
-          actorLabel: disk.created_by || disk.owner,
+          actorLabel: renderTriggerActorLabel(disk.render_generation_request),
         });
       }
       sourceId = G0_LEGACY_ORIGINAL_ID;
@@ -2448,7 +2459,7 @@ async function runGenerationMutation(id: string, mutationId: string): Promise<vo
         sources,
         observedCurrentGenerationId: snapshot.sourceGenerationId,
         expectedCurrentGenerationId: snapshot.sourceGenerationId,
-        actorLabel: still.created_by || still.owner,
+        actorLabel: renderTriggerActorLabel(still.render_generation_request),
       });
     } catch (err) {
       const message = isRenderGenerationError(err) ? err.problem : err instanceof Error ? err.message : "固化失败";

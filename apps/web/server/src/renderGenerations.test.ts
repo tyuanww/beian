@@ -270,6 +270,58 @@ function importG0(store: RenderGenerationStore) {
   });
 }
 
+describe("render actor_label", () => {
+  it("seal accepts null actor_label and the summary omits it", () => {
+    const job = seedJob(); const store = openStore(job);
+    const virtual = store.virtualLegacyCurrentId();
+    store.sealGeneration({ mode: "legacy_import", contractSha256: CONTRACT_SHA, contractBytes: CONTRACT,
+      profile: "compat-legacy-v0", observedCurrentGenerationId: null, expectedCurrentGenerationId: virtual, actorLabel: null });
+    const summary = store.publicSummary(G0_LEGACY_ORIGINAL_ID, G0_LEGACY_ORIGINAL_ID);
+    assert.equal(summary.actor_label, undefined);
+  });
+
+  it("seal still rejects an account id or path as actor_label", () => {
+    for (const bad of ["ou_0123456789abcdef", "/tmp/x", ""]) {
+      const job = seedJob(); const store = openStore(job);
+      const virtual = store.virtualLegacyCurrentId();
+      assert.throws(() => store.sealGeneration({ mode: "legacy_import", contractSha256: CONTRACT_SHA, contractBytes: CONTRACT,
+        profile: "compat-legacy-v0", observedCurrentGenerationId: null, expectedCurrentGenerationId: virtual, actorLabel: bad }),
+      /操作者字段非法/);
+    }
+  });
+
+  it("old archive account-id actor_label stays on disk but public APIs omit it", () => {
+    const job = seedJob(); const store = openStore(job); importG0(store);
+    const manifestPath = join(job.root, RENDER_GENERATION_DIR, G0_LEGACY_ORIGINAL_ID, "generation.json");
+    const beforeDisk = readFileSync(manifestPath, "utf8");
+    const data = JSON.parse(beforeDisk);
+    assert.equal(data.actor_label, "籽烨");
+    data.actor_label = "ou_0123456789abcdef";
+    writeFileSync(manifestPath, JSON.stringify(data));
+    // Re-open so the store re-reads the planted old value.
+    const store2 = openStore(job);
+    const summary = store2.publicSummary(G0_LEGACY_ORIGINAL_ID, G0_LEGACY_ORIGINAL_ID);
+    assert.equal(summary.actor_label, undefined);
+    const page = store2.listHistory({ currentGenerationId: G0_LEGACY_ORIGINAL_ID });
+    assert.equal(page.items[0]?.actor_label, undefined);
+    assert.equal(JSON.parse(readFileSync(manifestPath, "utf8")).actor_label, "ou_0123456789abcdef");
+  });
+
+  it("old archive blank actor_label is omitted from public APIs", () => {
+    for (const planted of ["", "   ", "\t"]) {
+      const job = seedJob(); const store = openStore(job); importG0(store);
+      const manifestPath = join(job.root, RENDER_GENERATION_DIR, G0_LEGACY_ORIGINAL_ID, "generation.json");
+      const data = JSON.parse(readFileSync(manifestPath, "utf8"));
+      data.actor_label = planted;
+      writeFileSync(manifestPath, JSON.stringify(data));
+      const store2 = openStore(job);
+      assert.equal(store2.publicSummary(G0_LEGACY_ORIGINAL_ID, G0_LEGACY_ORIGINAL_ID).actor_label, undefined);
+      assert.equal(store2.listHistory({ currentGenerationId: G0_LEGACY_ORIGINAL_ID }).items[0]?.actor_label, undefined);
+      assert.equal(JSON.parse(readFileSync(manifestPath, "utf8")).actor_label, planted);
+    }
+  });
+});
+
 describe("renderGenerations", () => {
   it("RF-04 history pagination never creates a cursor key or any other file", () => {
     const job = seedJob(); const store = openStore(job); importG0(store);

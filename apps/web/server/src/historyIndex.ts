@@ -13,6 +13,7 @@ import {
 } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { DATA_DIR } from "./config.js";
+import { accountDisplayName } from "./auth.js";
 
 /**
  * 统一历史只读摘要。权威记录仍在审稿/打样/上传/压缩目录。
@@ -104,7 +105,8 @@ type HistoryItem = {
   status: string;
   created_at: string;
   creator_id: string;
-  creator_name: string;
+  /** 生成人显示名；无记录时为 null（前端显示「未记录」），绝不回落到 actor 或账号 id。 */
+  creator_name: string | null;
   names: string[];
   matched_names: string[];
   visibility: HistoryVisibility;
@@ -395,7 +397,7 @@ function fileNames(files: unknown): string[] {
 function projectReview(raw: Record<string, unknown>, id: string): Stored | null {
   if (raw.id !== id || typeof raw.created_at !== "string" || typeof raw.status !== "string") return null;
   const access = typeof raw.owner === "string" ? raw.owner : "";
-  const createdBy = cleanText(raw.created_by, 120) || cleanText(raw.actor, 120);
+  const createdBy = cleanText(raw.created_by, 120);
   return storedFromParts({
     id,
     type: "review",
@@ -404,7 +406,7 @@ function projectReview(raw: Record<string, unknown>, id: string): Stored | null 
     status: raw.status,
     created_at: raw.created_at,
     creator_id: cleanText(access, 120),
-    creator_name: createdBy || cleanText(access, 120),
+    creator_name: createdBy,
     names: [],
     visibility: "owner",
     access_owner: access,
@@ -428,7 +430,7 @@ function projectMockup(raw: Record<string, unknown>, id: string): Stored | null 
     status: raw.status,
     created_at: raw.created_at,
     creator_id: cleanText(owner, 120),
-    creator_name: cleanText(raw.created_by, 120) || cleanText(owner, 120),
+    creator_name: cleanText(raw.created_by, 120),
     names,
     visibility: "team",
     access_owner: owner,
@@ -450,7 +452,7 @@ function projectReceipt(raw: Record<string, unknown>, id: string): Stored | null
     status: "ready",
     created_at: raw.created_at,
     creator_id: raw.owner,
-    creator_name: raw.owner,
+    creator_name: "",
     names,
     visibility: "upload_owner",
     access_owner: raw.owner,
@@ -474,7 +476,7 @@ function projectSession(raw: Record<string, unknown>, id: string): Stored | null
     status: "uploading",
     created_at: raw.created_at,
     creator_id: raw.owner,
-    creator_name: raw.owner,
+    creator_name: "",
     names,
     visibility: "upload_owner",
     access_owner: raw.owner,
@@ -496,7 +498,7 @@ function projectCompression(raw: Record<string, unknown>, id: string): Stored | 
     status: raw.status,
     created_at: raw.created_at,
     creator_id: owner,
-    creator_name: cleanText(raw.created_by, 120) || owner,
+    creator_name: cleanText(raw.created_by, 120),
     names: fileNames(raw.files),
     visibility: "team",
     access_owner: owner,
@@ -890,7 +892,23 @@ function matches(record: Stored, filter: Filter, now: number): boolean {
   return record.names.some((name) => name.toLowerCase().includes(needle));
 }
 
-function toItem(record: Stored, needle: string): HistoryItem {
+// 生成人：只从落盘的 created_by 查账号目录；没有 created_by 就是 null，绝不经 creator_id / owner 查名。
+// 旧索引里 creator_name 曾回落成账号 id（与 creator_id 相同），同样视为无记录。查不到也是 null。
+function creatorName(record: Stored, lookup: (id: string) => string | null): string | null {
+  const createdBy = record.creator_name.trim();
+  if (!createdBy || createdBy === record.creator_id) return null;
+  return lookup(createdBy);
+}
+
+function accountNameLookup(): (id: string) => string | null {
+  const cache = new Map<string, string | null>();
+  return (id) => {
+    if (!cache.has(id)) cache.set(id, accountDisplayName(id));
+    return cache.get(id) ?? null;
+  };
+}
+
+function toItem(record: Stored, needle: string, lookup: (id: string) => string | null): HistoryItem {
   const matched = needle
     ? record.names.filter((name) => name.toLowerCase().includes(needle)).slice(0, MATCHED_NAME_LIMIT)
     : [];
@@ -902,7 +920,7 @@ function toItem(record: Stored, needle: string): HistoryItem {
     status: record.status,
     created_at: record.created_at,
     creator_id: record.creator_id,
-    creator_name: record.creator_name,
+    creator_name: creatorName(record, lookup),
     names: record.names,
     matched_names: matched,
     visibility: record.visibility,
@@ -937,7 +955,8 @@ function answer(doc: Doc, viewer: HistoryViewer, filter: Filter, cursorRaw: stri
   const rows = matched
     .filter((record) => (cursor ? afterCursor(record, cursor) : true))
     .sort(newer);
-  const page = rows.slice(0, filter.limit).map((record) => toItem(record, needle));
+  const lookup = accountNameLookup();
+  const page = rows.slice(0, filter.limit).map((record) => toItem(record, needle, lookup));
   const next = rows.length > filter.limit && page.length ? encodeCursor(filter, viewer, bound, page[page.length - 1]) : null;
   return { items: page, next_cursor: next, total: matched.length, facets };
 }

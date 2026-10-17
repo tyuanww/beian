@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { REVIEW_COPY } from "../copy/labels.js";
-import { reviewErrorCopy } from "./reviewErrorCopy.js";
+import { reviewErrorCopy, reviewErrorType } from "./reviewErrorCopy.js";
 
 describe("reviewer-visible labels", () => {
   it("uses the agreed wording", () => {
@@ -28,5 +28,16 @@ describe("reviewErrorCopy", () => {
   it("leaves other errors to customerCopy", () => {
     assert.equal(reviewErrorCopy("对照失败"), "检查失败");
     assert.equal(reviewErrorCopy(""), "");
+  });
+
+  it("page_over uses a warning Alert, other errors stay error", () => {
+    assert.equal(reviewErrorType("这一单页数超过可核对页数"), "warning");
+    assert.equal(reviewErrorType("page_over_rendered"), "warning");
+    assert.equal(reviewErrorType("稿件超过 1 页，暂不支持核对，请联系管理员"), "warning");
+    assert.equal(reviewErrorType("稿件超过12页"), "warning");
+    assert.equal(reviewErrorCopy("稿件超过 1 页，暂不支持核对，请联系管理员"), REVIEW_COPY.pageOver);
+    assert.equal(reviewErrorType("认字组件没装上，没有结果"), "error");
+    assert.equal(reviewErrorType("对照失败"), "error");
+    assert.equal(reviewErrorType(""), "error");
   });
 });

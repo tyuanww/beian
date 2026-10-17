@@ -17,7 +17,7 @@ import { WaitCard } from "../chrome/WaitCard";
 import { mockupFailReason, mockupFailTag } from "./mockupError";
 import { AdminRotateFront, StructureConfirmPanel } from "./StructureConfirmPanel";
 import { RenderVersions } from "./RenderVersions";
-import { NAV_LABEL } from "../copy/labels";
+import { creatorLabel, NAV_LABEL } from "../copy/labels";
 import { structureIssueCopy, structureStatusLabel } from "./mockupStructure";
 import { liveJobLine, mockupBoardProgress, shouldShowWaitCard } from "./waitCard";
 import { stemFromFilename } from "./stemName";
@@ -198,9 +198,10 @@ function toMockCard(row: MockupJob): DeskCardRow {
     title: mockTitle(row),
     statusText: s.text,
     statusColor: s.color,
-    actor: row.owner,
+    actor: creatorLabel(row.owner),
     at: row.job_started_at || row.created_at,
     progress: mockupBoardProgress(row),
+    queued: row.job_status === "queued",
     live: liveJobLine({ ...row, kind: "mockup" }),
     error:
       row.structure_status === "review_required"

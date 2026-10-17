@@ -106,7 +106,7 @@ test("三栏通铺：1440 稿件 ≥70%、右栏 320、工具条在画布下方�
   await expect(page.getByTestId("review-dock").locator(".review-flat-list > li").first()).toHaveCSS("border-bottom-color", "rgb(231, 226, 236)");
   // visual-check #3：1440 常驻右栏 tabs 行也有「收起」，收起后右上出现「展开疑点」，再展开回到常驻。
   await page.getByRole("button", { name: "收起右栏" }).click();
-  await expect(page.getByTestId("review-dock")).toHaveText("展开疑点 · 待人工确认 1");
+  await expect(page.getByTestId("review-dock")).toHaveText("展开疑点 · 待确认 1");
   await page.getByTestId("review-dock").click();
   await expect(page.locator(".review-sidebar:not(.is-overlay)")).toBeVisible();
 
@@ -325,7 +325,7 @@ test("<1440 右栏默认收起，展开为 320 浮层并平移让当前标记露
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.goto(`/review/${task.id}`);
   const tab = page.getByTestId("review-dock");
-  await expect(tab).toHaveText("展开疑点 · 待人工确认 1");
+  await expect(tab).toHaveText("展开疑点 · 待确认 1");
   // 已批第 40 行：1280 宽稿件列 1176px（1280 − 主侧栏 52 − 缩略图条 52）。
   expect((await page.locator(".review-ccol").boundingBox())!.width).toBeCloseTo(1176, 0);
   await tab.click();
@@ -376,7 +376,7 @@ test("忽略悬停有说明；写原因只在选了有错后出现，刷新保�
   await page.reload();
   await dock.getByRole("tab", { name: /有错/ }).click();
   await expect(page.getByLabel("写原因")).toHaveValue("未提交的长原因，刷新后继续");
-  await expect(page.getByText("先保存备注，再继续。")).toBeVisible();
+  await expect(page.getByTestId("review-unsaved-hint")).toHaveText("备注未保存，请先保存");
 });
 
 test("手机 <720：只看稿和签字/退回，注明逐条下结论仅电脑端，不横向溢出", async ({ page, syntheticApi }, testInfo) => {
@@ -743,14 +743,14 @@ test("锁页后收起撤销提示", async ({ page, syntheticApi }) => {
   await expect(page.getByTestId("review-undo-toast")).toHaveCount(0, { timeout: 1000 });
 });
 
-test("就地对照：每条框出范围，对照窗贴在当前框右侧，右栏只留清单", async ({ page, syntheticApi }) => {
+test("对照：每条框出范围，对照窗贴在当前框右侧，右栏只留清单", async ({ page, syntheticApi }) => {
   await page.addInitScript(() => localStorage.setItem("wb_review_spot", "on"));
   const task = reviewTask("e5969b58cdb8");
   task.hits = [
     {
-      id: "hit_name", field: "中文品名", status: "疑点", excel: "合成核对单", pdf: "合成核对", page: 1, decision: "pending",
+      id: "hit_name", field: "中文品名", status: "疑点", excel: "合成核对单", pdf: "合成核对", page: 1, decision: "pending", excel_row_count: 1, excel_standard: "合成核对单", manuscript: "合成核对",
       bboxes: [
-        { page: 1, left: 40, top: 80, width: 80, height: 24, role: "hit" },
+        { page: 1, left: 30, top: 70, width: 190, height: 44, role: "range" },
         { page: 1, left: 140, top: 80, width: 60, height: 24, role: "hit" },
       ],
     },
@@ -767,13 +767,19 @@ test("就地对照：每条框出范围，对照窗贴在当前框右侧，右�
 
   const dock = page.getByTestId("review-dock");
   const card = page.getByTestId("review-spot");
-  await expect(page.getByRole("button", { name: "就地对照" })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("button", { name: "对照", exact: true })).toHaveAttribute("aria-pressed", "true");
   await expect(dock.getByLabel("疑点列表")).toBeVisible();
   await expect(dock.locator(".review-flat-detail")).toHaveCount(0);
-  await expect(card.getByText("Excel 应印", { exact: true })).toBeVisible();
+  await expect(card.getByText("Excel标准", { exact: true })).toBeVisible();
   await expect(card.getByText("稿上读到", { exact: true })).toBeVisible();
-  await expect(card).toContainText("中文品名");
-  await expect(page.locator(".hit-range")).toHaveCount(2);
+  await expect(card).toContainText("合成核对单");
+  // 标题字段名在前：「中文品名 · 疑点 · 待确认 1/3」。
+  const spotTitle = card.getByTestId("review-spot-title");
+  await expect(spotTitle).toHaveText(/^中文品名\s*·\s*疑点 · 待确认 1\/3$/);
+  await expect(spotTitle).toHaveAttribute("aria-label", "中文品名 · 疑点 · 待确认 1/3");
+  await expect(spotTitle.locator(".review-spot-field")).toHaveAttribute("title", "中文品名");
+  // 对照只画当前这条：一个范围框 + 一个错点。
+  await expect(page.locator(".hit-range")).toHaveCount(1);
   await expect.poll(async () => {
     const box = await page.locator(".hit-range.is-on").boundingBox();
     const spot = await card.boundingBox();
@@ -781,9 +787,10 @@ test("就地对照：每条框出范围，对照窗贴在当前框右侧，右�
     return spot.x >= box.x + box.width - 2 && spot.y < box.y + box.height;
   }).toBe(true);
 
-  await page.locator(".hit-range.is-dim").click();
-  await expect(card).toContainText("净含量");
-  await expect(page.locator(".hit-range.is-on")).toHaveCount(1);
+  await card.getByRole("button", { name: "下一项" }).click();
+  await expect(card).toContainText("30ml");
+  await expect(spotTitle).toHaveAttribute("aria-label", "净含量 · 疑点 · 待确认 2/3");
+  await expect(page.locator(".hit-range")).toHaveCount(0);
 
   await dock.getByRole("button", { name: /生产批号/ }).click();
   await expect(card).toHaveCount(0);
@@ -794,4 +801,41 @@ test("就地对照：每条框出范围，对照窗贴在当前框右侧，右�
   await card.getByRole("button", { name: /^有错/ }).click();
   await expect.poll(() => decisions(syntheticApi).length).toBe(1);
   await expect(page.getByTestId("review-undo-toast")).toHaveText("已标为有错，撤销");
+});
+
+test("对照：标题字段名过长时截断，悬停能看全名", async ({ page, syntheticApi }) => {
+  await page.addInitScript(() => localStorage.setItem("wb_review_spot", "on"));
+  const task = reviewTask("e5969b58cdb9");
+  const longName = "中文品名（含英文名称及规格型号说明，用于备案核对的超长字段名称示例）";
+  task.hits = [{
+    id: "hit_long", field: longName, status: "疑点", excel: "合成核对单", pdf: "合成核对", page: 1, decision: "pending",
+    bboxes: [{ page: 1, left: 40, top: 80, width: 90, height: 28, role: "hit" }],
+  }];
+  syntheticApi.tasks.push(task);
+  await page.goto(`/review/${task.id}`);
+  const title = page.getByTestId("review-spot").getByTestId("review-spot-title");
+  const field = title.locator(".review-spot-field");
+  await expect(field).toHaveAttribute("title", longName);
+  await expect(title).toHaveAttribute("aria-label", `${longName} · 疑点 · 待确认 1/1`);
+  await expect(title.locator(".review-spot-rest")).toBeVisible();
+  await expect.poll(() => field.evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
+});
+
+test("待人工确认单独一组：不混进待确认列表，审核人能展开看到", async ({ page, syntheticApi }) => {
+  const task = reviewTask("e5969b58cdc1");
+  task.verbatim_check = true;
+  task.hits!.push({ ...task.hits![0], id: "hit_held", field: "认不准的字", status: "待人工确认", evidence: "OCR 没读全，需要人眼确认" });
+  syntheticApi.tasks.push(task);
+  await page.goto(`/review/${task.id}`);
+  const dock = page.getByTestId("review-dock");
+  await expect(page.getByTestId("review-held-line")).toHaveText("另有 1 处待人工确认");
+  await expect(dock.getByLabel("疑点列表")).toContainText("中文品名");
+  await expect(dock.getByLabel("疑点列表")).not.toContainText("认不准的字");
+  const bar = dock.getByTestId("review-held-bar");
+  await expect(bar).toHaveText("待人工确认 1");
+  await bar.click();
+  const group = dock.getByTestId("review-held-group");
+  await expect(group).toBeVisible();
+  await expect(group).toContainText("认不准的字");
+  await expect(group).not.toContainText("中文品名");
 });

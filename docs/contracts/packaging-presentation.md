@@ -12,6 +12,11 @@
 
 打样中和打样失败可重试，用机上已有稿再排，不必重传；先确认旧 worker 已退出；仍运行时遵守 [结构与宿主合同](packaging-structure.md) 的 Illustrator 禁杀阶段，无法安全退出就 409。已出图缺印刷面走 `POST /api/mockups/:id/print-faces`（V2 `render_face_assets`，不跑 pipeline/Blender，status 仍 done；持久入队立即返回 202，页面轮询补面子状态，失败可重试，刷新或离页不取消作业）；不要对 done 打 retry。下载提示走 `mockupHud.ts`（不挡点击）；GLB 全屏走 `mockupFullscreen.ts`。等待圆盘是 `WaitLoader`（对照中 / 对红中 / 打样中，不要英文 Generating）。结构导出阶段 WaitCard / `liveJobLine` 只写「打开稿件 / 盘点图层 / 保存印刷 PDF」等中文阶段，没有 `job_eta_s` 就不要编造 120 秒或 4 分钟。
 
+## 导出与 PPT 规则
+
+- 导出不会悄悄换背景。点下载时，打样单记下当时的背景、产品灯光、背景灯光和画面来源，之后按这一套合成。页面上显示的是白桌白墙布景、而布景高清图还没就绪时，这次不出图，提示稍后重试。不会改用白底或地面图代替。下载开始后切换版本或离开页面，这次下载仍按点击时的设置完成。
+- PPT 能出就出，出不了不算失败。打样流水线先用两张白底写 PPT，写不出再试演示文稿运行时。两次都写不出时，流水线在 stderr 打「PPT 跳过」，静帧、PDF 和 GLB 照常交付，整单仍是成功。
+
 ## 资产与路由
 
 下载白底只给 `front_right` / `back_left`，不要把 `ai-raster` 或 PPT 质检 PNG 当成白底。`*_ground` 映射 `white_a_ground` / `white_b_ground`，不能当 `white_a` / `white_b`。`*_card` 映射 `white_*_card`，不能当产品静帧或地面。读字只给 `read_front` / `read_back` 等 key，对应 `assets/panel_{face}.png`；不要把印刷面当白底，也不要用 GLB 或 3/4 白底静帧读小字。预览 inline 带 ETag，`private, no-cache`，未改可 304；`?download=1` 才附件且 `private, no-store`，不要把 304 空文件当下载。侧栏版本号只读 `/api/status.version`，紧跟在姓名下面，不另写常量。地址按台分开：`/reviewup` `/reviewup/new` `/review/:id` `/mockup` `/mockup/new` `/mockup/:id` `/compress` `/compress/:id` `/history` `/settings`，后退换台。旧 `/` `/new` `/review` 302 到审稿台新地址。

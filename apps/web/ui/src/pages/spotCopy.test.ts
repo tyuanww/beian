@@ -7,6 +7,7 @@ import {
   spanOmitReason,
   spotColumns,
   spotHeaderText,
+  spotTitleParts,
   spotLocus,
   spotNavTarget,
   spotPendingEmptyLine,
@@ -238,5 +239,21 @@ describe("markedSlices", () => {
       { text: "𠀀", mark: true },
       { text: "丙", mark: false },
     ]);
+  });
+});
+
+describe("spotTitleParts", () => {
+  it("puts the field name first", () => {
+    const parts = spotTitleParts("中文品名", "疑点", undefined, "待确认", "1/3");
+    assert.equal(parts.field, "中文品名");
+    assert.equal(parts.rest, "疑点 · 待确认 1/3");
+    assert.equal(parts.full, "中文品名 · 疑点 · 待确认 1/3");
+  });
+  it("keeps a distinct Excel item and drops a duplicate one", () => {
+    assert.equal(spotTitleParts("品名", "错字", "品名", "待确认", "2/5").full, "品名 · 错字 · 待确认 2/5");
+    assert.equal(spotTitleParts("文案", "错字", "功效", "全部", "1/1").full, "文案 · 错字 · 功效 · 全部 1/1");
+  });
+  it("falls back without a field name", () => {
+    assert.deepEqual(spotTitleParts("  ", "疑点", undefined, "全部", "1/1"), { field: "", rest: "疑点 · 全部 1/1", full: "疑点 · 全部 1/1" });
   });
 });

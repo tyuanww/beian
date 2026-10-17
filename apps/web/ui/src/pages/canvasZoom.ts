@@ -84,7 +84,7 @@ export function zoomToBox(
 }
 
 /**
- * 就地对照：把这条范围框进视口，并在空档较大的一侧留出对照窗。
+ * 对照：把这条范围框进视口，并在空档较大的一侧留出对照窗。
  * 范围已经铺满画面时保持整页。
  */
 export function frameRangeForCard(

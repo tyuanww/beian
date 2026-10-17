@@ -226,6 +226,25 @@ function users(): User[] {
   }
 }
 
+/** 按 created_by 查账号目录里的显示名：先按 open_id，再按显示名；查不到、重名或目录不可读返回 null，绝不返回原始 id。 */
+export function accountDisplayName(id: string): string | null {
+  const key = String(id || "").trim();
+  if (!key) return null;
+  let list: User[];
+  try {
+    list = users();
+  } catch {
+    return null;
+  }
+  const byOpenId = list.filter((user) => (user.open_id || "").trim() === key);
+  if (byOpenId.length) {
+    const name = byOpenId.length === 1 ? (byOpenId[0].name || "").trim() : "";
+    return name && name !== key ? name : null;
+  }
+  const byName = list.filter((user) => (user.name || "").trim() === key);
+  return byName.length === 1 ? key : null;
+}
+
 function roleOf(value: unknown): Role | null {
   return typeof value === "string" && Object.prototype.hasOwnProperty.call(PERMS, value)
     ? (value as Role)

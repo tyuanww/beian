@@ -29,9 +29,9 @@ import { reviewHits, shouldUseReworkView } from "./reviewVersion";
 import { ReviewDockPanel } from "./ReviewDockPanel";
 import { ReviewHitDetail } from "./ReviewHitDetail";
 import { SPOT_CARD_GAP, SPOT_CARD_MARGIN, SPOT_CARD_MIN_HEIGHT, SPOT_CARD_MIN_WIDTH, SPOT_CARD_WIDTH, avoidSpotObstacle, placeSpotCard, resolveSpotPosition, spotDragStarted, spotLane, spotSideRoom, type SpotObstacle } from "./spotCard";
-import { spotHeaderText, spotNavTarget, spotPendingEmptyLine } from "./spotCopy";
+import { spotTitleParts, spotNavTarget, spotPendingEmptyLine } from "./spotCopy";
 import { firstPendingIssueIndex, pageIndexForHit } from "./reviewNav";
-import { reviewErrorCopy } from "./reviewErrorCopy";
+import { reviewErrorCopy, reviewErrorType } from "./reviewErrorCopy";
 import { reviewVersionToggle } from "./reviewStatus";
 import { buildRevisionList, partitionReviewHits, withLocalNotes } from "./reviewEvidence";
 import {
@@ -541,7 +541,7 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
     }
   }, []);
 
-  /** <1440 浮层展开后，当前标记若被右栏盖住就平移画布（第 7 行）。就地对照改为重新框进可见区域。 */
+  /** <1440 浮层展开后，当前标记若被右栏盖住就平移画布（第 7 行）。对照改为重新框进可见区域。 */
   useEffect(() => {
     if (layout !== "overlay" || !panelOpen || spotOn) return;
     const id = window.requestAnimationFrame(() => {
@@ -1011,7 +1011,7 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
       {locked ? <Alert className="review-lock" type="warning" title={`🔒 ${locked}`} description={REVIEW_COPY.lockedNote} /> : null}
       {error ? <Alert type="error" title={error} /> : null}
       {task?.error || task?.job_error ? (
-        <Alert type="error" showIcon title={reviewErrorCopy(task.error || task.job_error || "") || "检查失败。"} description={failedJob ? REVIEW_COPY.reupload : undefined} />
+        <Alert type={reviewErrorType(task.error || task.job_error || "")} showIcon title={reviewErrorCopy(task.error || task.job_error || "") || "检查失败。"} description={failedJob ? REVIEW_COPY.reupload : undefined} />
       ) : failedJob ? <Alert type="error" showIcon title={REVIEW_COPY.reupload} /> : null}
       {signed && !locked ? <Alert type="success" showIcon title={task?.complete_kind === "rework" ? "已退回。" : "已签字。"} /> : null}
       {decisionError ? <Alert type="error" showIcon title={`未保存：${decisionError}`} /> : null}
@@ -1286,7 +1286,16 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
                   if (spotDragRef.current?.id === event.pointerId) spotDragRef.current = null;
                 }}
               >
-                <strong>{spotHeaderText(current.status || current.field || "项目", current.item, REVIEW_COPY.tabs[locked ? "all" : tab], locked ? positionLabel(tabIndices(hits, "all", active), active, undefined, heldCount) : positionLabel(tabList, active, tab === "pending" ? counts.pending : undefined, heldCount))}</strong>
+                {(() => {
+                  const title = spotTitleParts(current.field, current.status || "项目", current.item, REVIEW_COPY.tabs[locked ? "all" : tab], locked ? positionLabel(tabIndices(hits, "all", active), active, undefined, heldCount) : positionLabel(tabList, active, tab === "pending" ? counts.pending : undefined, heldCount));
+                  return (
+                    <strong className="review-spot-title" data-testid="review-spot-title" aria-label={title.full}>
+                      {title.field ? <span className="review-spot-field" title={title.field}>{title.field}</span> : null}
+                      {title.field ? <span aria-hidden="true">·</span> : null}
+                      <span className="review-spot-rest">{title.rest}</span>
+                    </strong>
+                  );
+                })()}
                 {spotDragged ? (
                   <button
                     type="button"

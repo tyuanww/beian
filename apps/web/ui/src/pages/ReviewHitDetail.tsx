@@ -184,12 +184,7 @@ export function ReviewHitDetail({
             <SpotColumnView column={columns.right} />
           </div>
           {hit.page_skew ? <p className="review-evidence-location">{REVIEW_COPY.pageSkew}</p> : null}
-          {nativeEvidence ? (
-            <section className="review-native-evidence" aria-label="文字来源证据">
-              <h3>{nativeEvidence.title}</h3>
-              <p>{nativeEvidence.message}</p>
-            </section>
-          ) : null}
+          {nativeEvidence ? <NativeEvidenceSection evidence={nativeEvidence} hitId={hit.id} /> : null}
         </div>
         <footer className="review-spot-foot">
           <div className="review-spot-nav">
@@ -251,24 +246,29 @@ export function ReviewHitDetail({
         />
       ) : null}
       {selected === "issue" && noteDirty ? <p className="review-draft-status" role="status">{busy ? "保存中…" : "未保存"}</p> : null}
-      {nativeEvidence ? (
-        <section className="review-native-evidence" aria-label="文字来源证据">
-          <h3>{nativeEvidence.title}</h3>
-          <p>{nativeEvidence.message}</p>
-          <p className="review-native-hint">请确认结果</p>
-          {nativeEvidence.nativeText || nativeEvidence.ocrText ? (
-            <details key={hit.id}>
-              <summary>查看文字来源</summary>
-              <div className="review-native-readings">
-                <section><strong>原稿文字</strong><p className="mono">{nativeEvidence.nativeText || "暂时读不到文字"}</p></section>
-                <section><strong>图片文字</strong><p className="mono">{nativeEvidence.ocrText || "暂时读不到文字"}</p></section>
-              </div>
-            </details>
-          ) : null}
-        </section>
-      ) : null}
+      {nativeEvidence ? <NativeEvidenceSection evidence={nativeEvidence} hitId={hit.id} /> : null}
       {hit.page_skew ? <p className="review-evidence-location">{REVIEW_COPY.pageSkew}</p> : null}
       {!hasBox ? <p className="review-evidence-location">{locationCopy}</p> : null}
     </div>
+  );
+}
+
+/** 文字来源证据：对照卡和右栏共用，默认收起「查看文字来源」。 */
+function NativeEvidenceSection({ evidence, hitId }: { evidence: NonNullable<ReturnType<typeof nativeEvidenceView>>; hitId?: string }) {
+  return (
+    <section className="review-native-evidence" aria-label="文字来源证据">
+      <h3>{evidence.title}</h3>
+      <p>{evidence.message}</p>
+      <p className="review-native-hint">请确认结果</p>
+      {evidence.nativeText || evidence.ocrText ? (
+        <details key={hitId}>
+          <summary>查看文字来源</summary>
+          <div className="review-native-readings">
+            <section><strong>原稿文字</strong><p className="mono">{evidence.nativeText || "暂时读不到文字"}</p></section>
+            <section><strong>图片文字</strong><p className="mono">{evidence.ocrText || "暂时读不到文字"}</p></section>
+          </div>
+        </details>
+      ) : null}
+    </section>
   );
 }

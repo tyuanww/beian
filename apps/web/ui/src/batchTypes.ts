@@ -14,12 +14,12 @@ export type CompressionFile = {
 export type CompressionBatch = {
   id: string; title: string; created_at: string; revision: number;
   status: "queued" | "running" | "done" | "partial" | "failed";
-  owner: string; creator_id: string; queue_ahead: number; files: CompressionFile[];
+  owner: string | null; creator_id: string; queue_ahead: number; files: CompressionFile[];
 };
 export type HistoryItem = {
   id: string; type: "review" | "mockup" | "upload" | "compression";
   title: string; product_name: string; status: string; created_at: string;
-  creator_id: string; creator_name: string; names: string[]; matched_names: string[];
+  creator_id: string; creator_name: string | null; names: string[]; matched_names: string[];
   visibility: "owner" | "team" | "upload_owner";
 };
 export type HistoryResult = {

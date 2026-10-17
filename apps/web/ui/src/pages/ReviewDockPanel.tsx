@@ -32,7 +32,7 @@ type Props = {
   verbatim?: boolean;
   fscNote?: string;
   locationCopy?: string;
-  /** 就地对照把这一条的说明放到稿旁，右栏只留清单。 */
+  /** 对照把这一条的说明放到稿旁，右栏只留清单。 */
   showDetail?: boolean;
   /** 稿旁对照窗把待人工确认标成有错时，收起那一组。 */
   closeHeldPulse?: number;

@@ -243,7 +243,7 @@ process.stdin.on('end',()=>{
   // Tiny protocol fixtures still allocate real credit, without writing the production 4 GiB reserve.
   const clear=registerLocalRenderGenerationRuntime({pythonExecutable:process.execPath,blenderExecutable:process.execPath,
     packagingDir:workerRoot,dataRoot:process.env.WB_DATA_DIR!,timeoutMs:60_000,terminationGraceMs:200,
-    resourcePolicy:{diskBytes:8*1024*1024}});
+    resourcePolicy:{diskBytes:8*1024*1024,memoryBytes:512*1024*1024}});
   try {
     assert.equal(getRenderGenerationRuntime()?.productionEnabled,false);
     const base=`/api/mockups/${f.id}/render-generations`;
@@ -269,6 +269,11 @@ process.stdin.on('end',()=>{
     assert.equal(stale.status,409);assert.equal((await stale.json()).reason,"current_changed");
     clear();
     const history=await (await request(base)).json();assert.equal(history.items.length,2);
+    // 封版操作者 = 触发这次出图的人（owner 会话「合成作者」）；种子单没有 created_by，也绝不写 owner 的 open_id。
+    for (const item of history.items as Array<{actor_label?:string}>) {
+      assert.equal(item.actor_label,"合成作者");
+      assert.notEqual(item.actor_label,owner.open_id);
+    }
     const read=await request(`/api/mockups/${f.id}/files/white_a?generation_id=${current}&download=1`);
     assert.equal(read.status,200);assert.deepEqual(Buffer.from(await read.arrayBuffer()),png());
     assert.equal(getRenderGenerationRuntime(),undefined);
@@ -310,7 +315,7 @@ process.stdin.on('end',()=>{
 });`);
   const clear=registerLocalRenderGenerationRuntime({pythonExecutable:process.execPath,blenderExecutable:process.execPath,
     packagingDir:workerRoot,dataRoot:process.env.WB_DATA_DIR!,timeoutMs:60_000,terminationGraceMs:200,
-    resourcePolicy:{diskBytes:8*1024*1024},
+    resourcePolicy:{diskBytes:8*1024*1024,memoryBytes:512*1024*1024},
     upgradeCandidate:{profileId:ISOLATED_UPGRADE_PROFILE_ID,declaredSha256:ISOLATED_UPGRADE_PROFILE_DECLARED_SHA256}});
   try {
     assert.equal(getRenderGenerationRuntime()?.productionEnabled,false);

@@ -80,6 +80,7 @@ describe("REVIEW_COPY（老板 2026-10-11 已批文案）", () => {
     assert.equal(REVIEW_COPY.rejectTitle, "退回这份稿？");
     assert.equal(REVIEW_COPY.rejectBody(2), "有错的 2 条会随退回一起发出，并通知「已退回」。提交后不能撤回。");
     assert.equal(REVIEW_COPY.rejectConfirm, "确认退回");
+    assert.equal(REVIEW_COPY.spot, "对照");
     assert.equal(REVIEW_COPY.signConclusion, "无改稿项");
     assert.equal(REVIEW_COPY.rejectBlockedByPending(4), "还有 4 条待确认，处理完才能退回");
     assert.equal(REVIEW_COPY.noBox, "没找到位置，请看整页");
