@@ -274,6 +274,7 @@ describe("RF-03C2.1 async render bridge", { skip: !renderGenerationProcessSuppor
       let spawned!: () => void;
       const spawn = new Promise<void>(resolve => { spawned = resolve; });
       let owned = false;
+      const stderr = mock.method(console, "error", () => {});
       mock.timers.enable({ apis: ["setInterval"] });
       try {
         const rendering = f.bridge.render(receipt, f.candidate, process.execPath,
@@ -288,8 +289,14 @@ describe("RF-03C2.1 async render bridge", { skip: !renderGenerationProcessSuppor
           assert.equal(JSON.stringify(error).includes("/path"), false);
           return true;
         });
-      } finally { mock.timers.reset(); }
+      } finally { mock.timers.reset(); stderr.mock.restore(); }
       assert.equal(owned, false);
+      // The stderr diagnostic (what pytest prints from run.stderr) names the errno; still no path.
+      const lines = stderr.mock.calls.map(call => call.arguments.map(String).join(" "));
+      const diagnostic = lines.filter(line => line.includes(`cause=resource_accounting_unavailable detail=${detail}`));
+      assert.equal(diagnostic.length, 1, JSON.stringify(lines));
+      assert.match(diagnostic[0], /^render-generation standalone\/standalone: problem=render_generation_failed /);
+      assert.equal(lines.some(line => line.includes("/path") || line.includes(f.root)), false);
     });
   }
 

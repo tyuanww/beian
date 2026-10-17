@@ -248,6 +248,11 @@ function command(options: ResolvedBridgeOptions, request: Json, observer: Render
     const stop = (cause: string, code = "render_generation_failed", detail?: string): void => {
       if (failure || closed) return;
       failure = new RenderBridgeError(code, cause, detail);
+      // stderr diagnostic (server log; pytest prints the bridge's stderr on failure). Only
+      // validated ids and the bounded errno code, never paths; the public cause is unchanged.
+      if (detail !== undefined) {
+        console.error(`render-generation ${context.jobId}/${context.mutationId}: problem=${code} cause=${cause} detail=${detail} fix=${failure.fix}`);
+      }
       signalTree(false);
       forceTimer = setTimeout(() => signalTree(true), options.terminationGraceMs);
     };
