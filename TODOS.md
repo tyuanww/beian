@@ -568,12 +568,12 @@ RF-10–RF-13 的原始依赖见 [ADR-007 §20.7](docs/adr-007-packaging-render-
 
 - [x] 对红（复核）失败、单子回到待审且带上一轮条目：老板 10/17 定 B，签字退回都拦，出路为重新上传对红（`POST /api/tasks/:tid/rework`，审核员只能传自己的单，别人的单回 403）。服务端 `completeGate` 在 `job_kind: rework` + `job_status: failed` 时（不论还剩不剩条目）回 400「当前状态不可签字」；对照失败等其他失败按 main 不受影响。前端失败单本来就不给签字/退回按钮。
 - [x] 前端核对页给这种单加「重新上传这一单」入口（调现有 `/rework`）：红条（复核失败）、黄条（复核超页，按 `job_error_code === "page_over"`）已加，只在本人单（`owner === me.open_id` 且有 `create`）或管理员显示，viewer / 别人的单不显示；前端 `isReworkableTask`（`reviewActions.ts`）照服务端同名函数放行。三条定稿文案在 `labels.ts`，不拼服务端 `job_error` 原文。
-- [x] 「检查中断」单（方案 A → 加码 Q4）：服务端 `isReworkableTask` 放行 `status: compare_failed` + `job_kind: compare` + `job_status: failed`、没有 `pages_v2` 的单（**不再要求还有条目**）；有 `pages_v2` 的仍不放行。`/rework` 把 `status_before_job` 记成 `pending_review` 并清掉旧 `error`。签字退回在复核前仍 400。
-- [x] 前端方案 A（有条目）已跟上；**无条目 / 只剩工艺说明** 的 `isReworkableTask` 与「回首页」→「可以重新上传这一单」归前端哥接加码 tip（合同测试暂用 `uiExpected`）。
-- [x] 对照失败且没有有效条目的单：加码 Q4 服务端已放开（`compare_failed` + `job_kind: compare` + `job_status: failed`、无 `pages_v2` 即可 `/rework`，不要求还有条目）。前端仍显示「回首页」+ `isDeadCompareFailed`（`reworkable.contract.test.ts` 暂用 `uiExpected` 钉住两侧差）：前端哥在同一 PR 把 `isReworkableTask` 去掉条目条件，正文改「可以重新上传这一单」（有 create 且本人或管理员才显示），去掉「回首页」。
+- [x] 「检查中断」单（方案 A，产品 10/17）：`isReworkableTask` 放行所有 `status: compare_failed` + `job_kind: compare` + `job_status: failed`、`activeHits` 还有条目、没有 `pages_v2` 的单，回收出来的失败和对照命令行自己失败的不区分；对照失败已没有条目的、有 `pages_v2` 的照旧回 400「当前状态不可对红」。`/rework` 对这种单把 `status_before_job` 记成 `pending_review` 并清掉旧 `error`，复核失败落到待审 + 对红失败（红条，签字退回拦，可再传），不再变成不可读单。签字退回在复核前仍 400。
+- [x] 前端跟上方案 A：`reviewActions.ts` 的 `isReworkableTask` 同条件放行检查中断单（有效条目同服务端 `activeHits`：认字单看 `hits_v2`、其他单 `hits_v2` 非空看它否则看 `hits`，跳过工艺表字段），条里文案「检查中断了，下面是上一轮的结果，可以重新上传这一单」+「重新上传这一单」按钮（本人单 / 管理员，viewer 不显示）。`reworkable.contract.test.ts` 把前后端 `isReworkableTask` 逐例对照（含只剩工艺说明条目的单两边都不放行）。
+- [ ] 对照失败且没有有效条目的单（`compare_failed`、按服务端 `activeHits` 算为 0，含只剩工艺说明的）：现状前端「这一单没法接着核了，请回首页重新新建一单」+「回首页」，服务端 `/rework` 回 400。**Q4 已从加码拆出去（项目哥 10/17）**：单独开 PR，合入前需要在装了模型的非生产机器上补跑一单逐字检查（design §7.4，无条目、有条目各一份，结果写进 PR 说明）。那个 PR 从届时的 main 开，撤回加码分支上的 revert `2f825f85`（即恢复 `d57dd2e0`：服务端 `isReworkableTask` 去掉条目条件 + 无条目 / 只剩工艺说明 200、管理员替别人无条目单 200 等测试），前端「回首页」→「可以重新上传这一单」（有 create 且本人或管理员才显示）和前端 `isReworkableTask` 放开一起放进去，`reworkable.contract.test.ts` 两边同改。另记：Q4 实验观察到首轮无结果的单对红后会显示成 round:2，到时一并处理。
 - [x] 黄条原文：加码已把服务端超页 `job_error` / `verbatim_statuses.json` 写成前半句「稿件超过 1 页」（Q9 老板批）；前端按有没有「可以重新上传这一单」按钮出两种句子，不读这句原文拼后半。
 - [ ] 第 5 批签字文案复核留下的非阻塞项（找茬哥 10/17；(a)(b)(d) 归前端哥接加码 tip）：
-  1. (a) 前端：首次对照超页又没有条目的单，失败横条与「回首页」正文打架——随 Q4/Q9 前端改成有按钮用「请改成 1 页后重新上传这一单」、无按钮只留「稿件超过 1 页」。
+  1. (a) 前端：首次对照超页又没有条目的单，失败横条与「回首页」正文打架——随 Q9 前端无按钮只留「稿件超过 1 页」；有按钮的「请改成 1 页后重新上传这一单」要等 Q4 那个 PR 放开无条目重传后才会出现。
   2. (b) 前端：`ReviewPage.tsx` 整单确认勾选框（`orderHeldNeeded && !failedJob && canComplete`）仍看 `canComplete`，应换成 `canCompleteThis`。
   3. [x] (c) 服务端：非管理员对别人的单 `POST /complete` 回 403 `{detail: "没有权限"}`，不改状态（加码 HTTP 测试已锁）。
   4. (d) 认字失败识别仍靠 `OCR_FAILED` 文字匹配（`reviewErrorCopy.ts`）；服务端已出 `ocr_failed` / `result_truncated` / `private_data_failed`，前端改按 `job_error_code` 判断并去掉文字匹配。
@@ -588,12 +588,11 @@ RF-10–RF-13 的原始依赖见 [ADR-007 §20.7](docs/adr-007-packaging-render-
 
 ## 2026-10-17 加码（`fix/pstack-batch5-errcode`）服务端已交
 
-分支 tip 含 main merge `8850511f`（#41）与 10 个加码服务端提交。前端哥接同一分支；合同最后由飞书哥改 `docs/contracts/*`（本批不动合同文档）。
+分支 tip 含 main merge `8850511f`（#41）与加码服务端提交（Q4 的 `d57dd2e0` 已由 `2f825f85` revert）。前端哥接同一分支；合同最后由飞书哥改 `docs/contracts/*`（本批不动合同文档）。
 
 - 共用：`reviewCodes.ts`、`hitText.ts`（`hit_text`）、`reviewIssue.ts`（`isReviewIssue` / `pendingWord`）。
 - 新作业码：`ocr_failed` / `result_truncated` / `private_data_failed`；`page_over` 原文仅「稿件超过 1 页」。
-- 记下（不在本 PR 关）：首轮无结果对红后会显示成 round:2（Q4 实验观察）；Q1/Q7（401/403/404 带码）另起一批。
-- 合入前置：有模型机器补跑逐字单（design §7.4），本机未跑。
+- 记下（不在本 PR 关）：Q1/Q7（401/403/404 带码）另起一批；Q4（无条目检查中断单重新上传）已拆出去单独开 PR，见上文「对照失败且没有有效条目的单」。
 
 ## 2026-10-17 CI 偶发：RF-02 adapter 资源采样把原子替换当成账算不清
 
