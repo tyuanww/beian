@@ -17,7 +17,7 @@ import { ReviewSubmitDialog } from "./ReviewSubmitDialog";
 import { createFlagStore, UndoToastGate } from "./undoToastGate";
 import {
   clampPinToView, conclusionFor, decisionFailureText, reworkUploadBlocked, submitFailureText, flatLayout, isTypingTarget, lockedBy, markShortcutsSeen, markerOutsideCorner, nextPendingAfter,
-  panToClearPanel, phonePendingLines, positionLabel, rejectNote, rejectRows, shouldShowShortcutsOnOpen, signHint, tabIndices, thumbMarks, verdictCounts, verdictForKey, isOpenHeld,
+  panToClearPanel, phonePendingLines, positionLabel, rejectNote, rejectRows, reviewPositionLabel, shouldShowShortcutsOnOpen, signHint, tabIndices, thumbMarks, verdictCounts, verdictForKey, isOpenHeld,
   type FlatLayout, type FlatTab,
 } from "./reviewFlat";
 import { ReviewWorkspace } from "./ReviewWorkspace";
@@ -951,7 +951,7 @@ export function ReviewPage({ taskId, userId, displayName = null, canComplete = t
   const releaseHeld = task?.verbatim_check === true;
   const pendingLines = phonePendingLines(hits, releaseHeld);
   const phone = layout === "phone";
-  const posnLabel = failedWithoutHits ? null : locked ? positionLabel(tabIndices(hits, "all", active), active, undefined, heldCount) : positionLabel(tabList, active, tab === "pending" ? counts.pending : undefined, heldCount);
+  const posnLabel = failedWithoutHits ? null : locked ? positionLabel(tabIndices(hits, "all", active), active, undefined, heldCount) : reviewPositionLabel(hits, tabList, active, tab === "pending" ? counts.pending : undefined, heldCount);
   const noteFor = (h?: FieldHit) => (h?.id ? notes[h.id] ?? h.note ?? "" : "");
   const zoomBy = (factor: number) => {
     const el = viewRef.current;

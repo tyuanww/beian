@@ -145,3 +145,13 @@ test("只读账号（viewer）：页头不出「仍有 …未处理」和退回�
   await expect(page.locator("button.review-sign")).toHaveCount(0);
   await expect(page.locator("button.review-reject")).toHaveCount(0);
 });
+
+test("条目状态异常：位置写计数不写「全部已下结论」，页头用服务端原话，右上短句，两个按钮都灰", async ({ page, syntheticApi }) => {
+  await page.goto(`/review/${seed(syntheticApi, 0x301, { role: "reviewer", status: "in_review", hits: [{ status: "未知状态" }] })}`);
+  await expect(page.getByTestId("review-posn")).toHaveText("1/1");
+  await expect(page.getByTestId("review-reject-note")).toHaveText("有 1 条审核数据状态异常，请重新对照");
+  await expect(page.locator("#review-sign-hint")).toHaveText(REVIEW_COPY.invalidHitStatus);
+  await expect(page.locator("button.review-sign")).toBeDisabled();
+  await expect(page.locator("button.review-reject")).toBeDisabled();
+  await expect(page.locator("button.review-sign")).toHaveAttribute("title", "有 1 条审核数据状态异常，请重新对照");
+});

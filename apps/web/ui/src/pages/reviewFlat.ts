@@ -6,7 +6,7 @@ import type { Decision, FieldHit, TaskDetail, TaskPage } from "../api";
 import { REVIEW_COPY } from "../copy/labels";
 import { isPendingDecision } from "./reviewNav";
 import { hasReadingDoubt } from "../../../server/src/readingDoubt.ts";
-import { blockingStatusWord, hasInvalidHitStatus, partitionReviewHits } from "./reviewEvidence";
+import { blockingStatusWord, hasInvalidHitStatus, invalidReviewStateCount, partitionReviewHits } from "./reviewEvidence";
 import { bytesTooLarge, uploadTooLargeText } from "../uploadLimit";
 
 export const FLAT_PANEL_WIDTH = 320;
@@ -86,9 +86,15 @@ export function submitGate(hits: FieldHit[], reviewable: boolean, locked = false
   const pending = c.pending + (releaseHeld ? 0 : held);
   if (!reviewable || locked) return { canSign: false, canReject: false, hint: "", title: "", rejectTitle: "", pending };
   // 与服务端 completeGate 同序：先拦未知状态，再看待确认。
+  // 状态异常：右上留短句，页头和悬停用服务端原话「有 N 条审核数据状态异常，请重新对照」。
+  const invalid = invalidReviewStateCount(hits);
+  const invalidDetail = REVIEW_COPY.invalidHitStatusDetail(invalid);
   if (hasInvalidHitStatus(hits)) {
-    const msg = REVIEW_COPY.invalidHitStatus;
-    return { canSign: false, canReject: false, hint: msg, title: msg, rejectTitle: msg, pending };
+    return { canSign: false, canReject: false, hint: REVIEW_COPY.invalidHitStatus, title: invalidDetail, rejectTitle: invalidDetail, pending };
+  }
+  // 只有 decision 非法（状态都认得）：按钮照规则表仍按待确认摆（签字灰、退回可点、确认框挡），文案用服务端原话。
+  if (pending > 0 && invalid > 0) {
+    return { canSign: false, canReject: true, hint: REVIEW_COPY.invalidHitStatus, title: invalidDetail, rejectTitle: invalidDetail, pending };
   }
   if (pending > 0) {
     const msg = REVIEW_COPY.pendingUnresolved(pendingTally(hits, releaseHeld));
@@ -322,6 +328,14 @@ export function rejectNote(rejectTitle: string | undefined, failedWithHits: bool
 /** 签字左侧提示（「仍有 …未处理」等）：viewer 不显示。 */
 export function signHint(hint: string, canComplete = true): string | null {
   return hint && canComplete ? hint : null;
+}
+
+/**
+ * 页头位置。有条目状态异常时不能写「全部已下结论」（异常条目不进待确认列表），改按全部条目计数，如「1/1」。
+ */
+export function reviewPositionLabel(hits: FieldHit[], list: number[], active: number, pendingLeft: number | undefined, held: number): string {
+  if (hasInvalidHitStatus(hits)) return positionLabel(tabIndices(hits, "all", active), active);
+  return positionLabel(list, active, pendingLeft, held);
 }
 
 /** 位置「3/9」：当前在该 tab 列表中的序号。 */

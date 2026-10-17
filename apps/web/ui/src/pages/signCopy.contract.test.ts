@@ -91,13 +91,6 @@ const COPY_CASES: ReadonlyArray<{ name: string; input: SignReturnInput; text: st
   },
 ];
 
-/**
- * 规则表里两边都拦、但拦截文案不同的行（不在本批改）：
- * - decision 是非法值：服务端 `isValidHitReviewState` 判为「有 1 条审核数据状态异常，请重新对照」；
- *   前端 `hasInvalidHitStatus` 只看状态，按待确认写「仍有 1 条疑点未处理」（按钮规则表里本来就是「待确认」）。
- */
-const KNOWN_COPY_GAPS = new Set(["decision 是非法值：按待确认挡住"]);
-
 describe("签字拦截文案前后端合同（「仍有 N 条…未处理」）", () => {
   for (const row of COPY_CASES) {
     it(row.name, () => {
@@ -114,22 +107,36 @@ describe("签字拦截文案前后端合同（「仍有 N 条…未处理」）"
     assert.ok(texts.some((t) => t.includes(REVIEW_COPY.readingDoubtWord)) && texts.some((t) => t.includes("待人工确认")));
   });
 
-  // 规则表里所有「前端有待确认」的行（前端写了「仍有…」提示）：提示必须等于服务端拦截原文。
-  const pendingRows = SIGN_RETURN_RULES.filter((row) => {
+  // 规则表里所有前端写了拦截提示的行（待确认，或审核数据状态异常）：悬停必须等于服务端拦截原文；
+  // 签字旁提示也是原文，只有状态异常时右上留短句「审核数据状态异常」。
+  const blockedRows = SIGN_RETURN_RULES.filter((row) => {
     const { ui } = bothSides(row.input);
-    return ui.pending > 0 && ui.hint !== "" && ui.hint !== REVIEW_COPY.invalidHitStatus;
+    return ui.hint !== "" && (ui.pending > 0 || ui.hint === REVIEW_COPY.invalidHitStatus);
   });
-  it("规则表里有前端待确认的行", () => assert.ok(pendingRows.length >= 5, String(pendingRows.length)));
-  for (const row of pendingRows) {
+  it("规则表里有前端待确认和状态异常的行", () => {
+    assert.ok(blockedRows.length >= 6, String(blockedRows.length));
+    assert.ok(blockedRows.some((row) => bothSides(row.input).ui.hint === REVIEW_COPY.invalidHitStatus));
+  });
+  for (const row of blockedRows) {
     it(`规则表：${row.name}`, () => {
       const { ui, server } = bothSides(row.input);
-      if (KNOWN_COPY_GAPS.has(row.name)) {
-        // 锁现状：两边都拦，但文案不同。哪天对齐了这里变红，把行从 KNOWN_COPY_GAPS 去掉。
-        assert.notEqual(ui.hint, server, `${row.name}：已对齐，请从 KNOWN_COPY_GAPS 去掉`);
-        return;
-      }
-      assert.equal(ui.hint, server);
-      assert.equal(ui.title, server);
+      assert.equal(ui.title, server, "签字悬停");
+      assert.equal(ui.hint, ui.hint === REVIEW_COPY.invalidHitStatus ? REVIEW_COPY.invalidHitStatus : server, "签字旁提示");
     });
   }
+
+  it("状态异常（未知状态 / 非法 decision）：页头和悬停用服务端原话，计数同服务端", () => {
+    for (const hits of [
+      [{ status: "未知状态" }],
+      [{ status: "疑点", decision: "maybe" }],
+      [{ status: "未知状态" }, { status: "疑点", decision: "maybe" }, { status: "疑点" }],
+      [{ status: "一致" }, { status: "字迹不清" }],
+    ] as Hits[]) {
+      const { ui, server } = bothSides(reviewer(hits));
+      assert.match(String(server), /^有 \d+ 条审核数据状态异常，请重新对照$/u);
+      assert.equal(ui.title, server);
+      assert.equal(ui.hint, REVIEW_COPY.invalidHitStatus);
+    }
+    assert.equal(bothSides(reviewer([{ status: "未知状态" }, { status: "疑点", decision: "maybe" }])).server, "有 2 条审核数据状态异常，请重新对照");
+  });
 });

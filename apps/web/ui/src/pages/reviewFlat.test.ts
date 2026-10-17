@@ -5,7 +5,7 @@ import { PUBLIC_UPLOAD_BYTES, UPLOAD_TOO_LARGE, setUploadLimitFromMe } from "../
 import {
   rejectNote,
   clampPinToView, completedAtLabel, completedByText, conclusionFor, decisionFailureText, reworkUploadBlocked, submitFailureText, flatLayout, isTypingTarget, lockedBy, markerOutsideCorner, nextPendingAfter,
-  openHeldAfterPending, panToClearPanel, pendingTally, phonePendingLines, positionLabel, rejectRows, shouldShowShortcutsOnOpen, signHint, submitGate, tabIndices, thumbMarks, verdictCounts, verdictForKey,
+  openHeldAfterPending, panToClearPanel, pendingTally, phonePendingLines, positionLabel, rejectRows, reviewPositionLabel, shouldShowShortcutsOnOpen, signHint, submitGate, tabIndices, thumbMarks, verdictCounts, verdictForKey,
 } from "./reviewFlat.js";
 
 const hit = (id: string, decision = "pending", page = 1, status = "疑点", note = ""): FieldHit => ({ id, field: id, status, decision, page, note });
@@ -207,5 +207,24 @@ describe("viewer：页头叫人做事的句子不出", () => {
     assert.equal(signHint(g.hint, true), g.hint);
     assert.equal(rejectNote(g.rejectTitle, false, true), g.rejectTitle);
     assert.equal(signHint("", true), null);
+  });
+});
+
+describe("审核数据状态异常", () => {
+  const odd = (id: string, extra: Partial<FieldHit> = {}): FieldHit => ({ id, field: id, status: "未知状态", page: 1, ...extra });
+  it("未知状态：右上短句，页头和悬停用服务端原话；两个按钮都灰", () => {
+    const g = submitGate([odd("a"), hit("b", "maybe")], true);
+    assert.deepEqual([g.canSign, g.canReject, g.hint, g.title, g.rejectTitle], [false, false, "审核数据状态异常", "有 2 条审核数据状态异常，请重新对照", "有 2 条审核数据状态异常，请重新对照"]);
+  });
+  it("只有 decision 非法：文案同服务端原话，按钮仍按待确认（签字灰、退回可点）", () => {
+    const g = submitGate([hit("a", "maybe")], true);
+    assert.deepEqual([g.canSign, g.canReject, g.hint, g.title, g.rejectTitle], [false, true, "审核数据状态异常", "有 1 条审核数据状态异常，请重新对照", "有 1 条审核数据状态异常，请重新对照"]);
+  });
+  it("导航：有异常状态时不写「全部已下结论」，按全部条目计数", () => {
+    const hits = [odd("a")];
+    assert.equal(positionLabel([], 0), "全部已下结论", "对照：不看异常时会写全部已下结论");
+    assert.equal(reviewPositionLabel(hits, [], 0, 0, 0), "1/1");
+    assert.equal(reviewPositionLabel([hit("a", "confirm"), odd("b")], [], 1, 0, 0), "2/2");
+    assert.equal(reviewPositionLabel([hit("a", "confirm")], [], 0, 0, 0), "全部已下结论");
   });
 });

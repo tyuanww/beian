@@ -220,6 +220,8 @@ export const REVIEW_COPY = {
   heldUnread: "认字存疑",
   /** 条目状态不在已知集合：与服务端 /complete 400「审核数据状态异常」对齐。 */
   invalidHitStatus: "审核数据状态异常",
+  /** 页头与悬停用服务端 /complete 400 原话（产品哥 2026-10-17）；N 含非法 decision，同服务端 `isValidHitReviewState`。 */
+  invalidHitStatusDetail: (n: number) => `有 ${n} 条审核数据状态异常，请重新对照`,
   /** 审稿员可见的认字报错：不露组件名、路径或堆栈。 */
   ocrFailed: "认字出了问题，请联系管理员",
   /** 后端超页（page_over）：只核 1 页。不写「拆分后上传」。 */
