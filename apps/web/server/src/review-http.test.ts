@@ -1081,7 +1081,9 @@ describe("review http", () => {
 
   it("加码：非管理员对别人的单 POST /complete 回 403 {detail:没有权限}，不改状态、不写 audit", async () => {
     const tid = "141414141415";
-    seed({
+    // audit 记在任务文件的 task.audit 上（/decision 追加）；先放一条，确认 403 后原样不变、没有追加。
+    const priorAudit = [{ at: "2026-10-17T00:00:00.000Z", actor: "刘籽烨", action: "decision", hit_id: "h1" }];
+    saveTask({
       id: tid,
       title: "别人的签",
       product_name: "别人的签",
@@ -1089,8 +1091,10 @@ describe("review http", () => {
       status: "pending_review",
       owner: "ou_review_http",
       hits: [hit({ status: "一致", decision: "confirm" })],
+      audit: priorAudit,
     });
     const before = loadTask(tid);
+    assert.deepEqual(before.audit, priorAudit);
     const snap = taskStoreSnapshot();
     const other = issueSessionForTest("路人", "reviewer", "ou_other_complete_errcode");
     const res = await app.request(`/api/tasks/${tid}/complete`, {
@@ -1104,6 +1108,9 @@ describe("review http", () => {
     assert.equal(after.status, before.status);
     assert.equal(after.conclusion, before.conclusion);
     assert.equal(after.complete_kind, before.complete_kind);
+    assert.equal(after.completed_at, undefined);
+    assert.equal(after.completed_by, undefined);
+    assert.deepEqual(after.audit, priorAudit, "403 不写 audit");
     assert.equal(taskStoreSnapshot().tasks.length, snap.tasks.length);
   });
 
