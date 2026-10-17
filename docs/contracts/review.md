@@ -47,6 +47,18 @@
 
 逐字核对只接受 1 页稿。后端在打开 PDF 时看 `page_count`：超过 1 页直接 `page_over` 失败，不按页逐页试核。任务列表和任务详情用 `job_error_code: "page_over"` 标出超页：CLI 报私有码 `page_over_rendered`，服务端映射成这个对外值；其他报错不带 `job_error_code`。发版前留下的旧超页失败单存盘里没有码，也没有私有码，服务端在读取时补算：失败单的 `job_error` 整句等于「稿件超过 1 页，暂不支持核对，请联系管理员」或「这一单页数超过可核对页数」，任务详情和任务列表就返回 `page_over`；只认整句相等，不改存盘。任务重跑、跑成功或重新核对时清掉旧码。`error` 提示文字照旧，但前端只按 `job_error_code === "page_over"` 判断，不再匹配文案。`job_error_detail`（`{ page_count?: number; max_pages?: number }`）先定格式不填，这一批接口里不出现这个字段，前端不依赖它。审稿员可见文案统一为「稿件超过 1 页，暂不支持核对，请联系管理员」（`labels.ts` 的 `pageOver`），级别是「提醒」，显示和改判断依据前一样；内部状态句「这一单页数超过可核对页数」不直接给审稿员。
 
+下表是旧超页单补码的样例。`contractSamples.test.ts` 逐行拿这些存盘值去跑代码里的补码规则，改规则时要同时改这张表。
+
+<!-- contract-samples:legacy-page-over -->
+| `job_status` | 存盘 `job_error` | 读出 `job_error_code` |
+| --- | --- | --- |
+| `failed` | 稿件超过 1 页，暂不支持核对，请联系管理员 | `page_over` |
+| `failed` | 这一单页数超过可核对页数 | `page_over` |
+| `failed` | 对照中断 | 无 |
+| `failed` | 稿件超过 1 页 | 无 |
+| `running` | 稿件超过 1 页，暂不支持核对，请联系管理员 | 无 |
+<!-- /contract-samples -->
+
 没有私密 Illustrator 编辑数据时整单走警告路径：落 `verbatim_warning`（文案见 `verbatim_statuses.json` 的 `warning`），并把块做成「待人工确认」命中。列表最多 40 块；截断时最后一条 `note` 写「另有 N 块未列出」。右栏对这类未决项抬头用「认字存疑」。对照开着时对照卡题在 `labels.ts` 的 `spotTitle`（「对照卡」）。
 
 「待人工确认」不能选一致：服务端 `/decision` 回 400「待人工确认不能选一致」。前端结论按钮、快捷键 1/2/3 和 `decide()` 共用 `allowedDecisions`（`reviewDecisions.ts`）：该项只给有错 / 忽略。

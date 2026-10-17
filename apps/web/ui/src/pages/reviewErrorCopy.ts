@@ -18,6 +18,7 @@ export function reviewErrorCopy(raw: string, code?: string, failedWithHits?: Fai
   if (failedWithHits === "compare" && !isPageOver(code)) return REVIEW_COPY.compareFailedWithHits;
   if (isPageOver(code)) return REVIEW_COPY.pageOver;
   const text = String(raw || "");
+  // error-text-match-allow -- 待后端错误码，见 TODOS.md「前端按报错文案判断状态」
   if (OCR_FAILED.test(text)) return REVIEW_COPY.ocrFailed;
   return customerCopy(text);
 }

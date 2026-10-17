@@ -23,6 +23,8 @@
 - L2 金标（人核定后）：`apps/web/backend/scripts/run_eval.py`。未核定的 `data/gold` 不进默认 `npm test`
 - 类型：`npm run typecheck -w beian-server` 与 `npm run build -w beian-ui`
 - 浏览器交互（Mac）：`npm run test:e2e`（Vite + 合成 API，只验证页面行为，不替代真实 Hono / 发版 L1）。Q05 `mockup-preview-upgrade.spec.ts` 默认自建临时目录并构建；显式 `BEIAN_Q05_DIST=<dir>` 只读复用已由 `buildQ05ArtifactInto` 盖章的产物，身份不匹配失败关闭、不回退构建、不删除该目录。这是测量隔离，不是正式性能预算。
+- L0 数字核对（GitHub-hosted）：`scripts/quality/check-l0-counts.mjs` 读完整 L0 的输出，按 `config/quality/l0-baseline.json` 核对。server、UI 两段的失败、取消、todo 都必须是 0，跳过的只能是基线里按名字列出的用例；pytest 没有失败和报错，跳过按 `-rs` 打出的「文件: 原因」和条数逐条比对，deselected 不超过基线。三组各有一个最低用例数，只升不降：用例变少就失败；用例变多时 CI 打一条提示，该 PR 要在同一个 PR 里把 `min_tests` 抬到实际数，并在 PR 描述里写明。多出或换掉一条跳过、找不到某段汇总，都会让 CI 失败。解析依赖 TAP 输出，所以 server、UI 的 `test` 脚本写死了 `--test-reporter=tap`，L0 的 `PYTEST_ADDOPTS` 带 `-rs`。改 `l0-baseline.json` 的 PR 要在描述里单独写明，评审人逐条确认。
+- 文档样例对照（L0 server）：`docs/contracts/` 里用 `<!-- contract-samples:名字 -->` 包住的表，由 `apps/web/server/src/contractSamples.test.ts` 逐行拿去跑代码里的规则（账号 id 判断、旧超页单补码）。改规则时要同时改表，不然测试会挂。
 - 复杂度门禁（Mac / GitHub-hosted PR）：`npm run quality`；基线只读、只能经评审缩小，新增发现、过期条目或相对 base 扩张都失败。本地自动解析 `origin/HEAD`（再回退 `origin/main` / `main`），找不到目标分支就失败关闭；CI 使用 PR base 精确 SHA。同文件同名诊断按重数比较，行号移动不改变身份，但新增第二处不能被折叠。`npm run quality:deep` 只生成手工清理报告，不自动删除。`npm run test:quality` 还要求 `.agents/skills` 实际目录、审核清单与 `skills-lock.json` 完全一致；项目 skill 不自动授予 shell。`antd` 是仓库 vendored 源，只能经 `scripts/quality/antd-readonly.mjs` 调固定 6.6.1；禁止用上游 restore/update 覆盖本地 hardening，恢复走受信任 Git 提交并重验哈希。
 - `.github/workflows/quality.yml` 的 Linux Node 22 质量 job 与 `windows-2022` PowerShell 5.1 合同 job 都使用 GitHub-hosted runner；禁止使用杭州/self-hosted runner。Windows job 实跑 `.NET File.Replace` 无备份原子替换，验证 Illustrator Agent 计划任务的隐藏窗口、持久/临时触发器和 `Quiesce` 顺序，另以 `release-staging-rehearsal.ps1` 在临时 clone 中按 AST 加载真实 `release.ps1` 函数，对 `eb2ceb8 → HEAD` 的真实 npm 依赖变化完整彩排停服前 staging（git archive、npm ci、Rollup 原生、全部离线探针含 UI 构建与 Hono 入口导入、同 SHA 复用）；并用 `release-deps-handoff.contract.ps1` 在临时目录的合成 workspace 仓库里按 AST 加载发布/恢复函数，实跑 npm workspace junction 重指、不跟随 junction 的删除、保留策略、超时杀进程树、被占用时换位失败后的恢复、完整换位与幂等换回；随后切到 Node 20 真跑 `npm ci`，执行 `glbWebpProbe.ts` 小 GLB WebP 转换探针和 `glbWebpMemoryProbe.ts` 合成同布局 GLB 峰值 RSS 记录；再跑 `glb-webp-variant-rename-open.test.ts`（Windows 上删除/覆盖被打开文件报 EPERM；旁路按内容哈希命名，替换时旧句柄仍读完整旧内容，新请求拿新内容）、`glb-webp-variant-fsync.test.ts`（目录 fsync 在 EISDIR/EPERM 下 best-effort 不抛错）与 `glb-webp-variant-windows-replace.test.ts`（元数据被打开时更新失败退回、不损坏；旧哈希文件删不掉跳过、绝不删当前文件）；它不注册或控制生产任务，不调用 `release.ps1`，也不替代发版 L1。Knip 只锁在 `tools/quality`，Vulture 只放 `requirements-quality.txt`，两者不得进入杭州生产依赖图。
 - 新增或修改产品逻辑要有相应行为测试（含失败路径）；纯文档、格式和不改行为的调整不机械新增测试。不要把密钥写进测试。
@@ -32,7 +34,7 @@
 1. 先确认已有依赖。质量工具单独位于 `tools/quality` 和 worker `requirements-quality.txt`；首次安装属于工具维护，缺依赖时说明范围，不把它写入产品依赖。
 2. 根 `npm run typecheck` 包含 server 类型检查和 UI build；读取 UI 构建产物的服务端 SPA 测试必须在构建之后。不要再重复单独跑相同 UI build。
 3. 孤儿检测合同在私有临时工作区使用同一份 Knip 配置，探针不写入产品工作区；可与只读质量扫描并行。其他测试仍按共享文件/环境决定是否并行。
-4. 当前 CI 顺序是安装 → test:quality → quality（比较 base）→ typecheck/UI build → 完整 L0；Windows hosted 合同是独立 job，不能冒充发版 L1。
+4. 当前 CI 顺序是安装 → test:quality → quality（比较 base）→ typecheck/UI build → 完整 L0 → L0 数字核对；Windows hosted 合同是独立 job，不能冒充发版 L1。
 5. 普通单测不可调用真实 OCR、Blender、Illustrator COM 或外网；真实稿数据和原生环境必须显式选择，不因目录或软件存在而获得授权。
 
 ### 显式选择真实稿或原生应用
@@ -49,6 +51,17 @@ cd apps/web/backend
 显式选择后样张缺失会失败并说明条件，不能以 skip 冒充验收。原生应用测试使用 `@pytest.mark.native` 和 `--run-native`，仍需符合设备与授权条件；这不是安装或启动原生软件的指令。未标记的未来测试不会自动分类，新增用例必须标记其真实数据/原生应用边界。仓库默认 L0 继续包括普通合成合同和接线测试。
 
 对仓库外真实 `.ai` 跑 `workers/packaging/tools/export_one_structure.py --dry-run` 只核 SHA-256 与层名 payload，仍不启 COM，也不等于杭州结构导出或金标。这不是默认 pytest，也不走 `export-one-structure.ps1`（该脚本不传 `--dry-run`）。层名是「刀版」的稿要显式 `--proposal-layers 刀版`；多张连核每张独立 `--out-dir`。
+
+### 真后端自检（旧数据场景）
+
+需要确认「旧数据在真后端上读出来对不对」时，不手工起服务，跑场景脚本：
+
+```bash
+cd apps/web/ui
+npm run verify:real-backend -- --scenario legacy-page-over --out <输出目录> [--no-build] [--keep-data]
+```
+
+脚本先构建 UI（`--no-build` 复用现有 `dist/`），用 `mkdtemp` 新建临时 `WB_DATA_DIR` 写入场景任务记录，在空闲端口起真 Hono（serve 已构建 UI），本机显示名登录自动创建的「管理员」，导出接口 JSON、无头截图并按场景断言；结束时按 PID 结束自己起的服务进程组并删除临时目录。断言失败退出 1，环境/启动问题退出 2。场景放在 `apps/web/ui/scripts/verify-scenarios/*.json`（`tasks` / `api` / `pages`）；数据目录与输出目录禁止落在 `runtime/` 或 `apps/web/backend/data`。分步驱动时用 `--serve`（起好后写 `<输出目录>/instance.json` 并常驻，`kill -TERM <instance.json 里的 pid>` 结束并清理）和 `--base-url http://127.0.0.1:<端口>`（只对本机实例做登录、导出、截图、断言，拒绝非回环地址）；完整步骤见 `.cursor/skills/verify-beian/SKILL.md`。这是合成旧数据的真后端读取验证，不是真实稿或线上验收。
 
 ## 有效证据与重跑
 

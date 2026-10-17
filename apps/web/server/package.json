@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "start": "tsx src/index.ts",
-    "test": "tsx --test src/*.test.ts",
+    "test": "tsx --test --test-reporter=tap src/*.test.ts",
     "typecheck": "tsc --noEmit",
     "legacy:page-over": "tsx src/legacyPageOver.ts"
   },

@@ -437,10 +437,17 @@ describe("repository quality policy", () => {
     assert.match(quality, /--no-save --package-lock=false --ignore-scripts/);
     assert.doesNotMatch(quality, /self-hosted|hangzhou|release\.ps1|environment:/i);
     assert.match(quality, /npm run typecheck/);
+    const l0Run = quality.indexOf("npm test 2>&1 | tee \"$RUNNER_TEMP/l0.log\"");
+    assert.ok(l0Run > 0, "complete L0 output must be captured for the count check");
     assert.ok(
-      quality.indexOf("run: npm run typecheck") < quality.indexOf("run: npm test"),
+      quality.indexOf("run: npm run typecheck") < l0Run,
       "UI build must exist before server SPA tests run in a clean checkout",
     );
+    assert.ok(
+      l0Run < quality.indexOf("node scripts/quality/check-l0-counts.mjs \"$RUNNER_TEMP/l0.log\""),
+      "L0 counts must be checked against the baseline after the complete L0 run",
+    );
+    assert.match(quality, /set -o pipefail/);
     assert.match(production, /runs-on:\s*\[self-hosted, hangzhou\]/);
     assert.doesNotMatch(production, /^\s{2}pull_request:\s*$/m);
   });

@@ -6,9 +6,10 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
-    "test": "tsx --test \"src/**/*.test.ts\"",
+    "test": "tsx --test --test-reporter=tap \"src/**/*.test.ts\"",
     "test:e2e": "tsc -p tsconfig.e2e.json --noEmit && playwright test",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "verify:real-backend": "node scripts/verify-real-backend.mjs"
   },
   "engines": {
     "node": ">=20"
