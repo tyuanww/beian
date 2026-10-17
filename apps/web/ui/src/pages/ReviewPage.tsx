@@ -28,7 +28,7 @@ import { unsavedNotesHint } from "./unsavedNotesHint";
 import { detailLoadState, shouldShowWaitCard } from "./waitCard";
 import { shouldUseReworkView } from "./reviewVersion";
 import { hrefOf } from "../appRoute";
-import { canReuploadFailed, isDeadCompareFailed, isFailedJob, isReworkableTask, isReviewableStatus, reviewGate, reviewPageHits, reviewSubmitButtons } from "./reviewActions";
+import { canAccessTaskOwner, canReuploadFailed, isDeadCompareFailed, isFailedJob, isReworkableTask, isReviewableStatus, reviewGate, reviewPageHits, reviewSubmitButtons } from "./reviewActions";
 import { ReviewDockPanel } from "./ReviewDockPanel";
 import { ReviewHitDetail } from "./ReviewHitDetail";
 import { SPOT_CARD_GAP, SPOT_CARD_MARGIN, SPOT_CARD_MIN_HEIGHT, SPOT_CARD_MIN_WIDTH, SPOT_CARD_WIDTH, avoidSpotObstacle, placeSpotCard, resolveSpotPosition, spotDragStarted, spotLane, spotSideRoom, type SpotObstacle } from "./spotCard";
@@ -920,7 +920,9 @@ export function ReviewPage({ taskId, userId, displayName = null, canComplete = t
   const orderHeldNeeded = needsOrderHeldConfirm(task, hits);
   const draftBlock = unsavedNotesHint(hasUnsavedNotes);
   const failedJob = isFailedJob(task);
-  const buttons = reviewSubmitButtons(task, hits, { locked: Boolean(locked), orderHeldConfirm, busy, hasUnsavedNotes, canComplete });
+  // 签字/退回：有 complete 权限，且这单自己能动（同服务端 assertCanAccessTask）；别人的单（非管理员）两个按钮都不在。
+  const canCompleteThis = canComplete && canAccessTaskOwner(task, { admin, openId: userId, displayName });
+  const buttons = reviewSubmitButtons(task, hits, { locked: Boolean(locked), orderHeldConfirm, busy, hasUnsavedNotes, canComplete: canCompleteThis });
   const failedWithoutHits = failedJob && hits.length === 0;
   const deadCompare = isDeadCompareFailed(task);
   // 对照失败但没有有效条目（按服务端 activeHits 算，如认字单 hits_v2 为空）：不算「带上一轮条目」，走无条目失败条。

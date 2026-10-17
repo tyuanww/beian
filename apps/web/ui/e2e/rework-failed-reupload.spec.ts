@@ -111,6 +111,30 @@ for (const bar of BARS) {
   });
 }
 
+test("审核员看别人的正常待审单：服务端 /complete 会 403，签字退回都不在", async ({ page, syntheticApi }) => {
+  await asReviewer(page);
+  const task = reviewTask("e5969b58ce07");
+  Object.assign(task, { owner: "ou_someone_else", status: "in_review", hits: [{ id: "p0", field: "中文品名", status: "疑点", decision: "pending" }] });
+  syntheticApi.tasks.push(task);
+  await page.goto(`/review/${task.id}`);
+  await expect(page.getByTestId("review-root")).toBeVisible();
+  await expect(page.locator("button.review-sign")).toHaveCount(0);
+  await expect(page.locator("button.review-reject")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /展开疑点 · 待确认 1/u })).toBeVisible();
+});
+
+test("管理员看别人的正常待审单：能签能退", async ({ page, syntheticApi }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem("wb_review_shortcuts_seen_v1", "1");
+    localStorage.setItem("wb_review_spot", "off");
+  });
+  const task = reviewTask("e5969b58ce08");
+  Object.assign(task, { owner: "ou_someone_else", status: "in_review", hits: [{ id: "p0", field: "中文品名", status: "疑点", decision: "pending" }] });
+  syntheticApi.tasks.push(task);
+  await page.goto(`/review/${task.id}`);
+  await expect(page.locator("button.review-reject")).toBeEnabled();
+});
+
 test("复核失败且没有剩余条目：显示「检查未完成，暂时没有结果」和「重新上传这一单」，签字退回不显示", async ({ page, syntheticApi }) => {
   await asReviewer(page);
   const task = reviewTask("e5969b58ce04");

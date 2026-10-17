@@ -80,8 +80,16 @@ export function canReuploadFailed(task: (ReworkableFields & Pick<TaskDetail, "ow
   if (!task || !isFailedJob(task) || !isReworkableTask(task)) return false;
   if (hits.length === 0 && task.job_kind !== "rework") return false;
   if (!viewer.canCreate) return false;
+  return canAccessTaskOwner(task, viewer);
+}
+
+/**
+ * 这单是不是自己能动的：同服务端 `tasks.ts` `canAccessOwner`（`assertCanAccessTask` 用它拦 /complete、/rework）——
+ * 管理员一律可以；其他人要 `owner` 等于自己的 open_id 或显示名，没有 owner 的老单不行。
+ */
+export function canAccessTaskOwner(task: Pick<TaskDetail, "owner"> | null | undefined, viewer: Pick<ReuploadViewer, "admin" | "openId" | "displayName">): boolean {
   if (viewer.admin) return true;
-  const owner = String(task.owner || "").trim();
+  const owner = String(task?.owner || "").trim();
   if (!owner) return false;
   return owner === String(viewer.openId || "").trim() || owner === String(viewer.displayName || "").trim();
 }
