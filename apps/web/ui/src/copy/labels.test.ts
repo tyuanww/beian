@@ -100,7 +100,8 @@ describe("REVIEW_COPY（老板 2026-10-11 已批文案）", () => {
     assert.equal(REVIEW_COPY.verdict.ignore, "忽略");
     assert.equal(REVIEW_COPY.collapse, "收起");
     assert.equal(REVIEW_COPY.undoToast("有错") + REVIEW_COPY.undo, "已标为有错，撤销");
-    assert.equal(REVIEW_COPY.pendingHint(3), "还有 3 条没下结论");
+    assert.equal(REVIEW_COPY.pendingUnresolved([{ word: "疑点", count: 3 }]), "仍有 3 条疑点未处理");
+    assert.equal(REVIEW_COPY.pendingUnresolved([{ word: "待人工确认", count: 2 }, { word: "认字存疑", count: 1 }]), "仍有 2 条待人工确认、1 条认字存疑未处理");
     assert.equal(REVIEW_COPY.offline, "没连上网，这条没存上");
   });
 });

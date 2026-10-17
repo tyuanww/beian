@@ -5,7 +5,7 @@ import { PUBLIC_UPLOAD_BYTES, UPLOAD_TOO_LARGE, setUploadLimitFromMe } from "../
 import {
   rejectNote,
   clampPinToView, completedAtLabel, completedByText, conclusionFor, decisionFailureText, reworkUploadBlocked, submitFailureText, flatLayout, isTypingTarget, lockedBy, markerOutsideCorner, nextPendingAfter,
-  openHeldAfterPending, panToClearPanel, phonePendingLines, positionLabel, rejectRows, shouldShowShortcutsOnOpen, submitGate, tabIndices, thumbMarks, verdictCounts, verdictForKey,
+  openHeldAfterPending, panToClearPanel, pendingTally, phonePendingLines, positionLabel, rejectRows, shouldShowShortcutsOnOpen, submitGate, tabIndices, thumbMarks, verdictCounts, verdictForKey,
 } from "./reviewFlat.js";
 
 const hit = (id: string, decision = "pending", page = 1, status = "疑点", note = ""): FieldHit => ({ id, field: id, status, decision, page, note });
@@ -20,8 +20,8 @@ describe("reviewFlat", () => {
     const pend = [hit("a"), hit("b", "confirm")];
     assert.deepEqual(verdictCounts(pend), { pending: 1, issue: 0, total: 2 });
     const g = submitGate(pend, true);
-    assert.equal(g.canSign, false); assert.equal(g.canReject, true); assert.equal(g.hint, "还有 1 条没下结论");
-    assert.equal(g.title, "还有 1 条没下结论，下完才能签字");
+    assert.equal(g.canSign, false); assert.equal(g.canReject, true); assert.equal(g.hint, "仍有 1 条疑点未处理");
+    assert.equal(g.title, "仍有 1 条疑点未处理");
     assert.equal(g.rejectTitle, "还有 1 条待确认，处理完才能退回");
     assert.equal(g.pending, 1);
     assert.equal(rejectNote(g.rejectTitle, false), "还有 1 条待确认，处理完才能退回");
@@ -166,5 +166,35 @@ describe("reviewFlat", () => {
     assert.equal(reworkUploadBlocked({ size: PUBLIC_UPLOAD_BYTES }), null);
     assert.equal(reworkUploadBlocked({ size: 1024 }), null);
     assert.equal(reworkUploadBlocked(null), null);
+  });
+});
+
+describe("签字门提示与服务端 /complete 拦截同一句", () => {
+  const doubt = (id: string, status = "一致"): FieldHit => ({ id, field: id, status, page: 1, coverage: { miss: ["CAPSULE MIST"] } } as FieldHit);
+  const held = (id: string, decision?: string): FieldHit => ({ id, field: id, status: "待人工确认", page: 1, ...(decision ? { decision } : {}) });
+
+  it("只有一类：与原来一字不差", () => {
+    assert.equal(submitGate([held("a"), held("b", "pending")], true).hint, "仍有 2 条待人工确认未处理");
+    assert.equal(submitGate([hit("m", "pending", 1, "多空格")], true).hint, "仍有 1 条多空格未处理");
+  });
+  it("认字存疑（状态本是「一致」）写「认字存疑」；签字悬停同一句", () => {
+    const g = submitGate([doubt("a")], true);
+    assert.deepEqual([g.hint, g.title, g.canSign], ["仍有 1 条认字存疑未处理", "仍有 1 条认字存疑未处理", false]);
+    // 缺空格没标 pending、只因认字存疑要结论：写「认字存疑」不写「缺空格」。
+    const spaceDoubt = { id: "s", field: "s", status: "缺空格", page: 1, sequence_diff: { only_in_excel: ["香柠檬"] } } as FieldHit;
+    assert.equal(submitGate([spaceDoubt], true).hint, "仍有 1 条认字存疑未处理");
+  });
+  it("多类：分开数，词序按首次出现，「、」连接", () => {
+    assert.equal(submitGate([held("a"), doubt("b"), held("c")], true).hint, "仍有 2 条待人工确认、1 条认字存疑未处理");
+    assert.equal(submitGate([hit("a"), hit("b", "pending", 1, "缺失"), hit("c")], true).hint, "仍有 2 条疑点、1 条缺失未处理");
+    const mixed = submitGate([held("a"), doubt("b"), held("c"), hit("d")], true);
+    assert.equal(mixed.hint, "仍有 2 条待人工确认、1 条认字存疑、1 条疑点未处理");
+    assert.equal(mixed.pending, 4, "各类条数之和等于确认框用的 pending");
+  });
+  it("已下结论的不计；逐字单的待人工确认不计", () => {
+    assert.equal(submitGate([held("a", "ignore"), doubt("b"), { ...doubt("c"), decision: "confirm" }], true).hint, "仍有 1 条认字存疑未处理");
+    assert.equal(submitGate([held("a"), doubt("b")], true, false, true).hint, "仍有 1 条认字存疑未处理");
+    assert.deepEqual(pendingTally([held("a"), doubt("b"), held("c")]), [{ word: "待人工确认", count: 2 }, { word: "认字存疑", count: 1 }]);
+    assert.deepEqual(pendingTally([held("a")], true), []);
   });
 });

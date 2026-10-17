@@ -119,8 +119,15 @@ export function actorLabel(name: string | null | undefined): string {
 export const REVIEW_COPY = {
   reject: "退回",
   sign: "签字",
-  pendingHint: (n: number) => `还有 ${n} 条没下结论`,
-  pendingTitle: (n: number) => `还有 ${n} 条没下结论，下完才能签字`,
+  /**
+   * 还有待确认时签字左侧提示与签字悬停说明：与服务端 /complete 400 同一句（`completeGate.ts`）。
+   * 按词分开数、词序按首次出现、「、」连接；只有一类时如「仍有 2 条待人工确认未处理」，
+   * 多类如「仍有 2 条待人工确认、1 条认字存疑未处理」。前后端逐字一致由 `signCopy.contract.test.ts` 锁住。
+   */
+  pendingUnresolved: (parts: ReadonlyArray<{ word: string; count: number }>) =>
+    `仍有 ${parts.map(({ word, count }) => `${count} 条${word}`).join("、")}未处理`,
+  /** 拦截文案里「只因认字存疑要结论」的条目填的词（状态本身可能是「一致」）。 */
+  readingDoubtWord: "认字存疑",
   signBlockedByIssue: (n: number) => `有 ${n} 条标了有错，请退回`,
   rejectTitle: "退回这份稿？",
   rejectBody: (n: number) => `有错的 ${n} 条会随退回一起发出，并通知「已退回」。提交后不能撤回。`,
