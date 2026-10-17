@@ -127,6 +127,7 @@ import { UnfoldedPrintHttpError } from "./unfoldedPrint.js";
 import { completeGate } from "./completeGate.js";
 import { CompressionProblem } from "./compressionModel.js";
 import { HistoryProblem, queryHistory } from "./historyIndex.js";
+import { ReviewProblem, reviewProblemBody } from "./reviewProblem.js";
 import { registerCompressionRoutes } from "./compressionApi.js";
 import { recoverCompressionBeforeReceipts } from "./compressionRuntime.js";
 import { compressionReceiptPersisted } from "./compressionStore.js";
@@ -440,6 +441,9 @@ function pngMagicAt(path: string): boolean {
 }
 
 app.onError((err, c) => {
+  if (err instanceof ReviewProblem) {
+    return c.json(reviewProblemBody(err), err.status);
+  }
   if (err instanceof ApiProblem) {
     return c.json({ detail: err.message, code: err.code }, err.status);
   }

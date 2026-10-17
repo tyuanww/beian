@@ -9,6 +9,7 @@ import { cleanCompleteKind, forgetHistory, noteHistoryReview } from "./historyIn
 import { skipPackSheetField } from "./sheetSkip.js";
 import { legacyPageOverCode } from "./legacyPageOver.js";
 import { hasReadingDoubt } from "./readingDoubt.js";
+import type { JobErrorCode } from "./reviewCodes.js";
 
 export type Hit = {
   id?: string;
@@ -31,7 +32,7 @@ export type Hit = {
 
 export type JobStatus = "queued" | "running" | "succeeded" | "failed";
 export type JobKind = "compare" | "rework" | "mockup";
-export type JobErrorCode = "page_over";
+export type { JobErrorCode };
 
 export type Viewer = {
   id: string;
