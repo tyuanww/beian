@@ -473,6 +473,7 @@ export function App() {
             key={`${me.open_id || "session-only"}:${taskId}`}
             userId={me.open_id || null}
             displayName={me.display_name || null}
+            canComplete={me.perms.includes("complete")}
             taskId={taskId}
             onBack={() => goRoute({ view: "tasks" })}
             onHistory={() => goRoute({ view: "history" })}

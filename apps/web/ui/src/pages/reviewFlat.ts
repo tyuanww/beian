@@ -5,7 +5,8 @@
 import type { Decision, FieldHit, TaskDetail, TaskPage } from "../api";
 import { REVIEW_COPY } from "../copy/labels";
 import { isPendingDecision } from "./reviewNav";
-import { partitionReviewHits } from "./reviewEvidence";
+import { hasReadingDoubt } from "../../../server/src/readingDoubt.ts";
+import { blockingStatusWord, hasInvalidHitStatus, partitionReviewHits } from "./reviewEvidence";
 import { bytesTooLarge, uploadTooLargeText } from "../uploadLimit";
 
 export const FLAT_PANEL_WIDTH = 320;
@@ -60,19 +61,45 @@ export function openHeldAfterPending(previousPending: number, pending: number, h
   return previousPending > 0 && pending === 0 && held > 0;
 }
 
+/** 一条待确认在拦截文案里填的词：按状态要结论的写状态，只因认字存疑要结论的写「认字存疑」，其余写原状态。 */
+function pendingWordFor(hit: FieldHit): string {
+  return blockingStatusWord(hit) ?? (hasReadingDoubt(hit) ? REVIEW_COPY.readingDoubtWord : String(hit.status || "未决"));
+}
+
+/**
+ * 待确认按词分开数，词序按条目首次出现（与服务端 `completeGate` 同序）。条目口径与 `submitGate` 的 pending 相同：
+ * 没下结论的疑点（`partitionReviewHits` 的 issues，同 `verdictCounts`），加上非逐字单（`releaseHeld` 为 false）未决的「待人工确认」。
+ */
+export function pendingTally(hits: FieldHit[], releaseHeld = false): Array<{ word: string; count: number }> {
+  const open = new Set(partitionReviewHits(hits).issues.filter(({ hit }) => isPendingDecision(hit.decision)).map(({ index }) => index));
+  const counts = new Map<string, number>();
+  hits.forEach((hit, index) => {
+    const word = isOpenHeld(hit) ? (releaseHeld ? null : "待人工确认") : open.has(index) ? pendingWordFor(hit) : null;
+    if (word !== null) counts.set(word, (counts.get(word) ?? 0) + 1);
+  });
+  return [...counts].map(([word, count]) => ({ word, count }));
+}
+
 export function submitGate(hits: FieldHit[], reviewable: boolean, locked = false, releaseHeld = false): SubmitGate {
   const c = verdictCounts(hits);
   const held = hits.filter(isOpenHeld).length;
   const pending = c.pending + (releaseHeld ? 0 : held);
   if (!reviewable || locked) return { canSign: false, canReject: false, hint: "", title: "", rejectTitle: "", pending };
+  // 与服务端 completeGate 同序：先拦未知状态，再看待确认。
+  if (hasInvalidHitStatus(hits)) {
+    const msg = REVIEW_COPY.invalidHitStatus;
+    return { canSign: false, canReject: false, hint: msg, title: msg, rejectTitle: msg, pending };
+  }
   if (pending > 0) {
+    const msg = REVIEW_COPY.pendingUnresolved(pendingTally(hits, releaseHeld));
     return {
       canSign: false,
       // 老板 2026-10-11 已批：签字禁用时退回不禁用。服务端 /complete 仍要求先下完结论，
       // 确认框里「确认退回」会挡住。退回按钮的悬停用同一句，不写「才能签字」。
       canReject: true,
-      hint: REVIEW_COPY.pendingHint(pending),
-      title: REVIEW_COPY.pendingTitle(pending),
+      // 签字旁提示和悬停与服务端 /complete 拦截同一句：按状态分开数。
+      hint: msg,
+      title: msg,
       rejectTitle: REVIEW_COPY.rejectBlockedByPending(pending),
       pending,
     };

@@ -560,6 +560,20 @@ RF-10–RF-13 的原始依赖见 [ADR-007 §20.7](docs/adr-007-packaging-render-
 
 - `apps/web/ui/src/pages/setupBoard.ts` `probeErrorMessage`（1 行）：认的是浏览器 fetch 自己抛的报错（failed to fetch / networkerror / load failed，请求没到服务器），后端永远给不了码，只能按浏览器文案换成「服务没连上，请稍后重试。」。
 
+## 2026-10-17 签字/退回规则表（第 5 批，`test/pstack-batch5-sign-rules`）
+
+签字 / 退回按钮何时显示、何时可点、确认框能否提交，是前后端共用表 `apps/web/server/src/signReturnRules.ts`（零依赖）：服务端 `signReturnRules.test.ts` 逐行对照 `completeGate`（`/complete` 拦截）+ `hasPerm(role, "complete")`；前端 `signReturnRules.contract.test.ts` 逐行对照 `reviewSubmitButtons`；`e2e/sign-return-rules.spec.ts` 按表渲染核对页。任一边改规则，对应测试变红。认字存疑的判断是共用的零依赖 `readingDoubt.ts` 的 `hasReadingDoubt`（只看 `coverage.miss`，以及已标记条目的 `sequence_diff.only_in_excel` / `doubt_bucket`；「已标记」是明确状态集合「疑点 / 缺失 / 缺空格 / 待人工确认」，`readingDoubt.test.ts` 防漂移），前端 `isReviewIssue` 和服务端 `hitNeedsDecision`（只在没下结论时）都调它。
+
+产品口径（2026-10-17）：该拦的两边都拦，服务端必须能独立拦住。原第 2–4 条与认字存疑已进主表；第 1 条待老板定，`SIGN_RETURN_DISPUTED` 只剩这一条（两行）：
+
+- [ ] 对红（复核）失败、单子回到待审且带上一轮条目，是否改成不可签：**待老板定**。现状两边不一致、各自锁住：前端失败单不给按钮；服务端 `/complete` 照 origin/main 不看 `job_status: failed`，按条目收签字 / 退回（8/20 设计 `docs/designs/review-job-module.md`「对红失败仍可签字」）。若定为不可签，要同时配一条管理员重新对红的路径（现在只有 `POST /api/tasks/:tid/rework` 带新 PDF，核对页只在 `status: completed` 时显示「上传新稿」，待审态的失败单在界面上没有入口）。
+- [x] 非逐字单出现未决「待人工确认」：两边都算待确认；服务端回 400「仍有 N 条待人工确认未处理」（逐字单仍走整单确认勾选）。
+- [x] 只读账号（viewer）：前端隐藏签字/退回；服务端 403。
+- [x] 条目状态不在已知集合：前端两个按钮灰并提示「审核数据状态异常」；服务端 400「有 N 条审核数据状态异常，请重新对照」。
+- [x] 认字存疑（`hasReadingDoubt`）且没下结论：两边都算待确认；服务端回 400「仍有 N 条认字存疑未处理」；多类同时出现时分开数，如「仍有 2 条待人工确认、1 条认字存疑未处理」。已标一致 / 忽略 / 有错后不再拦。
+- [ ] 加码批下后（第 5 批「加后端码」老板未批），上面服务端这几处拦截（待人工确认 / 认字存疑「仍有 N 条…未处理」）改回机读码，前端按码出文案；现在 `/complete` 仍是 `HTTPException(400, { message })` → `{detail}`，不加字段。
+- [ ] `isAccountingCopy`：前端 `hitText.ts` 的 `humanMissLines` 仍用正则把 `score=`、「覆盖偏低」等核算说明从 miss 里滤掉（只影响核对要点显示）。签字门已不受影响：两边都按 `hasReadingDoubt` 认任何非空 miss，表里「coverage.miss 只有核算说明」一行锁住两边都算待确认。等后端给出结构化「核算说明」标记（不混进 `coverage.miss`）后去掉前端这条正则。
+
 ## 2026-10-17 CI 偶发：RF-02 adapter 资源采样把原子替换当成账算不清
 
 - **用例**：`apps/web/backend/tests/test_packaging_render_generation.py::test_node_bridge_calls_real_rf02_validator_without_blender[adapter]`。同一用例另外 5 个参数（missing / bridge / jobs / seal-proof / seal-tamper）没有出过这个错。

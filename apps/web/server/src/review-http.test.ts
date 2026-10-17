@@ -21,6 +21,7 @@ type SeedHit = {
   field?: string;
   status?: string;
   decision?: string;
+  coverage?: { miss?: string[] };
 };
 
 type SeedTask = {
@@ -29,6 +30,7 @@ type SeedTask = {
   product_name: string;
   type: string;
   status: string;
+  job_kind?: "compare" | "rework";
   error?: string;
   conclusion?: string;
   complete_kind?: string;
@@ -714,6 +716,95 @@ describe("review http", () => {
     assert.equal(res.status, 400);
     const body = (await res.json()) as { detail?: string };
     assert.equal(body.detail, "整单待人工确认，签字即认可");
+  });
+
+  // 签字/退回共用表（signReturnRules.ts）第 1、2 条与认字存疑在 HTTP 入口的落点：仍是 400 + {detail}，不加错误码。
+  async function completeAs(tid: string, conclusion: string) {
+    const res = await app.request(`/api/tasks/${tid}/complete`, {
+      method: "POST",
+      headers: { ...authHeader(), "content-type": "application/json" },
+      body: JSON.stringify({ conclusion }),
+    });
+    return { status: res.status, body: (await res.json()) as Record<string, unknown> };
+  }
+
+  // 待老板定（signReturnRules.ts 待决行）：暂按 main，对红失败不挡签字/退回。
+  it("still accepts signing and returning after a failed rework that kept last round's hits (main behavior)", async () => {
+    const signTid = seed({
+      id: "d7d7d7d7d7d7",
+      title: "复核失败签字",
+      product_name: "复核失败签字",
+      type: "excel_pdf",
+      status: "pending_review",
+      job_kind: "rework",
+      job_status: "failed",
+      hits: [hit({ decision: "confirm" })],
+    });
+    const sign = await completeAs(signTid, "无改稿项");
+    assert.equal(sign.status, 200);
+    assert.equal(sign.body.status, "completed");
+    assert.equal(sign.body.complete_kind, "signed");
+
+    const retTid = seed({
+      id: "d8d8d8d8d8d8",
+      title: "复核失败退回",
+      product_name: "复核失败退回",
+      type: "excel_pdf",
+      status: "in_review",
+      job_kind: "rework",
+      job_status: "failed",
+      hits: [hit({ decision: "issue" })],
+    });
+    const ret = await completeAs(retTid, "退回改稿");
+    assert.equal(ret.status, 200);
+    assert.equal(ret.body.status, "completed");
+    assert.equal(ret.body.complete_kind, "rework");
+  });
+
+  it("treats an open 待人工确认 on a non-verbatim order as pending", async () => {
+    const tid = seed({
+      id: "c7c7c7c7c7c7",
+      title: "非逐字待人工",
+      product_name: "非逐字待人工",
+      type: "excel_pdf",
+      status: "pending_review",
+      hits: [hit({ status: "待人工确认", decision: "pending" })],
+    });
+    const res = await completeAs(tid, "无改稿项");
+    assert.equal(res.status, 400);
+    assert.deepEqual(res.body, { detail: "仍有 1 条待人工确认未处理" });
+  });
+
+  it("treats a consistent hit with coverage.miss (认字存疑) as pending", async () => {
+    const tid = seed({
+      id: "c8c8c8c8c8c8",
+      title: "认字存疑",
+      product_name: "认字存疑",
+      type: "excel_pdf",
+      status: "pending_review",
+      hits: [hit({ status: "一致", decision: undefined, coverage: { miss: ["CAPSULE MIST"] } })],
+    });
+    const res = await completeAs(tid, "无改稿项");
+    assert.equal(res.status, 400);
+    assert.deepEqual(res.body, { detail: "仍有 1 条认字存疑未处理" });
+  });
+
+  it("counts 待人工确认 and 认字存疑 separately in one message, in first-seen order", async () => {
+    const tid = seed({
+      id: "d9d9d9d9d9d9",
+      title: "两类都有",
+      product_name: "两类都有",
+      type: "excel_pdf",
+      status: "pending_review",
+      hits: [
+        hit({ id: "h1", status: "待人工确认", decision: "pending" }),
+        hit({ id: "h2", status: "一致", decision: undefined, coverage: { miss: ["CAPSULE MIST"] } }),
+        hit({ id: "h3", status: "待人工确认", decision: undefined }),
+      ],
+    });
+    const res = await completeAs(tid, "无改稿项");
+    assert.equal(res.status, 400);
+    assert.deepEqual(res.body, { detail: "仍有 2 条待人工确认、1 条认字存疑未处理" });
   });
 
   it("old task without created_by returns null creator, never the actor, after a verdict", async () => {

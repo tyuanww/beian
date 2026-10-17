@@ -112,7 +112,9 @@ test("三栏通铺：1440 稿件 ≥70%、右栏 320、工具条在画布下方�
 
   const sign = page.getByRole("button", { name: "签字", exact: true });
   await expect(sign).toBeDisabled();
-  await expect(page.getByText("还有 1 条没下结论", { exact: true })).toBeVisible();
+  // 与服务端 /complete 拦截同一句（按状态分开数）。
+  await expect(page.getByText("仍有 1 条疑点未处理", { exact: true })).toBeVisible();
+  await expect(sign).toHaveAttribute("title", "仍有 1 条疑点未处理");
   await expect(page.getByTestId("review-reject-note")).toHaveText("还有 1 条待确认，处理完才能退回");
   // 签字禁用时退回不禁用；还有待确认时确认框挡住「确认退回」（服务端 /complete 要求先下完结论）。
   const rejectBtn = page.getByRole("button", { name: "退回", exact: true });
@@ -438,9 +440,9 @@ test("768 宽页头不折行，退回/签字靠右（design F-002）", async ({ 
   const reject = (await page.getByRole("button", { name: "退回", exact: true }).boundingBox())!;
   expect(top.x + top.width - (sign.x + sign.width)).toBeLessThanOrEqual(24);
   expect(Math.abs(reject.y - sign.y)).toBeLessThan(2);
-  // <1024 隐藏「还有 N 条没下结论」，改为签字按钮悬停说明。
+  // <1024 隐藏签字旁「仍有 N 条…未处理」，改为签字按钮悬停说明（同一句）。
   await expect(page.locator(".review-signhint")).toBeHidden();
-  await expect(page.getByRole("button", { name: "签字", exact: true })).toHaveAttribute("title", /没下结论|待确认/);
+  await expect(page.getByRole("button", { name: "签字", exact: true })).toHaveAttribute("title", "仍有 1 条疑点未处理");
   await expect(page.getByTestId("review-reject-note")).toHaveText("还有 1 条待确认，处理完才能退回");
   await expect(page.getByRole("button", { name: "退回", exact: true })).toHaveAttribute("title", "还有 1 条待确认，处理完才能退回");
   expect((await page.locator(".review-title").boundingBox())!.height).toBeLessThan(40);

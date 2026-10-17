@@ -4,7 +4,7 @@ import { makeTestTempDir } from "./testTemp.js";
 
 process.env.WB_DATA_DIR = makeTestTempDir("beian-ts-");
 
-const { activeHits, boardColumn, deleteTask, hasReworkPages, hitNeedsDecision, isHitDecision, isReviewableStatus, isReworkableStatus, isReworkableTask, isValidHitReviewState, listTasks, loadTask, saveTask } = await import("./tasks.js");
+const { activeHits, boardColumn, deleteTask, hasReworkPages, hitNeedsDecision, isHitDecision, isReviewableStatus, isReworkableStatus, isReworkableTask, isValidHitReviewState, listTasks, loadTask, pendingWord, saveTask } = await import("./tasks.js");
 
 const admin = { id: "ou_admin", name: "管理员", admin: true };
 
@@ -122,6 +122,23 @@ describe("review gates", () => {
     assert.equal(hitNeedsDecision({ status: "疑点", decision: "confirmed" }), true);
     assert.equal(hitNeedsDecision({ status: "缺失", decision: "pending" }), true);
     assert.equal(hitNeedsDecision({ status: "疑点", decision: "ignore" }), false);
+    assert.equal(hitNeedsDecision({ status: "一致" }), false);
+    assert.equal(hitNeedsDecision({ status: "一致", coverage: { miss: ["CAPSULE MIST"] } }), true);
+    assert.equal(hitNeedsDecision({ status: "一致", coverage: { miss: ["CAPSULE MIST"] }, decision: "confirm" }), false);
+    assert.equal(hitNeedsDecision({ status: "一致", coverage: { miss: ["  "] } }), false);
+    // 认字存疑走共用 hasReadingDoubt：已标记条目才看 sequence_diff / doubt_bucket，不看说明文字。
+    assert.equal(hitNeedsDecision({ status: "缺空格", sequence_diff: { only_in_excel: ["香柠檬"] } }), true);
+    assert.equal(hitNeedsDecision({ status: "缺空格", doubt_bucket: "ocr_graphic" }), true);
+    assert.equal(hitNeedsDecision({ status: "一致", sequence_diff: { only_in_excel: ["香柠檬"] } }), false);
+    assert.equal(hitNeedsDecision({ status: "一致", doubt_bucket: "ocr_smallprint" }), false);
+    assert.equal(hitNeedsDecision({ status: "一致", note: "认字存疑" }), false);
+    // 拦截文案填的词：按状态要结论的写状态，只因认字存疑要结论的写「认字存疑」。
+    assert.equal(pendingWord({ status: "疑点", decision: "pending", coverage: { miss: ["x"] } }), "疑点");
+    assert.equal(pendingWord({ status: "多空格", decision: "pending" }), "多空格");
+    assert.equal(pendingWord({ status: "一致", coverage: { miss: ["x"] } }), "认字存疑");
+    assert.equal(pendingWord({ status: "缺空格", doubt_bucket: "ocr_graphic" }), "认字存疑");
+    assert.equal(pendingWord({ status: "一致", coverage: { miss: ["x"] }, decision: "confirm" }), null);
+    assert.equal(pendingWord({ status: "待人工确认" }), null);
   });
 
   it("lets signed tasks rework but not failed or comparing ones", () => {
