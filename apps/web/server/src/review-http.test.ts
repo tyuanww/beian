@@ -11,8 +11,8 @@ process.env.WB_PORT = "0";
 
 const { app } = await import("./index.js");
 const { issueSessionForTest } = await import("./auth.js");
-const { loadTask, saveTask } = await import("./tasks.js");
-const { resetJobsTestHooks, setJobsTestHooks } = await import("./jobs.js");
+const { hasValidTaskJobState, loadTask, saveTask, taskStoreSnapshot } = await import("./tasks.js");
+const { queueSnapshot, resetJobsTestHooks, setJobsTestHooks } = await import("./jobs.js");
 const { setVerbatimProbeForTest } = await import("./workers.js");
 const { saveSettings } = await import("./settings.js");
 
@@ -847,25 +847,192 @@ describe("review http", () => {
     });
   }
 
-  it("「检查中断」条（compare_failed 带上一轮条目）：签字退回都 400；/rework 按现状回 400「当前状态不可对红」且不落盘", async () => {
-    const tid = seed({
-      id: "e3e3e3e3e3e3",
+  // 「检查中断」单（产品 10/17 方案 A）：对照失败、还留着上一轮条目、没有 pages_v2 的单可重新上传对红。
+  // 种子按 reclaimTask 把卡在 comparing 的复核改成 compare_failed 的真实落盘：job_kind 改写成 compare、
+  // error/job_error「对照中断」、条目没清、上一轮的 status_before_job 还留着。
+  function seedInterrupted(id: string, over: Partial<SeedTask> = {}) {
+    const dir = join(process.env.WB_DATA_DIR as string, "uploads", id);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "source.xlsx"), "xlsx");
+    writeFileSync(join(dir, "artwork.pdf"), "%PDF-1.4\nv1\n");
+    return seed({
+      id,
       title: "检查中断",
       product_name: "检查中断",
       type: "excel_pdf",
       status: "compare_failed",
+      status_before_job: "in_review",
       job_kind: "compare",
       job_status: "failed",
       job_error: "对照中断",
       error: "对照中断",
-      pages: [{ url: "/api/tasks/e3e3e3e3e3e3/pages/p1.png" }],
+      pages: [{ url: `/api/tasks/${id}/pages/p1.png` }],
       hits: failedRoundHits(),
+      ...over,
     });
+  }
+
+  async function waitJobDone(tid: string) {
+    for (let i = 0; i < 200; i++) {
+      const t = loadTask(tid);
+      if (t.job_status === "succeeded" || t.job_status === "failed") return t;
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    throw new Error(`job for ${tid} did not finish`);
+  }
+
+  async function assertSignAndReturnBlocked(tid: string) {
     for (const conclusion of ["无改稿项", "退回：1 条有错，见清单"]) {
       const res = await completeAs(tid, conclusion);
       assert.equal(res.status, 400);
       assert.deepEqual(res.body, { detail: "当前状态不可签字" });
     }
+  }
+
+  it("「检查中断」单：签字退回仍 400；本人重新上传入队，复核拿原 Excel 对 artwork_v2.pdf、上一轮 hits 原样", async () => {
+    const tid = seedInterrupted("e3e3e3e3e3e3");
+    await assertSignAndReturnBlocked(tid);
+    let seen: { pdf: string; tid: string; hits: unknown; artwork: string } | undefined;
+    setJobsTestHooks({
+      runRework: async (opts) => {
+        seen = { pdf: opts.pdf, tid: opts.tid, hits: loadTask(opts.tid).hits, artwork: readFileSync(opts.pdf, "utf8") };
+        return { code: 1, stdout: "", stderr: "", timedOut: false };
+      },
+    });
+    try {
+      const res = await reworkAs(tid);
+      assert.equal(res.status, 200);
+      assert.equal(res.body.status, "comparing");
+      assert.equal(res.body.job_kind, "rework");
+      assert.ok(res.body.job_status === "queued" || res.body.job_status === "running");
+      assert.equal("error" in res.body, false);
+      assert.equal("job_error" in res.body, false);
+      const queued = loadTask(tid);
+      assert.equal(queued.status_before_job, "pending_review");
+      assert.equal(queued.error, undefined);
+      await waitJobDone(tid);
+    } finally {
+      resetJobsTestHooks();
+    }
+    const uploads = join(process.env.WB_DATA_DIR as string, "uploads", tid);
+    assert.ok(seen);
+    assert.equal(seen.tid, tid);
+    assert.equal(seen.pdf, join(uploads, "artwork_v2.pdf"));
+    assert.equal(seen.artwork, "%PDF-1.4\n");
+    assert.deepEqual(seen.hits, failedRoundHits());
+    assert.equal(readFileSync(join(uploads, "artwork.pdf"), "utf8"), "%PDF-1.4\nv1\n");
+    assert.equal(readFileSync(join(uploads, "source.xlsx"), "utf8"), "xlsx");
+  });
+
+  for (const flow of [
+    { name: "签字", id: "e4e4e4e4e4e4", hits_v2: [{ id: "h1", field: "净含量", status: "一致" }], conclusion: "无改稿项", kind: "signed" },
+    { name: "退回", id: "e5e5e5e5e5e5", hits_v2: [{ id: "h1", field: "净含量", status: "疑点", decision: "issue" }], conclusion: "退回：1 条有错，见清单", kind: "rework" },
+  ]) {
+    it(`「检查中断」单复核成功：进 in_review，${flow.name}回 200，旧「对照中断」已清，之后和所有单一样不能再上传`, async () => {
+      const tid = seedInterrupted(flow.id);
+      setJobsTestHooks({
+        runRework: async () => ({
+          code: 0,
+          stdout: `${JSON.stringify({ status: "in_review", pages_v2: [{ url: `/api/tasks/${flow.id}/pages/v2/p1.png` }], hits_v2: flow.hits_v2 })}\n`,
+          stderr: "",
+          timedOut: false,
+        }),
+      });
+      try {
+        assert.equal((await reworkAs(tid)).status, 200);
+        const done = await waitJobDone(tid);
+        assert.equal(done.status, "in_review");
+        assert.equal(done.job_kind, "rework");
+        assert.equal(done.job_status, "succeeded");
+        assert.equal(done.error, undefined);
+        assert.equal(done.job_error, undefined);
+      } finally {
+        resetJobsTestHooks();
+      }
+      const detail = await app.request(`/api/tasks/${tid}`, { headers: authHeader() });
+      assert.equal(detail.status, 200);
+      const text = await detail.text();
+      const body = JSON.parse(text) as Record<string, unknown>;
+      assert.equal(body.error, undefined);
+      assert.equal(body.job_error, undefined);
+      assert.equal(text.includes("对照中断"), false);
+      assert.equal(text.includes("检查中断了"), false);
+
+      const res = await completeAs(tid, flow.conclusion);
+      assert.equal(res.status, 200);
+      assert.equal(res.body.status, "completed");
+      assert.equal(res.body.complete_kind, flow.kind);
+      const again = await reworkAs(tid);
+      assert.equal(again.status, 400);
+      assert.deepEqual(again.body, { detail: "当前状态不可对红" });
+    });
+  }
+
+  it("「检查中断」单复核失败：落到 pending_review + rework failed，单可读、列表可见、不挡调度；失败新写的错误留着；签字退回 400，可再次上传", async () => {
+    const tid = seedInterrupted("e6e6e6e6e6e6");
+    const unreadableBefore = taskStoreSnapshot().unreadable;
+    const unknownBefore = queueSnapshot().unknown;
+    setJobsTestHooks({ runRework: async () => ({ code: 0, stdout: "", stderr: "", timedOut: true }) });
+    try {
+      assert.equal((await reworkAs(tid)).status, 200);
+      assert.equal(loadTask(tid).error, undefined);
+      const failed = await waitJobDone(tid);
+      assert.equal(failed.status, "pending_review");
+      assert.equal(failed.job_kind, "rework");
+      assert.equal(failed.job_status, "failed");
+      assert.equal(failed.job_error, "超时");
+      assert.equal(failed.error, undefined);
+      assert.equal(hasValidTaskJobState(failed), true);
+    } finally {
+      resetJobsTestHooks();
+    }
+    const snap = taskStoreSnapshot();
+    assert.equal(snap.unreadable, unreadableBefore);
+    assert.ok(snap.tasks.some((t) => t.id === tid));
+    assert.equal(queueSnapshot().unknown, unknownBefore);
+
+    const list = await app.request("/api/tasks", { headers: authHeader() });
+    assert.equal(list.status, 200);
+    const row = ((await list.json()) as Array<Record<string, unknown>>).find((t) => t.id === tid);
+    assert.ok(row);
+    assert.equal(row.status, "pending_review");
+    assert.equal(row.job_status, "failed");
+    assert.equal(row.error, "超时");
+    const detail = (await (await app.request(`/api/tasks/${tid}`, { headers: authHeader() })).json()) as Record<string, unknown>;
+    assert.equal(detail.job_error, "超时");
+
+    await assertSignAndReturnBlocked(tid);
+    setJobsTestHooks({ runRework: async () => ({ code: 1, stdout: "", stderr: "", timedOut: false }) });
+    try {
+      const again = await reworkAs(tid);
+      assert.equal(again.status, 200);
+      assert.equal(again.body.job_kind, "rework");
+      assert.ok(again.body.job_status === "queued" || again.body.job_status === "running");
+      assert.equal(loadTask(tid).status_before_job, "pending_review");
+      await waitJobDone(tid);
+    } finally {
+      resetJobsTestHooks();
+    }
+  });
+
+  it("别人的「检查中断」单：403，不入队，不写 artwork_v2.pdf，单原样", async () => {
+    const tid = seedInterrupted("e7e7e7e7e7e7");
+    const other = issueSessionForTest("路人", "reviewer", "ou_interrupted_other");
+    const fd = new FormData();
+    fd.set("pdf", new File([Buffer.from("%PDF-1.4\n")], "v2.pdf", { type: "application/pdf" }));
+    const res = await app.request(`/api/tasks/${tid}/rework`, { method: "POST", headers: { authorization: `Bearer ${other.token}` }, body: fd });
+    assert.equal(res.status, 403);
+    const after = loadTask(tid);
+    assert.equal(after.status, "compare_failed");
+    assert.equal(after.job_kind, "compare");
+    assert.equal(after.job_status, "failed");
+    assert.equal(after.error, "对照中断");
+    assert.equal(after.status_before_job, "in_review");
+    assert.equal(existsSync(join(process.env.WB_DATA_DIR as string, "uploads", tid, "artwork_v2.pdf")), false);
+  });
+
+  it("对照失败且已没有条目：/rework 仍 400「当前状态不可对红」，不落盘", async () => {
+    const tid = seedInterrupted("e8e8e8e8e8e8", { hits: [] });
     const res = await reworkAs(tid);
     assert.equal(res.status, 400);
     assert.deepEqual(res.body, { detail: "当前状态不可对红" });

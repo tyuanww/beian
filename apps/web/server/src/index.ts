@@ -1330,7 +1330,14 @@ app.post(
     mkdirSync(dir, { recursive: true });
     const pdfPath = join(dir, "artwork_v2.pdf");
     writeFileSync(pdfPath, pdfBuf);
-    current.status_before_job = current.status;
+    // 检查中断单（compare_failed）重传：失败要退回到合法的 pending_review（rework failed 只认待审/在审/已完成，
+    // 记 compare_failed 会变成不可读单并挡住调度）；旧的「对照中断」error 一并清掉。
+    if (current.status === "compare_failed") {
+      current.status_before_job = "pending_review";
+      delete current.error;
+    } else {
+      current.status_before_job = current.status;
+    }
     current.status = "comparing";
     current.job_kind = "rework";
     current.job_status = "queued";
