@@ -20,6 +20,12 @@ describe("reviewErrorCopy", () => {
     assert.equal(reviewErrorCopy("认字出了问题，请联系管理员"), REVIEW_COPY.ocrFailed);
   });
 
+  it("rework failures that keep the last round's hits get the agreed sentence", () => {
+    assert.equal(REVIEW_COPY.reworkFailed, "复核出了问题，下面是上一轮的结果，请联系管理员");
+    assert.equal(reviewErrorCopy("对照中断", undefined, true), REVIEW_COPY.reworkFailed);
+    assert.notEqual(reviewErrorCopy("对照中断"), REVIEW_COPY.reworkFailed);
+  });
+
   it("leaves other errors to customerCopy", () => {
     assert.equal(reviewErrorCopy("对照失败"), "检查失败");
     assert.equal(reviewErrorCopy(""), "");

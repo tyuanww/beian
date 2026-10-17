@@ -918,6 +918,7 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
   const draftBlock = unsavedNotesHint(hasUnsavedNotes);
   const failedJob = task?.status === "compare_failed" || task?.job_status === "failed";
   const failedWithoutHits = failedJob && hits.length === 0;
+  const reworkFailedWithHits = task?.job_kind === "rework" && task?.job_status === "failed" && hits.length > 0;
   const thumbs = thumbMarks(pages, hits, seenPages);
   const issueRows = rejectRows(hits, notes);
   const releaseHeld = task?.verbatim_check === true;
@@ -1013,7 +1014,7 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
       {locked ? <Alert className="review-lock" type="warning" title={`🔒 ${locked}`} description={REVIEW_COPY.lockedNote} /> : null}
       {error ? <Alert type="error" title={error} /> : null}
       {task?.error || task?.job_error || task?.job_error_code ? (
-        <Alert type={reviewErrorType(task.job_error_code)} showIcon title={reviewErrorCopy(task.error || task.job_error || "", task.job_error_code) || "检查失败。"} description={failedJob ? REVIEW_COPY.reupload : undefined} />
+        <Alert type={reviewErrorType(task.job_error_code)} showIcon title={reviewErrorCopy(task.error || task.job_error || "", task.job_error_code, reworkFailedWithHits) || "检查失败。"} description={failedJob ? REVIEW_COPY.reupload : undefined} />
       ) : failedJob ? <Alert type="error" showIcon title={REVIEW_COPY.reupload} /> : null}
       {signed && !locked ? <Alert type="success" showIcon title={task?.complete_kind === "rework" ? "已退回。" : "已签字。"} /> : null}
       {decisionError ? <Alert type="error" showIcon title={`未保存：${decisionError}`} /> : null}

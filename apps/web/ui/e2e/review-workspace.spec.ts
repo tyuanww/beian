@@ -898,7 +898,7 @@ test("复核失败但条目还在：失败条照常显示，进度、翻页、�
   syntheticApi.tasks.push(task);
   expect(task.hits?.length).toBeGreaterThan(0);
   await page.goto(`/review/${task.id}`);
-  await expect(page.locator(".ant-alert-error").first()).toBeVisible();
+  await expect(page.locator(".ant-alert-error").filter({ hasText: "复核出了问题，下面是上一轮的结果，请联系管理员" })).toBeVisible();
   await expect(page.getByTestId("review-posn")).toBeVisible();
   await expect(page.getByRole("button", { name: "上一条" })).toBeVisible();
   await expect(page.getByRole("button", { name: "下一条" })).toBeVisible();
