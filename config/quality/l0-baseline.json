@@ -2,7 +2,7 @@
   "node_suites": [
     {
       "name": "server",
-      "min_tests": 1122,
+      "min_tests": 1124,
       "allowed_skips": [
         "protects PDF signatures and recompresses shared images once within the saved budget",
         "rejects an ancestor chain that aliases /private/tmp and leaves external bytes unchanged",
@@ -11,7 +11,7 @@
     },
     {
       "name": "ui",
-      "min_tests": 586,
+      "min_tests": 590,
       "allowed_skips": []
     }
   ],
