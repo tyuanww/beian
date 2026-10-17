@@ -238,11 +238,11 @@ test("服务端拒绝 /rework（如 409 对红还在排队或正在跑）：照�
   await expect(page.locator(".wait-card")).toHaveCount(0);
 });
 
-for (const [code, raw, readOnly, own] of [
-  ["result_truncated", "这一单结果没写完，没有结果", "这一单结果太多，没能写完，请联系管理员", "这一单结果太多，没能写完"],
-  ["private_data_failed", "私有数据解析失败", "稿件里的 Illustrator 私有数据读不出来，请联系管理员", "稿件里的 Illustrator 私有数据读不出来"],
+for (const [code, raw, full] of [
+  ["result_truncated", "这一单结果没写完，没有结果", "这一单结果太多，没能写完，请联系管理员"],
+  ["private_data_failed", "私有数据解析失败", "稿件里的 Illustrator 私有数据读不出来，请联系管理员"],
 ] as const) {
-  test(`复核失败 ${code}、没有剩余条目：别人的单是产品定稿整句，自己的单有按钮只留前半句`, async ({ page, syntheticApi }) => {
+  test(`复核失败 ${code}、没有剩余条目：自己的单有按钮、别人的单无按钮，标题都是 §2.3 整句`, async ({ page, syntheticApi }) => {
     await asReviewer(page);
     const base = { status: "pending_review", job_kind: "rework", job_status: "failed", job_error: raw, job_error_code: code, hits: [] };
     const mine = reviewTask(code === "result_truncated" ? "e5969b58ce0d" : "e5969b58ce0e");
@@ -251,12 +251,11 @@ for (const [code, raw, readOnly, own] of [
     Object.assign(theirs, base, { owner: "ou_someone_else" });
     syntheticApi.tasks.push(mine, theirs);
     await page.goto(`/review/${theirs.id}`);
-    await expect(page.locator(".ant-alert-error .ant-alert-title").first()).toHaveText(readOnly);
+    await expect(page.locator(".ant-alert-error .ant-alert-title").first()).toHaveText(full);
     await expect(page.getByRole("button", { name: REVIEW_COPY.reupload })).toHaveCount(0);
     await page.goto(`/review/${mine.id}`);
     const bar = page.locator(".ant-alert-error").filter({ has: page.getByRole("button", { name: REVIEW_COPY.reupload }) });
-    await expect(bar.locator(".ant-alert-title")).toHaveText(own);
-    await expect(bar).not.toContainText("请联系管理员");
+    await expect(bar.locator(".ant-alert-title")).toHaveText(full);
   });
 }
 

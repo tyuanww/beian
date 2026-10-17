@@ -111,16 +111,16 @@ describe("复核（对红）失败且没有剩余条目", () => {
     assert.doesNotMatch(text, /下面是上一轮的结果/u);
   });
 
-  it("复核 result_truncated / private_data_failed、没有剩余条目：自己的单有按钮只留前半句，别人的单是产品定稿整句", () => {
-    for (const [code, own, others] of [
-      ["result_truncated", "这一单结果太多，没能写完", "这一单结果太多，没能写完，请联系管理员"],
-      ["private_data_failed", "稿件里的 Illustrator 私有数据读不出来", "稿件里的 Illustrator 私有数据读不出来，请联系管理员"],
+  it("复核 result_truncated / private_data_failed、没有剩余条目：自己的单 / 别人的单 / viewer 都用 §2.3 整句", () => {
+    for (const [code, full] of [
+      ["result_truncated", "这一单结果太多，没能写完，请联系管理员"],
+      ["private_data_failed", "稿件里的 Illustrator 私有数据读不出来，请联系管理员"],
     ] as const) {
       const t = (owner: string) => ({ ...noHits(owner), job_error: "x", job_error_code: code }) as TaskDetail;
       const copyFor = (task: TaskDetail, v: ReuploadViewer) => reviewErrorCopy(String(task.job_error), task.job_error_code, undefined, canReuploadFailed(task, [], v));
-      assert.equal(copyFor(t("ou_me"), reviewer), own, code);
-      assert.equal(copyFor(t("ou_other"), reviewer), others, code);
-      assert.equal(copyFor(t("ou_me"), viewer), others, code);
+      assert.equal(copyFor(t("ou_me"), reviewer), full, code);
+      assert.equal(copyFor(t("ou_other"), reviewer), full, code);
+      assert.equal(copyFor(t("ou_me"), viewer), full, code);
     }
   });
 
