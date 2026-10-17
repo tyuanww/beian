@@ -4,5 +4,5 @@
   "space_errors": ["多空格", "缺空格"],
   "warning": "稿件未保留 Illustrator 编辑数据，定位精度下降，建议设计师重新导出",
   "fsc_note": "FSC、认证码、星级已跳过，不进退稿",
-  "page_over": "稿件超过 1 页，暂不支持核对，请联系管理员"
+  "page_over": "稿件超过 1 页"
 }

@@ -16,6 +16,10 @@ from pathlib import Path
 
 import httpx
 
+class OcrUnavailable(RuntimeError):
+    """百度 OCR 没配置（缺 AK/SK）。仍是 RuntimeError，原有捕获不变；CLI 据此给 problem 码 ocr_unavailable。"""
+
+
 TOKEN_URL = "https://aip.baidubce.com/oauth/2.0/token"
 OCR_URLS = {
     "accurate_basic": "https://aip.baidubce.com/rest/2.0/ocr/v1/accurate_basic",
@@ -114,7 +118,7 @@ def ocr_image_bytes(
     if env_para in ("0", "false", "False", "no"):
         paragraph = False
     if not ak or not sk:
-        raise RuntimeError("未配置百度 OCR：backend/.env.baidu")
+        raise OcrUnavailable("未配置百度 OCR：backend/.env.baidu")
     if api_name not in OCR_URLS:
         raise ValueError(f"未知 API {api_name}")
 
@@ -275,7 +279,7 @@ def qrcode_image_bytes(png_or_jpg: bytes) -> tuple[list[dict], dict]:
     cfg = load_baidu_env()
     ak, sk = _ak_sk(cfg)
     if not ak or not sk:
-        raise RuntimeError("未配置百度 OCR：backend/.env.baidu")
+        raise OcrUnavailable("未配置百度 OCR：backend/.env.baidu")
     token = get_access_token(ak, sk)
     url = f"{OCR_URLS['qrcode']}?access_token={urllib.parse.quote(token)}"
     img_b64 = base64.b64encode(png_or_jpg).decode("ascii")

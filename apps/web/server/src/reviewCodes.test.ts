@@ -28,6 +28,10 @@ describe("审稿接口码表 reviewCodes.ts", () => {
     for (const code of JOB_ERROR_CODES) assert.doesNotMatch(code, /^(complete|decision|rework|page_view)_/, code);
   });
 
+  it("任务字段码：超页 + 三个作业失败码（加码 Q3）", () => {
+    assert.deepEqual([...JOB_ERROR_CODES], ["page_over", "ocr_failed", "result_truncated", "private_data_failed"]);
+  });
+
   it("码唯一，返回体码和任务字段码不重名", () => {
     const all = [...REVIEW_CODES, ...JOB_ERROR_CODES];
     assert.equal(new Set(all).size, all.length);

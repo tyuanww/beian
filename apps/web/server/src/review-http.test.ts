@@ -809,7 +809,7 @@ describe("review http", () => {
 
   for (const bar of [
     { name: "红条「复核出了问题」", id: "e1e1e1e1e1e1", job_error: "对照中断" },
-    { name: "黄条「稿件超过 1 页，这次复核没做」", id: "e2e2e2e2e2e2", job_error: "稿件超过 1 页，暂不支持核对，请联系管理员", job_error_code: "page_over" as const },
+    { name: "黄条「稿件超过 1 页，这次复核没做」", id: "e2e2e2e2e2e2", job_error: "稿件超过 1 页", job_error_code: "page_over" as const },
   ]) {
     it(`${bar.name}：签字退回都 400，同一单可重新上传对红`, async () => {
       const tid = seed({

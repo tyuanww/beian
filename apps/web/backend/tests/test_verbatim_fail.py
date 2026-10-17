@@ -242,7 +242,8 @@ raise SystemExit(0)
     proc = _run([PY, "-c", script])
     assert proc.returncode == 2, proc.stdout + proc.stderr
     assert "page_over_rendered" in proc.stdout
-    assert "稿件超过 1 页，暂不支持核对，请联系管理员" in proc.stdout
+    # 老板 10/17 批：超页原文去掉「请联系管理员」，服务端只存前半句，后半句由前端按有没有重新上传按钮拼。
+    assert proc.stdout.splitlines()[1] == "稿件超过 1 页"
 
 
 def test_compare_pdf_two_page_reports_page_over(tmp_path: Path) -> None:

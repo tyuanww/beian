@@ -58,7 +58,7 @@ def cmd_probe(args: argparse.Namespace) -> int:
 
         ak, sk = baidu_ak_sk()
         if not ak or not sk:
-            return _err("未配置百度 OCR")
+            return _err("未配置百度 OCR", problem="ocr_unavailable", cause="baidu ak/sk missing", fix="配置 backend/.env.baidu")
         try:
             get_access_token(ak, sk, force=True)
         except Exception as exc:  # noqa: BLE001 — 探测要吞细节
@@ -307,6 +307,11 @@ def main() -> int:
             return cmd_probe(args)
         return _err("未知命令")
     except Exception as exc:  # noqa: BLE001 — 对照失败必须给 jobs.ts 一行 JSON
+        from app.baidu_ocr import OcrUnavailable
+
+        if isinstance(exc, OcrUnavailable):
+            # 原文照旧；带私有码让服务端映射成 job_error_code「ocr_failed」，前端按码出文案。
+            return _err(str(exc).strip(), problem="ocr_unavailable", cause="baidu ak/sk missing", fix="配置 backend/.env.baidu")
         return _err(str(exc).strip() or type(exc).__name__)
 
 

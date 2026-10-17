@@ -144,6 +144,12 @@ export function reviewDetail(code: ReviewCode, params: ReviewParams = {}): strin
   return typeof text === "function" ? text(params) : text;
 }
 
-/** 任务字段 `job_error_code`（作业失败写在任务上）。 */
-export const JOB_ERROR_CODES = ["page_over"] as const;
+/**
+ * 任务字段 `job_error_code`（作业失败写在任务上）。`job_error` 原文照旧，前端只按码选句：
+ * - `page_over`：逐字稿超页（原文只存前半句「稿件超过 1 页」，后半句前端按有没有重新上传按钮拼）；
+ * - `ocr_failed`：认字没出结果（模型缺失 / 模型校验失败 / 版权声明缺失 / 依赖缺失 / 内存超限 / 百度 OCR 未配置）；
+ * - `result_truncated`：结果超过输出上限，没写完；
+ * - `private_data_failed`：稿件里的 Illustrator 私有数据读不出来（解压超限、解析失败）。
+ */
+export const JOB_ERROR_CODES = ["page_over", "ocr_failed", "result_truncated", "private_data_failed"] as const;
 export type JobErrorCode = (typeof JOB_ERROR_CODES)[number];

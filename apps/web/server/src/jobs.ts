@@ -3346,7 +3346,7 @@ function finishOcr(id: string, startedAt: string, result: RunPythonResult): void
   }
   const memoryFailure = verbatimMemoryFailure(result.signal);
   if (task.verbatim_check === true && memoryFailure) {
-    markOcrFailed(task, memoryFailure);
+    markOcrFailed(task, memoryFailure, "ocr_failed");
     return;
   }
   if (result.code !== 0) {
@@ -3596,6 +3596,17 @@ function logCliFailure(scope: string, failure: CliFailure): void {
 /** CLI 私有 problem 码 → 对外 job_error_code。只放前端要按码分支的；其余不带码。 */
 const PUBLIC_JOB_ERROR_CODES: Readonly<Record<string, JobErrorCode>> = {
   page_over_rendered: "page_over",
+  // 认字没出结果（加码 Q3：六种都算 ocr_failed；内存信号另在 finishOcr 里按 verbatimMemoryFailure 写）。
+  model_missing: "ocr_failed",
+  model_hash_mismatch: "ocr_failed",
+  notice_missing: "ocr_failed",
+  dep_missing: "ocr_failed",
+  oom: "ocr_failed",
+  ocr_unavailable: "ocr_failed",
+  // Q3：不并入 ocr_failed，各自单独给码。
+  result_truncated: "result_truncated",
+  private_data_limit: "private_data_failed",
+  private_data_parse_failed: "private_data_failed",
 };
 
 function publicJobErrorCode(code: string | undefined): JobErrorCode | undefined {
