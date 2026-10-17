@@ -22,9 +22,9 @@ Preconditions:
 - 在 `apps/web/ui` 下，Node 24；场景 `legacy-page-over` 存在。
 - 一次性模式无需已有实例；分步模式需 `helpers/doctor.sh <out>` 为 `DOCTOR PASS`。
 
-- **旧超页单（一次性）。** 运行 `npm run verify:real-backend -- --scenario legacy-page-over --out "$OUT"`。退出码 0，输出 `[verify] PASS legacy-page-over：API 2 项，页面 1 个`。
-- **接口补算。** 查看 `$OUT/api-task.json`。含 `"job_error_code": "page_over"` 与 `"status": "compare_failed"`；种子记录本身没有这个字段（见场景 JSON）。
-- **页面状态。** 查看 `$OUT/review-legacy-page-over.png` 与 `summary.json`。顶部是黄色 Alert「稿件超过 1 页，暂不支持核对，请联系管理员」+「重新上传这一单」；`.ant-alert-error` 数量为 0。
+- **旧超页单（一次性）。** 运行 `npm run verify:real-backend -- --scenario legacy-page-over --out "$OUT"`。退出码 0，输出 `[verify] PASS legacy-page-over：API 4 项，页面 2 个`（两单分别覆盖两句旧超页原文：`a1b2c3d4e5f6`「这一单页数超过可核对页数」、`b2c3d4e5f6a1`「稿件超过 1 页，暂不支持核对，请联系管理员」）。
+- **接口补算。** 查看 `$OUT/api-task.json` 与 `$OUT/api-task-v1-text.json`。含 `"job_error_code": "page_over"` 与 `"status": "compare_failed"`；种子记录本身没有这个字段（见场景 JSON）。
+- **页面状态。** 查看 `$OUT/review-legacy-page-over.png`、`$OUT/review-legacy-page-over-v1-text.png` 与 `summary.json`。顶部是黄色 Alert「稿件超过 1 页，暂不支持核对，请联系管理员」+「重新上传这一单」；`.ant-alert-error` 数量为 0。
 - **分步驱动。** `--serve` 启动后运行 `node scripts/verify-real-backend.mjs --scenario legacy-page-over --out "$OUT/drive" --base-url <instance.json 的 base>`，结果同上。
 
 ## Driving it with Playwright e2e（合成 API）
