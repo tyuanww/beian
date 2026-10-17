@@ -3,12 +3,12 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync, symlinkSync, linkSync } from "node:fs";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-import { describe, it } from "node:test";
+import { describe, it, mock } from "node:test";
 import { makeTestTempDir } from "./testTemp.js";
 import { createRenderGenerationBridge, type RenderBridgeValidation } from "./renderGenerationBridge.js";
 import { renderGenerationProcessSupported } from "./renderGenerationProcess.js";
 import { contentFingerprint, type QualityVerifyInput } from "./renderGenerations.js";
-import { createRenderLifecycle, renderReservationPath } from "./renderGenerationBudget.js";
+import { createRenderLifecycle, renderReservationPath, type RenderLifecycle } from "./renderGenerationBudget.js";
 
 const faces = ["front", "right", "back", "left", "top", "bottom"] as const;
 const hash = (bytes: string | Buffer) => `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
@@ -118,6 +118,14 @@ process.stdin.on('end', () => {
     result.ok=false; result.code='render_generation_failed';
     result.cause=behavior === 'structured-error' ? 'missing_blender' : '/private/secret';
   }
+  if (behavior === 'await-release') {
+    // Stays alive (no stdout) until the test writes 'release'; the test never waits on wall time.
+    const wait = setInterval(() => {
+      if (!fs.existsSync(path.join(__dirname, 'release'))) return;
+      clearInterval(wait); console.log(JSON.stringify(result));
+    }, 5);
+    return;
+  }
   console.log(JSON.stringify(result));
 });
 `;
@@ -226,6 +234,34 @@ describe("RF-03C2.1 async render bridge", { skip: !renderGenerationProcessSuppor
       if (resource === "disk") assert.equal(existsSync(join(f.candidate, "undeclared.bin")), true);
     });
   }
+
+  it("only the in-flight 100ms sample tolerates vanished entries; the post-close census stays strict", async () => {
+    const f = fixture(10000);
+    const receipt = await f.bridge.verify(f.input);
+    f.behavior("await-release");
+    const calls: Array<{ dir: string; pid: number | undefined; options: unknown }> = [];
+    const lifecycle: RenderLifecycle = { deadline: Infinity, check: () => {}, beforeWrite: () => {}, release: () => {},
+      observe: (dir, pid, ...rest: unknown[]) => { calls.push({ dir, pid, options: rest[0] }); } };
+    let spawned!: () => void;
+    const spawn = new Promise<void>(resolve => { spawned = resolve; });
+    let pid = 0;
+    mock.timers.enable({ apis: ["setInterval"] });
+    try {
+      const rendering = f.bridge.render(receipt, f.candidate, process.execPath,
+        { lifecycle, onSpawn: p => { pid = p; spawned(); } });
+      await spawn;
+      assert.equal(calls.length, 0);
+      mock.timers.tick(100);
+      assert.deepEqual(calls, [{ dir: f.candidate, pid, options: { tolerateVanished: true } }]);
+      writeFileSync(join(f.options.packagingDir, "release"), "");
+      await rendering;
+    } finally { mock.timers.reset(); }
+    assert.equal(calls.length, 2);
+    assert.equal(calls[1].dir, f.candidate);
+    assert.equal(calls[1].pid, undefined);
+    const final = calls[1].options as { tolerateVanished?: boolean } | undefined;
+    assert.ok(final === undefined || final.tolerateVanished !== true, "post-close census must stay strict");
+  });
 
   for (const damage of ["none", "files", "bytes", "faces", "contract", "fingerprint", "mode", "extra", "missing", "duplicate"]) {
     it(`binds one-shot partial seal proof to copied evidence: ${damage}`, async () => {

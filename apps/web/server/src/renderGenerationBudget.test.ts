@@ -7,7 +7,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { once } from "node:events";
 import { makeTestTempDir } from "./testTemp.js";
 import { candidateDiskBytes, createRenderLifecycle, releaseRenderReservation, renderGroupMemory,
-  renderReservationPath } from "./renderGenerationBudget.js";
+  renderReservationPath, type CandidateDiskFs } from "./renderGenerationBudget.js";
 
 const MiB = 1024 * 1024;
 function fixture(extra: Partial<Parameters<typeof createRenderLifecycle>[0]> = {}) {
@@ -66,6 +66,63 @@ it("bounded census rejects symlinks and file-count explosions without following 
   for (let i = 0; i < 256; i++) writeFileSync(join(large, String(i)), "");
   assert.throws(() => candidateDiskBytes(large), /candidate_file_budget/);
 });
+
+// Stubbed fs: "listed by readdir, gone before lstat/readdir" without real concurrency or timing.
+type StubNode = { kind: "dir" | "file" | "symlink" | "fifo"; size?: number; nlink?: number; children?: string[];
+  lstat?: "ENOENT"; readdir?: "ENOENT" };
+function stubFs(tree: Record<string, StubNode>): CandidateDiskFs {
+  const enoent = (p: string) => Object.assign(new Error(`ENOENT: ${p}`), { code: "ENOENT" });
+  return {
+    lstatSync: ((p: string) => {
+      const n = tree[p];
+      if (!n || n.lstat === "ENOENT") throw enoent(p);
+      return { isSymbolicLink: () => n.kind === "symlink", isDirectory: () => n.kind === "dir",
+        isFile: () => n.kind === "file", nlink: n.nlink ?? 1, size: n.size ?? 0 };
+    }) as unknown as CandidateDiskFs["lstatSync"],
+    readdirSync: (p: string) => {
+      const n = tree[p];
+      if (!n || n.readdir === "ENOENT") throw enoent(p);
+      return n.children ?? [];
+    },
+  };
+}
+const STUB = "/stub-candidate";
+const stubTree = (extra: StubNode): Record<string, StubNode> => ({
+  [STUB]: { kind: "dir", children: ["kept.json", "extra"] },
+  [join(STUB, "kept.json")]: { kind: "file", size: 10 },
+  [join(STUB, "extra")]: extra,
+});
+const isEnoent = (e: NodeJS.ErrnoException) => e.code === "ENOENT";
+
+it("sampling census counts a file listed then vanished (temp renamed away) as 0; strict default rethrows ENOENT", () => {
+  const tree = stubTree({ kind: "file", lstat: "ENOENT" });
+  assert.equal(candidateDiskBytes(STUB, { tolerateVanished: true, fs: stubFs(tree) }), 10);
+  assert.throws(() => candidateDiskBytes(STUB, { fs: stubFs(tree) }), isEnoent);
+  assert.throws(() => candidateDiskBytes(STUB, { tolerateVanished: false, fs: stubFs(tree) }), isEnoent);
+});
+
+it("sampling census counts a subdirectory removed before readdir as 0; strict default rethrows ENOENT", () => {
+  const tree = stubTree({ kind: "dir", readdir: "ENOENT" });
+  assert.equal(candidateDiskBytes(STUB, { tolerateVanished: true, fs: stubFs(tree) }), 10);
+  assert.throws(() => candidateDiskBytes(STUB, { fs: stubFs(tree) }), isEnoent);
+});
+
+it("sampling census skips a regular file replaced out from under lstat (nlink 0); strict rejects it", () => {
+  const tree = stubTree({ kind: "file", size: 7, nlink: 0 });
+  assert.equal(candidateDiskBytes(STUB, { tolerateVanished: true, fs: stubFs(tree) }), 10);
+  assert.throws(() => candidateDiskBytes(STUB, { fs: stubFs(tree) }), /candidate_file_type/);
+});
+
+for (const [name, node] of [
+  ["symlink", { kind: "symlink" }], ["hard link", { kind: "file", nlink: 2 }], ["fifo", { kind: "fifo" }],
+  ["symlink with nlink 0", { kind: "symlink", nlink: 0 }], ["fifo with nlink 0", { kind: "fifo", nlink: 0 }],
+] as Array<[string, StubNode]>) {
+  it(`sampling census still rejects a real ${name} in both modes`, () => {
+    const tree = stubTree(node);
+    assert.throws(() => candidateDiskBytes(STUB, { tolerateVanished: true, fs: stubFs(tree) }), /candidate_file_type/);
+    assert.throws(() => candidateDiskBytes(STUB, { fs: stubFs(tree) }), /candidate_file_type/);
+  });
+}
 
 it("cancellation and expired deadlines reject writes and still allow owned credit cleanup", async () => {
   const controller = new AbortController();
