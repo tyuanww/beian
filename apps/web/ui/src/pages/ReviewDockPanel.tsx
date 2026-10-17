@@ -25,6 +25,7 @@ type Props = {
   onDecide: (hit: FieldHit, decision: Decision, note: string) => void;
   onNoteCommit: (hit: FieldHit, decision: Decision, note: string) => void;
   onCopy: () => void;
+  showProgress?: boolean;
   onCollapse?: () => void;
   tab: FlatTab;
   onTab: (tab: FlatTab) => void;
@@ -54,7 +55,7 @@ function verdictTag(hit: FieldHit) {
 export function ReviewDockPanel({
   hits, active, current, currentHasBox, pageNo, reviewable, busy, note, emptyMessage, reworkCheck,
   nativeTaskEvidence, ocrMeta, onPick, onDecide, onNoteCommit, onCopy, onNoteChange, onCollapse, tab, onTab,
-  verbatim = false, fscNote, locationCopy = REVIEW_COPY.noBox, showDetail = true, closeHeldPulse = 0,
+  verbatim = false, fscNote, locationCopy = REVIEW_COPY.noBox, showDetail = true, closeHeldPulse = 0, showProgress = true,
 }: Props) {
   const counts = verdictCounts(hits);
   const held = hits.filter(isOpenHeld);
@@ -138,10 +139,12 @@ export function ReviewDockPanel({
         })}
         {!heldOpen && !list.length ? <li className="review-dock-none">{hits.length ? (tab === "pending" || held.length > 0 ? REVIEW_COPY.pendingEmpty : REVIEW_COPY.allDecided) : emptyMessage}</li> : null}
       </ol>
-      <div className="review-pfoot">
-        <span aria-live="polite">{REVIEW_COPY.footer(counts.pending, progress.pageLeft)}</span>
-        <button type="button" className="btn-ghost" onClick={onCopy}>复制修改清单</button>
-      </div>
+      {showProgress ? (
+        <div className="review-pfoot">
+          <span aria-live="polite">{REVIEW_COPY.footer(counts.pending, progress.pageLeft)}</span>
+          <button type="button" className="btn-ghost" onClick={onCopy}>复制修改清单</button>
+        </div>
+      ) : null}
       {reworkCheck?.length ? (
         <section className="notes-foot">
           <p className="field-label">复核</p>
