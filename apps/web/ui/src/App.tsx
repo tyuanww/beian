@@ -49,8 +49,11 @@ function readAuthHint(): string {
 }
 
 function authTitle(message: string): string {
+  // error-text-match-allow -- 待后端错误码，见 TODOS.md「前端按报错文案判断状态」
   if (message.includes("伸美") || message.includes("不允许")) return "进不了这间审稿室";
+  // error-text-match-allow -- 待后端错误码，见 TODOS.md「前端按报错文案判断状态」
   if (message.includes("取消")) return "授权未完成";
+  // error-text-match-allow -- 待后端错误码，见 TODOS.md「前端按报错文案判断状态」
   if (message.includes("过期")) return "登录已过期";
   return "飞书授权未完成";
 }

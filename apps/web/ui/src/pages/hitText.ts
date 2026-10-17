@@ -34,6 +34,7 @@ export type HitText = {
 };
 
 function isAccountingCopy(text: string): boolean {
+  // error-text-match-allow -- 这里认的是后端 OCR 核对文本（不是报错文案），待后端给结构化字段，见 TODOS.md；只为存量登记，不作为新增例外的先例
   return /score\s*=|覆盖偏低|稿上命中\s*\d+\s*\/\s*\d+|best score|未见缺失/i.test(text);
 }
 
