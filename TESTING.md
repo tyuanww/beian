@@ -23,6 +23,8 @@
 - L2 金标（人核定后）：`apps/web/backend/scripts/run_eval.py`。未核定的 `data/gold` 不进默认 `npm test`
 - 类型：`npm run typecheck -w beian-server` 与 `npm run build -w beian-ui`
 - 浏览器交互（Mac）：`npm run test:e2e`（Vite + 合成 API，只验证页面行为，不替代真实 Hono / 发版 L1）。Q05 `mockup-preview-upgrade.spec.ts` 默认自建临时目录并构建；显式 `BEIAN_Q05_DIST=<dir>` 只读复用已由 `buildQ05ArtifactInto` 盖章的产物，身份不匹配失败关闭、不回退构建、不删除该目录。这是测量隔离，不是正式性能预算。
+- L0 数字核对（GitHub-hosted）：`scripts/quality/check-l0-counts.mjs` 读完整 L0 的输出，按 `config/quality/l0-baseline.json` 核对：server、UI 两段失败和取消都是 0，跳过的只能是基线里按名字列出的用例；pytest 没有失败和报错，skipped、deselected 不超过基线。多出一条跳过、换掉一条跳过、找不到某段汇总，都会让 CI 失败。基线只能经评审改。
+- 文档样例对照（L0 server）：`docs/contracts/` 里用 `<!-- contract-samples:名字 -->` 包住的表，由 `apps/web/server/src/contractSamples.test.ts` 逐行拿去跑代码里的规则（账号 id 判断、旧超页单补码）。改规则时要同时改表，不然测试会挂。
 - 复杂度门禁（Mac / GitHub-hosted PR）：`npm run quality`；基线只读、只能经评审缩小，新增发现、过期条目或相对 base 扩张都失败。本地自动解析 `origin/HEAD`（再回退 `origin/main` / `main`），找不到目标分支就失败关闭；CI 使用 PR base 精确 SHA。同文件同名诊断按重数比较，行号移动不改变身份，但新增第二处不能被折叠。`npm run quality:deep` 只生成手工清理报告，不自动删除。`npm run test:quality` 还要求 `.agents/skills` 实际目录、审核清单与 `skills-lock.json` 完全一致；项目 skill 不自动授予 shell。`antd` 是仓库 vendored 源，只能经 `scripts/quality/antd-readonly.mjs` 调固定 6.6.1；禁止用上游 restore/update 覆盖本地 hardening，恢复走受信任 Git 提交并重验哈希。
 - `.github/workflows/quality.yml` 的 Linux Node 22 质量 job 与 `windows-2022` PowerShell 5.1 合同 job 都使用 GitHub-hosted runner；禁止使用杭州/self-hosted runner。Windows job 实跑 `.NET File.Replace` 无备份原子替换，验证 Illustrator Agent 计划任务的隐藏窗口、持久/临时触发器和 `Quiesce` 顺序，另以 `release-staging-rehearsal.ps1` 在临时 clone 中按 AST 加载真实 `release.ps1` 函数，对 `eb2ceb8 → HEAD` 的真实 npm 依赖变化完整彩排停服前 staging（git archive、npm ci、Rollup 原生、全部离线探针含 UI 构建与 Hono 入口导入、同 SHA 复用）；并用 `release-deps-handoff.contract.ps1` 在临时目录的合成 workspace 仓库里按 AST 加载发布/恢复函数，实跑 npm workspace junction 重指、不跟随 junction 的删除、保留策略、超时杀进程树、被占用时换位失败后的恢复、完整换位与幂等换回；随后切到 Node 20 真跑 `npm ci`，执行 `glbWebpProbe.ts` 小 GLB WebP 转换探针和 `glbWebpMemoryProbe.ts` 合成同布局 GLB 峰值 RSS 记录；再跑 `glb-webp-variant-rename-open.test.ts`（Windows 上删除/覆盖被打开文件报 EPERM；旁路按内容哈希命名，替换时旧句柄仍读完整旧内容，新请求拿新内容）、`glb-webp-variant-fsync.test.ts`（目录 fsync 在 EISDIR/EPERM 下 best-effort 不抛错）与 `glb-webp-variant-windows-replace.test.ts`（元数据被打开时更新失败退回、不损坏；旧哈希文件删不掉跳过、绝不删当前文件）；它不注册或控制生产任务，不调用 `release.ps1`，也不替代发版 L1。Knip 只锁在 `tools/quality`，Vulture 只放 `requirements-quality.txt`，两者不得进入杭州生产依赖图。
 - 新增或修改产品逻辑要有相应行为测试（含失败路径）；纯文档、格式和不改行为的调整不机械新增测试。不要把密钥写进测试。
@@ -32,7 +34,7 @@
 1. 先确认已有依赖。质量工具单独位于 `tools/quality` 和 worker `requirements-quality.txt`；首次安装属于工具维护，缺依赖时说明范围，不把它写入产品依赖。
 2. 根 `npm run typecheck` 包含 server 类型检查和 UI build；读取 UI 构建产物的服务端 SPA 测试必须在构建之后。不要再重复单独跑相同 UI build。
 3. 孤儿检测合同在私有临时工作区使用同一份 Knip 配置，探针不写入产品工作区；可与只读质量扫描并行。其他测试仍按共享文件/环境决定是否并行。
-4. 当前 CI 顺序是安装 → test:quality → quality（比较 base）→ typecheck/UI build → 完整 L0；Windows hosted 合同是独立 job，不能冒充发版 L1。
+4. 当前 CI 顺序是安装 → test:quality → quality（比较 base）→ typecheck/UI build → 完整 L0 → L0 数字核对；Windows hosted 合同是独立 job，不能冒充发版 L1。
 5. 普通单测不可调用真实 OCR、Blender、Illustrator COM 或外网；真实稿数据和原生环境必须显式选择，不因目录或软件存在而获得授权。
 
 ### 显式选择真实稿或原生应用

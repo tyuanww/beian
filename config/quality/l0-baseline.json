@@ -1,0 +1,20 @@
+{
+  "node_suites": [
+    {
+      "name": "server",
+      "allowed_skips": [
+        "protects PDF signatures and recompresses shared images once within the saved budget",
+        "rejects an ancestor chain that aliases /private/tmp and leaves external bytes unchanged",
+        "refuses the uncontained Windows bridge before spawn or stdin delivery"
+      ]
+    },
+    {
+      "name": "ui",
+      "allowed_skips": []
+    }
+  ],
+  "pytest": {
+    "max_skipped": 9,
+    "max_deselected": 10
+  }
+}
