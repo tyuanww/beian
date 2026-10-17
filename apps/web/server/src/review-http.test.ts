@@ -359,8 +359,7 @@ describe("review http", () => {
       fd.set("pdf", new File([Buffer.from("%PDF-1.4\n")], "v2.pdf", { type: "application/pdf" }));
       const res = await app.request(`/api/tasks/${tid}/rework`, { method: "POST", headers: authHeader(), body: fd });
       assert.equal(res.status, 400);
-      const body = (await res.json()) as { detail?: string };
-      assert.equal(body.detail, "认字出了问题，请联系管理员");
+      assert.deepEqual(await res.json(), { detail: "认字出了问题，请联系管理员", code: "rework_verbatim_not_ready" });
       assert.equal(calls, 1);
       assert.equal(readFileSync(pdfPath, "utf8"), "keep");
       const saved = loadTask(tid);
@@ -965,7 +964,7 @@ describe("review http", () => {
       assert.equal(res.body.complete_kind, flow.kind);
       const again = await reworkAs(tid);
       assert.equal(again.status, 400);
-      assert.deepEqual(again.body, { detail: "当前状态不可对红" });
+      assert.deepEqual(again.body, { detail: "当前状态不可对红", code: "rework_status_not_allowed" });
     });
   }
 
@@ -1036,7 +1035,7 @@ describe("review http", () => {
     const tid = seedInterrupted("e8e8e8e8e8e8", { hits: [] });
     const res = await reworkAs(tid);
     assert.equal(res.status, 400);
-    assert.deepEqual(res.body, { detail: "当前状态不可对红" });
+    assert.deepEqual(res.body, { detail: "当前状态不可对红", code: "rework_status_not_allowed" });
     assert.equal(loadTask(tid).status, "compare_failed");
     assert.equal(existsSync(join(process.env.WB_DATA_DIR as string, "uploads", tid, "artwork_v2.pdf")), false);
   });
@@ -1047,7 +1046,7 @@ describe("review http", () => {
     });
     const res = await reworkAs(tid);
     assert.equal(res.status, 400);
-    assert.deepEqual(res.body, { detail: "当前状态不可对红" });
+    assert.deepEqual(res.body, { detail: "当前状态不可对红", code: "rework_status_not_allowed" });
     const after = loadTask(tid);
     assert.equal(after.status, "compare_failed");
     assert.equal(after.job_kind, "compare");
@@ -1728,7 +1727,7 @@ describe("review http", () => {
         body: fd,
       });
       assert.equal(res.status, 400);
-      assert.match(String(((await res.json()) as { detail?: string }).detail || ""), /文件超过 1 MB/);
+      assert.deepEqual(await res.json(), { detail: "文件超过 1 MB", code: "rework_pdf_too_large" });
     } finally {
       saveSettings({ WB_MAX_UPLOAD_MB: "" });
     }
@@ -1862,5 +1861,81 @@ describe("review http", () => {
       body: "--foreign-large-body--\r\n",
     });
     assert.equal(res.status, 403);
+  });
+
+  // 加码：/decision、/rework 拦截带码，状态码和 detail 原文不变。
+  async function decide(tid: string, body: Record<string, unknown>) {
+    const res = await app.request(`/api/tasks/${tid}/decision`, {
+      method: "POST",
+      headers: { ...authHeader(), "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    return { status: res.status, body: (await res.json()) as Record<string, unknown> };
+  }
+
+  it("decision rejections carry a code", async () => {
+    const done = seed({ id: "dec0de000001", title: "已签", product_name: "已签", type: "excel_pdf", status: "completed", hits: [hit()] });
+    const r1 = await decide(done, { hit_id: "h1", decision: "issue" });
+    assert.equal(r1.status, 400);
+    assert.deepEqual(r1.body, { detail: "当前状态不可审核", code: "decision_status_not_reviewable" });
+
+    const open = seed({
+      id: "dec0de000002",
+      title: "在审",
+      product_name: "在审",
+      type: "excel_pdf",
+      status: "in_review",
+      hits: [hit(), hit({ id: "h2", status: "待人工确认", decision: undefined })],
+    });
+    const r2 = await decide(open, { hit_id: "h1", decision: "ai_pass" });
+    assert.equal(r2.status, 400);
+    assert.deepEqual(r2.body, { detail: "非法审核结论", code: "decision_value_invalid" });
+    const r3 = await decide(open, { hit_id: "nope", decision: "issue" });
+    assert.equal(r3.status, 404);
+    assert.deepEqual(r3.body, { detail: "字段不存在", code: "decision_hit_not_found" });
+    const r4 = await decide(open, { hit_id: "h2", decision: "confirm" });
+    assert.equal(r4.status, 400);
+    assert.deepEqual(r4.body, { detail: "待人工确认不能选一致", code: "decision_held_confirm_forbidden" });
+    assert.equal(loadTask(open).hits?.[1]?.decision, undefined);
+  });
+
+  it("rework rejections carry a code: job running, missing pdf, invalid pdf", async () => {
+    const running = seed({
+      id: "ae0de0000001",
+      title: "对红中",
+      product_name: "对红中",
+      type: "excel_pdf",
+      status: "comparing",
+      job_kind: "rework",
+      job_status: "running",
+      hits: [hit({ decision: "issue" })],
+    });
+    const r1 = await reworkAs(running);
+    assert.equal(r1.status, 409);
+    assert.deepEqual(r1.body, { detail: "对红还在排队或正在跑", code: "rework_job_running" });
+
+    const tid = seed({
+      id: "ae0de0000002",
+      title: "待改稿",
+      product_name: "待改稿",
+      type: "excel_pdf",
+      status: "completed",
+      complete_kind: "rework",
+      conclusion: "待设计改稿",
+      hits: [hit({ decision: "issue" })],
+    });
+    const empty = new FormData();
+    empty.set("note", "没有附件");
+    const r2 = await app.request(`/api/tasks/${tid}/rework`, { method: "POST", headers: authHeader(), body: empty });
+    assert.equal(r2.status, 400);
+    assert.deepEqual(await r2.json(), { detail: "需要改稿后的 PDF", code: "rework_pdf_missing" });
+
+    const bad = new FormData();
+    bad.set("pdf", new File([Buffer.from("not a pdf")], "v2.pdf", { type: "application/pdf" }));
+    const r3 = await app.request(`/api/tasks/${tid}/rework`, { method: "POST", headers: authHeader(), body: bad });
+    assert.equal(r3.status, 400);
+    assert.deepEqual(await r3.json(), { detail: "不是有效的 PDF", code: "rework_pdf_invalid" });
+    assert.equal(existsSync(join(process.env.WB_DATA_DIR as string, "uploads", tid, "artwork_v2.pdf")), false);
+    assert.equal(loadTask(tid).status, "completed");
   });
 });
