@@ -1040,6 +1040,21 @@ describe("review http", () => {
     assert.equal(existsSync(join(process.env.WB_DATA_DIR as string, "uploads", tid, "artwork_v2.pdf")), false);
   });
 
+  it("对照失败且只剩工艺说明条目：不算剩余条目，/rework 回 400「当前状态不可对红」，不入队不落盘", async () => {
+    const tid = seedInterrupted("e9e9e9e9e9e9", {
+      hits: [hit({ id: "h1", field: "工艺说明", decision: "pending" }), hit({ id: "h2", field: "颜色要求：专色", decision: "pending" })],
+    });
+    const res = await reworkAs(tid);
+    assert.equal(res.status, 400);
+    assert.deepEqual(res.body, { detail: "当前状态不可对红" });
+    const after = loadTask(tid);
+    assert.equal(after.status, "compare_failed");
+    assert.equal(after.job_kind, "compare");
+    assert.equal(after.job_status, "failed");
+    assert.equal(after.error, "对照中断");
+    assert.equal(existsSync(join(process.env.WB_DATA_DIR as string, "uploads", tid, "artwork_v2.pdf")), false);
+  });
+
   it("treats an open 待人工确认 on a non-verbatim order as pending", async () => {
     const tid = seed({
       id: "c7c7c7c7c7c7",
