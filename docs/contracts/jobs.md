@@ -33,6 +33,28 @@ UI 等待：`shouldShowWaitCard`（`queued` | `running` | `comparing`；`done`/`
 - 封版存档里的操作者 `actor_label` 记的是触发这次封版的人，只写显示名。查不到显示名、空串、是账号 id（规则见下），或封版时拿不到触发人，都写 null，版本历史显示「未记录」。不拿生成人或账号 id 补。已经写进去的旧存档不回填、不改写，磁盘上的原值不动。读出来给人看时，如果值是空、空白，或是账号 id，对外一律当 null，版本历史显示「未记录」；判断条件只挡账号 id 形状，不误伤真人名字。所以 2026-10-16 之前渲染版本历史里的操作者可能不准（可能是生成人甚至账号 id），不修旧数据。账号 id 的判断规则：`ou_`、`on_`、`oc_` 开头，后面跟 20 到 64 个小写字母或数字且至少一个数字；或 `cli_` 开头，后面正好 16 个小写字母或数字。其余都当人名显示，例如 `oc_designer`、`ou_abcdefgh`、`ou_ABC123456`。
 - 排队中的任务不显示预计时间。`job_status` 是 `queued` 时，等待卡、看板和侧栏只写排队位置：「前面还有 N 单」，前面没有单时写「就快轮到」。运行中才写阶段和预计时间。看板紧凑卡对排队中的单只显示「排队中 · 前面还有 N 单」，不显示百分比；前面没有单时显示「排队中 · 就快轮到」。
 
+下表是账号 id 判断规则的样例。`contractSamples.test.ts` 逐行拿这些值去跑代码里的规则，改规则时要同时改这张表。
+
+<!-- contract-samples:account-id -->
+| 值 | 判定 |
+| --- | --- |
+| `ou_0123456789abcdef0123456789abcdef` | 账号 id |
+| `on_0123456789abcdef0123456789abcdef` | 账号 id |
+| `oc_0123456789abcdef0123456789abcdef` | 账号 id |
+| `ou_a1b2c3d4e5f6a7b8c9d0` | 账号 id |
+| `ou_a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1` | 账号 id |
+| `cli_a1b2c3d4e5f6a7b8` | 账号 id |
+| `ou_a1b2c3d4e5f6a7b8c9d` | 人名 |
+| `ou_a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a19` | 人名 |
+| `ou_aaaaaaaaaaaaaaaaaaaa` | 人名 |
+| `ou_0123456789ABCDEF0123456789ABCDEF` | 人名 |
+| `cli_a1b2c3d4e5f6a7b` | 人名 |
+| `cli_a1b2c3d4e5f6a7b8c` | 人名 |
+| `oc_designer` | 人名 |
+| `ou_abcdefgh` | 人名 |
+| `ou_ABC123456` | 人名 |
+<!-- /contract-samples -->
+
 ## 补印刷面持久队列
 
 `POST /api/mockups/:id/print-faces` 保持既有 create 权限与团队共享范围。首次入队由 jobs 写 `print_faces_request`，立即返回 202；同单在途请求返回既有工作，跨单进入同一打样执行槽串行等待。成片 `status=done`、既有图片和下载保持；公开详情只给 `print_faces_repair.status/error`，不返回 PID、源稿哈希、尝试身份或私有路径。已经完整且成功的请求返回 200，不重复切面。
