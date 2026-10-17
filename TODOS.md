@@ -316,7 +316,7 @@ RF-10–RF-13 的原始依赖见 [ADR-007 §20.7](docs/adr-007-packaging-render-
 
 - [x] **B05 — 退回豁免 `order_held_confirm`（及 batch1 找茬非阻断）**
 
-  状态：产品定稿——退回不需要整单勾选、不带 `order_held_confirm`；只有签字才要。当前后端 `/complete` 对有未决 held 的退回也会要该字段，会 400。B04 多页逐页核对另见上项，不重复。
+  状态：产品定稿——退回不需要整单勾选、不带 `order_held_confirm`；只有签字才要。已上线（pstack batch2）：`/complete` 退回跳过该检查，有未决 held 时也不会 400；签字仍要求整单勾选。B04 多页逐页核对另见上项，不重复。
 
   1. 下一批改服务端：退回路径豁免 `order_held_confirm`；签字仍要求整单勾选。
   2. 前端退回不要带该字段（签字才带）。
@@ -327,7 +327,7 @@ RF-10–RF-13 的原始依赖见 [ADR-007 §20.7](docs/adr-007-packaging-render-
 
 - [ ] **B06 — 超页报错带独立错误码 `page_over`**
 
-  状态：下一批（改 API 形状，本批不动代码）。现在前端靠匹配超页报错文案判断，文案一改就失灵。
+  状态：pstack batch3 服务端已做：CLI 超页（私有码 `page_over_rendered`）时任务带 `job_error_code: "page_over"`，文案照旧；其他报错不带码，重跑 / 成功 / 重新核对会清掉旧码；`jobs.test.ts` 补两条回归。前端改按码判断（第 2 项）待前端接。
   1. 后端超页时另带错误码 `page_over`（例如新增字段 `job_error_code`），文案照旧。
   2. 前端按错误码判断，不再匹配文案。
   3. **验收：** 超页单返回 `job_error_code: "page_over"`；其他报错不带或带各自的码；前端改文案后判断仍对；有回归。
