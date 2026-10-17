@@ -124,7 +124,7 @@ import {
 } from "./illustratorAgent.js";
 import { confirmPackagingStructure, probeVerbatimReady } from "./workers.js";
 import { UnfoldedPrintHttpError } from "./unfoldedPrint.js";
-import { skipPackSheetField } from "./sheetSkip.js";
+import { completeGate } from "./completeGate.js";
 import { CompressionProblem } from "./compressionModel.js";
 import { HistoryProblem, queryHistory } from "./historyIndex.js";
 import { registerCompressionRoutes } from "./compressionApi.js";
@@ -162,11 +162,9 @@ import {
   assertTid,
   deleteTask,
   findTaskBySourceReceipt,
-  hitNeedsDecision,
   isHitDecision,
   isReviewableStatus,
   isReworkableTask,
-  isValidHitReviewState,
   listTasks,
   newCompareVerbatimFlag,
   loadTask,
@@ -1250,42 +1248,15 @@ app.post("/api/tasks/:tid/complete", async (c) => {
   // 最后一次 await 后再读盘，此后同步落盘，旧对象不能覆盖新的作业状态。
   const task = loadTask(tid);
   assertCanAccessTask(task, viewerFromSession(s));
-  if (task.job_status === "queued" || task.job_status === "running") {
-    throw new HTTPException(409, { message: "对照还在排队或正在跑，不能签字" });
-  }
-  if (!isReviewableStatus(task.status)) {
-    throw new HTTPException(400, { message: "当前状态不可签字" });
-  }
-  const hits = activeHits(task).filter((h) => !skipPackSheetField(h.field));
-  const invalid = hits.filter((h) => !isValidHitReviewState(h));
-  if (invalid.length) {
-    throw new HTTPException(400, { message: `有 ${invalid.length} 条审核数据状态异常，请重新对照` });
-  }
-  const pending = hits.filter(hitNeedsDecision);
-  if (pending.length) {
-    const words = [...new Set(pending.map((hit) => String(hit.status || "未决")))].join("、");
-    throw new HTTPException(400, { message: `仍有 ${pending.length} 条${words}未处理` });
-  }
-  const openHeld = task.verbatim_check === true
-    ? hits.filter((hit) => (
-      hit.status === "待人工确认"
-      && hit.decision !== "confirm"
-      && hit.decision !== "issue"
-      && hit.decision !== "ignore"
-    )).length
-    : 0;
-  const issues = hits.filter((h) => h.decision === "issue");
-  // 退回（有 issue）不要求整单确认；只有签字才要 order_held_confirm。
-  if (!issues.length && task.verbatim_warning && openHeld > 0 && body.order_held_confirm !== true) {
-    throw new HTTPException(400, { message: "整单待人工确认，签字即认可" });
-  }
+  const gate = completeGate(task, body.order_held_confirm);
+  if (!gate.ok) throw new HTTPException(gate.status, { message: gate.message });
   const conclusion = (body.conclusion || "").trim();
   if (!conclusion) throw new HTTPException(400, { message: "请写下结论" });
   task.status = "completed";
   task.completed_at = nowIso();
   task.completed_by = s.display_name;
   task.conclusion = conclusion;
-  task.complete_kind = issues.length ? "rework" : "signed";
+  task.complete_kind = gate.kind;
   saveTask(task);
   launchNotification(`signed task ${task.id}`, () => notifyTaskComplete(task, s.display_name));
   return c.json(publicTask(task, viewerFromSession(s)));
