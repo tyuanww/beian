@@ -21,7 +21,7 @@ const SPACE = new Set(statuses.space_errors);
 /** 与服务端 tasks.ts HIT_STATUSES 同口径；不在集合里的状态不能签字/退回。 */
 const KNOWN_HIT_STATUSES = new Set<string>(["一致", "疑点", "缺失", "跳过", ...statuses.statuses]);
 
-export function isKnownHitStatus(status: string | undefined): boolean {
+function isKnownHitStatus(status: string | undefined): boolean {
   return KNOWN_HIT_STATUSES.has(String(status || ""));
 }
 

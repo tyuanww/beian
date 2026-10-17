@@ -8,7 +8,7 @@
  * - 条目本身已被标记（`decision: "issue"`，或状态是待人工 / 不清 / 疑 / 缺 / 误一类）时，
  *   `sequence_diff.only_in_excel` 有非空片段，或 `doubt_bucket` 是 OCR 小字 / 大号图形字，也算存疑。
  */
-export const READING_DOUBT_BUCKETS = ["ocr_smallprint", "ocr_graphic"] as const;
+const READING_DOUBT_BUCKETS = ["ocr_smallprint", "ocr_graphic"] as const;
 
 export type ReadingDoubtHit = {
   status?: string;
@@ -23,7 +23,7 @@ function hasNonBlank(list: unknown): boolean {
 }
 
 /** 条目已被标记要人看：结论是有错，或状态属于待人工 / 不清 / 疑 / 缺 / 误一类（按状态值，不按说明文字）。 */
-export function isFlaggedReviewHit(hit: ReadingDoubtHit): boolean {
+function isFlaggedReviewHit(hit: ReadingDoubtHit): boolean {
   return hit.decision === "issue" || /待人工|不清|疑|缺|误/u.test(String(hit.status || ""));
 }
 
