@@ -881,5 +881,28 @@ test("失败单：顶部不显示结论进度，只显示失败原因", async ({
   await expect(page.locator(".ant-alert").filter({ hasText: "稿件超过 1 页，暂不支持核对，请联系管理员" })).toBeVisible();
   await expect(page.getByTestId("review-posn")).toHaveCount(0);
   await expect(page.getByText("全部已下结论")).toHaveCount(0);
+  await expect(page.locator(".review-th").first()).toContainText("P1");
+  await expect(page.locator(".review-th-w")).toHaveCount(0);
+  await expect(page.getByText(/这单还剩 \d+ 条待确认/)).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "复制修改清单" })).toHaveCount(0);
+  await expect(page.getByText("检查未完成，暂时没有结果")).toBeVisible();
   await page.screenshot({ path: info.outputPath("failed-no-progress.png") });
+});
+
+test("复核失败但条目还在：失败条照常显示，进度、翻页、剩余条数和修改清单都保留", async ({ page, syntheticApi }, info) => {
+  const task = reviewTask("e5969b58cd63");
+  task.job_kind = "rework";
+  task.status = "pending_review";
+  task.job_status = "failed";
+  task.job_error = "对照中断";
+  syntheticApi.tasks.push(task);
+  expect(task.hits?.length).toBeGreaterThan(0);
+  await page.goto(`/review/${task.id}`);
+  await expect(page.locator(".ant-alert-error").first()).toBeVisible();
+  await expect(page.getByTestId("review-posn")).toBeVisible();
+  await expect(page.getByRole("button", { name: "上一条" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "下一条" })).toBeVisible();
+  await expect(page.getByText(/这单还剩 \d+ 条待确认/)).toBeVisible();
+  await expect(page.getByRole("button", { name: "复制修改清单" })).toBeVisible();
+  await page.screenshot({ path: info.outputPath("rework-failed.png") });
 });
