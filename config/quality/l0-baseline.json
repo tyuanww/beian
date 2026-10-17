@@ -11,7 +11,7 @@
     },
     {
       "name": "ui",
-      "min_tests": 590,
+      "min_tests": 601,
       "allowed_skips": []
     }
   ],
