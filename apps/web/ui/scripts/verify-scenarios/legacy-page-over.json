@@ -1,0 +1,103 @@
+{
+  "name": "legacy-page-over",
+  "description": "旧超页失败单：存盘没有 job_error_code，job_error 是两句旧版超页原文之一（各一单）。真后端读取时应补算 page_over，核对页显示黄色（warning）提醒。",
+  "login": "管理员",
+  "tasks": [
+    {
+      "id": "a1b2c3d4e5f6",
+      "title": "旧超页单",
+      "product_name": "旧超页单",
+      "type": "excel_pdf",
+      "status": "compare_failed",
+      "owner": "管理员",
+      "job_kind": "compare",
+      "job_status": "failed",
+      "job_error": "这一单页数超过可核对页数",
+      "error": "这一单页数超过可核对页数",
+      "created_at": "2026-10-10T02:00:00Z"
+    },
+    {
+      "id": "b2c3d4e5f6a1",
+      "title": "旧超页单（第一版原文）",
+      "product_name": "旧超页单（第一版原文）",
+      "type": "excel_pdf",
+      "status": "compare_failed",
+      "owner": "管理员",
+      "job_kind": "compare",
+      "job_status": "failed",
+      "job_error": "稿件超过 1 页，暂不支持核对，请联系管理员",
+      "error": "稿件超过 1 页，暂不支持核对，请联系管理员",
+      "created_at": "2026-10-09T02:00:00Z"
+    }
+  ],
+  "api": [
+    {
+      "path": "/api/tasks/a1b2c3d4e5f6",
+      "save": "api-task.json",
+      "expect": {
+        "job_error_code": "page_over",
+        "status": "compare_failed"
+      }
+    },
+    {
+      "path": "/api/tasks",
+      "save": "api-tasks.json",
+      "pick": {
+        "id": "a1b2c3d4e5f6"
+      },
+      "expect": {
+        "job_error_code": "page_over"
+      }
+    },
+    {
+      "path": "/api/tasks/b2c3d4e5f6a1",
+      "save": "api-task-v1-text.json",
+      "expect": {
+        "job_error_code": "page_over",
+        "status": "compare_failed"
+      }
+    },
+    {
+      "path": "/api/tasks",
+      "save": "api-tasks-v1-text.json",
+      "pick": {
+        "id": "b2c3d4e5f6a1"
+      },
+      "expect": {
+        "job_error_code": "page_over"
+      }
+    }
+  ],
+  "pages": [
+    {
+      "path": "/review/a1b2c3d4e5f6",
+      "screenshot": "review-legacy-page-over.png",
+      "expect": [
+        {
+          "selector": ".ant-alert-warning",
+          "visible": true,
+          "hasText": "稿件超过 1 页"
+        },
+        {
+          "selector": ".ant-alert-error",
+          "count": 0
+        }
+      ]
+    },
+    {
+      "path": "/review/b2c3d4e5f6a1",
+      "screenshot": "review-legacy-page-over-v1-text.png",
+      "expect": [
+        {
+          "selector": ".ant-alert-warning",
+          "visible": true,
+          "hasText": "稿件超过 1 页"
+        },
+        {
+          "selector": ".ant-alert-error",
+          "count": 0
+        }
+      ]
+    }
+  ]
+}

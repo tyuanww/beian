@@ -14,6 +14,7 @@ import {
 } from "./mockupFullscreen";
 import { readBoxesOn, readPinsOn, readSpotOn, skipPackSheetField, writeBoxesOn, writePinsOn, writeSpotOn } from "./reviewDock";
 import { ReviewSubmitDialog } from "./ReviewSubmitDialog";
+import { createFlagStore, UndoToastGate } from "./undoToastGate";
 import {
   clampPinToView, conclusionFor, decisionFailureText, reworkUploadBlocked, submitFailureText, flatLayout, isTypingTarget, lockedBy, markShortcutsSeen, markerOutsideCorner, nextPendingAfter,
   panToClearPanel, phonePendingLines, positionLabel, rejectRows, shouldShowShortcutsOnOpen, submitGate, tabIndices, thumbMarks, verdictCounts, verdictForKey, isOpenHeld,
@@ -325,8 +326,11 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
   const locked = lockedBy(task, displayName);
   const lockedRef = useRef(locked);
   lockedRef.current = locked;
-  // 锁页后撤销已无意义（服务端不再收结论），收起撤销提示。
-  useEffect(() => {
+  // 锁页后撤销已无意义（服务端不再收结论），收起撤销提示：
+  // 内容在锁页那次提交的 layout 阶段就卸掉（不等 message 退出动画），外壳再交给 destroy 收走。
+  const [undoHidden] = useState(createFlagStore);
+  useLayoutEffect(() => {
+    undoHidden.set(Boolean(locked));
     if (locked) message.destroy("review-undo");
   }, [locked]);
   const gate = submitGate(hits, reviewable, Boolean(locked), task?.verbatim_check === true);
@@ -650,6 +654,7 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
       type: "success",
       duration: 5,
       content: (
+        <UndoToastGate hidden={undoHidden}>
         <span className="review-undo-toast" data-testid="review-undo-toast">
           {REVIEW_COPY.undoToast(label)}
           <button
@@ -667,6 +672,7 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
             {REVIEW_COPY.undo}
           </button>
         </span>
+        </UndoToastGate>
       ),
     });
   }

@@ -128,8 +128,10 @@ export function statusWord(
 ): { cls: string; text: string } {
   if (!r) return { cls: "is-idle", text: "未检查" };
   if ("pending" in r) return { cls: "is-wait", text: mode === "send" ? "发送中" : "检查中" };
+  // error-text-match-allow -- 待后端错误码，第 5 批清，见 TODOS.md「前端按报错文案判断状态」
   if (r.ok && /未启用/.test(r.message)) return { cls: "is-ok", text: "未启用" };
   if (r.ok) return { cls: "is-ok", text: "正常" };
+  // error-text-match-allow -- 待后端错误码，第 5 批清，见 TODOS.md「前端按报错文案判断状态」
   if (/超时/.test(r.message)) return { cls: "is-wait", text: "超时" };
   return { cls: "is-bad", text: "待处理" };
 }
@@ -174,6 +176,7 @@ export function foldCatalogReason(
   if (group === "MiniMax（可选）") {
     const enabled = fields.find((f) => f.key === "MINIMAX_ENABLED");
     const key = fields.find((f) => f.key === "MINIMAX_API_KEY");
+    // error-text-match-allow -- 待后端错误码，第 5 批清，见 TODOS.md「前端按报错文案判断状态」
     if (enabled?.value === "false" || (probe && !("pending" in probe) && /未启用/.test(probe.message))) {
       return "AI 复核未启用。密钥已收起。";
     }
@@ -206,6 +209,7 @@ export function idleRowMessage(id: string, kind: (typeof BOARD_ROWS)[number]["ki
 
 export function probeErrorMessage(err: unknown): string {
   const raw = err instanceof Error ? err.message : "探测失败";
+  // error-text-match-allow -- 永久例外：这里认的是浏览器 fetch 自己抛的报错（failed to fetch 等，请求没到服务器），后端永远给不了码，见 TODOS.md；不作为新增例外的先例
   if (/failed to fetch|networkerror|load failed/i.test(raw)) {
     return "服务没连上，请稍后重试。";
   }
