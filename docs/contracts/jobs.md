@@ -29,8 +29,8 @@ cd apps/web/backend && PYTHONPATH=. .venv/bin/python -m app.cli --help
 | --- | --- | --- |
 | `page_over` | `page_over_rendered` | 逐字稿超页；存盘原文只存前半句「稿件超过 N 页」（页数读常量），后半句由前端按有没有重新上传按钮拼 |
 | `ocr_failed` | `model_missing` / `model_hash_mismatch` / `notice_missing` / `dep_missing` / `oom` / `ocr_unavailable`；服务端 `verbatimMemoryFailure` 也写此码 | 认字没出结果 |
-| `result_truncated` | `result_truncated` | 结果超过输出上限，没写完 |
-| `private_data_failed` | `private_data_limit` / `private_data_parse_failed` | 稿件里的 Illustrator 私有数据读不出来 |
+| `result_truncated` | `result_truncated` | 这一单结果太多，没能写完，请联系管理员 |
+| `private_data_failed` | `private_data_limit` / `private_data_parse_failed` | 稿件里的 Illustrator 私有数据读不出来，请联系管理员 |
 
 未列入上表的私有码不映射，任务不带 `job_error_code`。旧超页单无码时的补算、失败条按码选句见 [审稿合同](review.md)。
 
