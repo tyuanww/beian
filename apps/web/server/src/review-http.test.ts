@@ -31,6 +31,9 @@ type SeedTask = {
   type: string;
   status: string;
   job_kind?: "compare" | "rework";
+  job_error?: string;
+  status_before_job?: string;
+  pages?: Array<{ url?: string }>;
   error?: string;
   conclusion?: string;
   complete_kind?: string;
@@ -792,6 +795,82 @@ describe("review http", () => {
     assert.equal(res.status, 400);
     assert.deepEqual(res.body, { detail: "当前状态不可签字" });
     assert.equal(loadTask(tid).status, "pending_review");
+  });
+
+  // 核对页三种失败条对应的真实落盘形状（jobs.ts markOcrFailed / reclaimTask）。对红失败不写 pages_v2
+  // （pages_v2 只由对红成功的 worker 结果合入），所以种子里不带；初审只写 pages。
+  async function reworkAs(tid: string) {
+    const fd = new FormData();
+    fd.set("pdf", new File([Buffer.from("%PDF-1.4\n")], "v2.pdf", { type: "application/pdf" }));
+    const res = await app.request(`/api/tasks/${tid}/rework`, { method: "POST", headers: authHeader(), body: fd });
+    return { status: res.status, body: (await res.json()) as Record<string, unknown> };
+  }
+
+  const failedRoundHits = () => [hit({ id: "h1", decision: "confirm" }), hit({ id: "h2", field: "中文品名", decision: "issue" })];
+
+  for (const bar of [
+    { name: "红条「复核出了问题」", id: "e1e1e1e1e1e1", job_error: "对照中断" },
+    { name: "黄条「稿件超过 1 页，这次复核没做」", id: "e2e2e2e2e2e2", job_error: "稿件超过 1 页，暂不支持核对，请联系管理员", job_error_code: "page_over" as const },
+  ]) {
+    it(`${bar.name}：签字退回都 400，同一单可重新上传对红`, async () => {
+      const tid = seed({
+        id: bar.id,
+        title: bar.name,
+        product_name: bar.name,
+        type: "excel_pdf",
+        status: "in_review",
+        status_before_job: "in_review",
+        job_kind: "rework",
+        job_status: "failed",
+        job_error: bar.job_error,
+        ...(bar.job_error_code ? { job_error_code: bar.job_error_code } : {}),
+        pages: [{ url: `/api/tasks/${bar.id}/pages/p1.png` }],
+        hits: failedRoundHits(),
+      });
+      assert.equal(loadTask(tid).pages_v2, undefined);
+      for (const conclusion of ["无改稿项", "退回：1 条有错，见清单"]) {
+        const res = await completeAs(tid, conclusion);
+        assert.equal(res.status, 400);
+        assert.deepEqual(res.body, { detail: "当前状态不可签字" });
+      }
+      setJobsTestHooks({ runRework: async () => ({ code: 1, stdout: "", stderr: "", timedOut: false }) });
+      try {
+        const res = await reworkAs(tid);
+        assert.equal(res.status, 200);
+        assert.equal(res.body.status, "comparing");
+        assert.equal(res.body.job_kind, "rework");
+        assert.ok(res.body.job_status === "queued" || res.body.job_status === "running");
+        assert.equal("job_error_code" in res.body, false);
+      } finally {
+        resetJobsTestHooks();
+      }
+    });
+  }
+
+  it("「检查中断」条（compare_failed 带上一轮条目）：签字退回都 400；/rework 按现状回 400「当前状态不可对红」且不落盘", async () => {
+    const tid = seed({
+      id: "e3e3e3e3e3e3",
+      title: "检查中断",
+      product_name: "检查中断",
+      type: "excel_pdf",
+      status: "compare_failed",
+      job_kind: "compare",
+      job_status: "failed",
+      job_error: "对照中断",
+      error: "对照中断",
+      pages: [{ url: "/api/tasks/e3e3e3e3e3e3/pages/p1.png" }],
+      hits: failedRoundHits(),
+    });
+    for (const conclusion of ["无改稿项", "退回：1 条有错，见清单"]) {
+      const res = await completeAs(tid, conclusion);
+      assert.equal(res.status, 400);
+      assert.deepEqual(res.body, { detail: "当前状态不可签字" });
+    }
+    const res = await reworkAs(tid);
+    assert.equal(res.status, 400);
+    assert.deepEqual(res.body, { detail: "当前状态不可对红" });
+    assert.equal(loadTask(tid).status, "compare_failed");
+    assert.equal(existsSync(join(process.env.WB_DATA_DIR as string, "uploads", tid, "artwork_v2.pdf")), false);
   });
 
   it("treats an open 待人工确认 on a non-verbatim order as pending", async () => {
