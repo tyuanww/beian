@@ -578,6 +578,10 @@ export type TaskSummary = {
   job_stage_label?: string;
   job_eta_s?: number;
   job_error?: string;
+  /** 任务报错码（B06）：目前只有超页 "page_over"；其他报错不带，重跑/成功后清空。 */
+  job_error_code?: "page_over";
+  /** 仅 page_over 时可能带；后端暂未填充，前端不依赖。 */
+  job_error_detail?: { page_count?: number; max_pages?: number };
   job_started_at?: string;
   job_finished_at?: string;
   queue_ahead?: number;

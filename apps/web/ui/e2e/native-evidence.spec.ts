@@ -20,6 +20,8 @@ for (const surface of [
     // 默认收起：原文不直接铺开。
     await expect(evidence.locator("details")).not.toHaveAttribute("open", "");
     await expect(evidence.getByText("净含量 30ml", { exact: true })).toBeHidden();
+    await evidence.scrollIntoViewIfNeeded();
+    await page.screenshot({ path: info.outputPath(`native-evidence-desktop-${surface.spot}-collapsed.png`) });
     await evidence.getByText("查看文字来源").click();
     await expect(evidence.getByText("净含量 30ml", { exact: true })).toBeVisible();
     await expect(evidence.getByText("净含量 80ml", { exact: true })).toBeVisible();

@@ -26,6 +26,7 @@ import {
   RENDER_GENERATION_HISTORY_DEFAULT_LIMIT,
   RENDER_GENERATION_HISTORY_MAX_LIMIT,
   RENDER_GENERATION_UNWIRED_NOTE,
+  isRenderActorAccountId,
   isRenderGenerationError,
   isRenderGenerationOutputKey,
   openRenderGenerationStore,
@@ -271,6 +272,31 @@ function importG0(store: RenderGenerationStore) {
 }
 
 describe("render actor_label", () => {
+  it("account-id shape: real Feishu ids yes, display-name-like strings no", () => {
+    for (const id of ["ou_7d8a6e6df7621556ce0d21922b676706", "on_94a1ee5551019f18cd73d9f111898cf2",
+      "oc_a0553eda9014c201e6969b478895c230", "cli_a5e3b0c3a1b8d00e", "  ou_7d8a6e6df7621556ce0d21922b676706 "]) {
+      assert.equal(isRenderActorAccountId(id), true, id);
+    }
+    for (const name of ["oc_designer", "ou_weiwei", "on_call_team_lead_backup", "ou_abc123", "OU_7D8A6E6DF7621556CE0D21922B676706",
+      "cli_short1", "籽烨", ""]) {
+      assert.equal(isRenderActorAccountId(name), false, name);
+    }
+  });
+
+  it("account-id shape: length boundaries and case", () => {
+    const body = (n: number) => "1".padEnd(n, "a");
+    assert.equal(isRenderActorAccountId(`ou_${body(19)}`), false, "ou 19");
+    assert.equal(isRenderActorAccountId(`ou_${body(20)}`), true, "ou 20");
+    assert.equal(isRenderActorAccountId(`ou_${body(64)}`), true, "ou 64");
+    assert.equal(isRenderActorAccountId(`ou_${body(65)}`), false, "ou 65");
+    assert.equal(isRenderActorAccountId(`cli_${body(15)}`), false, "cli 15");
+    assert.equal(isRenderActorAccountId(`cli_${body(16)}`), true, "cli 16");
+    assert.equal(isRenderActorAccountId(`cli_${body(17)}`), false, "cli 17");
+    assert.equal(isRenderActorAccountId("ou_7D8A6E6DF7621556CE0D21922B676706"), false, "uppercase hex 32");
+    assert.equal(isRenderActorAccountId(`ou_${"a".repeat(20)}`), false, "20 letters, no digit");
+    assert.equal(isRenderActorAccountId(`ou_${"a".repeat(19)}1`), true, "20 chars with one digit");
+  });
+
   it("seal accepts null actor_label and the summary omits it", () => {
     const job = seedJob(); const store = openStore(job);
     const virtual = store.virtualLegacyCurrentId();
@@ -281,7 +307,7 @@ describe("render actor_label", () => {
   });
 
   it("seal still rejects an account id or path as actor_label", () => {
-    for (const bad of ["ou_0123456789abcdef", "/tmp/x", ""]) {
+    for (const bad of ["ou_7d8a6e6df7621556ce0d21922b676706", "/tmp/x", ""]) {
       const job = seedJob(); const store = openStore(job);
       const virtual = store.virtualLegacyCurrentId();
       assert.throws(() => store.sealGeneration({ mode: "legacy_import", contractSha256: CONTRACT_SHA, contractBytes: CONTRACT,
@@ -296,7 +322,7 @@ describe("render actor_label", () => {
     const beforeDisk = readFileSync(manifestPath, "utf8");
     const data = JSON.parse(beforeDisk);
     assert.equal(data.actor_label, "籽烨");
-    data.actor_label = "ou_0123456789abcdef";
+    data.actor_label = "ou_7d8a6e6df7621556ce0d21922b676706";
     writeFileSync(manifestPath, JSON.stringify(data));
     // Re-open so the store re-reads the planted old value.
     const store2 = openStore(job);
@@ -304,7 +330,7 @@ describe("render actor_label", () => {
     assert.equal(summary.actor_label, undefined);
     const page = store2.listHistory({ currentGenerationId: G0_LEGACY_ORIGINAL_ID });
     assert.equal(page.items[0]?.actor_label, undefined);
-    assert.equal(JSON.parse(readFileSync(manifestPath, "utf8")).actor_label, "ou_0123456789abcdef");
+    assert.equal(JSON.parse(readFileSync(manifestPath, "utf8")).actor_label, "ou_7d8a6e6df7621556ce0d21922b676706");
   });
 
   it("old archive blank actor_label is omitted from public APIs", () => {

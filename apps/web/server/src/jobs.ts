@@ -53,6 +53,7 @@ import {
   type RenderGenerationSource,
 } from "./renderGenerations.js";
 import {
+  jobErrorCodeOf,
   loadAllTasks,
   loadTasksForRecovery,
   loadTask,
@@ -62,6 +63,7 @@ import {
   assertCanAccessTask,
   taskOwner,
   taskStoreSnapshot,
+  type JobErrorCode,
   type JobKind,
   type Task,
   type Viewer,
@@ -420,6 +422,7 @@ export function publicTask(task: Task, viewer?: Viewer): Record<string, unknown>
   const redact = !viewer?.admin;
   return {
     ...rest,
+    job_error_code: jobErrorCodeOf(task),
     // 生成人只认 created_by；旧单缺失时原样给 null，不回落到 actor。
     created_by: task.created_by || null,
     // 最后一步兜底：脱敏后仍有本机路径 / 凭据特征时整条隐藏，加 error_hidden / error_ticket（单号 = task.id）。
@@ -2947,6 +2950,7 @@ function claimOcr(task: Task): void {
   task.job_started_at = nowIso();
   task.job_eta_s = 40;
   task.job_error = undefined;
+  delete task.job_error_code;
   delete task.job_pid;
   if (!task.notify_job_id) {
     task.notify_job_id = `${task.id}:${task.job_kind}:${task.job_started_at}`;
@@ -3346,8 +3350,8 @@ function finishOcr(id: string, startedAt: string, result: RunPythonResult): void
     return;
   }
   if (result.code !== 0) {
-    const cli = cliError(result.stderr);
-    markOcrFailed(task, publicJobError(cli) || "对照中断");
+    const failure = cliFailure(result.stderr);
+    markOcrFailed(task, publicJobError(failure.error) || "对照中断", publicJobErrorCode(failure.code));
     return;
   }
   const payload = lastJson(result.stdout);
@@ -3366,13 +3370,14 @@ function finishOcr(id: string, startedAt: string, result: RunPythonResult): void
   task.status = allowedResultStatus(task.job_kind, payload.status);
   task.job_status = "succeeded";
   task.job_error = undefined;
+  delete task.job_error_code;
   saveTask(task);
   launchNotification(`task ${task.id}`, () => fireTaskNotify(task, true));
   (hooks.bookkeeping || compareBookkeeping)(true, { task_id: task.id, actor: taskOwner(task) });
   tryStart();
 }
 
-function markOcrFailed(task: Task, publicMsg: string): void {
+function markOcrFailed(task: Task, publicMsg: string, code?: JobErrorCode): void {
   if (task.job_kind === "rework") {
     task.status = String(task.status_before_job || "pending_review");
   } else {
@@ -3381,6 +3386,8 @@ function markOcrFailed(task: Task, publicMsg: string): void {
   }
   task.job_status = "failed";
   task.job_error = publicMsg;
+  if (code) task.job_error_code = code;
+  else delete task.job_error_code;
   task.job_finished_at = task.job_finished_at || nowIso();
   delete task.job_pid;
   attachRenderedPages(task);
@@ -3584,6 +3591,15 @@ function logCliFailure(scope: string, failure: CliFailure): void {
   console.error(
     `${scope}: problem=${safeCliDiagnostic(failure.code || failure.error)} cause=${safeCliDiagnostic(failure.cause)} fix=${safeCliDiagnostic(failure.fix)}`,
   );
+}
+
+/** CLI 私有 problem 码 → 对外 job_error_code。只放前端要按码分支的；其余不带码。 */
+const PUBLIC_JOB_ERROR_CODES: Readonly<Record<string, JobErrorCode>> = {
+  page_over_rendered: "page_over",
+};
+
+function publicJobErrorCode(code: string | undefined): JobErrorCode | undefined {
+  return code ? PUBLIC_JOB_ERROR_CODES[code] : undefined;
 }
 
 function publicJobError(msg: string): string | null {

@@ -1010,8 +1010,8 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
       {gate.rejectTitle ? <p className="review-reject-note" id="review-reject-note" data-testid="review-reject-note">{gate.rejectTitle}</p> : null}
       {locked ? <Alert className="review-lock" type="warning" title={`🔒 ${locked}`} description={REVIEW_COPY.lockedNote} /> : null}
       {error ? <Alert type="error" title={error} /> : null}
-      {task?.error || task?.job_error ? (
-        <Alert type={reviewErrorType(task.error || task.job_error || "")} showIcon title={reviewErrorCopy(task.error || task.job_error || "") || "检查失败。"} description={failedJob ? REVIEW_COPY.reupload : undefined} />
+      {task?.error || task?.job_error || task?.job_error_code ? (
+        <Alert type={reviewErrorType(task.job_error_code)} showIcon title={reviewErrorCopy(task.error || task.job_error || "", task.job_error_code) || "检查失败。"} description={failedJob ? REVIEW_COPY.reupload : undefined} />
       ) : failedJob ? <Alert type="error" showIcon title={REVIEW_COPY.reupload} /> : null}
       {signed && !locked ? <Alert type="success" showIcon title={task?.complete_kind === "rework" ? "已退回。" : "已签字。"} /> : null}
       {decisionError ? <Alert type="error" showIcon title={`未保存：${decisionError}`} /> : null}

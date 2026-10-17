@@ -41,6 +41,7 @@ type SeedTask = {
   job_status?: "queued" | "running" | "succeeded" | "failed";
   verbatim_check?: boolean;
   verbatim_warning?: string;
+  job_error_code?: "page_over";
 };
 
 function authHeader() {
@@ -369,6 +370,7 @@ describe("review http", () => {
   it("queues a verbatim rework after the glyph probe passes", async () => {
     const tid = "242424242424";
     seed({
+      job_error_code: "page_over",
       id: tid,
       title: "认字对红",
       product_name: "认字对红",
@@ -394,6 +396,7 @@ describe("review http", () => {
       const body = (await res.json()) as { status?: string; job_kind?: string };
       assert.equal(body.status, "comparing");
       assert.equal(body.job_kind, "rework");
+      assert.equal("job_error_code" in body, false);
       assert.equal(existsSync(join(process.env.WB_DATA_DIR as string, "uploads", tid, "artwork_v2.pdf")), true);
     } finally {
       setVerbatimProbeForTest(null);

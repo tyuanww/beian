@@ -839,3 +839,31 @@ test("待人工确认单独一组：不混进待确认列表，审核人能展�
   await expect(group).toContainText("认不准的字");
   await expect(group).not.toContainText("中文品名");
 });
+
+test("超页：后端回 job_error_code=page_over 时显示黄色提醒", async ({ page, syntheticApi }, info) => {
+  const task = reviewTask("e5969b58cd60");
+  task.status = "compare_failed";
+  task.board = "failed";
+  task.job_status = "failed";
+  task.job_error = "这一单页数超过可核对页数";
+  task.job_error_code = "page_over";
+  syntheticApi.tasks.push(task);
+  await page.goto(`/review/${task.id}`);
+  const alert = page.locator(".ant-alert").filter({ hasText: "稿件超过 1 页，暂不支持核对，请联系管理员" });
+  await expect(alert).toBeVisible();
+  await expect(alert).toHaveClass(/ant-alert-warning/);
+  await page.screenshot({ path: info.outputPath("page-over-warning.png") });
+});
+
+test("超页：报错文案像超页但没有 page_over 码时不显示超页提醒", async ({ page, syntheticApi }, info) => {
+  const task = reviewTask("e5969b58cd61");
+  task.status = "compare_failed";
+  task.board = "failed";
+  task.job_status = "failed";
+  task.job_error = "稿件超过 1 页，暂不支持核对，请联系管理员";
+  syntheticApi.tasks.push(task);
+  await page.goto(`/review/${task.id}`);
+  await expect(page.locator(".ant-alert-error").first()).toBeVisible();
+  await expect(page.locator(".ant-alert-warning")).toHaveCount(0);
+  await page.screenshot({ path: info.outputPath("page-over-no-code-error.png") });
+});
