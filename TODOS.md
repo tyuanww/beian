@@ -546,7 +546,7 @@ RF-10–RF-13 的原始依赖见 [ADR-007 §20.7](docs/adr-007-packaging-render-
 
 `node scripts/quality/error-text-match.mjs`（`npm run test:quality` 里由 `scripts/quality/error-text-match.test.mjs` 强制）禁止前端对报错文本做 `includes` / `startsWith` / `match` / `test` 等判断；判状态要认后端机读码（如 `job_error_code`）。下面是登记为 `// error-text-match-allow` 的存量例外，测试里 `ALLOWED` 按文件锁定（共 7 行；原 10 行，第 5 批清掉 App.tsx 3 行），清掉一处就把基线同步减小；不接受新增例外。
 
-- [x] ~~`apps/web/ui/src/App.tsx` `authTitle`（3 行）：按飞书登录失败文案含「伸美 / 不允许 / 取消 / 过期」选标题。~~ 已清（第 5 批，`fix/pstack-batch5-login-title`）：服务端回跳 URL 本来就带 `feishu_error`（denied / expired / forbidden / failed），前端改由 `apps/web/ui/src/loginFailure.ts` 按码选标题，文字在 `copy/labels.ts` 的 `LOGIN_FAILURE_COPY`；3 行例外标记已删，`ALLOWED` 去掉 App.tsx，`MAX_TOTAL` 10 → 7。服务端未改。
+- [x] ~~`apps/web/ui/src/App.tsx` `authTitle`（3 行）：按飞书登录失败文案含「伸美 / 不允许 / 取消 / 过期」选标题。~~ 已清（第 5 批，`fix/pstack-batch5-login-title`）：服务端回跳 URL 本来就带 `feishu_error`（denied / expired / forbidden / failed），前端改由 `apps/web/ui/src/loginFailure.ts` 按码选标题，文字在 `copy/labels.ts` 的 `LOGIN_FAILURE_COPY`；3 行例外标记已删，`ALLOWED` 去掉 App.tsx，`MAX_TOTAL` 10 → 7。服务端只收紧类型（`feishuLoginError.ts` 导出 `FEISHU_LOGIN_ERROR_CODES`），运行时不变；前后端码由合同测试连起来。
 - `apps/web/ui/src/pages/reviewErrorCopy.ts` `reviewErrorCopy`（1 行）：`OCR_FAILED` 正则认「认字 / OCR / 文字识别」失败。需要后端给认字失败错误码（同 `page_over` 的做法）。
 - `apps/web/ui/src/pages/hitText.ts` `isAccountingCopy`（1 行）：**认的是后端 OCR 核对文本（score=、覆盖偏低、稿上命中 n/m 等），不是报错文案**。需要后端把这类核对说明给成结构化字段。只为存量登记，不作为新增例外的先例。
 - 本检查首次扫描新发现的存量（批次 4 指派时未列入，同样只减不增；待后端错误码，第 5 批清）：
