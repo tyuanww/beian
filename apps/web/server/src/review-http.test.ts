@@ -1938,4 +1938,23 @@ describe("review http", () => {
     assert.equal(existsSync(join(process.env.WB_DATA_DIR as string, "uploads", tid, "artwork_v2.pdf")), false);
     assert.equal(loadTask(tid).status, "completed");
   });
+
+  it("task detail projects hit_text on hits / hits_v2 without touching the stored JSON", async () => {
+    const tid = seed({
+      id: "a17e70000001",
+      title: "投影",
+      product_name: "投影",
+      type: "excel_pdf",
+      status: "in_review",
+      hits: [{ id: "h1", field: "净含量", status: "疑点", decision: "pending", coverage: { miss: ["50g", "score=0.4 覆盖偏低"] } }],
+      hits_v2: [{ id: "h2", field: "中文品名", status: "一致" }],
+    });
+    const res = await app.request(`/api/tasks/${tid}`, { headers: authHeader() });
+    assert.equal(res.status, 200);
+    const body = (await res.json()) as { hits: Array<{ hit_text?: unknown }>; hits_v2: Array<{ hit_text?: unknown }> };
+    assert.deepEqual(body.hits[0].hit_text, { v: 1, miss: ["50g"], accounting: ["score=0.4 覆盖偏低"], evidence: null, observed: null, located: true });
+    assert.deepEqual(body.hits_v2[0].hit_text, { v: 1, miss: [], accounting: [], evidence: null, observed: null, located: true });
+    const stored = JSON.parse(readFileSync(join(process.env.WB_DATA_DIR as string, "tasks", `${tid}.json`), "utf8")) as { hits: object[] };
+    assert.equal("hit_text" in stored.hits[0], false);
+  });
 });
