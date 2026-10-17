@@ -259,3 +259,22 @@ for (const [code, raw, readOnly, own] of [
     await expect(bar).not.toContainText("请联系管理员");
   });
 }
+
+test("复核超页、没有剩余条目（Q9）：自己的单标题「稿件超过 1 页，请改成 1 页后重新上传这一单」+按钮；别人的单只有「稿件超过 1 页」", async ({ page, syntheticApi }) => {
+  await asReviewer(page);
+  const base = { status: "pending_review", job_kind: "rework", job_status: "failed", job_error: "稿件超过 1 页", job_error_code: "page_over" as const, hits: [] };
+  const mine = reviewTask("e5969b58ce11");
+  Object.assign(mine, base, { owner: ME });
+  const theirs = reviewTask("e5969b58ce12");
+  Object.assign(theirs, base, { owner: "ou_someone_else" });
+  syntheticApi.tasks.push(mine, theirs);
+  await page.goto(`/review/${mine.id}`);
+  const bar = page.locator(".ant-alert-warning");
+  await expect(bar.locator(".ant-alert-title")).toHaveText("稿件超过 1 页，请改成 1 页后重新上传这一单");
+  await expect(bar.getByRole("button", { name: REVIEW_COPY.reupload })).toBeVisible();
+  await expect(bar).not.toContainText(/请联系管理员|回首页|下面是上一轮的结果/u);
+  await page.goto(`/review/${theirs.id}`);
+  await expect(page.locator(".ant-alert-warning .ant-alert-title")).toHaveText("稿件超过 1 页");
+  await expect(page.locator(".ant-alert-warning")).not.toContainText(/请联系管理员|回首页/u);
+  await expect(page.getByRole("button", { name: REVIEW_COPY.reupload })).toHaveCount(0);
+});

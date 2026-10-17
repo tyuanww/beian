@@ -124,6 +124,15 @@ describe("复核（对红）失败且没有剩余条目", () => {
     }
   });
 
+  it("复核超页、没有剩余条目（Q9）：自己的单有按钮拼「，请改成 1 页后重新上传这一单」，别人的单、viewer 只有前半句", () => {
+    const over = (owner: string) => ({ ...noHits(owner), job_error: "稿件超过 1 页", job_error_code: "page_over" }) as TaskDetail;
+    const copyFor = (t: TaskDetail, v: ReuploadViewer) => reviewErrorCopy(String(t.job_error), t.job_error_code, undefined, canReuploadFailed(t, [], v));
+    assert.equal(copyFor(over("ou_me"), reviewer), "稿件超过 1 页，请改成 1 页后重新上传这一单");
+    assert.equal(copyFor(over("ou_other"), admin), "稿件超过 1 页，请改成 1 页后重新上传这一单");
+    assert.equal(copyFor(over("ou_other"), reviewer), "稿件超过 1 页");
+    assert.equal(copyFor(over("ou_me"), viewer), "稿件超过 1 页");
+  });
+
   it("复核认字失败、带上一轮条目：仍显示红条「复核出了问题…」", () => {
     const t = task({ ...BARS[0].task, job_error: "认字组件没装上，没有结果", job_error_code: "ocr_failed" });
     const copyFor = (v: ReuploadViewer) => reviewErrorCopy(String(t.job_error), t.job_error_code, "rework", canReuploadFailed(t, reviewPageHits(t, false), v));

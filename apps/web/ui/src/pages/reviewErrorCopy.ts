@@ -31,11 +31,12 @@ export type FailedWithHitsKind = "rework" | "compare";
  * 所以「下面是上一轮的结果」只会出现在真有上一轮条目的单上。
  */
 export function reviewErrorCopy(raw: string, code?: string, failedWithHits?: FailedWithHitsKind, canReupload = false): string {
-  // 超页（按码）：带上一轮条目的（复核或检查中断都一样），或这条有重新上传按钮，用黄条定稿文案。
-  if (isPageOver(code) && (failedWithHits || canReupload)) return canReupload ? REVIEW_COPY.reworkPageOver : REVIEW_COPY.reworkPageOverReadOnly;
+  // 超页（按码）带上一轮条目的（复核或检查中断都一样）：黄条定稿文案，后半句跟着按钮。
+  if (isPageOver(code) && failedWithHits) return canReupload ? REVIEW_COPY.reworkPageOver : REVIEW_COPY.reworkPageOverReadOnly;
   if (failedWithHits === "rework") return canReupload ? REVIEW_COPY.reworkFailed : REVIEW_COPY.reworkFailedReadOnly;
   if (failedWithHits === "compare") return canReupload ? REVIEW_COPY.compareFailedWithHits : REVIEW_COPY.compareFailedWithHitsReadOnly;
-  if (isPageOver(code)) return REVIEW_COPY.pageOver;
+  // 超页没有上一轮条目：服务端原文只有前半句，有按钮才拼「，请改成 N 页后重新上传这一单」（Q9）；不写「下面是上一轮的结果」。
+  if (isPageOver(code)) return canReupload ? REVIEW_COPY.pageOverReupload : REVIEW_COPY.pageOver;
   const byCode = code ? JOB_CODE_COPY[code as JobErrorCode] : undefined;
   if (byCode) return canReupload ? byCode.reupload : byCode.readOnly;
   return customerCopy(String(raw || ""));

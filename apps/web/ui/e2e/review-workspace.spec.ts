@@ -925,7 +925,9 @@ test("失败单：顶部不显示结论进度，只显示失败原因", async ({
   task.hits = [];
   syntheticApi.tasks.push(task);
   await page.goto(`/review/${task.id}`);
-  await expect(page.locator(".ant-alert").filter({ hasText: "稿件超过 1 页，暂不支持核对，请联系管理员" })).toBeVisible();
+  // 服务端旧整句也不显示：按 page_over 码出前端句（Q9）。
+  await expect(page.locator(".ant-alert-warning .ant-alert-title")).toHaveText("稿件超过 1 页");
+  await expect(page.locator(".ant-alert-warning")).not.toContainText("请联系管理员");
   await expect(page.getByTestId("review-posn")).toHaveCount(0);
   await expect(page.getByText("全部已下结论")).toHaveCount(0);
   await expect(page.locator(".review-th").first()).toContainText("P1");

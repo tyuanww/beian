@@ -8,8 +8,10 @@ describe("reviewer-visible labels", () => {
     assert.equal(REVIEW_COPY.heldUnread, "认字存疑");
     assert.equal(REVIEW_COPY.spotTitle, "对照卡");
     assert.equal(REVIEW_COPY.ocrFailed, "认字出了问题，请联系管理员");
-    assert.equal(REVIEW_COPY.pageOver, "稿件超过 1 页，暂不支持核对，请联系管理员");
-    assert.doesNotMatch(REVIEW_COPY.pageOver, /拆分/u);
+    assert.equal(REVIEW_COPY.pageOver, "稿件超过 1 页");
+    assert.equal(REVIEW_COPY.pageOverReupload, "稿件超过 1 页，请改成 1 页后重新上传这一单");
+    assert.doesNotMatch(REVIEW_COPY.pageOver, /拆分|请联系管理员|回首页/u);
+    assert.doesNotMatch(REVIEW_COPY.pageOverReupload, /拆分|请联系管理员|回首页/u);
   });
 });
 
@@ -52,6 +54,18 @@ describe("reviewErrorCopy", () => {
     assert.doesNotMatch(REVIEW_COPY.reworkPageOver, /请联系管理员/u);
     assert.equal(reviewErrorCopy("这一单页数超过可核对页数", "page_over"), REVIEW_COPY.pageOver);
     assert.equal(reviewErrorType("page_over"), "warning");
+  });
+
+  it("超页没有上一轮条目（Q9）：服务端前半句原样不拼，前端按有没有按钮选句；页数读 REVIEW_PAGE_LIMIT", () => {
+    for (const raw of ["稿件超过 1 页", "稿件超过 1 页，暂不支持核对，请联系管理员", "这一单页数超过可核对页数", ""]) {
+      assert.equal(reviewErrorCopy(raw, "page_over", undefined, true), "稿件超过 1 页，请改成 1 页后重新上传这一单", raw);
+      assert.equal(reviewErrorCopy(raw, "page_over", undefined, false), "稿件超过 1 页", raw);
+      assert.doesNotMatch(reviewErrorCopy(raw, "page_over", undefined, true), /下面是上一轮的结果|请联系管理员/u, raw);
+    }
+    assert.equal(reviewErrorType("page_over"), "warning");
+    // 页数常量：两句都从同一个上限拼。
+    const n = /稿件超过 (\d+) 页/u.exec(REVIEW_COPY.pageOver)?.[1];
+    assert.equal(REVIEW_COPY.pageOverReupload, `稿件超过 ${n} 页，请改成 ${n} 页后重新上传这一单`);
   });
 
   it("an interrupted compare that kept the last round's hits gets its own sentence", () => {
