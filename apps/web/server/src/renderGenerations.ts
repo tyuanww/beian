@@ -390,9 +390,14 @@ function isGenerationId(id: string): boolean {
   return id === G0_LEGACY_ORIGINAL_ID || GEN_ID_RE.test(id);
 }
 
-/** 飞书 open_id / union_id / chat id 一类账号 id，不是显示名。 */
+/**
+ * 飞书账号 id，不是显示名：open_id `ou_`、union_id `on_`、chat_id `oc_` 后接 20–64 位小写字母数字且带数字；
+ * app_id `cli_` 后接 16 位。短名或纯字母（如 `oc_designer`）当显示名，不误杀。
+ */
 export function isRenderActorAccountId(value: string): boolean {
-  return /^(ou|on|oc|cli)_[0-9a-z]{6,}$/i.test(value.trim());
+  const v = value.trim();
+  if (/^cli_[0-9a-z]{16}$/.test(v)) return true;
+  return /^(ou|on|oc)_[0-9a-z]{20,64}$/.test(v) && /\d/.test(v.slice(3));
 }
 
 function looksLikePath(id: string): boolean {

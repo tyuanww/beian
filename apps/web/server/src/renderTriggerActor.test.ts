@@ -24,6 +24,6 @@ describe("renderTriggerActorLabel", () => {
   });
   it("never an account id", () => {
     assert.equal(renderTriggerActorLabel({ ...base, actor_name: "ou_trigger01" }), null);
-    assert.equal(renderTriggerActorLabel({ ...base, actor_name: "ou_0123456789abcdef" }), null);
+    assert.equal(renderTriggerActorLabel({ ...base, actor_name: "ou_7d8a6e6df7621556ce0d21922b676706" }), null);
   });
 });
