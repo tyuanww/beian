@@ -37,7 +37,7 @@ describe("reviewErrorCopy", () => {
   });
 
   it("an interrupted compare that kept the last round's hits gets its own sentence", () => {
-    assert.equal(REVIEW_COPY.compareFailedWithHits, "检查中断了，下面是上一轮的结果，请联系管理员");
+    assert.equal(REVIEW_COPY.compareFailedWithHits, "检查中断了，下面是上一轮的结果，可以重新上传这一单");
     assert.equal(reviewErrorCopy("对照中断", undefined, "compare"), REVIEW_COPY.compareFailedWithHits);
     assert.equal(reviewErrorCopy("这一单页数超过可核对页数", "page_over", "compare"), REVIEW_COPY.pageOver);
     assert.equal(reviewErrorCopy("对照中断", undefined, "rework"), REVIEW_COPY.reworkFailed);

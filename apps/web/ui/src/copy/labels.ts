@@ -230,8 +230,8 @@ export const REVIEW_COPY = {
   pageOver: "稿件超过 1 页，暂不支持核对，请联系管理员",
   /** 复核失败带上一轮条目的红条 / 黄条（老板 2026-10-17 复核失败按 B）：结尾引导重新上传，条里有「重新上传这一单」按钮。 */
   reworkFailed: "复核出了问题，下面是上一轮的结果，可以重新上传这一单",
-  /** 检查中断带上一轮条目：服务端 /rework 现在回 400，先不给重新上传、保持原句；等服务端放宽 isReworkableTask 后再改。 */
-  compareFailedWithHits: "检查中断了，下面是上一轮的结果，请联系管理员",
+  /** 检查中断带上一轮条目（产品 10/17 方案 A，服务端已放行 /rework）：条里同样有「重新上传这一单」。 */
+  compareFailedWithHits: "检查中断了，下面是上一轮的结果，可以重新上传这一单",
   /** 黄条（复核超页，按 job_error_code==="page_over"，不拼服务端 job_error 原文）：产品哥 2026-10-17 定稿。 */
   reworkPageOver: `稿件超过 ${REVIEW_PAGE_LIMIT} 页，这次复核没做，下面是上一轮的结果。请改成 ${REVIEW_PAGE_LIMIT} 页后重新上传这一单`,
   heldNote: "备注没对上",
