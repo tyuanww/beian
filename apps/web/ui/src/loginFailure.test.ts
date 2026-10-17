@@ -27,9 +27,9 @@ describe("loginFailure 按 feishu_error 码定标题", () => {
     }
   });
 
-  it("failed：飞书授权未完成，原因里碰巧有「过期 / 取消 / 不允许」也不改标题", () => {
+  it("failed：暂时登录不了，原因里碰巧有「过期 / 取消 / 不允许」也不改标题", () => {
     for (const hint of ["飞书换票失败", "token 已过期", "请求被取消", "不允许的 redirect_uri", "账号目录中有重复 open_id，请联系管理员。"]) {
-      assert.equal(loginFailure("failed", hint).title, "飞书授权未完成", hint);
+      assert.equal(loginFailure("failed", hint).title, "暂时登录不了", hint);
     }
   });
 
@@ -40,22 +40,22 @@ describe("loginFailure 按 feishu_error 码定标题", () => {
     assert.equal(loginFailure("failed", "").message, "飞书授权失败，请再试一次。");
   });
 
-  it("未知码：飞书授权未完成，原因里有「伸美」也不当 forbidden", () => {
+  it("未知码：暂时登录不了，原因里有「伸美」也不当 forbidden", () => {
     const f = loginFailure("teapot", "只允许伸美公司的飞书号进入。");
-    assert.deepEqual(f, { code: null, title: "飞书授权未完成", message: "只允许伸美公司的飞书号进入。" });
+    assert.deepEqual(f, { code: null, title: "暂时登录不了", message: "只允许伸美公司的飞书号进入。" });
     assert.equal(loginFailure("teapot", "").message, "飞书授权未完成。");
   });
 
-  it("没有码：飞书授权未完成", () => {
+  it("没有码：暂时登录不了，兜底原因不变", () => {
     for (const raw of ["", null, undefined]) {
-      assert.deepEqual(loginFailure(raw, ""), { code: null, title: "飞书授权未完成", message: "飞书授权未完成。" });
+      assert.deepEqual(loginFailure(raw, ""), { code: null, title: "暂时登录不了", message: "飞书授权未完成。" });
     }
   });
 
   it("原型链上的名字不算码，大小写不同也不算", () => {
     for (const raw of ["toString", "constructor", "__proto__", "hasOwnProperty", "Forbidden", " denied"]) {
       assert.equal(feishuErrorCode(raw), null, raw);
-      assert.equal(loginFailure(raw, "").title, "飞书授权未完成", raw);
+      assert.equal(loginFailure(raw, "").title, "暂时登录不了", raw);
     }
   });
 });

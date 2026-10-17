@@ -33,6 +33,7 @@ export const WAIT_TITLE: Record<WaitKind, string> = {
  * 飞书登录失败页（拒绝页）的标题与兜底原因；key 是服务端回跳 URL 里的 `feishu_error` 码，
  * 按码穷尽（服务端加码时这里不补会类型报错）。标题只按码选，不按原因文案选；
  * 原因优先显示服务端写的 `wb_login_hint`，cookie 没了才用 fallback。
+ * 标题产品哥 2026-10-17 定稿：failed 与未知码/无码都是「暂时登录不了」，见 DESIGN.md「登录」。
  */
 export const LOGIN_FAILURE_COPY: Record<FeishuErrorCode, { title: string; fallback: string }> = {
   /** 在飞书授权页点了拒绝。 */
@@ -42,11 +43,11 @@ export const LOGIN_FAILURE_COPY: Record<FeishuErrorCode, { title: string; fallba
   /** 403：非伸美企业、飞书身份无效、飞书号不在账号目录、账号已停用。 */
   forbidden: { title: "进不了这间审稿室", fallback: "只允许伸美公司的飞书号进入。" },
   /** 其余：换票失败、网络错误、账号目录故障（503：目录不可读、重复 open_id、角色无效）。 */
-  failed: { title: "飞书授权未完成", fallback: "飞书授权失败，请再试一次。" },
+  failed: { title: "暂时登录不了", fallback: "飞书授权失败，请再试一次。" },
 };
 
 /** 回跳没带码或码不认识（服务端新码先于前端上线）时的兜底。 */
-export const LOGIN_FAILURE_UNKNOWN = { title: "飞书授权未完成", fallback: "飞书授权未完成。" } as const;
+export const LOGIN_FAILURE_UNKNOWN = { title: "暂时登录不了", fallback: "飞书授权未完成。" } as const;
 
 /** 审稿单状态（key 是后端 status 值）。 */
 export const REVIEW_STATUS_LABEL = {

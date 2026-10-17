@@ -31,16 +31,18 @@ test("账号不在账号目录（forbidden）：标题是「进不了这间审�
   if (process.env.LOGIN_FAILURE_SHOT) await page.screenshot({ path: process.env.LOGIN_FAILURE_SHOT, fullPage: true });
 });
 
-test("failed 码：原因里有「过期」也不改成「登录已过期」", async ({ page }) => {
+test("failed 码：标题「暂时登录不了」，原因里有「过期」也不改成「登录已过期」", async ({ page }) => {
   await loggedOut(page, "token 已过期");
   await page.goto("/?feishu_error=failed");
-  await expect(page.locator(".auth-result-title")).toHaveText("飞书授权未完成");
+  await expect(page.locator(".auth-result-title")).toHaveText("暂时登录不了");
   await expect(page.locator(".auth-result")).toContainText("token 已过期");
+  await expect(page.getByRole("link", { name: "重新飞书授权" })).toBeVisible();
+  if (process.env.LOGIN_FAILED_SHOT) await page.screenshot({ path: process.env.LOGIN_FAILED_SHOT, fullPage: true });
 });
 
-test("未知码且原因 cookie 已过期：兜底「飞书授权未完成」", async ({ page }) => {
+test("未知码且原因 cookie 已过期：标题兜底「暂时登录不了」，原因兜底仍是「飞书授权未完成。」", async ({ page }) => {
   await loggedOut(page, null);
   await page.goto("/?feishu_error=teapot");
-  await expect(page.locator(".auth-result-title")).toHaveText("飞书授权未完成");
+  await expect(page.locator(".auth-result-title")).toHaveText("暂时登录不了");
   await expect(page.locator(".auth-result")).toContainText("飞书授权未完成。");
 });
