@@ -1,4 +1,3 @@
-import { skipPackSheetField } from "./sheetSkip.js";
 import { activeHits, isHitDecision, isReviewableStatus, isValidHitReviewState, pendingWord, type Hit, type Task } from "./tasks.js";
 import { hitStatusCode, REVIEW_CODE_STATUS, reviewDetail, type CompleteCode, type PendingItem, type ReviewParams } from "./reviewCodes.js";
 
@@ -47,7 +46,8 @@ export function completeGate(task: Task, orderHeldConfirm: unknown): CompleteGat
   if (task.job_kind === "rework" && task.job_status === "failed") {
     return reject("complete_rework_failed");
   }
-  const hits = activeHits(task).filter((h) => !skipPackSheetField(h.field));
+  // 工艺说明等不进机审的字段由 activeHits 滤掉，这里不再重复 filter（加码 Q6）。
+  const hits = activeHits(task);
   const invalid = hits.filter((h) => !isValidHitReviewState(h));
   if (invalid.length) {
     return reject("complete_hits_invalid", { count: invalid.length });
