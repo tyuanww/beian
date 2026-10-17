@@ -300,6 +300,13 @@ export const SIGN_RETURN_RULES: readonly SignReturnRule[] = [
     expect: PENDING,
     code: "complete_hits_pending",
   },
+  // —— 加码 Q2（前后端共用 reviewIssue.ts）：缺空格没下结论一律要结论 ——
+  {
+    name: "缺空格没有 decision、也没有存疑字段",
+    input: reviewer([{ status: "缺空格" }]),
+    expect: PENDING,
+    code: "complete_hits_pending",
+  },
   {
     name: "认字存疑：coverage.miss 只有核算说明（score=…）也算存疑，两边都不再滤文字",
     input: reviewer([{ status: "一致", coverageMiss: ["score=0.42 覆盖偏低"] }]),
@@ -308,14 +315,5 @@ export const SIGN_RETURN_RULES: readonly SignReturnRule[] = [
   },
 ];
 
-export const SIGN_RETURN_DISPUTED: readonly SignReturnDisputed[] = [
-  {
-    // 加码 Q2：服务端已改（reviewIssue.ts）；前端 isReviewIssue 由前端哥在同一 PR 跟上后，挪回主表：
-    // expect PENDING，code "complete_hits_pending"。
-    name: "缺空格没有 decision、也没有存疑字段",
-    input: reviewer([{ status: "缺空格" }]),
-    ui: SIGN_ONLY,
-    server: { sign: false, ret: false },
-    why: "加码 Q2：缺空格没下结论一律要结论。服务端已拦（仍有 1 条缺空格未处理）；前端还按核对要点有无内容判断，待前端对齐",
-  },
-];
+/** 前后端仍不一致的输入：目前没有（加码 Q2「缺空格没下结论」一行前端已对齐，挪回主表）。 */
+export const SIGN_RETURN_DISPUTED: readonly SignReturnDisputed[] = [];

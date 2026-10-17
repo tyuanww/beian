@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
@@ -7,12 +7,14 @@ import type { FieldHit, TaskDetail } from "../api";
 import { REVIEW_COPY } from "../copy/labels";
 import { reviewGate, reviewPageHits } from "./reviewActions";
 import { partitionReviewHits } from "./reviewEvidence";
+import { isReviewIssue as sharedIsReviewIssue } from "../../../server/src/reviewIssue.ts";
 
 /** 走 `partitionReviewHits`（内部用 `isReviewIssue`）：前端是否把这一条当疑点。 */
 const isReviewIssue = (hit: FieldHit) => partitionReviewHits([hit]).issues.length === 1;
 
 /**
- * 加码 Q2 服务端已跟上：缺空格没结论一律要结论。原「差异一」已对齐；仍钉死「无存疑字段的缺空格」两侧分歧，前端哥对齐 isReviewIssue 后改掉。
+ * 锁住已对齐：前端 `isReviewIssue`（reviewEvidence.ts）与服务端 `/complete` 的待确认口径用同一份共用 `server/src/reviewIssue.ts`（加码 §6）。
+ * 原「差异一」（缺空格只靠核对要点有内容）、「仍有差异」（缺空格无结论无存疑字段）已对齐；「差异二」（状态正则 /不清|误/）前端已删。
  */
 const dataDir = mkdtempSync(join(tmpdir(), "beian-ui-issue-gap-"));
 process.once("exit", () => rmSync(dataDir, { recursive: true, force: true }));
@@ -29,7 +31,7 @@ function bothSides(hit: FieldHit) {
   return { ui, server: gate.ok ? null : gate.message };
 }
 
-describe("isReviewIssue 与服务端 hitNeedsDecision（加码 Q2 后）", () => {
+describe("isReviewIssue 与服务端 /complete 已对齐（共用 reviewIssue.ts）", () => {
   it("已对齐：缺空格没标 pending、只靠核对要点有内容——两边都拦（服务端写「仍有 1 条缺空格未处理」）", () => {
     const hit: FieldHit = { id: "h0", field: "中文品名", status: "缺空格", evidence: "稿件「香柠檬精油」少一个空格" };
     assert.equal(isReviewIssue(hit), true);
@@ -41,20 +43,35 @@ describe("isReviewIssue 与服务端 hitNeedsDecision（加码 Q2 后）", () =>
     assert.equal(ui.hint, REVIEW_COPY.pendingUnresolved([{ word: "缺空格", count: 1 }]));
   });
 
-  it("仍有差异：缺空格无 decision、也无存疑字段——服务端拦、前端不算待确认（见 SIGN_RETURN_DISPUTED；前端哥对齐 isReviewIssue 后删）", () => {
+  it("已对齐：缺空格无 decision、也无存疑字段——两边都拦（加码 Q2，原 SIGN_RETURN_DISPUTED 唯一一行已挪回主表）", () => {
     const hit: FieldHit = { id: "h0", field: "中文品名", status: "缺空格" };
-    assert.equal(isReviewIssue(hit), false, "前端仍看核对要点有无内容");
+    assert.equal(isReviewIssue(hit), true);
     const { ui, server } = bothSides(hit);
     assert.equal(server, "仍有 1 条缺空格未处理");
-    assert.equal(ui.canSign, true);
-    assert.equal(ui.canReject, false);
+    assert.equal(ui.canSign, false);
+    assert.equal(ui.canReject, true);
+    assert.equal(ui.hint, server);
   });
 
-  it("正则 /不清|误/ 在已知状态里一个都不命中，只会撞上未知状态——两边都按状态异常拦，不产生实际分歧", () => {
+  it("差异二已对齐：前端 isReviewIssue 不再有状态文字正则，只认共用 reviewIssue.ts 的状态集合", () => {
+    const src = readFileSync(new URL("./reviewEvidence.ts", import.meta.url), "utf8");
+    assert.match(src, /from "\.\.\/\.\.\/\.\.\/server\/src\/reviewIssue\.ts"/u, "isReviewIssue 改 import 共用文件");
+    assert.doesNotMatch(src, /不清|\/\[\^\/\]\*误/u, "不再有 /不清|误/");
+    assert.doesNotMatch(src, /\.test\(String\(hit\.status/u, "不再对 hit.status 做正则");
+    assert.doesNotMatch(src, /doubtLines\(hit\)\.length/u, "不再用核对要点有无内容兜底");
+    // 已知状态 × 各种结论 × 有无存疑字段：前端与共用规则逐例相同。
     for (const status of KNOWN_STATUSES) {
-      assert.equal(isValidHitReviewState({ status }), true, `${status} 服务端认得`);
-      assert.doesNotMatch(status, /不清|误/u, status);
+      for (const decision of [undefined, "pending", "confirm", "issue", "ignore"]) {
+        for (const extra of [{}, { coverage: { miss: ["CAPSULE"] } }, { evidence: "稿件少一个空格" }, { doubt_bucket: "ocr_graphic" }]) {
+          const hit = { id: "h0", field: "中文品名", status, decision, ...extra } as FieldHit;
+          assert.equal(isReviewIssue(hit), sharedIsReviewIssue(hit) && status !== "待人工确认", `${status} ${decision} ${JSON.stringify(extra)}`);
+        }
+      }
     }
+  });
+
+  it("未知状态（如「看不清」）两边都按状态异常拦", () => {
+    for (const status of KNOWN_STATUSES) assert.equal(isValidHitReviewState({ status }), true, `${status} 服务端认得`);
     const { ui, server } = bothSides({ id: "h0", field: "中文品名", status: "看不清" });
     assert.equal(server, REVIEW_COPY.invalidHitStatusDetail(1));
     assert.equal(ui.title, server);

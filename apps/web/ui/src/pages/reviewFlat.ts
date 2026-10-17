@@ -5,8 +5,8 @@
 import type { Decision, FieldHit, TaskDetail, TaskPage } from "../api";
 import { REVIEW_COPY } from "../copy/labels";
 import { isPendingDecision } from "./reviewNav";
-import { hasReadingDoubt } from "../../../server/src/readingDoubt.ts";
-import { blockingStatusWord, hasInvalidHitStatus, invalidReviewStateCount, partitionReviewHits } from "./reviewEvidence";
+import { pendingWord } from "../../../server/src/reviewIssue.ts";
+import { hasInvalidHitStatus, invalidReviewStateCount, partitionReviewHits } from "./reviewEvidence";
 import { bytesTooLarge, uploadTooLargeText } from "../uploadLimit";
 import { HIT_STATUS_CODES, REVIEW_CODES, type PendingItem, type ReviewCode, type ReviewParams } from "../../../server/src/reviewCodes.ts";
 
@@ -62,9 +62,12 @@ export function openHeldAfterPending(previousPending: number, pending: number, h
   return previousPending > 0 && pending === 0 && held > 0;
 }
 
-/** 一条待确认在拦截文案里填的词：按状态要结论的写状态，只因认字存疑要结论的写「认字存疑」，其余写原状态。 */
+/**
+ * 一条待确认在拦截文案里填的词：同服务端，用共用 `reviewIssue.ts` 的 `pendingWord`（按状态要结论的写状态，
+ * 只因认字存疑的写「认字存疑」，缺空格没结论写「缺空格」）；共用规则不给词的（decision 非法值等）写原状态。
+ */
 function pendingWordFor(hit: FieldHit): string {
-  return blockingStatusWord(hit) ?? (hasReadingDoubt(hit) ? REVIEW_COPY.readingDoubtWord : String(hit.status || "未决"));
+  return pendingWord(hit) ?? String(hit.status || "未决");
 }
 
 /**
