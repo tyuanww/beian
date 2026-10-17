@@ -13,7 +13,7 @@
  */
 
 /** `/complete`（签字 / 退回同一入口）被拒时的码。 */
-export const COMPLETE_CODES = [
+const COMPLETE_CODES = [
   "complete_job_running",
   "complete_status_not_reviewable",
   "complete_rework_failed",
@@ -25,16 +25,16 @@ export const COMPLETE_CODES = [
 export type CompleteCode = (typeof COMPLETE_CODES)[number];
 
 /** `/decision` 被拒时的码。 */
-export const DECISION_CODES = [
+const DECISION_CODES = [
   "decision_status_not_reviewable",
   "decision_value_invalid",
   "decision_hit_not_found",
   "decision_held_confirm_forbidden",
 ] as const;
-export type DecisionCode = (typeof DECISION_CODES)[number];
+type DecisionCode = (typeof DECISION_CODES)[number];
 
 /** `/rework` 被拒时的码。 */
-export const REWORK_CODES = [
+const REWORK_CODES = [
   "rework_job_running",
   "rework_status_not_allowed",
   "rework_pdf_missing",
@@ -42,7 +42,7 @@ export const REWORK_CODES = [
   "rework_pdf_too_large",
   "rework_verbatim_not_ready",
 ] as const;
-export type ReworkCode = (typeof REWORK_CODES)[number];
+type ReworkCode = (typeof REWORK_CODES)[number];
 
 export type ReviewCode = CompleteCode | DecisionCode | ReworkCode;
 export const REVIEW_CODES: readonly ReviewCode[] = [...COMPLETE_CODES, ...DECISION_CODES, ...REWORK_CODES];
@@ -128,7 +128,7 @@ export type PendingItem =
 
 export type ReviewParams = { count?: number; items?: PendingItem[] };
 
-export function pendingItemWord(item: PendingItem): string {
+function pendingItemWord(item: PendingItem): string {
   if (item.kind === "status") return HIT_STATUS_CODES[item.status];
   return item.kind === "reading_doubt" ? "认字存疑" : "待人工确认";
 }
