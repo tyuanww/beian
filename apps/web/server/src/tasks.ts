@@ -25,6 +25,7 @@ export type Hit = {
 
 export type JobStatus = "queued" | "running" | "succeeded" | "failed";
 export type JobKind = "compare" | "rework" | "mockup";
+export type JobErrorCode = "page_over";
 
 export type Viewer = {
   id: string;
@@ -87,6 +88,8 @@ export type Task = {
   job_stage_label?: string;
   job_eta_s?: number;
   job_error?: string;
+  /** 机读错误码，文案可改、判断不变。目前只有超页 `page_over`。 */
+  job_error_code?: JobErrorCode;
   job_started_at?: string;
   job_finished_at?: string;
   job_pid?: number;
@@ -331,6 +334,7 @@ export function listTasks(q: string, viewer: Viewer): Record<string, unknown>[] 
     job_stage_label: t.job_stage_label,
     job_eta_s: t.job_eta_s,
     job_error: t.job_error,
+    job_error_code: t.job_error_code,
     job_started_at: t.job_started_at,
     job_finished_at: t.job_finished_at,
   }));

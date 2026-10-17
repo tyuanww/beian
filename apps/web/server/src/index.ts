@@ -1363,6 +1363,7 @@ app.post(
     current.job_kind = "rework";
     current.job_status = "queued";
     current.job_error = undefined;
+    delete current.job_error_code;
     current.reclaim_count = 0;
     delete current.job_pid;
     delete current.job_finished_at;

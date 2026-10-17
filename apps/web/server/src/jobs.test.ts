@@ -8,7 +8,7 @@ import { makeTestTempDir } from "./testTemp.js";
 process.env.VITEST = "1";
 process.env.WB_DATA_DIR = makeTestTempDir("beian-jobs-");
 
-const { deleteTask, loadTask, replaceFile, saveTask, setReplaceFileHooksForTest } = await import("./tasks.js");
+const { deleteTask, listTasks, loadTask, replaceFile, saveTask, setReplaceFileHooksForTest } = await import("./tasks.js");
 const {
   decorateQueueAhead,
   enqueue,
@@ -1811,6 +1811,86 @@ describe("jobs dispatcher", () => {
     assert.equal(page?.name, "page_01.png");
     assert.equal(page?.page, 1);
     assert.equal(page?.url, `/api/tasks/${id}/pages/page_01.png`);
+  });
+
+  it("page_over CLI failure carries job_error_code and keeps the wording", async () => {
+    const id = tid(210);
+    setJobsTestHooks({
+      runCompare: async () => ({
+        code: 2,
+        stdout: "",
+        stderr: JSON.stringify({
+          ok: false,
+          error: "稿件超过 1 页，暂不支持核对，请联系管理员",
+          code: "page_over_rendered",
+          cause: "multi-page pdf",
+          fix: "-",
+        }) + "\n",
+        timedOut: false,
+      }),
+    });
+    queuedCompare(id, "2026-08-24T01:00:30.000Z");
+    enqueue({ kind: "compare", id });
+    for (let i = 0; i < 50 && loadTask(id).job_status !== "failed"; i++) {
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    const t = loadTask(id);
+    assert.equal(t.status, "compare_failed");
+    assert.equal(t.job_error, "稿件超过 1 页，暂不支持核对，请联系管理员");
+    assert.equal(t.job_error_code, "page_over");
+    const pub = publicTask(t, { id: "ou_ziye", name: "籽烨", admin: false });
+    assert.equal(pub.job_error_code, "page_over");
+    assert.equal("job_error_detail" in pub, false);
+    const row = listTasks("", { id: "ou_ziye", name: "籽烨", admin: true }).find((r) => r.id === id);
+    assert.equal(row?.job_error_code, "page_over");
+    assert.equal(JSON.stringify(row).includes("job_error_detail"), false);
+  });
+
+  it("a successful rerun clears a stale job_error_code", async () => {
+    const id = tid(212);
+    setJobsTestHooks({
+      runCompare: async () => ({
+        code: 0,
+        stdout: JSON.stringify({ status: "pending_review", hits: [{ id: "h1" }] }) + "\n",
+        stderr: "",
+        timedOut: false,
+      }),
+    });
+    queuedCompare(id, "2026-08-24T01:00:50.000Z");
+    const stale = loadTask(id);
+    stale.job_error_code = "page_over";
+    saveTask(stale);
+    enqueue({ kind: "compare", id });
+    for (let i = 0; i < 50 && loadTask(id).status !== "pending_review"; i++) {
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    const t = loadTask(id);
+    assert.equal(t.status, "pending_review");
+    assert.equal(t.job_error_code, undefined);
+    assert.equal("job_error_detail" in t, false);
+  });
+
+  it("other CLI failures carry no job_error_code and a rerun clears a stale one", async () => {
+    const id = tid(211);
+    setJobsTestHooks({
+      runCompare: async () => ({
+        code: 2,
+        stdout: "",
+        stderr: JSON.stringify({ ok: false, error: "这一单认字超出内存，没有结果", code: "oom", cause: "rss limit" }) + "\n",
+        timedOut: false,
+      }),
+    });
+    queuedCompare(id, "2026-08-24T01:00:40.000Z");
+    const stale = loadTask(id);
+    stale.job_error_code = "page_over";
+    saveTask(stale);
+    enqueue({ kind: "compare", id });
+    for (let i = 0; i < 50 && loadTask(id).job_status !== "failed"; i++) {
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    const t = loadTask(id);
+    assert.equal(t.job_error, "这一单认字超出内存，没有结果");
+    assert.equal(t.job_error_code, undefined);
   });
 
   it("mockup stderr JSON error is job_error not 打样中断", async () => {
