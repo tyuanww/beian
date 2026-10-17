@@ -92,6 +92,32 @@ describe("复核（对红）失败且没有剩余条目", () => {
     assert.deepEqual([b.sign, b.reject], ["hidden", "hidden"]);
   });
 
+  it("认字失败、没有剩余条目：自己的单（rework 不要求有条目）有按钮，带「再不行请联系管理员」退路；别人的单、viewer 是原句", () => {
+    const ocr = (owner: string | null = "ou_me") => ({ ...noHits(owner), job_error: "认字组件没装上，没有结果" }) as TaskDetail;
+    const copyFor = (t: TaskDetail, v: ReuploadViewer) => reviewErrorCopy(String(t.job_error), t.job_error_code, undefined, canReuploadFailed(t, [], v));
+    assert.equal(canReuploadFailed(ocr(), [], reviewer), true);
+    assert.equal(copyFor(ocr(), reviewer), "认字出了问题，可以重新上传这一单，再不行请联系管理员");
+    assert.equal(copyFor(ocr("ou_other"), admin), REVIEW_COPY.ocrFailedReupload, "管理员按钮在，句子跟着按钮");
+    assert.equal(copyFor(ocr("ou_other"), reviewer), "认字出了问题，请联系管理员");
+    assert.equal(copyFor(ocr(), viewer), "认字出了问题，请联系管理员");
+  });
+
+  it("首轮认字失败、没有上一轮结果：原句「认字出了问题，请联系管理员」，不出「下面是上一轮的结果」", () => {
+    const first = { ...noHits(), status: "compare_failed", job_kind: "compare", job_error: "认字组件没装上，没有结果" } as TaskDetail;
+    const hits = reviewPageHits(first, false);
+    assert.equal(hits.length, 0);
+    const text = reviewErrorCopy(String(first.job_error), first.job_error_code, undefined, canReuploadFailed(first, hits, reviewer));
+    assert.equal(text, "认字出了问题，请联系管理员");
+    assert.doesNotMatch(text, /下面是上一轮的结果/u);
+  });
+
+  it("复核认字失败、带上一轮条目：仍显示红条「复核出了问题…」", () => {
+    const t = task({ ...BARS[0].task, job_error: "认字组件没装上，没有结果" });
+    const copyFor = (v: ReuploadViewer) => reviewErrorCopy(String(t.job_error), t.job_error_code, "rework", canReuploadFailed(t, reviewPageHits(t, false), v));
+    assert.equal(copyFor(reviewer), "复核出了问题，下面是上一轮的结果，可以重新上传这一单");
+    assert.equal(copyFor(viewer), "复核出了问题，下面是上一轮的结果");
+  });
+
   it("首次检查失败、没有条目：不走 /rework，不给按钮", () => {
     const first = { ...noHits(), status: "compare_failed", job_kind: "compare" } as TaskDetail;
     assert.equal(canReuploadFailed(first, [], reviewer), false);

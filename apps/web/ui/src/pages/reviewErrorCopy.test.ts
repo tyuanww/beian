@@ -47,22 +47,58 @@ describe("reviewErrorCopy", () => {
     assert.equal(reviewErrorCopy("这一单页数超过可核对页数", "page_over", "compare", false), REVIEW_COPY.reworkPageOverReadOnly);
   });
 
-  it("同一条里有重新上传按钮时，任何分支都不出「请联系管理员」", () => {
+  it("同一条里有重新上传按钮时，除没有剩余条目的认字失败外任何分支都不出「请联系管理员」", () => {
+    // 只对 ocrFailedReupload 这一句放开：产品哥 2026-10-17 定稿，没有剩余条目的认字失败单在重新上传后面特意留
+    // 「再不行请联系管理员」作退路——认字失败重新上传未必能好（可能是认字服务本身的问题），得给审稿员一条找人的路。
+    // 其他分支（复核失败红条含认字失败、检查中断、超页黄条、其他报错）仍锁住：有按钮就不叫人联系管理员。
     const raws = ["认字组件没装上，没有结果", "认字出了问题，请联系管理员", "对照中断", "对照失败", "这一单页数超过可核对页数", ""];
+    const ocrRaws = new Set(["认字组件没装上，没有结果", "认字出了问题，请联系管理员"]);
+    let opened = 0;
     for (const raw of raws) {
       for (const code of [undefined, "page_over"]) {
         for (const kind of [undefined, "rework", "compare"] as const) {
-          assert.doesNotMatch(reviewErrorCopy(raw, code, kind, true), /请联系管理员/u, `${raw} ${code} ${kind}`);
+          const text = reviewErrorCopy(raw, code, kind, true);
+          const label = `${raw} ${code} ${kind}`;
+          // 走到 ocrFailedReupload 的只有：认字原文、没有 page_over 码、没有带上一轮条目（超页码和带条目的失败条优先）。
+          if (ocrRaws.has(raw) && code === undefined && kind === undefined) {
+            opened += 1;
+            assert.equal(text, REVIEW_COPY.ocrFailedReupload, label);
+          } else {
+            assert.notEqual(text, REVIEW_COPY.ocrFailedReupload, label);
+            assert.doesNotMatch(text, /请联系管理员/u, label);
+          }
         }
       }
     }
-    // 没有剩余条目但有按钮（复核失败）：超页走黄条，认字失败换成可重新上传的句子。
+    assert.equal(opened, ocrRaws.size, "放开的只有 ocrFailedReupload 这一句");
+    // 没有剩余条目但有按钮（复核失败）：超页走黄条，认字失败换成带退路的句子。
     assert.equal(reviewErrorCopy("稿件超过 1 页，暂不支持核对，请联系管理员", "page_over", undefined, true), REVIEW_COPY.reworkPageOver);
     assert.equal(reviewErrorCopy("认字组件没装上", undefined, undefined, true), REVIEW_COPY.ocrFailedReupload);
-    assert.equal(REVIEW_COPY.ocrFailedReupload, "认字出了问题，可以重新上传这一单");
     // 没有按钮：原样（首次检查失败、无条目对照失败另有「回首页」）。
     assert.equal(reviewErrorCopy("这一单页数超过可核对页数", "page_over"), REVIEW_COPY.pageOver);
     assert.equal(reviewErrorCopy("认字组件没装上"), REVIEW_COPY.ocrFailed);
+  });
+
+  it("认字失败两句逐字：有按钮带「再不行请联系管理员」退路，没按钮是原句", () => {
+    assert.equal(REVIEW_COPY.ocrFailedReupload, "认字出了问题，可以重新上传这一单，再不行请联系管理员");
+    assert.equal(REVIEW_COPY.ocrFailed, "认字出了问题，请联系管理员");
+    assert.equal(reviewErrorCopy("认字组件没装上，没有结果", undefined, undefined, true), "认字出了问题，可以重新上传这一单，再不行请联系管理员");
+    assert.equal(reviewErrorCopy("认字组件没装上，没有结果", undefined, undefined, false), "认字出了问题，请联系管理员");
+  });
+
+  it("复核认字失败但带上一轮条目：仍是复核失败红条那句，不走认字失败的句子", () => {
+    assert.equal(reviewErrorCopy("认字组件没装上，没有结果", undefined, "rework", true), REVIEW_COPY.reworkFailed);
+    assert.equal(reviewErrorCopy("认字组件没装上，没有结果", undefined, "rework", false), REVIEW_COPY.reworkFailedReadOnly);
+  });
+
+  it("预检失败、首轮认字失败（没有上一轮结果）：原句「认字出了问题，请联系管理员」，不出「下面是上一轮的结果」", () => {
+    // 预检失败：服务端 workers.ts VERBATIM_PROBE_FALLBACK 原句；首轮认字失败：组件 / 服务原文。都没有上一轮条目，也没有按钮。
+    for (const raw of ["认字出了问题，请联系管理员", "认字组件没装上，没有结果", "百度 OCR 超时"]) {
+      const text = reviewErrorCopy(raw, undefined, undefined, false);
+      assert.equal(text, REVIEW_COPY.ocrFailed, raw);
+      assert.doesNotMatch(text, /下面是上一轮的结果/u, raw);
+    }
+    assert.doesNotMatch(REVIEW_COPY.ocrFailedReupload, /下面是上一轮的结果/u, "没有剩余条目：也不写上一轮");
   });
 
   it("leaves other errors to customerCopy", () => {

@@ -15,7 +15,8 @@ export type FailedWithHitsKind = "rework" | "compare";
 
 /**
  * `canReupload`：失败条里有没有「重新上传这一单」按钮（与按钮同一个 `canReuploadFailed` 结果）。
- * 有按钮：句尾写重新上传，且同一条里不出「请联系管理员」；没有按钮：不写重新上传。
+ * 有按钮：句尾写重新上传，且同一条里不出「请联系管理员」——没有剩余条目的认字失败单例外（`ocrFailedReupload`，
+ * 产品哥特意留「再不行请联系管理员」退路）；没有按钮：不写重新上传。
  */
 export function reviewErrorCopy(raw: string, code?: string, failedWithHits?: FailedWithHitsKind, canReupload = false): string {
   // 超页（按码）：带上一轮条目的（复核或检查中断都一样），或这条有重新上传按钮，用黄条定稿文案。

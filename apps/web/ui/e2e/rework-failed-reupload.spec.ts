@@ -186,6 +186,43 @@ test("复核失败且没有剩余条目：显示「检查未完成，暂时没�
   await expect(page.locator("button.review-reject")).toHaveCount(0);
 });
 
+test("复核认字失败、没有剩余条目：自己的单有按钮，句尾留「再不行请联系管理员」退路；别人的单是原句", async ({ page, syntheticApi }) => {
+  await asReviewer(page);
+  const ocr = { status: "pending_review", job_kind: "rework", job_status: "failed", job_error: "认字组件没装上，没有结果", hits: [] };
+  const own = reviewTask("e5969b58ce09");
+  Object.assign(own, ocr, { owner: ME });
+  const others = reviewTask("e5969b58ce0a");
+  Object.assign(others, ocr, { owner: "ou_someone_else" });
+  syntheticApi.tasks.push(own, others);
+  await page.goto(`/review/${own.id}`);
+  // 产品哥定稿：认字失败重新上传未必能好，有按钮时特意留「请联系管理员」作退路（只对这一句放开）。
+  const bar = page.locator(".ant-alert-error").filter({ hasText: REVIEW_COPY.ocrFailedReupload });
+  await expect(bar.locator(".ant-alert-title")).toHaveText("认字出了问题，可以重新上传这一单，再不行请联系管理员");
+  await expect(bar.getByRole("button", { name: REVIEW_COPY.reupload })).toBeVisible();
+  await page.goto(`/review/${others.id}`);
+  await expect(page.locator(".ant-alert-error .ant-alert-title").first()).toHaveText("认字出了问题，请联系管理员");
+  await expect(page.getByRole("button", { name: REVIEW_COPY.reupload })).toHaveCount(0);
+});
+
+test("复核认字失败、带上一轮条目：仍显示复核失败红条「复核出了问题…」", async ({ page, syntheticApi }) => {
+  await asReviewer(page);
+  const task = failedTask({ ...BARS[0], id: "e5969b58ce0c", patch: { ...BARS[0].patch, job_error: "认字组件没装上，没有结果" } }, ME);
+  syntheticApi.tasks.push(task);
+  await page.goto(`/review/${task.id}`);
+  await expect(page.locator(".ant-alert-error .ant-alert-title").first()).toHaveText(REVIEW_COPY.reworkFailed);
+  await expect(page.getByRole("button", { name: REVIEW_COPY.reupload })).toBeVisible();
+});
+
+test("首轮认字失败、没有上一轮结果：页面是原句「认字出了问题，请联系管理员」，不出「下面是上一轮的结果」", async ({ page, syntheticApi }) => {
+  await asReviewer(page);
+  const task = reviewTask("e5969b58ce0b");
+  Object.assign(task, { owner: ME, status: "compare_failed", board: "failed", job_kind: "compare", job_status: "failed", job_error: "认字组件没装上，没有结果", error: "认字组件没装上，没有结果", hits: [] });
+  syntheticApi.tasks.push(task);
+  await page.goto(`/review/${task.id}`);
+  await expect(page.locator(".ant-alert-error .ant-alert-title").first()).toHaveText(REVIEW_COPY.ocrFailed);
+  await expect(page.getByTestId("review-root")).not.toContainText("下面是上一轮的结果");
+});
+
 test("服务端拒绝 /rework（如 409 对红还在排队或正在跑）：照常提示服务端的话，单子留在失败页", async ({ page, syntheticApi }, info) => {
   await asReviewer(page);
   const task = failedTask(BARS[0], ME);
