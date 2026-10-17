@@ -9,6 +9,9 @@
  *     _error / _message 结尾（含 r.message、String(err) 等写法）；
  *   - 或名字是 raw / text，且它由报错字段赋值（同文件里的初始化引用了 message / error / err / detail），
  *     或匹配用的字符串/正则是人话（含汉字，或两个以上英文单词）。
+ * 被匹配对象先剥掉无参的字符串规整调用（toLowerCase / toUpperCase / toLocale*Case / trim / trimStart / trimEnd 等）再取名字，
+ * 所以 err.message.toLowerCase().includes("x") 一样会被抓。另外，上述报错名字与非空字符串字面量用 === / !== / == / != 直接比较（左右都算）也算；
+ * 字面量是 snake_case 机读码（如 reason === "permission_denied"）时不算，那是在认码。
  * 允许的例外：紧挨在调用上一行写 `// error-text-match-allow -- <理由>`。例外总数只减不增，
  * 由 scripts/quality/error-text-match.test.mjs 里的 ALLOWED 基线按文件锁定。
  */
@@ -32,6 +35,9 @@ const STRONG_NAME = /^(message|msg|error|err|detail|details|reason|job_error|err
 const WEAK_NAME = /^(raw|text)$/u;
 const ERRORISH_INIT = /\b(message|error|err|detail|job_error)\b/u;
 const PROSE = /\p{Script=Han}|[A-Za-z]{2,}\s+[A-Za-z]{2,}/u;
+const MACHINE_CODE = /^[a-z][a-z0-9]*(?:_[a-z0-9]+)+$/u;
+const NORMALIZERS = new Set(["toLowerCase", "toUpperCase", "toLocaleLowerCase", "toLocaleUpperCase", "trim", "trimStart", "trimEnd", "trimLeft", "trimRight"]);
+const EQUALITY = new Set([ts.SyntaxKind.EqualsEqualsEqualsToken, ts.SyntaxKind.ExclamationEqualsEqualsToken, ts.SyntaxKind.EqualsEqualsToken, ts.SyntaxKind.ExclamationEqualsToken]);
 
 function subjectName(node) {
   if (!node) return "";
@@ -40,6 +46,10 @@ function subjectName(node) {
   if (ts.isElementAccessExpression(node) && ts.isStringLiteral(node.argumentExpression)) return node.argumentExpression.text;
   if (ts.isParenthesizedExpression(node) || ts.isNonNullExpression(node) || ts.isAsExpression(node)) return subjectName(node.expression);
   if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === "String") return subjectName(node.arguments[0]);
+  // err.message.toLowerCase() / r.message.trim() 之类：剥掉无参规整调用再取名字。
+  if (ts.isCallExpression(node) && node.arguments.length === 0 && ts.isPropertyAccessExpression(node.expression) && NORMALIZERS.has(node.expression.name.text)) {
+    return subjectName(node.expression.expression);
+  }
   if (ts.isBinaryExpression(node)) return subjectName(node.left);
   return "";
 }
@@ -76,19 +86,32 @@ export function scanSource(code, file = "inline.ts") {
   const decls = collectDeclarations(source);
   const lines = code.split(/\r?\n/u);
   const hits = [];
+  const record = (node, name, method) => {
+    const line = source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1;
+    const prev = lines[line - 2] || "";
+    hits.push({ file, line, name, method, allowed: prev.includes(ALLOW_MARKER), snippet: node.getText(source).slice(0, 100) });
+  };
+  const errorish = (name, pattern) => STRONG_NAME.test(name) || (WEAK_NAME.test(name) && (errorDerived(name, decls) || PROSE.test(pattern)));
   const visit = (node) => {
+    if (ts.isBinaryExpression(node) && EQUALITY.has(node.operatorToken.kind)) {
+      const sides = [[node.left, node.right], [node.right, node.left]];
+      for (const [subject, literal] of sides) {
+        // 空串、snake_case 机读码（如 "permission_denied"）不是文案比较。
+        if (!ts.isStringLiteralLike(literal) || literal.text === "" || MACHINE_CODE.test(literal.text)) continue;
+        const name = subjectName(subject);
+        if (errorish(name, literal.text)) {
+          record(node, name, node.operatorToken.getText(source));
+          break;
+        }
+      }
+    }
     if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression) && METHODS.has(node.expression.name.text)) {
       const method = node.expression.name.text;
       const owner = node.expression.expression;
       const subject = REGEX_OWNER_METHODS.has(method) ? node.arguments[0] : owner;
       const pattern = REGEX_OWNER_METHODS.has(method) ? owner : node.arguments[0];
       const name = subjectName(subject);
-      const flagged = STRONG_NAME.test(name) || (WEAK_NAME.test(name) && (errorDerived(name, decls) || PROSE.test(patternText(pattern, decls))));
-      if (flagged) {
-        const line = source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1;
-        const prev = lines[line - 2] || "";
-        hits.push({ file, line, name, method, allowed: prev.includes(ALLOW_MARKER), snippet: node.getText(source).slice(0, 100) });
-      }
+      if (errorish(name, patternText(pattern, decls))) record(node, name, method);
     }
     ts.forEachChild(node, visit);
   };

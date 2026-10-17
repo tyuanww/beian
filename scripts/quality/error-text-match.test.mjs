@@ -51,6 +51,67 @@ test("非报错文本不误报：任务 id 正则、普通名字、无人话模�
   assert.deepEqual(scanSource(code), []);
 });
 
+test("先剥掉无参字符串规整调用再取名字：toLowerCase / toUpperCase / toLocale*Case / trim / trimStart / trimEnd / trimLeft / trimRight 都拦", () => {
+  const forms = [
+    'err.message.toLowerCase().includes("x");',
+    'r.message.trim().startsWith("超时");',
+    'err.message.toUpperCase().endsWith("X");',
+    'err.message.toLocaleLowerCase().indexOf("x");',
+    'err.message.toLocaleUpperCase().includes("X");',
+    'r.message.trimStart().startsWith("未启用");',
+    'r.message.trimEnd().endsWith("失败");',
+    'r.message.trimLeft().includes("x");',
+    'r.message.trimRight().includes("x");',
+    '/超时/.test(r.message.trim().toLowerCase());',
+  ];
+  for (const form of forms) {
+    const hits = scanSource(`declare const err: Error; declare const r: { message: string };\n${form}`);
+    assert.equal(hits.length, 1, form);
+    assert.equal(hits[0].name, "message", form);
+  }
+});
+
+test("规整调用不改变非报错名字的结论；带参数的调用不剥", () => {
+  const code = [
+    'declare const name: string; declare const err: Error;',
+    'name.toLowerCase().includes("x");',
+    'name.trim().startsWith("伸美");',
+    'err.message.split(":")[0];',
+  ].join("\n");
+  assert.deepEqual(scanSource(code), []);
+});
+
+test("报错名字与字符串字面量直接比较：=== / !== / == / != 左右颠倒都拦", () => {
+  const forms = [
+    'err.message === "Failed to fetch";',
+    '"Failed to fetch" === err.message;',
+    'r.message !== "超时";',
+    '"超时" !== r.message;',
+    'error == "登录已过期";',
+    '"登录已过期" == error;',
+    'detail != "当前状态不可审核";',
+    '"当前状态不可审核" != detail;',
+    'err.message.trim() === "timeout";',
+    'raw === "服务没连上";',
+  ];
+  for (const form of forms) {
+    const hits = scanSource(`declare const err: Error; declare const r: { message: string }; declare const error: string; declare const detail: string; declare const raw: string;\n${form}`);
+    assert.equal(hits.length, 1, form);
+  }
+});
+
+test("比较的正例：机读码、空串、非报错名字不拦", () => {
+  const code = [
+    'declare const reason: string; declare const error: string; declare const status: string; declare const caps: { legacy_relight: { reason: string } };',
+    'caps.legacy_relight.reason !== "permission_denied";',
+    'reason === "native_coverage";',
+    'error === "";',
+    'status === "failed";',
+    'status === "已签字";',
+  ].join("\n");
+  assert.deepEqual(scanSource(code), []);
+});
+
 test(`紧挨上一行写 ${ALLOW_MARKER} 才算登记例外`, () => {
   const code = [
     'declare const message: string;',
