@@ -293,6 +293,8 @@ describe("render actor_label", () => {
     assert.equal(isRenderActorAccountId(`cli_${body(16)}`), true, "cli 16");
     assert.equal(isRenderActorAccountId(`cli_${body(17)}`), false, "cli 17");
     assert.equal(isRenderActorAccountId("ou_7D8A6E6DF7621556CE0D21922B676706"), false, "uppercase hex 32");
+    assert.equal(isRenderActorAccountId(`ou_${"a".repeat(20)}`), false, "20 letters, no digit");
+    assert.equal(isRenderActorAccountId(`ou_${"a".repeat(19)}1`), true, "20 chars with one digit");
   });
 
   it("seal accepts null actor_label and the summary omits it", () => {
