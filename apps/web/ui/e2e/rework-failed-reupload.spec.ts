@@ -300,3 +300,19 @@ test("首次对照就超页、没有条目：自己的单标题「稿件超过 1
   await expect(page.locator(".ant-alert-warning")).not.toContainText(/请联系管理员|回首页|重新上传/u);
   await expect(page.getByTestId("review-back-home")).toHaveCount(0);
 });
+
+test("逐字单整单待人工确认：自己的单有勾选框，审核员看别人的单签字退回和勾选框都不在", async ({ page, syntheticApi }) => {
+  await asReviewer(page);
+  const base = { status: "in_review", verbatim_check: true, verbatim_warning: "认字精度下降", hits: [{ id: "h0", field: "中文品名", status: "待人工确认", decision: "pending" }] };
+  const mine = reviewTask("e5969b58ce15");
+  Object.assign(mine, base, { owner: ME });
+  const theirs = reviewTask("e5969b58ce16");
+  Object.assign(theirs, base, { owner: "ou_someone_else" });
+  syntheticApi.tasks.push(mine, theirs);
+  await page.goto(`/review/${mine.id}`);
+  await expect(page.getByTestId("review-order-held")).toBeVisible();
+  await page.goto(`/review/${theirs.id}`);
+  await expect(page.getByTestId("review-root")).toBeVisible();
+  await expect(page.locator("button.review-sign")).toHaveCount(0);
+  await expect(page.getByTestId("review-order-held")).toHaveCount(0);
+});

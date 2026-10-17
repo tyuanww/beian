@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { readFileSync } from "node:fs";
-import { completePayload, needsOrderHeldConfirm, signAllowedForOrderHeld } from "./orderHeldConfirm.js";
+import { completePayload, needsOrderHeldConfirm, showOrderHeldCheckbox, signAllowedForOrderHeld } from "./orderHeldConfirm.js";
 import type { FieldHit } from "../api.js";
 
 const held = (id: string, decision: FieldHit["decision"] = "pending"): FieldHit => ({
@@ -36,5 +36,19 @@ describe("needsOrderHeldConfirm", () => {
     assert.match(page, /completePayload\(/u);
     const api = readFileSync(new URL("../api.ts", import.meta.url), "utf8");
     assert.match(api, /order_held_confirm\?: boolean/u);
+  });
+});
+
+describe("整单确认勾选框看 canCompleteThis（这单自己能签字），不只看 canComplete", () => {
+  it("要整单确认、不是失败单、自己能签字才显示", () => {
+    assert.equal(showOrderHeldCheckbox(true, false, true), true);
+    assert.equal(showOrderHeldCheckbox(true, false, false), false, "审核员看别人的单 / viewer");
+    assert.equal(showOrderHeldCheckbox(true, true, true), false, "失败单");
+    assert.equal(showOrderHeldCheckbox(false, false, true), false);
+  });
+  it("ReviewPage 用 canCompleteThis 调它", () => {
+    const src = readFileSync(new URL("./ReviewPage.tsx", import.meta.url), "utf8");
+    assert.match(src, /showOrderHeldCheckbox\(orderHeldNeeded, failedJob, canCompleteThis\)/u);
+    assert.doesNotMatch(src, /orderHeldNeeded && !failedJob && canComplete\b/u);
   });
 });

@@ -23,7 +23,7 @@ import {
 import { ReviewWorkspace } from "./ReviewWorkspace";
 import { phoneDraftPlan, useReviewSession } from "./useReviewSession";
 import { isDecisionAllowed, isHeldStatus } from "./reviewDecisions";
-import { completePayload, needsOrderHeldConfirm } from "./orderHeldConfirm";
+import { completePayload, needsOrderHeldConfirm, showOrderHeldCheckbox } from "./orderHeldConfirm";
 import { unsavedNotesHint } from "./unsavedNotesHint";
 import { detailLoadState, shouldShowWaitCard } from "./waitCard";
 import { shouldUseReworkView } from "./reviewVersion";
@@ -1016,7 +1016,7 @@ export function ReviewPage({ taskId, userId, displayName = null, canComplete = t
         ) : null}
         {draftBlock ? <span className="review-draft-status" role="status" data-testid="review-unsaved-hint">{draftBlock}</span> : null}
         {signHint(gate.hint, buttons) ? <span className="review-signhint" id="review-sign-hint" title={gate.title} aria-live="polite">{gate.hint}</span> : null}
-        {orderHeldNeeded && !failedJob && canComplete ? (
+        {showOrderHeldCheckbox(orderHeldNeeded, failedJob, canCompleteThis) ? (
           <Checkbox
             className="review-order-held"
             data-testid="review-order-held"
