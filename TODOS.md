@@ -559,3 +559,13 @@ RF-10–RF-13 的原始依赖见 [ADR-007 §20.7](docs/adr-007-packaging-render-
 永久例外（不在待清清单里，仍计入 `ALLOWED`，不作为新增例外的先例）：
 
 - `apps/web/ui/src/pages/setupBoard.ts` `probeErrorMessage`（1 行）：认的是浏览器 fetch 自己抛的报错（failed to fetch / networkerror / load failed，请求没到服务器），后端永远给不了码，只能按浏览器文案换成「服务没连上，请稍后重试。」。
+
+## 2026-10-17 CI 偶发：RF-02 adapter 资源采样把原子替换当成账算不清
+
+- **用例**：`apps/web/backend/tests/test_packaging_render_generation.py::test_node_bridge_calls_real_rf02_validator_without_blender[adapter]`。同一用例另外 5 个参数（missing / bridge / jobs / seal-proof / seal-tamper）没有出过这个错。
+- **出现过的 3 次**（都是第 1 次 attempt 挂，重跑就过）：quality run [38161062541](https://github.com/tyuanww/beian/actions/runs/38161062541)（`feat/glb-webp-variant`）、[38715177271](https://github.com/tyuanww/beian/actions/runs/38715177271)（`fix/review-spot-fit`）、[39009607700](https://github.com/tyuanww/beian/actions/runs/39009607700)（PR #36 head `640237eb`）。
+- **报错原话**：`RenderBridgeError: 候选渲染未完成：resource_accounting_unavailable`，堆栈 `at stop (apps/web/server/src/renderGenerationBridge.ts:241:17)` ← `at Timeout.<anonymous> (renderGenerationBridge.ts:251:23)`。
+- **根因**：渲染进程运行期间，bridge 每 100ms 调 `lifecycle.observe` 统计候选目录（`renderGenerationBudget.ts` `candidateDiskBytes`）。Python 侧用「mkstemp 临时文件 + `os.replace`」原子写（`workers/packaging/pipeline.py` `save_json`、卡片写入，测试 fake Blender 的 GLB 写入同理）。`readdirSync` 列出的临时文件在 `lstatSync` 前被改名，抛出原始 `ENOENT`；它不是 `RenderBudgetError`，被 `renderGenerationBridge.ts:251` 统一记成 `resource_accounting_unavailable`。只有走 `createRenderGenerationPreparer`（带 lifecycle）的路径才定时采样，所以 bridge / seal-* / missing 不会撞上。采样代码由 `6ed1aa80`（#88）引入。
+- **同一竞态的另一种表现**：仓库外探针观察到 `candidate_file_type`，全部是「普通文件、非软链、`nlink=0`」——`lstat` 按名字找到旧 inode 时它正被 `os.replace` 换掉，链接数已降到 0。真硬链（`nlink≥2`）、软链、非普通文件都不会表现成这样，可以区分。
+- **修法**：`candidateDiskBytes` 加 `tolerateVanished`，默认严格。只有 100ms 定时采样传宽松：子项 `lstat` ENOENT、子目录 `readdirSync` ENOENT、`nlink=0` 的普通文件按 0 计，下一拍重算。渲染结束后的终检 `observe(candidateDir)` 保持严格。软链、硬链、非普通文件两种模式都照旧拒绝。
+- **未做**：子目录在遍历中途被换成文件时 `readdirSync` 报 `ENOTDIR`，两种模式都保持严格（直接报错）；现有 Python 写法没有把目录换成文件的路径，若以后 CI 出现 `ENOTDIR` 再议。

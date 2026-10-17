@@ -54,19 +54,36 @@ export function renderGroupMemory(pid: number): number {
   return bytes;
 }
 
-/** Counts every file, not only declared outputs; never follows links. */
-export function candidateDiskBytes(root: string): number {
+/** Counts every file, not only declared outputs; never follows links.
+ * Strict by default (final checks). Only the periodic in-flight sample passes
+ * tolerateVanished: an entry listed by readdir that is gone (ENOENT) or was
+ * unlinked by a concurrent atomic replace (regular file, nlink 0) before lstat
+ * counts 0 and is recounted next tick. Symlinks, hard links (nlink > 1) and
+ * non-regular files still fail closed in both modes.
+ */
+export type CandidateDiskFs = { lstatSync: typeof lstatSync; readdirSync: (path: string) => string[] };
+export type CandidateDiskOptions = { tolerateVanished?: boolean; fs?: CandidateDiskFs };
+export function candidateDiskBytes(root: string, options: CandidateDiskOptions = {}): number {
+  const fs: CandidateDiskFs = options.fs ?? { lstatSync, readdirSync: path => readdirSync(path) };
+  const tolerate = options.tolerateVanished === true;
+  const vanished = (e: unknown) => (e as NodeJS.ErrnoException)?.code === "ENOENT";
   let files = 0;
   const walk = (path: string, depth: number): number => {
     if (depth > 6 || ++files > RENDER_LIFECYCLE_LIMITS.fileCount) fail("candidate_file_budget");
     let st;
-    try { st = lstatSync(path); } catch (e) {
-      if (depth === 0 && (e as NodeJS.ErrnoException).code === "ENOENT") return 0;
+    try { st = fs.lstatSync(path); } catch (e) {
+      if (vanished(e) && (depth === 0 || tolerate)) return 0;
       throw e;
     }
+    if (tolerate && depth > 0 && !st.isSymbolicLink() && st.isFile() && st.nlink === 0) return 0;
     if (st.isSymbolicLink() || (!st.isDirectory() && (!st.isFile() || st.nlink !== 1))) fail("candidate_file_type");
     if (!st.isDirectory()) return st.size;
-    return readdirSync(path).reduce((sum, name) => sum + walk(join(path, name), depth + 1), 0);
+    let names: string[];
+    try { names = fs.readdirSync(path); } catch (e) {
+      if (tolerate && vanished(e)) return 0;
+      throw e;
+    }
+    return names.reduce((sum, name) => sum + walk(join(path, name), depth + 1), 0);
   };
   return walk(root, 0);
 }
@@ -75,7 +92,8 @@ export type RenderLifecycle = {
   deadline: number;
   check: RenderCheckpoint;
   beforeWrite(bytes: number): void;
-  observe(candidateDir: string, groupPid?: number): void;
+  /** Strict unless the periodic sampler passes { tolerateVanished: true }. */
+  observe(candidateDir: string, groupPid?: number, options?: { tolerateVanished?: boolean }): void;
   /** Caller must prove all owned processes gone. False preserves the credit. */
   release(ownershipGone: boolean): void;
 };
@@ -221,10 +239,10 @@ export function createRenderLifecycle(input: {
     ftruncateSync(fd, diskBytes - consumed);
     check();
   };
-  const lifecycle: RenderLifecycle = { deadline, check, beforeWrite, release, observe: (candidate, pid) => {
+  const lifecycle: RenderLifecycle = { deadline, check, beforeWrite, release, observe: (candidate, pid, options) => {
     check();
     if (pid && renderGroupMemory(pid) + process.memoryUsage().rss > memoryBytes) fail("memory_budget");
-    const bytes = candidateDiskBytes(candidate);
+    const bytes = candidateDiskBytes(candidate, { tolerateVanished: options?.tolerateVanished === true });
     if (bytes > RENDER_LIFECYCLE_LIMITS.candidateBytes) fail("candidate_disk_budget");
     if (bytes > observedBytes) { beforeWrite(bytes - observedBytes); observedBytes = bytes; }
     check();
