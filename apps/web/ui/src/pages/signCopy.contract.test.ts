@@ -41,11 +41,11 @@ function taskFor(input: SignReturnInput) {
   };
 }
 
-function bothSides(input: SignReturnInput): { ui: { hint: string; title: string; pending: number }; server: string | null } {
+function bothSides(input: SignReturnInput): { ui: { hint: string; title: string; rejectTitle: string; canReject: boolean; pending: number }; server: string | null } {
   const task = taskFor(input);
   const ui = reviewGate(task as TaskDetail, reviewPageHits(task as TaskDetail, false), false);
   const gate = completeGate(task as Parameters<typeof completeGate>[0], undefined);
-  return { ui: { hint: ui.hint, title: ui.title, pending: ui.pending }, server: gate.ok ? null : gate.message };
+  return { ui: { hint: ui.hint, title: ui.title, rejectTitle: ui.rejectTitle, canReject: ui.canReject, pending: ui.pending }, server: gate.ok ? null : gate.message };
 }
 
 const reviewer = (hits: Hits, extra: Partial<SignReturnInput> = {}): SignReturnInput => ({ role: "reviewer", status: "in_review", hits, ...extra });
@@ -98,6 +98,8 @@ describe("签字拦截文案前后端合同（「仍有 N 条…未处理」）"
       assert.equal(server, row.text, "服务端 /complete");
       assert.equal(ui.hint, row.text, "前端签字旁提示");
       assert.equal(ui.title, row.text, "前端签字悬停");
+      // 签字和退回是同一个 /complete，有待确认时退回也回同一句 400：页头退回那行、退回悬停、退回确认框都用它。
+      assert.equal(ui.rejectTitle, row.text, "前端退回一侧");
     });
   }
 
@@ -121,6 +123,7 @@ describe("签字拦截文案前后端合同（「仍有 N 条…未处理」）"
     it(`规则表：${row.name}`, () => {
       const { ui, server } = bothSides(row.input);
       assert.equal(ui.title, server, "签字悬停");
+      assert.equal(ui.rejectTitle, server, "退回一侧（页头那行 / 悬停 / 确认框）");
       assert.equal(ui.hint, ui.hint === REVIEW_COPY.invalidHitStatus ? REVIEW_COPY.invalidHitStatus : server, "签字旁提示");
     });
   }

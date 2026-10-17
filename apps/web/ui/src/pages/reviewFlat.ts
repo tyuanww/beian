@@ -101,12 +101,12 @@ export function submitGate(hits: FieldHit[], reviewable: boolean, locked = false
     return {
       canSign: false,
       // 老板 2026-10-11 已批：签字禁用时退回不禁用。服务端 /complete 仍要求先下完结论，
-      // 确认框里「确认退回」会挡住。退回按钮的悬停用同一句，不写「才能签字」。
+      // 确认框里「确认退回」会挡住。
       canReject: true,
-      // 签字旁提示和悬停与服务端 /complete 拦截同一句：按状态分开数。
+      // 签字旁提示、两个按钮的悬停、页头退回那行、退回确认框都与服务端 /complete 拦截同一句：按状态分开数，不加后缀。
       hint: msg,
       title: msg,
-      rejectTitle: REVIEW_COPY.rejectBlockedByPending(pending),
+      rejectTitle: msg,
       pending,
     };
   }

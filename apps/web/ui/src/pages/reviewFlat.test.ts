@@ -22,9 +22,9 @@ describe("reviewFlat", () => {
     const g = submitGate(pend, true);
     assert.equal(g.canSign, false); assert.equal(g.canReject, true); assert.equal(g.hint, "仍有 1 条疑点未处理");
     assert.equal(g.title, "仍有 1 条疑点未处理");
-    assert.equal(g.rejectTitle, "还有 1 条待确认，处理完才能退回");
+    assert.equal(g.rejectTitle, "仍有 1 条疑点未处理");
     assert.equal(g.pending, 1);
-    assert.equal(rejectNote(g.rejectTitle, false), "还有 1 条待确认，处理完才能退回");
+    assert.equal(rejectNote(g.rejectTitle, false), "仍有 1 条疑点未处理");
     assert.equal(rejectNote(g.rejectTitle, true), null, "失败但带条目：按钮都不在，小字也不显示");
     assert.deepEqual([submitGate([hit("a", "issue")], true).canSign, submitGate([hit("a", "issue")], true).canReject], [false, true]);
     assert.equal(submitGate([hit("a", "ignore")], true).canSign, true);

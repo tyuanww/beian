@@ -113,18 +113,18 @@ test("三栏通铺：1440 稿件 ≥70%、右栏 320、工具条在画布下方�
   const sign = page.getByRole("button", { name: "签字", exact: true });
   await expect(sign).toBeDisabled();
   // 与服务端 /complete 拦截同一句（按状态分开数）。
-  await expect(page.getByText("仍有 1 条疑点未处理", { exact: true })).toBeVisible();
+  await expect(page.locator("#review-sign-hint")).toHaveText("仍有 1 条疑点未处理");
   await expect(sign).toHaveAttribute("title", "仍有 1 条疑点未处理");
-  await expect(page.getByTestId("review-reject-note")).toHaveText("还有 1 条待确认，处理完才能退回");
+  await expect(page.getByTestId("review-reject-note")).toHaveText("仍有 1 条疑点未处理");
   // 签字禁用时退回不禁用；还有待确认时确认框挡住「确认退回」（服务端 /complete 要求先下完结论）。
   const rejectBtn = page.getByRole("button", { name: "退回", exact: true });
   await expect(rejectBtn).toBeEnabled();
   await rejectBtn.click();
   const pendingDialog = page.getByRole("dialog");
   // 提示放在框顶（标题下第一段），打字前就看到。
-  await expect(pendingDialog.locator(".ant-modal-body > :first-child")).toHaveText("还有 1 条待确认，处理完才能退回");
+  await expect(pendingDialog.locator(".ant-modal-body > :first-child")).toHaveText("仍有 1 条疑点未处理");
   await expect(pendingDialog.getByRole("button", { name: "确认退回" })).toBeDisabled();
-  // qa #3：交不了时补充说明也禁用，避免白写；提示「还有 N 条待确认，处理完才能退回」。
+  // qa #3：交不了时补充说明也禁用，避免白写；提示与服务端同一句「仍有 N 条…未处理」。
   await expect(pendingDialog.getByLabel("补充说明（选填）")).toBeDisabled();
   await pendingDialog.getByRole("button", { name: "再看看" }).click();
   await expect(pendingDialog).toBeHidden();
@@ -443,8 +443,8 @@ test("768 宽页头不折行，退回/签字靠右（design F-002）", async ({ 
   // <1024 隐藏签字旁「仍有 N 条…未处理」，改为签字按钮悬停说明（同一句）。
   await expect(page.locator(".review-signhint")).toBeHidden();
   await expect(page.getByRole("button", { name: "签字", exact: true })).toHaveAttribute("title", "仍有 1 条疑点未处理");
-  await expect(page.getByTestId("review-reject-note")).toHaveText("还有 1 条待确认，处理完才能退回");
-  await expect(page.getByRole("button", { name: "退回", exact: true })).toHaveAttribute("title", "还有 1 条待确认，处理完才能退回");
+  await expect(page.getByTestId("review-reject-note")).toHaveText("仍有 1 条疑点未处理");
+  await expect(page.getByRole("button", { name: "退回", exact: true })).toHaveAttribute("title", "仍有 1 条疑点未处理");
   expect((await page.locator(".review-title").boundingBox())!.height).toBeLessThan(40);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
@@ -963,7 +963,7 @@ test("签字/退回按钮定位器在正常待审单上能找到（失败单断�
   await page.goto(`/review/${task.id}`);
   await expect(page.locator("button.review-sign")).toHaveCount(1);
   await expect(page.locator("button.review-reject")).toHaveCount(1);
-  await expect(page.getByTestId("review-reject-note")).toHaveText(/还有 \d+ 条待确认，处理完才能退回/);
+  await expect(page.getByTestId("review-reject-note")).toHaveText(/^仍有 \d+ 条.+未处理$/);
 });
 
 test("复核超页且条目还在：黄条写明这次复核没做，条里给重新上传，条目和进度保留", async ({ page, syntheticApi }, info) => {

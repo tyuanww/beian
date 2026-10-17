@@ -1466,6 +1466,7 @@ export function ReviewPage({ taskId, userId, displayName = null, canComplete = t
         kind={dialog}
         rows={issueRows}
         pending={gate.pending}
+        blockedText={gate.rejectTitle}
         held={heldCount}
         fscNote={task?.fsc_note}
         busy={busy}

@@ -167,7 +167,6 @@ export const REVIEW_COPY = {
   /** 提交失败按服务端状态/错误码映射；不把服务端原文给用户看。 */
   submitStillChecking: "这份稿还在检查，等一会儿再提交",
   submitPending: (n: number) => `还有 ${n} 条待确认，处理完才能签字`,
-  rejectBlockedByPending: (n: number) => `还有 ${n} 条待确认，处理完才能退回`,
   collapse: "收起",
   expand: (n: number) => `展开疑点 · 待确认 ${n}`,
   tabs: { pending: "待确认", issue: "有错", all: "全部" },
