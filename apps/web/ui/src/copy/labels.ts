@@ -31,7 +31,10 @@ export const WAIT_TITLE: Record<WaitKind, string> = {
 
 /**
  * 飞书登录失败页（拒绝页）的标题与兜底原因；key 是服务端回跳 URL 里的 `feishu_error` 码，
- * 按码穷尽（服务端加码时这里不补会类型报错）。标题只按码选，不按原因文案选；
+ * Record 按前端 `FeishuErrorCode` 穷尽：前端联合类型里加了码而这里不补会类型报错。
+ * 服务端码是 URL 里的普通字符串，前端拿不到它的类型；服务端在 `apps/web/server/src/feishuLoginError.ts`
+ * 列出全部码，两边是否一致由 `loginFailure.contract.test.ts` 对照（服务端加码不同步前端时该测试变红）。
+ * 标题只按码选，不按原因文案选；
  * 原因优先显示服务端写的 `wb_login_hint`，cookie 没了才用 fallback。
  * 标题产品哥 2026-10-17 定稿：failed 与未知码/无码都是「暂时登录不了」，见 DESIGN.md「登录」。
  */

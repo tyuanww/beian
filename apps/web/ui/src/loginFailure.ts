@@ -3,6 +3,7 @@
  * 码由 `apps/web/server/src/index.ts` 的 `failLogin` 写入：回调带 error → denied，OAuth state 失效 → expired，
  * 其余异常经 `auth.ts` 的 `loginFailureCode` 分成 403 → forbidden、其它 → failed。
  * 显示的字在 `copy/labels.ts` 的 `LOGIN_FAILURE_COPY`。
+ * 服务端码表在 `apps/web/server/src/feishuLoginError.ts`，与本文件 `FeishuErrorCode` 的一致性由 `loginFailure.contract.test.ts` 把关。
  */
 import { LOGIN_FAILURE_COPY, LOGIN_FAILURE_UNKNOWN } from "./copy/labels";
 
