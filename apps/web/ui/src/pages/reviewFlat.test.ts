@@ -5,7 +5,7 @@ import { PUBLIC_UPLOAD_BYTES, UPLOAD_TOO_LARGE, setUploadLimitFromMe } from "../
 import {
   rejectNote,
   clampPinToView, completedAtLabel, completedByText, conclusionFor, decisionFailureText, reworkUploadBlocked, submitFailureText, flatLayout, isTypingTarget, lockedBy, markerOutsideCorner, nextPendingAfter,
-  openHeldAfterPending, panToClearPanel, pendingTally, phonePendingLines, positionLabel, rejectRows, shouldShowShortcutsOnOpen, submitGate, tabIndices, thumbMarks, verdictCounts, verdictForKey,
+  openHeldAfterPending, panToClearPanel, pendingTally, phonePendingLines, positionLabel, rejectRows, shouldShowShortcutsOnOpen, signHint, submitGate, tabIndices, thumbMarks, verdictCounts, verdictForKey,
 } from "./reviewFlat.js";
 
 const hit = (id: string, decision = "pending", page = 1, status = "疑点", note = ""): FieldHit => ({ id, field: id, status, decision, page, note });
@@ -196,5 +196,16 @@ describe("签字门提示与服务端 /complete 拦截同一句", () => {
     assert.equal(submitGate([held("a"), doubt("b")], true, false, true).hint, "仍有 1 条认字存疑未处理");
     assert.deepEqual(pendingTally([held("a"), doubt("b"), held("c")]), [{ word: "待人工确认", count: 2 }, { word: "认字存疑", count: 1 }]);
     assert.deepEqual(pendingTally([held("a")], true), []);
+  });
+});
+
+describe("viewer：页头叫人做事的句子不出", () => {
+  it("签字旁「仍有 …未处理」、退回那行都不出；有 complete 时照常", () => {
+    const g = submitGate([hit("a")], true);
+    assert.equal(signHint(g.hint, false), null);
+    assert.equal(rejectNote(g.rejectTitle, false, false), null);
+    assert.equal(signHint(g.hint, true), g.hint);
+    assert.equal(rejectNote(g.rejectTitle, false, true), g.rejectTitle);
+    assert.equal(signHint("", true), null);
   });
 });

@@ -314,8 +314,14 @@ export function markShortcutsSeen(store: Pick<Storage, "setItem"> | null): void 
 }
 
 /** 退回门槛小字。失败但带上一轮条目时签字/退回按钮都不在，小字也不显示。 */
-export function rejectNote(rejectTitle: string | undefined, failedWithHits: boolean): string | null {
-  return rejectTitle && !failedWithHits ? rejectTitle : null;
+export function rejectNote(rejectTitle: string | undefined, failedWithHits: boolean, canComplete = true): string | null {
+  // viewer（没有 complete）不签不退：叫人做事的句子不出（产品哥 2026-10-17），只读信息照常。
+  return rejectTitle && !failedWithHits && canComplete ? rejectTitle : null;
+}
+
+/** 签字左侧提示（「仍有 …未处理」等）：viewer 不显示。 */
+export function signHint(hint: string, canComplete = true): string | null {
+  return hint && canComplete ? hint : null;
 }
 
 /** 位置「3/9」：当前在该 tab 列表中的序号。 */

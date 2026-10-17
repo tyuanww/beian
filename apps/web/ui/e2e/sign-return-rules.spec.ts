@@ -129,3 +129,19 @@ SIGN_COPY_ROWS.forEach((row, n) => {
     await expect(sign).toHaveAttribute("title", row.text);
   });
 });
+
+test("只读账号（viewer）：页头不出「仍有 …未处理」和退回那行，进度和待确认数照常", async ({ page, syntheticApi }) => {
+  await page.route("**/api/auth/me", (route) => route.fulfill({
+    status: 200,
+    contentType: "application/json",
+    body: JSON.stringify({ logged_in: true, display_name: ME, avatar_url: null, open_id: "ou_e2e_synthetic", role: "viewer", perms: ["read", "export", "confirm_structure"] }),
+  }));
+  await page.goto(`/review/${seed(syntheticApi, 0x300, { role: "viewer", status: "in_review", hits: [{ status: "疑点", decision: "pending" }] })}`);
+  await expect(page.getByTestId("review-root")).toBeVisible();
+  await expect(page.getByTestId("review-posn")).toHaveText("1/1");
+  await expect(page.locator(".review-flat-tabs, .review-sidebar").first()).toContainText("待确认");
+  await expect(page.locator("#review-sign-hint")).toHaveCount(0);
+  await expect(page.getByTestId("review-reject-note")).toHaveCount(0);
+  await expect(page.locator("button.review-sign")).toHaveCount(0);
+  await expect(page.locator("button.review-reject")).toHaveCount(0);
+});

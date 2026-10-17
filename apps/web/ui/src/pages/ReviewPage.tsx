@@ -17,7 +17,7 @@ import { ReviewSubmitDialog } from "./ReviewSubmitDialog";
 import { createFlagStore, UndoToastGate } from "./undoToastGate";
 import {
   clampPinToView, conclusionFor, decisionFailureText, reworkUploadBlocked, submitFailureText, flatLayout, isTypingTarget, lockedBy, markShortcutsSeen, markerOutsideCorner, nextPendingAfter,
-  panToClearPanel, phonePendingLines, positionLabel, rejectNote, rejectRows, shouldShowShortcutsOnOpen, tabIndices, thumbMarks, verdictCounts, verdictForKey, isOpenHeld,
+  panToClearPanel, phonePendingLines, positionLabel, rejectNote, rejectRows, shouldShowShortcutsOnOpen, signHint, tabIndices, thumbMarks, verdictCounts, verdictForKey, isOpenHeld,
   type FlatLayout, type FlatTab,
 } from "./reviewFlat";
 import { ReviewWorkspace } from "./ReviewWorkspace";
@@ -1010,8 +1010,8 @@ export function ReviewPage({ taskId, userId, displayName = null, canComplete = t
           </button>
         ) : null}
         {draftBlock ? <span className="review-draft-status" role="status" data-testid="review-unsaved-hint">{draftBlock}</span> : null}
-        {gate.hint ? <span className="review-signhint" id="review-sign-hint" title={gate.title} aria-live="polite">{gate.hint}</span> : null}
-        {orderHeldNeeded && !failedJob ? (
+        {signHint(gate.hint, canComplete) ? <span className="review-signhint" id="review-sign-hint" title={gate.title} aria-live="polite">{gate.hint}</span> : null}
+        {orderHeldNeeded && !failedJob && canComplete ? (
           <Checkbox
             className="review-order-held"
             data-testid="review-order-held"
@@ -1031,7 +1031,7 @@ export function ReviewPage({ taskId, userId, displayName = null, canComplete = t
         </span>
       </header>
 
-      {rejectNote(gate.rejectTitle, Boolean(failedWithHits)) ? <p className="review-reject-note" id="review-reject-note" data-testid="review-reject-note">{gate.rejectTitle}</p> : null}
+      {rejectNote(gate.rejectTitle, Boolean(failedWithHits), canComplete) ? <p className="review-reject-note" id="review-reject-note" data-testid="review-reject-note">{gate.rejectTitle}</p> : null}
       {locked ? <Alert className="review-lock" type="warning" title={`🔒 ${locked}`} description={REVIEW_COPY.lockedNote} /> : null}
       {error ? <Alert type="error" title={error} /> : null}
       {task?.error || task?.job_error || task?.job_error_code ? (
