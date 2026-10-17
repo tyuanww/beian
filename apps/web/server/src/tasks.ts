@@ -334,10 +334,23 @@ export function listTasks(q: string, viewer: Viewer): Record<string, unknown>[] 
     job_stage_label: t.job_stage_label,
     job_eta_s: t.job_eta_s,
     job_error: t.job_error,
-    job_error_code: t.job_error_code,
+    job_error_code: jobErrorCodeOf(t),
     job_started_at: t.job_started_at,
     job_finished_at: t.job_finished_at,
   }));
+}
+
+/**
+ * 旧单兼容：本批之前失败的超页单，存盘里没有 job_error_code，读取时按 CLI 出过的两版超页原文现算。
+ * 只认失败单、只认整句相等；新失败一律在失败那刻写码，不走这里。
+ */
+const LEGACY_PAGE_OVER_TEXTS = new Set(["稿件超过 1 页，暂不支持核对，请联系管理员", "这一单页数超过可核对页数"]);
+
+export function jobErrorCodeOf(t: Task): JobErrorCode | undefined {
+  if (t.job_error_code) return t.job_error_code;
+  if (t.job_status !== "failed" && t.status !== "compare_failed") return undefined;
+  const text = (typeof t.job_error === "string" ? t.job_error : "").trim();
+  return LEGACY_PAGE_OVER_TEXTS.has(text) ? "page_over" : undefined;
 }
 
 export const REVIEWABLE_STATUSES = ["pending_review", "in_review"] as const;

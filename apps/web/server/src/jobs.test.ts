@@ -1846,6 +1846,27 @@ describe("jobs dispatcher", () => {
     assert.equal(JSON.stringify(row).includes("job_error_detail"), false);
   });
 
+  it("old page_over failures without a stored code still read as page_over", () => {
+    const viewer = { id: "ou_ziye", name: "籽烨", admin: true };
+    const cases: Array<[number, string, "page_over" | undefined]> = [
+      [213, "稿件超过 1 页，暂不支持核对，请联系管理员", "page_over"],
+      [214, "这一单页数超过可核对页数", "page_over"],
+      [215, "这一单认字超出内存，没有结果", undefined],
+    ];
+    for (const [n, text, want] of cases) {
+      const id = tid(n);
+      saveTask({ id, title: "旧单", product_name: "旧单", type: "excel_pdf", status: "compare_failed", owner: "籽烨",
+        job_kind: "compare", job_status: "failed", job_error: text });
+      assert.equal(loadTask(id).job_error_code, undefined, "stored record has no code");
+      assert.equal(publicTask(loadTask(id), viewer).job_error_code, want, text);
+      assert.equal(listTasks("", viewer).find((r) => r.id === id)?.job_error_code, want, text);
+    }
+    const running = tid(216);
+    saveTask({ id: running, title: "跑着", product_name: "跑着", type: "excel_pdf", status: "comparing", owner: "籽烨",
+      job_kind: "compare", job_status: "running", job_error: "稿件超过 1 页，暂不支持核对，请联系管理员" });
+    assert.equal(publicTask(loadTask(running), viewer).job_error_code, undefined, "not failed, no code");
+  });
+
   it("a successful rerun clears a stale job_error_code", async () => {
     const id = tid(212);
     setJobsTestHooks({

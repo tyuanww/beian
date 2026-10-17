@@ -53,6 +53,7 @@ import {
   type RenderGenerationSource,
 } from "./renderGenerations.js";
 import {
+  jobErrorCodeOf,
   loadAllTasks,
   loadTasksForRecovery,
   loadTask,
@@ -421,6 +422,7 @@ export function publicTask(task: Task, viewer?: Viewer): Record<string, unknown>
   const redact = !viewer?.admin;
   return {
     ...rest,
+    job_error_code: jobErrorCodeOf(task),
     // 生成人只认 created_by；旧单缺失时原样给 null，不回落到 actor。
     created_by: task.created_by || null,
     // 最后一步兜底：脱敏后仍有本机路径 / 凭据特征时整条隐藏，加 error_hidden / error_ticket（单号 = task.id）。
