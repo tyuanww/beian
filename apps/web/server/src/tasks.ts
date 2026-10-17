@@ -391,10 +391,10 @@ export function isReworkableTask(
   if (hasReworkPages(task)) return false;
   if (task.status === "pending_review" || task.status === "in_review") return true;
   // 产品 10/17 方案 A：「检查中断」单（对照失败、还留着上一轮条目）可重新上传对红。回收出来的失败
-  // 和对照命令行自己失败的不区分；对照失败已没有条目的照旧不放行。工艺说明这类不进机审的字段不算条目，
-  // 写法同 completeGate。
+  // 和对照命令行自己失败的不区分；对照失败已没有条目的照旧不放行。工艺说明这类不进机审的字段不算条目
+  // （activeHits 已经滤掉）。
   if (task.status === "compare_failed") {
-    return task.job_kind === "compare" && task.job_status === "failed" && activeHits(task as Task).filter((h) => !skipPackSheetField(h.field)).length > 0;
+    return task.job_kind === "compare" && task.job_status === "failed" && activeHits(task as Task).length > 0;
   }
   return task.status === "completed" && task.complete_kind === "rework";
 }
