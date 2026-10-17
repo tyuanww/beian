@@ -75,7 +75,8 @@ describe("签字/退回规则表（前端核对页）", () => {
   it("未知状态：签字/退回都灰，提示「审核数据状态异常」", () => {
     const task = taskFor({ role: "reviewer", status: "in_review", hits: [{ status: "未知状态" }] });
     const gate = reviewGate(task, reviewPageHits(task, false), false);
-    assert.deepEqual([gate.canSign, gate.canReject, gate.hint, gate.title, gate.rejectTitle], [false, false, REVIEW_COPY.invalidHitStatus, REVIEW_COPY.invalidHitStatus, REVIEW_COPY.invalidHitStatus]);
+    // 右上短句；页头与悬停用服务端原话。
+    assert.deepEqual([gate.canSign, gate.canReject, gate.hint, gate.title, gate.rejectTitle], [false, false, REVIEW_COPY.invalidHitStatus, "有 1 条审核数据状态异常，请重新对照", "有 1 条审核数据状态异常，请重新对照"]);
     assert.equal(REVIEW_COPY.invalidHitStatus, "审核数据状态异常");
   });
 

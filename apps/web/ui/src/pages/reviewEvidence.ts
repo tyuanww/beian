@@ -25,6 +25,16 @@ function isKnownHitStatus(status: string | undefined): boolean {
   return KNOWN_HIT_STATUSES.has(String(status || ""));
 }
 
+const KNOWN_DECISIONS = new Set(["pending", "confirm", "issue", "ignore"]);
+
+/**
+ * 审核数据状态异常的条数，口径同服务端 `isValidHitReviewState`（`/complete` 回「有 N 条审核数据状态异常，请重新对照」）：
+ * 状态不在已知集合，或 decision 有值但不是 pending / confirm / issue / ignore。
+ */
+export function invalidReviewStateCount(hits: ReadonlyArray<{ status?: string; decision?: string | null }>): number {
+  return hits.filter((hit) => !isKnownHitStatus(hit.status) || (hit.decision != null && !KNOWN_DECISIONS.has(String(hit.decision)))).length;
+}
+
 export function hasInvalidHitStatus(hits: ReadonlyArray<{ status?: string }>): boolean {
   return hits.some((hit) => !isKnownHitStatus(hit.status));
 }

@@ -13,13 +13,20 @@ function isPageOver(code?: string): boolean {
 /** 失败但保留上一轮条目的单子：复核失败，或首次核对被中断回收（compare）。 */
 export type FailedWithHitsKind = "rework" | "compare";
 
-export function reviewErrorCopy(raw: string, code?: string, failedWithHits?: FailedWithHitsKind): string {
-  if (failedWithHits === "rework") return isPageOver(code) ? REVIEW_COPY.reworkPageOver : REVIEW_COPY.reworkFailed;
-  if (failedWithHits === "compare" && !isPageOver(code)) return REVIEW_COPY.compareFailedWithHits;
+/**
+ * `canReupload`：失败条里有没有「重新上传这一单」按钮（与按钮同一个 `canReuploadFailed` 结果）。
+ * 有按钮：句尾写重新上传，且同一条里不出「请联系管理员」——没有剩余条目的认字失败单例外（`ocrFailedReupload`，
+ * 产品哥特意留「再不行请联系管理员」退路）；没有按钮：不写重新上传。
+ */
+export function reviewErrorCopy(raw: string, code?: string, failedWithHits?: FailedWithHitsKind, canReupload = false): string {
+  // 超页（按码）：带上一轮条目的（复核或检查中断都一样），或这条有重新上传按钮，用黄条定稿文案。
+  if (isPageOver(code) && (failedWithHits || canReupload)) return canReupload ? REVIEW_COPY.reworkPageOver : REVIEW_COPY.reworkPageOverReadOnly;
+  if (failedWithHits === "rework") return canReupload ? REVIEW_COPY.reworkFailed : REVIEW_COPY.reworkFailedReadOnly;
+  if (failedWithHits === "compare") return canReupload ? REVIEW_COPY.compareFailedWithHits : REVIEW_COPY.compareFailedWithHitsReadOnly;
   if (isPageOver(code)) return REVIEW_COPY.pageOver;
   const text = String(raw || "");
   // error-text-match-allow -- 待后端错误码，见 TODOS.md「前端按报错文案判断状态」
-  if (OCR_FAILED.test(text)) return REVIEW_COPY.ocrFailed;
+  if (OCR_FAILED.test(text)) return canReupload ? REVIEW_COPY.ocrFailedReupload : REVIEW_COPY.ocrFailed;
   return customerCopy(text);
 }
 

@@ -6,7 +6,7 @@ import type { Decision, FieldHit, TaskDetail, TaskPage } from "../api";
 import { REVIEW_COPY } from "../copy/labels";
 import { isPendingDecision } from "./reviewNav";
 import { hasReadingDoubt } from "../../../server/src/readingDoubt.ts";
-import { blockingStatusWord, hasInvalidHitStatus, partitionReviewHits } from "./reviewEvidence";
+import { blockingStatusWord, hasInvalidHitStatus, invalidReviewStateCount, partitionReviewHits } from "./reviewEvidence";
 import { bytesTooLarge, uploadTooLargeText } from "../uploadLimit";
 
 export const FLAT_PANEL_WIDTH = 320;
@@ -86,21 +86,27 @@ export function submitGate(hits: FieldHit[], reviewable: boolean, locked = false
   const pending = c.pending + (releaseHeld ? 0 : held);
   if (!reviewable || locked) return { canSign: false, canReject: false, hint: "", title: "", rejectTitle: "", pending };
   // 与服务端 completeGate 同序：先拦未知状态，再看待确认。
+  // 状态异常：右上留短句，页头和悬停用服务端原话「有 N 条审核数据状态异常，请重新对照」。
+  const invalid = invalidReviewStateCount(hits);
+  const invalidDetail = REVIEW_COPY.invalidHitStatusDetail(invalid);
   if (hasInvalidHitStatus(hits)) {
-    const msg = REVIEW_COPY.invalidHitStatus;
-    return { canSign: false, canReject: false, hint: msg, title: msg, rejectTitle: msg, pending };
+    return { canSign: false, canReject: false, hint: REVIEW_COPY.invalidHitStatus, title: invalidDetail, rejectTitle: invalidDetail, pending };
+  }
+  // 只有 decision 非法（状态都认得）：按钮照规则表仍按待确认摆（签字灰、退回可点、确认框挡），文案用服务端原话。
+  if (pending > 0 && invalid > 0) {
+    return { canSign: false, canReject: true, hint: REVIEW_COPY.invalidHitStatus, title: invalidDetail, rejectTitle: invalidDetail, pending };
   }
   if (pending > 0) {
     const msg = REVIEW_COPY.pendingUnresolved(pendingTally(hits, releaseHeld));
     return {
       canSign: false,
       // 老板 2026-10-11 已批：签字禁用时退回不禁用。服务端 /complete 仍要求先下完结论，
-      // 确认框里「确认退回」会挡住。退回按钮的悬停用同一句，不写「才能签字」。
+      // 确认框里「确认退回」会挡住。
       canReject: true,
-      // 签字旁提示和悬停与服务端 /complete 拦截同一句：按状态分开数。
+      // 签字旁提示、两个按钮的悬停、页头退回那行、退回确认框都与服务端 /complete 拦截同一句：按状态分开数，不加后缀。
       hint: msg,
       title: msg,
-      rejectTitle: REVIEW_COPY.rejectBlockedByPending(pending),
+      rejectTitle: msg,
       pending,
     };
   }
@@ -313,9 +319,33 @@ export function markShortcutsSeen(store: Pick<Storage, "setItem"> | null): void 
   }
 }
 
-/** 退回门槛小字。失败但带上一轮条目时签字/退回按钮都不在，小字也不显示。 */
-export function rejectNote(rejectTitle: string | undefined, failedWithHits: boolean): string | null {
-  return rejectTitle && !failedWithHits ? rejectTitle : null;
+/** 签字 / 退回两个按钮各自显示与否（`reviewSubmitButtons` 的结果；只看是否 hidden）。 */
+type SubmitVisibility = { sign: "hidden" | "disabled" | "enabled"; reject: "hidden" | "disabled" | "enabled" };
+
+/**
+ * 签字和退回都做不了（两个按钮都不在：viewer、失败单、别人的失败单等）时，叫人去做事的句子不出
+ * （产品哥 2026-10-17：做不了的事不叫他做）。只要有一个按钮在（哪怕灰着），就照常说明为什么。
+ */
+function canSignOrReject(buttons: SubmitVisibility): boolean {
+  return buttons.sign !== "hidden" || buttons.reject !== "hidden";
+}
+
+/** 页头退回门槛小字（「仍有 …未处理」等）。 */
+export function rejectNote(rejectTitle: string | undefined, buttons: SubmitVisibility): string | null {
+  return rejectTitle && canSignOrReject(buttons) ? rejectTitle : null;
+}
+
+/** 右上签字左侧提示（「仍有 …未处理」等）。 */
+export function signHint(hint: string, buttons: SubmitVisibility): string | null {
+  return hint && canSignOrReject(buttons) ? hint : null;
+}
+
+/**
+ * 页头位置。有条目状态异常时不能写「全部已下结论」（异常条目不进待确认列表），改按全部条目计数，如「1/1」。
+ */
+export function reviewPositionLabel(hits: FieldHit[], list: number[], active: number, pendingLeft: number | undefined, held: number): string {
+  if (hasInvalidHitStatus(hits)) return positionLabel(tabIndices(hits, "all", active), active);
+  return positionLabel(list, active, pendingLeft, held);
 }
 
 /** 位置「3/9」：当前在该 tab 列表中的序号。 */

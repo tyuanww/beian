@@ -17,7 +17,7 @@ import { ReviewSubmitDialog } from "./ReviewSubmitDialog";
 import { createFlagStore, UndoToastGate } from "./undoToastGate";
 import {
   clampPinToView, conclusionFor, decisionFailureText, reworkUploadBlocked, submitFailureText, flatLayout, isTypingTarget, lockedBy, markShortcutsSeen, markerOutsideCorner, nextPendingAfter,
-  panToClearPanel, phonePendingLines, positionLabel, rejectNote, rejectRows, shouldShowShortcutsOnOpen, tabIndices, thumbMarks, verdictCounts, verdictForKey, isOpenHeld,
+  panToClearPanel, phonePendingLines, positionLabel, rejectNote, rejectRows, reviewPositionLabel, shouldShowShortcutsOnOpen, signHint, tabIndices, thumbMarks, verdictCounts, verdictForKey, isOpenHeld,
   type FlatLayout, type FlatTab,
 } from "./reviewFlat";
 import { ReviewWorkspace } from "./ReviewWorkspace";
@@ -27,7 +27,8 @@ import { completePayload, needsOrderHeldConfirm } from "./orderHeldConfirm";
 import { unsavedNotesHint } from "./unsavedNotesHint";
 import { detailLoadState, shouldShowWaitCard } from "./waitCard";
 import { shouldUseReworkView } from "./reviewVersion";
-import { isFailedJob, isReviewableStatus, reviewGate, reviewPageHits, reviewSubmitButtons } from "./reviewActions";
+import { hrefOf } from "../appRoute";
+import { canAccessTaskOwner, canReuploadFailed, isDeadCompareFailed, isFailedJob, isReworkableTask, isReviewableStatus, reviewGate, reviewPageHits, reviewSubmitButtons } from "./reviewActions";
 import { ReviewDockPanel } from "./ReviewDockPanel";
 import { ReviewHitDetail } from "./ReviewHitDetail";
 import { SPOT_CARD_GAP, SPOT_CARD_MARGIN, SPOT_CARD_MIN_HEIGHT, SPOT_CARD_MIN_WIDTH, SPOT_CARD_WIDTH, avoidSpotObstacle, placeSpotCard, resolveSpotPosition, spotDragStarted, spotLane, spotSideRoom, type SpotObstacle } from "./spotCard";
@@ -55,17 +56,14 @@ type Props = {
   displayName?: string | null;
   /** 有 complete 权限才能看见签字/退回；viewer 为 false。缺省 true。 */
   canComplete?: boolean;
+  /** 有 create 权限（`me.perms`）：失败条里的「重新上传这一单」要它；viewer 为 false。缺省 false。 */
+  canCreate?: boolean;
+  /** 当前登录人是管理员（`isAdmin(me)`）；服务端 /rework 对管理员不看归属。 */
+  admin?: boolean;
   onBack: () => void;
   /** 手机底部导航「历史」。 */
   onHistory?: () => void;
 };
-
-function isReworkable(task: TaskDetail | null) {
-  if (!task) return false;
-  if (Array.isArray(task.pages_v2) && task.pages_v2.length > 0) return false;
-  if (task.status === "pending_review" || task.status === "in_review") return true;
-  return task.status === "completed" && task.complete_kind === "rework";
-}
 
 function pageList(task: TaskDetail | null): TaskPage[] {
   const raw = task?.pages;
@@ -89,7 +87,7 @@ function spotTabObstacle(canvas: HTMLElement): SpotObstacle | null {
   return obstacle;
 }
 
-export function ReviewPage({ taskId, userId, displayName = null, canComplete = true, onBack, onHistory }: Props) {
+export function ReviewPage({ taskId, userId, displayName = null, canComplete = true, canCreate = false, admin = false, onBack, onHistory }: Props) {
   const { message, modal } = App.useApp();
   const [task, setTask] = useState<TaskDetail | null>(() => reviewHandoffFor(taskId));
   const [error, setError] = useState<string | null>(null);
@@ -295,7 +293,7 @@ export function ReviewPage({ taskId, userId, displayName = null, canComplete = t
   const page = pages[pageIdx];
   const signed = task?.status === "completed";
   const reviewable = isReviewableStatus(task?.status);
-  const reworkable = isReworkable(task);
+  const reworkable = isReworkableTask(task);
   const current = hits[active];
 
   useLayoutEffect(() => {
@@ -716,6 +714,7 @@ export function ReviewPage({ taskId, userId, displayName = null, canComplete = t
 
   const hasUnsavedNotes = hits.some((hit) => hit.id && notes[hit.id] != null && notes[hit.id] !== (hit.note ?? ""));
 
+  /** 选 PDF 走 /rework（页头「上传新稿」和失败条「重新上传这一单」共用）；被拒时照常提示服务端的话。 */
   async function uploadRework(file: File) {
     if (!task || !reworkable || hasUnsavedNotes) return;
     // 公网上传上限预检：超了就直接提示，不发请求（否则会先被 413 HTML 拦掉）。
@@ -921,15 +920,39 @@ export function ReviewPage({ taskId, userId, displayName = null, canComplete = t
   const orderHeldNeeded = needsOrderHeldConfirm(task, hits);
   const draftBlock = unsavedNotesHint(hasUnsavedNotes);
   const failedJob = isFailedJob(task);
-  const buttons = reviewSubmitButtons(task, hits, { locked: Boolean(locked), orderHeldConfirm, busy, hasUnsavedNotes, canComplete });
+  // 签字/退回：有 complete 权限，且这单自己能动（同服务端 assertCanAccessTask）；别人的单（非管理员）两个按钮都不在。
+  const canCompleteThis = canComplete && canAccessTaskOwner(task, { admin, openId: userId, displayName });
+  const buttons = reviewSubmitButtons(task, hits, { locked: Boolean(locked), orderHeldConfirm, busy, hasUnsavedNotes, canComplete: canCompleteThis });
   const failedWithoutHits = failedJob && hits.length === 0;
-  const failedWithHits: FailedWithHitsKind | undefined = failedJob && hits.length > 0 ? (task?.job_kind === "rework" ? "rework" : "compare") : undefined;
+  const deadCompare = isDeadCompareFailed(task);
+  // 对照失败但没有有效条目（按服务端 activeHits 算，如认字单 hits_v2 为空）：不算「带上一轮条目」，走无条目失败条。
+  const failedWithHits: FailedWithHitsKind | undefined = failedJob && hits.length > 0 && !deadCompare ? (task?.job_kind === "rework" ? "rework" : "compare") : undefined;
+  const reuploadFailed = canReuploadFailed(task, hits, { canCreate, admin, openId: userId, displayName });
+  /** 和页头「上传新稿」同一条选文件 → /rework 流程。 */
+  const pickReworkPdf = () => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".pdf";
+    input.onchange = () => { const f = input.files?.[0]; if (f) void uploadRework(f); };
+    input.click();
+  };
+  const failedBarAction = reuploadFailed ? (
+    <button type="button" className="btn-ghost review-upload-failed" disabled={busy || hasUnsavedNotes} onClick={pickReworkPdf}>
+      {REVIEW_COPY.reupload}
+    </button>
+  ) : deadCompare ? (
+    <a href={hrefOf({ view: "tasks" })} className="btn-ghost review-back-home" data-testid="review-back-home" onClick={(e) => { e.preventDefault(); onBack(); }}>
+      {REVIEW_COPY.backHome}
+    </a>
+  ) : undefined;
+  /** 无条目失败单的正文：对照失败没救的单请回首页新建；其余照旧。 */
+  const failedNoHitsCopy = deadCompare ? REVIEW_COPY.compareFailedNoHits : REVIEW_COPY.reupload;
   const thumbs = thumbMarks(pages, hits, seenPages);
   const issueRows = rejectRows(hits, notes);
   const releaseHeld = task?.verbatim_check === true;
   const pendingLines = phonePendingLines(hits, releaseHeld);
   const phone = layout === "phone";
-  const posnLabel = failedWithoutHits ? null : locked ? positionLabel(tabIndices(hits, "all", active), active, undefined, heldCount) : positionLabel(tabList, active, tab === "pending" ? counts.pending : undefined, heldCount);
+  const posnLabel = failedWithoutHits ? null : locked ? positionLabel(tabIndices(hits, "all", active), active, undefined, heldCount) : reviewPositionLabel(hits, tabList, active, tab === "pending" ? counts.pending : undefined, heldCount);
   const noteFor = (h?: FieldHit) => (h?.id ? notes[h.id] ?? h.note ?? "" : "");
   const zoomBy = (factor: number) => {
     const el = viewRef.current;
@@ -982,20 +1005,14 @@ export function ReviewPage({ taskId, userId, displayName = null, canComplete = t
             type="button"
             className="btn-ghost review-upload-new"
             disabled={busy || hasUnsavedNotes}
-            onClick={() => {
-              const input = document.createElement("input");
-              input.type = "file";
-              input.accept = ".pdf";
-              input.onchange = () => { const f = input.files?.[0]; if (f) void uploadRework(f); };
-              input.click();
-            }}
+            onClick={pickReworkPdf}
           >
             上传新稿
           </button>
         ) : null}
         {draftBlock ? <span className="review-draft-status" role="status" data-testid="review-unsaved-hint">{draftBlock}</span> : null}
-        {gate.hint ? <span className="review-signhint" id="review-sign-hint" title={gate.title} aria-live="polite">{gate.hint}</span> : null}
-        {orderHeldNeeded && !failedJob ? (
+        {signHint(gate.hint, buttons) ? <span className="review-signhint" id="review-sign-hint" title={gate.title} aria-live="polite">{gate.hint}</span> : null}
+        {orderHeldNeeded && !failedJob && canComplete ? (
           <Checkbox
             className="review-order-held"
             data-testid="review-order-held"
@@ -1015,12 +1032,12 @@ export function ReviewPage({ taskId, userId, displayName = null, canComplete = t
         </span>
       </header>
 
-      {rejectNote(gate.rejectTitle, Boolean(failedWithHits)) ? <p className="review-reject-note" id="review-reject-note" data-testid="review-reject-note">{gate.rejectTitle}</p> : null}
+      {rejectNote(gate.rejectTitle, buttons) ? <p className="review-reject-note" id="review-reject-note" data-testid="review-reject-note">{gate.rejectTitle}</p> : null}
       {locked ? <Alert className="review-lock" type="warning" title={`🔒 ${locked}`} description={REVIEW_COPY.lockedNote} /> : null}
       {error ? <Alert type="error" title={error} /> : null}
       {task?.error || task?.job_error || task?.job_error_code ? (
-        <Alert type={reviewErrorType(task.job_error_code)} showIcon title={reviewErrorCopy(task.error || task.job_error || "", task.job_error_code, failedWithHits) || "检查失败。"} description={failedJob && !failedWithHits ? REVIEW_COPY.reupload : undefined} />
-      ) : failedJob ? <Alert type="error" showIcon title={failedWithHits ? reviewErrorCopy("", undefined, failedWithHits) : REVIEW_COPY.reupload} /> : null}
+        <Alert type={reviewErrorType(task.job_error_code)} showIcon title={reviewErrorCopy(task.error || task.job_error || "", task.job_error_code, failedWithHits, reuploadFailed) || "检查失败。"} description={failedJob && !failedWithHits && (deadCompare || !failedBarAction) ? failedNoHitsCopy : undefined} action={failedBarAction} />
+      ) : failedJob ? <Alert type="error" showIcon title={failedWithHits ? reviewErrorCopy("", undefined, failedWithHits, reuploadFailed) : failedNoHitsCopy} action={failedBarAction} /> : null}
       {signed && !locked ? <Alert type="success" showIcon title={task?.complete_kind === "rework" ? "已退回。" : "已签字。"} /> : null}
       {decisionError ? <Alert type="error" showIcon title={`未保存：${decisionError}`} /> : null}
 
@@ -1450,6 +1467,7 @@ export function ReviewPage({ taskId, userId, displayName = null, canComplete = t
         kind={dialog}
         rows={issueRows}
         pending={gate.pending}
+        blockedText={gate.rejectTitle}
         held={heldCount}
         fscNote={task?.fsc_note}
         busy={busy}

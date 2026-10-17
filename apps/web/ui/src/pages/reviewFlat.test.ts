@@ -5,7 +5,7 @@ import { PUBLIC_UPLOAD_BYTES, UPLOAD_TOO_LARGE, setUploadLimitFromMe } from "../
 import {
   rejectNote,
   clampPinToView, completedAtLabel, completedByText, conclusionFor, decisionFailureText, reworkUploadBlocked, submitFailureText, flatLayout, isTypingTarget, lockedBy, markerOutsideCorner, nextPendingAfter,
-  openHeldAfterPending, panToClearPanel, pendingTally, phonePendingLines, positionLabel, rejectRows, shouldShowShortcutsOnOpen, submitGate, tabIndices, thumbMarks, verdictCounts, verdictForKey,
+  openHeldAfterPending, panToClearPanel, pendingTally, phonePendingLines, positionLabel, rejectRows, reviewPositionLabel, shouldShowShortcutsOnOpen, signHint, submitGate, tabIndices, thumbMarks, verdictCounts, verdictForKey,
 } from "./reviewFlat.js";
 
 const hit = (id: string, decision = "pending", page = 1, status = "疑点", note = ""): FieldHit => ({ id, field: id, status, decision, page, note });
@@ -22,10 +22,10 @@ describe("reviewFlat", () => {
     const g = submitGate(pend, true);
     assert.equal(g.canSign, false); assert.equal(g.canReject, true); assert.equal(g.hint, "仍有 1 条疑点未处理");
     assert.equal(g.title, "仍有 1 条疑点未处理");
-    assert.equal(g.rejectTitle, "还有 1 条待确认，处理完才能退回");
+    assert.equal(g.rejectTitle, "仍有 1 条疑点未处理");
     assert.equal(g.pending, 1);
-    assert.equal(rejectNote(g.rejectTitle, false), "还有 1 条待确认，处理完才能退回");
-    assert.equal(rejectNote(g.rejectTitle, true), null, "失败但带条目：按钮都不在，小字也不显示");
+    assert.equal(rejectNote(g.rejectTitle, { sign: "disabled", reject: "enabled" }), "仍有 1 条疑点未处理");
+    assert.equal(rejectNote(g.rejectTitle, { sign: "hidden", reject: "hidden" }), null, "失败单：按钮都不在，小字也不显示");
     assert.deepEqual([submitGate([hit("a", "issue")], true).canSign, submitGate([hit("a", "issue")], true).canReject], [false, true]);
     assert.equal(submitGate([hit("a", "ignore")], true).canSign, true);
     assert.equal(submitGate([], true).canSign, true, "零疑点可直接签字");
@@ -196,5 +196,38 @@ describe("签字门提示与服务端 /complete 拦截同一句", () => {
     assert.equal(submitGate([held("a"), doubt("b")], true, false, true).hint, "仍有 1 条认字存疑未处理");
     assert.deepEqual(pendingTally([held("a"), doubt("b"), held("c")]), [{ word: "待人工确认", count: 2 }, { word: "认字存疑", count: 1 }]);
     assert.deepEqual(pendingTally([held("a")], true), []);
+  });
+});
+
+describe("签字和退回都做不了：右上和页头叫人做事的句子不出", () => {
+  it("两个按钮都不在才藏；有一个在（哪怕灰着）就照常说明", () => {
+    const g = submitGate([hit("a")], true);
+    const none = { sign: "hidden", reject: "hidden" } as const;
+    assert.equal(signHint(g.hint, none), null);
+    assert.equal(rejectNote(g.rejectTitle, none), null);
+    for (const b of [{ sign: "disabled", reject: "enabled" }, { sign: "disabled", reject: "disabled" }, { sign: "enabled", reject: "hidden" }] as const) {
+      assert.equal(signHint(g.hint, b), g.hint, JSON.stringify(b));
+      assert.equal(rejectNote(g.rejectTitle, b), g.rejectTitle, JSON.stringify(b));
+    }
+    assert.equal(signHint("", { sign: "disabled", reject: "enabled" }), null);
+  });
+});
+
+describe("审核数据状态异常", () => {
+  const odd = (id: string, extra: Partial<FieldHit> = {}): FieldHit => ({ id, field: id, status: "未知状态", page: 1, ...extra });
+  it("未知状态：右上短句，页头和悬停用服务端原话；两个按钮都灰", () => {
+    const g = submitGate([odd("a"), hit("b", "maybe")], true);
+    assert.deepEqual([g.canSign, g.canReject, g.hint, g.title, g.rejectTitle], [false, false, "审核数据状态异常", "有 2 条审核数据状态异常，请重新对照", "有 2 条审核数据状态异常，请重新对照"]);
+  });
+  it("只有 decision 非法：文案同服务端原话，按钮仍按待确认（签字灰、退回可点）", () => {
+    const g = submitGate([hit("a", "maybe")], true);
+    assert.deepEqual([g.canSign, g.canReject, g.hint, g.title, g.rejectTitle], [false, true, "审核数据状态异常", "有 1 条审核数据状态异常，请重新对照", "有 1 条审核数据状态异常，请重新对照"]);
+  });
+  it("导航：有异常状态时不写「全部已下结论」，按全部条目计数", () => {
+    const hits = [odd("a")];
+    assert.equal(positionLabel([], 0), "全部已下结论", "对照：不看异常时会写全部已下结论");
+    assert.equal(reviewPositionLabel(hits, [], 0, 0, 0), "1/1");
+    assert.equal(reviewPositionLabel([hit("a", "confirm"), odd("b")], [], 1, 0, 0), "2/2");
+    assert.equal(reviewPositionLabel([hit("a", "confirm")], [], 0, 0, 0), "全部已下结论");
   });
 });

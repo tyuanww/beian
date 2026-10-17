@@ -141,7 +141,7 @@ describe("review gates", () => {
     assert.equal(pendingWord({ status: "待人工确认" }), null);
   });
 
-  it("lets signed tasks rework but not failed or comparing ones", () => {
+  it("lets signed tasks and interrupted compares with hits rework, but not other failed or comparing ones", () => {
     assert.equal(isReworkableStatus("pending_review"), true);
     assert.equal(isReworkableStatus("in_review"), true);
     assert.equal(isReworkableStatus("completed"), true);
@@ -154,6 +154,12 @@ describe("review gates", () => {
     assert.equal(isReworkableTask({ status: "in_review" }), true);
     assert.equal(isReworkableTask({ status: "completed", complete_kind: "rework" }), true);
     assert.equal(isReworkableTask({ status: "completed", complete_kind: "signed" }), false);
+    const interrupted = { status: "compare_failed", job_kind: "compare" as const, job_status: "failed" as const, hits: [{ id: "h1", field: "净含量", status: "疑点" }] };
+    assert.equal(isReworkableTask(interrupted), true);
+    assert.equal(isReworkableTask({ ...interrupted, hits: [] }), false);
+    assert.equal(isReworkableTask({ ...interrupted, pages_v2: [{ url: "/x.png" }] }), false);
+    assert.equal(isReworkableTask({ ...interrupted, job_kind: "rework" as const }), false);
+    assert.equal(isReworkableTask({ ...interrupted, job_status: "succeeded" as const }), false);
     assert.equal(
       isReworkableTask({ status: "completed", complete_kind: "rework", pages_v2: [{ url: "/x.png" }] }),
       false,

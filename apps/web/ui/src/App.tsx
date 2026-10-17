@@ -474,6 +474,8 @@ export function App() {
             userId={me.open_id || null}
             displayName={me.display_name || null}
             canComplete={me.perms.includes("complete")}
+            canCreate={me.perms.includes("create")}
+            admin={isAdmin(me)}
             taskId={taskId}
             onBack={() => goRoute({ view: "tasks" })}
             onHistory={() => goRoute({ view: "history" })}

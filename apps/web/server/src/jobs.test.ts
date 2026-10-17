@@ -269,7 +269,7 @@ describe("jobs dispatcher", () => {
     assert.equal(t.job_error, "对照中断");
   });
 
-  it("rework failure returns to status_before_job so she can still sign", async () => {
+  it("rework failure returns to status_before_job with last round's hits kept; signing waits for a re-uploaded rework", async () => {
     setJobsTestHooks({
       runRework: async () => ({ code: 1, stdout: "", stderr: "", timedOut: false }),
     });

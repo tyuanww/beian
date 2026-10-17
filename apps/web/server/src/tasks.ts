@@ -209,7 +209,7 @@ const NATIVE_REASONS = new Set(["native_busy", "native_offline", "source_changed
  * A parseable but contradictory record must block release rather than vanish
  * from the running/queued counters.
  */
-function hasValidTaskJobState(task: Task): boolean {
+export function hasValidTaskJobState(task: Task): boolean {
   const native = task.native_text_request;
   if (task.native_text_attempted !== undefined && typeof task.native_text_attempted !== "boolean") return false;
   if (native !== undefined && (!native || native.version !== "native-text/1"
@@ -384,9 +384,17 @@ export function hasReworkPages(task: { pages_v2?: unknown }): boolean {
   return Array.isArray(task.pages_v2) && task.pages_v2.length > 0;
 }
 
-export function isReworkableTask(task: { status: string; complete_kind?: string; pages_v2?: unknown }): boolean {
+export function isReworkableTask(
+  task: { status: string; complete_kind?: string; pages_v2?: unknown } & Partial<Pick<Task, "job_kind" | "job_status" | "verbatim_check" | "hits" | "hits_v2">>,
+): boolean {
   if (hasReworkPages(task)) return false;
   if (task.status === "pending_review" || task.status === "in_review") return true;
+  // 产品 10/17 方案 A：「检查中断」单（对照失败、还留着上一轮条目）可重新上传对红。回收出来的失败
+  // 和对照命令行自己失败的不区分；对照失败已没有条目的照旧不放行。工艺说明这类不进机审的字段不算条目，
+  // 写法同 completeGate。
+  if (task.status === "compare_failed") {
+    return task.job_kind === "compare" && task.job_status === "failed" && activeHits(task as Task).filter((h) => !skipPackSheetField(h.field)).length > 0;
+  }
   return task.status === "completed" && task.complete_kind === "rework";
 }
 

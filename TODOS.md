@@ -308,7 +308,7 @@ RF-10–RF-13 的原始依赖见 [ADR-007 §20.7](docs/adr-007-packaging-render-
 
 - [ ] **B04 — 多页稿逐页核对**
 
-  状态：本批（pstack batch1）超过 1 页直接 `page_over`，审稿员可见文案「稿件超过 1 页，暂不支持核对，请联系管理员」。未按页循环核对；多页不得静默漏查。
+  状态：本批（pstack batch1）超过 1 页直接 `page_over`，审稿员可见文案「稿件超过 1 页，暂不支持核对，请联系管理员」。未按页循环核对；多页不得静默漏查。前端黄条（复核超页）页数用 `apps/web/ui/src/copy/labels.ts` 的 `REVIEW_PAGE_LIMIT = 1` 插值（仓库没有可共用的上限常量），B04 上线时改 4。
 
   1. 实现按页循环核对，汇总各页结果，不把多页静默漏查或只核第一页。
   2. 补两页真测（合成 + 真实稿各至少一例），确认超页门与逐页路径边界清晰。
@@ -333,7 +333,7 @@ RF-10–RF-13 的原始依赖见 [ADR-007 §20.7](docs/adr-007-packaging-render-
   3. **验收：** 超页单返回 `job_error_code: "page_over"`；其他报错不带或带各自的码；前端改文案后判断仍对；有回归。
   4. pstack batch4：旧超页失败单（存盘无码）读取时按原文补码的兼容逻辑已独立为 `apps/web/server/src/legacyPageOver.ts`，统计方法 `npm run legacy:page-over -w beian-server -- <tasks 目录>`。现在没有流程会让旧失败单被重跑或归档，统计数不会自己归零；是否归档旧失败单需要老板决定，否则这段兼容长期保留。在杭州生产 tasks 目录跑 `legacy:page-over`（即使只读）也是碰 runtime 目录，必须老板单独批准。
   5. pstack batch4 Bug：老的失败超页单在核对页顶部导航显示「全部已下结论」（失败单无 hits，`positionLabel` 空列表回落该文案）。已本地修：失败且没有条目的单子不显示顶部进度/翻页、缩略图「✓ 看完」、右栏剩余条数和「复制修改清单」，只留失败原因；复核失败但保留上一轮条目的单子照常显示，顶部红条写「复核出了问题，下面是上一轮的结果，请联系管理员」；e2e 补回归。未发版。
-  6. 第5批处理：复核失败单右上角显示「还有 N 条没下结论」，边角单（compare_failed 带上一轮条目）上不显示，两种单子要统一。产品哥已定这一行保留，只是两种单子没对齐。
+  6. ~~第5批处理：复核失败单右上角显示「还有 N 条没下结论」，边角单（compare_failed 带上一轮条目）上不显示，两种单子要统一。~~ 已处理（10/17 产品哥定）：签字和退回都做不了（两个按钮都不在：失败单、viewer）时右上和页头那句都不显示，两种失败单已统一；疑点列表的待确认数照常。判断跟着 `reviewSubmitButtons`（`reviewFlat.ts` `signHint` / `rejectNote`），不看失败条类型。
 
 - [ ] **B07 — 渲染版本历史 `actor_label` 在 2026-10-16 前可能不准**
 
@@ -564,14 +564,25 @@ RF-10–RF-13 的原始依赖见 [ADR-007 §20.7](docs/adr-007-packaging-render-
 
 签字 / 退回按钮何时显示、何时可点、确认框能否提交，是前后端共用表 `apps/web/server/src/signReturnRules.ts`（零依赖）：服务端 `signReturnRules.test.ts` 逐行对照 `completeGate`（`/complete` 拦截）+ `hasPerm(role, "complete")`；前端 `signReturnRules.contract.test.ts` 逐行对照 `reviewSubmitButtons`；`e2e/sign-return-rules.spec.ts` 按表渲染核对页。任一边改规则，对应测试变红。认字存疑的判断是共用的零依赖 `readingDoubt.ts` 的 `hasReadingDoubt`（只看 `coverage.miss`，以及已标记条目的 `sequence_diff.only_in_excel` / `doubt_bucket`；「已标记」是明确状态集合「疑点 / 缺失 / 缺空格 / 待人工确认」，`readingDoubt.test.ts` 防漂移），前端 `isReviewIssue` 和服务端 `hitNeedsDecision`（只在没下结论时）都调它。
 
-产品口径（2026-10-17）：该拦的两边都拦，服务端必须能独立拦住。原第 2–4 条与认字存疑已进主表；第 1 条待老板定，`SIGN_RETURN_DISPUTED` 只剩这一条（两行）：
+产品口径（2026-10-17）：该拦的两边都拦，服务端必须能独立拦住。原 4 条与认字存疑已全部进主表，`SIGN_RETURN_DISPUTED` 为空：
 
-- [ ] 对红（复核）失败、单子回到待审且带上一轮条目，是否改成不可签：**待老板定**。现状两边不一致、各自锁住：前端失败单不给按钮；服务端 `/complete` 照 origin/main 不看 `job_status: failed`，按条目收签字 / 退回（8/20 设计 `docs/designs/review-job-module.md`「对红失败仍可签字」）。若定为不可签，要同时配一条管理员重新对红的路径（现在只有 `POST /api/tasks/:tid/rework` 带新 PDF，核对页只在 `status: completed` 时显示「上传新稿」，待审态的失败单在界面上没有入口）。
+- [x] 对红（复核）失败、单子回到待审且带上一轮条目：老板 10/17 定 B，签字退回都拦，出路为重新上传对红（`POST /api/tasks/:tid/rework`，审核员只能传自己的单，别人的单回 403）。服务端 `completeGate` 在 `job_kind: rework` + `job_status: failed` 时（不论还剩不剩条目）回 400「当前状态不可签字」；对照失败等其他失败按 main 不受影响。前端失败单本来就不给签字/退回按钮。
+- [x] 前端核对页给这种单加「重新上传这一单」入口（调现有 `/rework`）：红条（复核失败）、黄条（复核超页，按 `job_error_code === "page_over"`）已加，只在本人单（`owner === me.open_id` 且有 `create`）或管理员显示，viewer / 别人的单不显示；前端 `isReworkableTask`（`reviewActions.ts`）照服务端同名函数放行。三条定稿文案在 `labels.ts`，不拼服务端 `job_error` 原文。
+- [x] 「检查中断」单（方案 A，产品 10/17）：`isReworkableTask` 放行所有 `status: compare_failed` + `job_kind: compare` + `job_status: failed`、`activeHits` 还有条目、没有 `pages_v2` 的单，回收出来的失败和对照命令行自己失败的不区分；对照失败已没有条目的、有 `pages_v2` 的照旧回 400「当前状态不可对红」。`/rework` 对这种单把 `status_before_job` 记成 `pending_review` 并清掉旧 `error`，复核失败落到待审 + 对红失败（红条，签字退回拦，可再传），不再变成不可读单。签字退回在复核前仍 400。
+- [x] 前端跟上方案 A：`reviewActions.ts` 的 `isReworkableTask` 同条件放行检查中断单（有效条目同服务端 `activeHits`：认字单看 `hits_v2`、其他单 `hits_v2` 非空看它否则看 `hits`，跳过工艺表字段），条里文案「检查中断了，下面是上一轮的结果，可以重新上传这一单」+「重新上传这一单」按钮（本人单 / 管理员，viewer 不显示）。`reworkable.contract.test.ts` 把前后端 `isReworkableTask` 逐例对照（含只剩工艺说明条目的单两边都不放行）。
+- [ ] 对照失败且没有有效条目的单（`compare_failed`、按服务端 `activeHits` 算为 0，含只剩工艺说明的）：产品 10/17 选 1，前端失败条正文「这一单没法接着核了，请回首页重新新建一单」+「回首页」链接（只跳路由，不调接口；`reviewActions.ts` `isDeadCompareFailed`），不再显示看着能点的纯文字「重新上传这一单」。能否原地重新上传留到加码 PR 评估（服务端那条见开发哥记的条目）；加码 PR 放开无条目重新上传时，前端把正文换成「可以重新上传这一单」并去掉「回首页」（`isDeadCompareFailed` 分支）。
+- [ ] 黄条原文：服务端超页 `job_error` 现在是「稿件超过 1 页，暂不支持核对，请联系管理员」，要去掉「请联系管理员」，放到加码 PR 里做；前端按 `job_error_code: "page_over"` 显示自己的文案，不读这句原文。
+- [ ] 第 5 批签字文案复核留下的非阻塞项（找茬哥 10/17，都归加码 PR；(a)(b) 归前端）：
+  1. (a) 前端：首次对照超页又没有条目的单，失败横条标题「稿件超过 1 页，暂不支持核对，请联系管理员」和正文「这一单没法接着核了，请回首页重新新建一单」打架，要统一成一个出路。
+  2. (b) 前端：`ReviewPage.tsx` 整单确认勾选框（`orderHeldNeeded && !failedJob && canComplete`）仍看 `canComplete`，应换成 `canCompleteThis`（同签字退回按钮，看单子归属）。
+  3. (c) 服务端（开发哥）：补测试，非管理员对别人的单调 `/complete` 回 403 `{detail: "没有权限"}`。
+  4. (d) 认字失败识别仍靠已登记的 `OCR_FAILED` 文字匹配（`reviewErrorCopy.ts`）；加码出 `ocr_failed` 码后前端改按码判断，去掉这处例外。
 - [x] 非逐字单出现未决「待人工确认」：两边都算待确认；服务端回 400「仍有 N 条待人工确认未处理」（逐字单仍走整单确认勾选）。
 - [x] 只读账号（viewer）：前端隐藏签字/退回；服务端 403。
 - [x] 条目状态不在已知集合：前端两个按钮灰并提示「审核数据状态异常」；服务端 400「有 N 条审核数据状态异常，请重新对照」。
 - [x] 认字存疑（`hasReadingDoubt`）且没下结论：两边都算待确认；服务端回 400「仍有 N 条认字存疑未处理」；多类同时出现时分开数，如「仍有 2 条待人工确认、1 条认字存疑未处理」。已标一致 / 忽略 / 有错后不再拦。
-- [ ] 加码批下后（第 5 批「加后端码」老板未批），上面服务端这几处拦截（待人工确认 / 认字存疑「仍有 N 条…未处理」）改回机读码，前端按码出文案；现在 `/complete` 仍是 `HTTPException(400, { message })` → `{detail}`，不加字段。
+- [ ] 加码批下后（第 5 批「加后端码」老板未批），上面服务端这几处拦截（对红失败单「当前状态不可签字」、待人工确认 / 认字存疑「仍有 N 条…未处理」）改回机读码，前端按码出文案；现在 `/complete` 仍是 `HTTPException(400, { message })` → `{detail}`，不加字段。
+- [ ] 前端 `isReviewIssue`（`reviewEvidence.ts`）比服务端 `hitNeedsDecision` 多拦两种条目：状态匹配 `/不清|误/` 的，以及 `doubtLines` 有内容但没标 pending 的（如缺空格）。产品哥 10/17 定以前端为准、服务端跟上：服务端按结构化字段判断，不照抄 `doubtLines` 的文字；前端这条正则也换成明确状态集合（同 `hasReadingDoubt` 的 `FLAGGED_STATUSES`）。真正对齐放在「加码」那个 PR。差异已由 `apps/web/ui/src/pages/reviewIssueGap.contract.test.ts` 锁住：缺空格没标 pending、只靠 `evidence` 有核对要点时前端签字灰（「仍有 1 条缺空格未处理」）、服务端放行；`/不清|误/` 在服务端认得的状态里一个都不命中，只会撞上未知状态，两边都按状态异常拦，实际不分歧。任一边改了这份测试会变红。
 - [ ] `isAccountingCopy`：前端 `hitText.ts` 的 `humanMissLines` 仍用正则把 `score=`、「覆盖偏低」等核算说明从 miss 里滤掉（只影响核对要点显示）。签字门已不受影响：两边都按 `hasReadingDoubt` 认任何非空 miss，表里「coverage.miss 只有核算说明」一行锁住两边都算待确认。等后端给出结构化「核算说明」标记（不混进 `coverage.miss`）后去掉前端这条正则。
 
 ## 2026-10-17 CI 偶发：RF-02 adapter 资源采样把原子替换当成账算不清

@@ -113,18 +113,18 @@ test("三栏通铺：1440 稿件 ≥70%、右栏 320、工具条在画布下方�
   const sign = page.getByRole("button", { name: "签字", exact: true });
   await expect(sign).toBeDisabled();
   // 与服务端 /complete 拦截同一句（按状态分开数）。
-  await expect(page.getByText("仍有 1 条疑点未处理", { exact: true })).toBeVisible();
+  await expect(page.locator("#review-sign-hint")).toHaveText("仍有 1 条疑点未处理");
   await expect(sign).toHaveAttribute("title", "仍有 1 条疑点未处理");
-  await expect(page.getByTestId("review-reject-note")).toHaveText("还有 1 条待确认，处理完才能退回");
+  await expect(page.getByTestId("review-reject-note")).toHaveText("仍有 1 条疑点未处理");
   // 签字禁用时退回不禁用；还有待确认时确认框挡住「确认退回」（服务端 /complete 要求先下完结论）。
   const rejectBtn = page.getByRole("button", { name: "退回", exact: true });
   await expect(rejectBtn).toBeEnabled();
   await rejectBtn.click();
   const pendingDialog = page.getByRole("dialog");
   // 提示放在框顶（标题下第一段），打字前就看到。
-  await expect(pendingDialog.locator(".ant-modal-body > :first-child")).toHaveText("还有 1 条待确认，处理完才能退回");
+  await expect(pendingDialog.locator(".ant-modal-body > :first-child")).toHaveText("仍有 1 条疑点未处理");
   await expect(pendingDialog.getByRole("button", { name: "确认退回" })).toBeDisabled();
-  // qa #3：交不了时补充说明也禁用，避免白写；提示「还有 N 条待确认，处理完才能退回」。
+  // qa #3：交不了时补充说明也禁用，避免白写；提示与服务端同一句「仍有 N 条…未处理」。
   await expect(pendingDialog.getByLabel("补充说明（选填）")).toBeDisabled();
   await pendingDialog.getByRole("button", { name: "再看看" }).click();
   await expect(pendingDialog).toBeHidden();
@@ -443,8 +443,8 @@ test("768 宽页头不折行，退回/签字靠右（design F-002）", async ({ 
   // <1024 隐藏签字旁「仍有 N 条…未处理」，改为签字按钮悬停说明（同一句）。
   await expect(page.locator(".review-signhint")).toBeHidden();
   await expect(page.getByRole("button", { name: "签字", exact: true })).toHaveAttribute("title", "仍有 1 条疑点未处理");
-  await expect(page.getByTestId("review-reject-note")).toHaveText("还有 1 条待确认，处理完才能退回");
-  await expect(page.getByRole("button", { name: "退回", exact: true })).toHaveAttribute("title", "还有 1 条待确认，处理完才能退回");
+  await expect(page.getByTestId("review-reject-note")).toHaveText("仍有 1 条疑点未处理");
+  await expect(page.getByRole("button", { name: "退回", exact: true })).toHaveAttribute("title", "仍有 1 条疑点未处理");
   expect((await page.locator(".review-title").boundingBox())!.height).toBeLessThan(40);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
@@ -858,14 +858,19 @@ test("超页：后端回 job_error_code=page_over 时显示黄色提醒", async 
   const task = reviewTask("e5969b58cd60");
   task.status = "compare_failed";
   task.board = "failed";
+  task.job_kind = "compare";
   task.job_status = "failed";
   task.job_error = "这一单页数超过可核对页数";
   task.job_error_code = "page_over";
   syntheticApi.tasks.push(task);
   await page.goto(`/review/${task.id}`);
-  const alert = page.locator(".ant-alert").filter({ hasText: "稿件超过 1 页，暂不支持核对，请联系管理员" });
+  // 这张合成单带着上一轮条目（检查中断 + page_over，找茬哥 10/17）：管理员有「重新上传这一单」，
+  // 用黄条定稿文案，后半句跟着按钮；同一条里不出「请联系管理员」。
+  const alert = page.locator(".ant-alert").filter({ hasText: "稿件超过 1 页，这次复核没做，下面是上一轮的结果。请改成 1 页后重新上传这一单" });
   await expect(alert).toBeVisible();
   await expect(alert).toHaveClass(/ant-alert-warning/);
+  await expect(alert.getByRole("button", { name: "重新上传这一单" })).toBeVisible();
+  await expect(alert).not.toContainText("请联系管理员");
   await page.screenshot({ path: info.outputPath("page-over-warning.png") });
 });
 
@@ -900,7 +905,11 @@ test("失败单：顶部不显示结论进度，只显示失败原因", async ({
   await expect(page.getByText(/这单还剩 \d+ 条待确认/)).toHaveCount(0);
   await expect(page.getByRole("button", { name: "复制修改清单" })).toHaveCount(0);
   await expect(page.getByText("检查未完成，暂时没有结果")).toBeVisible();
-  await expect(page.locator(".ant-alert").getByText("重新上传这一单")).toBeVisible();
+  // 对照失败没有条目（产品 10/17 选 1）：正文请回首页新建一单，后面是「回首页」链接；不再写「重新上传这一单」。
+  const bar = page.locator(".ant-alert").filter({ hasText: "这一单没法接着核了，请回首页重新新建一单" });
+  await expect(bar).toBeVisible();
+  await expect(bar.getByRole("link", { name: "回首页" })).toBeVisible();
+  await expect(page.getByText("重新上传这一单")).toHaveCount(0);
   await page.screenshot({ path: info.outputPath("failed-no-progress.png") });
 });
 
@@ -913,13 +922,15 @@ test("复核失败但条目还在：失败条照常显示，进度、翻页、�
   syntheticApi.tasks.push(task);
   expect(task.hits?.length).toBeGreaterThan(0);
   await page.goto(`/review/${task.id}`);
-  await expect(page.locator(".ant-alert-error").filter({ hasText: "复核出了问题，下面是上一轮的结果，请联系管理员" })).toBeVisible();
+  const reworkAlert = page.locator(".ant-alert-error").filter({ hasText: "复核出了问题，下面是上一轮的结果，可以重新上传这一单" });
+  await expect(reworkAlert).toBeVisible();
   await expect(page.getByTestId("review-posn")).toBeVisible();
   await expect(page.getByRole("button", { name: "上一条" })).toBeVisible();
   await expect(page.getByRole("button", { name: "下一条" })).toBeVisible();
   await expect(page.getByText(/这单还剩 \d+ 条待确认/)).toBeVisible();
   await expect(page.getByRole("button", { name: "复制修改清单" })).toBeVisible();
-  await expect(page.getByText("重新上传这一单")).toHaveCount(0);
+  // 合成登录是管理员：服务端 /rework 对管理员不看归属，失败条里给「重新上传这一单」。
+  await expect(reworkAlert.getByRole("button", { name: "重新上传这一单" })).toBeVisible();
   await expect(page.locator("button.review-sign")).toHaveCount(0);
   await expect(page.locator("button.review-reject")).toHaveCount(0);
   await expect(page.getByTestId("review-reject-note")).toHaveCount(0);
@@ -938,8 +949,9 @@ test("compare_failed 带上一轮条目（reclaimTask 边角单）：进度、�
   expect(task.hits?.length).toBeGreaterThan(0);
   await page.goto(`/review/${task.id}`);
   const alert = page.locator(".ant-alert-error").first();
-  await expect(alert).toHaveText("检查中断了，下面是上一轮的结果，请联系管理员");
-  await expect(page.getByText("重新上传这一单")).toHaveCount(0);
+  await expect(alert.locator(".ant-alert-title")).toHaveText("检查中断了，下面是上一轮的结果，可以重新上传这一单");
+  // 产品 10/17 方案 A：服务端 /rework 已放行这种单，条里给重新上传（默认合成登录是管理员）。
+  await expect(alert.getByRole("button", { name: "重新上传这一单" })).toBeVisible();
   await expect(page.getByTestId("review-posn")).toBeVisible();
   await expect(page.getByRole("button", { name: "上一条" })).toBeVisible();
   await expect(page.getByRole("button", { name: "下一条" })).toBeVisible();
@@ -961,10 +973,10 @@ test("签字/退回按钮定位器在正常待审单上能找到（失败单断�
   await page.goto(`/review/${task.id}`);
   await expect(page.locator("button.review-sign")).toHaveCount(1);
   await expect(page.locator("button.review-reject")).toHaveCount(1);
-  await expect(page.getByTestId("review-reject-note")).toHaveText(/还有 \d+ 条待确认，处理完才能退回/);
+  await expect(page.getByTestId("review-reject-note")).toHaveText(/^仍有 \d+ 条.+未处理$/);
 });
 
-test("复核超页且条目还在：黄条写明这次复核没做，不提供重新上传，条目和进度保留", async ({ page, syntheticApi }, info) => {
+test("复核超页且条目还在：黄条写明这次复核没做，条里给重新上传，条目和进度保留", async ({ page, syntheticApi }, info) => {
   const task = reviewTask("e5969b58cd66");
   task.job_kind = "rework";
   task.status = "pending_review";
@@ -974,10 +986,10 @@ test("复核超页且条目还在：黄条写明这次复核没做，不提供�
   syntheticApi.tasks.push(task);
   expect(task.hits?.length).toBeGreaterThan(0);
   await page.goto(`/review/${task.id}`);
-  const alert = page.locator(".ant-alert-warning").filter({ hasText: "稿件超过 1 页，这次复核没做，下面是上一轮的结果，请联系管理员" });
+  const alert = page.locator(".ant-alert-warning").filter({ hasText: "稿件超过 1 页，这次复核没做，下面是上一轮的结果。请改成 1 页后重新上传这一单" });
   await expect(alert).toBeVisible();
   await expect(page.locator(".ant-alert-error")).toHaveCount(0);
-  await expect(page.getByText("重新上传这一单")).toHaveCount(0);
+  await expect(alert.getByRole("button", { name: "重新上传这一单" })).toBeVisible();
   await expect(page.getByTestId("review-posn")).toBeVisible();
   await expect(page.locator(".review-th-w").first()).toBeVisible();
   await expect(page.locator(".review-dock-panel").getByText("中文品名").first()).toBeVisible();
