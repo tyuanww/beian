@@ -173,7 +173,7 @@ jobs:
       - name: Run complete L0 suite
         shell: bash
         env:
-          PYTEST_ADDOPTS: "--durations=20"
+          PYTEST_ADDOPTS: "--durations=20 -rs"
         run: |
           set -o pipefail
           npm test 2>&1 | tee "$RUNNER_TEMP/l0.log"

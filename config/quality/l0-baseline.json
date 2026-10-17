@@ -2,6 +2,7 @@
   "node_suites": [
     {
       "name": "server",
+      "min_tests": 1122,
       "allowed_skips": [
         "protects PDF signatures and recompresses shared images once within the saved budget",
         "rejects an ancestor chain that aliases /private/tmp and leaves external bytes unchanged",
@@ -10,11 +11,34 @@
     },
     {
       "name": "ui",
+      "min_tests": 586,
       "allowed_skips": []
     }
   ],
   "pytest": {
-    "max_skipped": 9,
-    "max_deselected": 10
+    "min_tests": 1402,
+    "max_deselected": 10,
+    "allowed_skips": [
+      {
+        "skip": "tests/test_packaging_glb_verify.py: explicit local synthetic Blender export check",
+        "count": 3
+      },
+      {
+        "skip": "tests/test_packaging_render_generation.py: explicit local synthetic full/card/GLB render",
+        "count": 2
+      },
+      {
+        "skip": "tests/test_packaging_windows_owned_job.py: explicit Windows native owned-container evidence",
+        "count": 1
+      },
+      {
+        "skip": "tests/test_packaging_windows_owned_job.py: explicit Windows native cancellation and memory evidence",
+        "count": 2
+      },
+      {
+        "skip": "tests/test_packaging_windows_owned_job.py: explicit Windows native crash-before-resume evidence",
+        "count": 1
+      }
+    ]
   }
 }
