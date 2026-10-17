@@ -578,6 +578,8 @@ export type TaskSummary = {
   job_stage_label?: string;
   job_eta_s?: number;
   job_error?: string;
+  /** 任务报错码；超页为 "page_over"（B06，待后端对齐字段名）。 */
+  job_error_code?: string;
   job_started_at?: string;
   job_finished_at?: string;
   queue_ahead?: number;

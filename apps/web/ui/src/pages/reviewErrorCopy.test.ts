@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { REVIEW_COPY } from "../copy/labels.js";
-import { reviewErrorCopy, reviewErrorType } from "./reviewErrorCopy.js";
+import { reviewErrorCopy } from "./reviewErrorCopy.js";
 
 describe("reviewer-visible labels", () => {
   it("uses the agreed wording", () => {
@@ -14,11 +14,6 @@ describe("reviewer-visible labels", () => {
 });
 
 describe("reviewErrorCopy", () => {
-  it("maps the backend page_over sentence to the product wording", () => {
-    assert.equal(reviewErrorCopy("这一单页数超过可核对页数"), REVIEW_COPY.pageOver);
-    assert.equal(reviewErrorCopy("page_over_rendered"), REVIEW_COPY.pageOver);
-  });
-
   it("hides OCR internals behind one sentence", () => {
     assert.equal(reviewErrorCopy("认字组件没装上，没有结果"), REVIEW_COPY.ocrFailed);
     assert.equal(reviewErrorCopy("百度 OCR 超时"), REVIEW_COPY.ocrFailed);
@@ -28,16 +23,5 @@ describe("reviewErrorCopy", () => {
   it("leaves other errors to customerCopy", () => {
     assert.equal(reviewErrorCopy("对照失败"), "检查失败");
     assert.equal(reviewErrorCopy(""), "");
-  });
-
-  it("page_over uses a warning Alert, other errors stay error", () => {
-    assert.equal(reviewErrorType("这一单页数超过可核对页数"), "warning");
-    assert.equal(reviewErrorType("page_over_rendered"), "warning");
-    assert.equal(reviewErrorType("稿件超过 1 页，暂不支持核对，请联系管理员"), "warning");
-    assert.equal(reviewErrorType("稿件超过12页"), "warning");
-    assert.equal(reviewErrorCopy("稿件超过 1 页，暂不支持核对，请联系管理员"), REVIEW_COPY.pageOver);
-    assert.equal(reviewErrorType("认字组件没装上，没有结果"), "error");
-    assert.equal(reviewErrorType("对照失败"), "error");
-    assert.equal(reviewErrorType(""), "error");
   });
 });
