@@ -21,6 +21,19 @@ cd apps/web/backend && PYTHONPATH=. .venv/bin/python -m app.cli --help
 
 4. 修改作业合同的测试：参考 `jobs.test.ts` 的对照块，复用有效覆盖，只为受影响行为补充或调整断言，不要求每次重写全部测试。对应合同必须保持：第二单 queued、GET 无 `job_pid`、没有最后一行 JSON →「对照中断」、对红失败后 `/complete` 回 400「当前状态不可签字」（老板 2026-10-17 选 B，测试在 `review-http.test.ts`）。打样结构：`STAGE illustrator_saving_artwork_pdf` 无假 `job_eta_s`；Agent busy 不领新 AI 单。pytest：CLI 不 `save_task`；`--help` 含 `STAGE` / `save_task` / `packaging`。打样出图测 pymupdf（`test_packaging_thumbnail.py`），不要假定有 qlmanage；Blender 后写最长边 1440 的 `*_card.png`。打样 PDF 测铺白和 Pillow 兜底（`test_packaging_dieline.py`）：pymupdf 已落盘则不覆盖，不要让人再装插件。Illustrator 无人值守合同见 `test_packaging_illustrator_structure.py`：saving 禁 Kill、busy 不当 offline；盘点 hide+outline、`restoreUnattendedArtwork` 失败禁 PDF、`eachInventoryPathItem` 展开组。
 
+## 审稿作业失败码
+
+对照 / 对红作业失败时，任务上可带 `job_error_code`（对外公开码，见 `apps/web/server/src/reviewCodes.ts` 的 `JOB_ERROR_CODES`；CLI 私有码 → 公开码的映射在 `jobs.ts` 的 `PUBLIC_JOB_ERROR_CODES`）。`job_error` 原文照旧，前端只按码选句，不做文字匹配：
+
+| 对外码 | CLI / 服务端私有来源 | 含义 |
+| --- | --- | --- |
+| `page_over` | `page_over_rendered` | 逐字稿超页；存盘原文只存前半句「稿件超过 N 页」（页数读常量），后半句由前端按有没有重新上传按钮拼 |
+| `ocr_failed` | `model_missing` / `model_hash_mismatch` / `notice_missing` / `dep_missing` / `oom` / `ocr_unavailable`；服务端 `verbatimMemoryFailure` 也写此码 | 认字没出结果 |
+| `result_truncated` | `result_truncated` | 结果超过输出上限，没写完 |
+| `private_data_failed` | `private_data_limit` / `private_data_parse_failed` | 稿件里的 Illustrator 私有数据读不出来 |
+
+未列入上表的私有码不映射，任务不带 `job_error_code`。旧超页单无码时的补算、失败条按码选句见 [审稿合同](review.md)。
+
 ## 作业入口与等待
 
 出图版本的 Q06.6 A 只在显式临时 runtime 装配固定 `upgradeCandidate` 时接通 upgrade；普通产品默认无 runtime 注册，临时根与平台门仍独立拒绝不合格装配，不能只凭 `productionEnabled=false` 判断安全。HTTP 创建体不接收任何 profile 字段，Python 缺 `upgrade_profile_id` 仍 `upgrade_unwired`；源 RF-02 验证先于绑定结构的候选解析。升级继续复用权限、幂等/CAS、审计、容量、产物质量与失败留图门，合法已有代的 history/activate 独立可用。平台实现允许 darwin/linux、拒绝 win32，本次原生证据只覆盖 Mac。A 开发不依赖 Q06.7；B 生产装配须 Q06.4 与既定八点审计，C 启用须 Q06.7/.8 及明确授权，状态见 [TODOS.md](../../TODOS.md)，参数见 [worker README](../../workers/packaging/README.md)。
