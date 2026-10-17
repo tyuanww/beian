@@ -1,7 +1,4 @@
-/**
- * 删除条件：`npm run legacy:page-over -- <tasks 目录>` 在生产数据上输出 0（旧超页失败单都已重跑或归档），
- * 然后删掉本文件、tasks.ts 里的调用和对应测试。
- */
+/** 旧失败单不会自己归零：归档与否由老板定，否则长期保留。对生产 tasks 目录跑统计须老板单独批准。 */
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
