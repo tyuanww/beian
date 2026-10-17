@@ -3,7 +3,7 @@ import { describe, it } from "node:test";
 import type { FieldHit, TaskDetail } from "../api";
 import { REVIEW_COPY } from "../copy/labels";
 import { reviewErrorCopy, type FailedWithHitsKind } from "./reviewErrorCopy";
-import { canReuploadFailed, reviewPageHits, reviewSubmitButtons, type ReuploadViewer } from "./reviewActions";
+import { canReuploadFailed, isDeadCompareFailed, reviewPageHits, reviewSubmitButtons, type ReuploadViewer } from "./reviewActions";
 
 /**
  * 复核失败按 B：红条（复核失败）、黄条（复核超页）、检查中断条（方案 A）里给自己的单「重新上传这一单」。
@@ -94,5 +94,34 @@ describe("复核（对红）失败且没有剩余条目", () => {
   it("首次检查失败、没有条目：不走 /rework，不给按钮", () => {
     const first = { ...noHits(), status: "compare_failed", job_kind: "compare" } as TaskDetail;
     assert.equal(canReuploadFailed(first, [], reviewer), false);
+  });
+});
+
+describe("对照失败且没有有效条目：请回首页新建一单（产品 10/17 选 1）", () => {
+  const sheet = (field: string): FieldHit => ({ id: field, field, status: "疑点", decision: "pending" });
+  it("没有条目、只剩工艺表条目、认字单 hits_v2 为空：都算没法接着核，也不给重新上传", () => {
+    for (const extra of [
+      { hits: [] },
+      { hits: [sheet("工艺说明"), sheet("颜色要求：专色")] },
+      { verbatim_check: true, hits_v2: [], hits: HITS },
+      { job_kind: undefined, job_status: undefined, hits: [] },
+    ] as Partial<TaskDetail>[]) {
+      const t = task({ ...COMPARE_BAR.task, ...extra });
+      assert.equal(isDeadCompareFailed(t), true, JSON.stringify(extra));
+      assert.equal(canReuploadFailed(t, reviewPageHits(t, false), reviewer), false);
+      assert.equal(canReuploadFailed(t, reviewPageHits(t, false), admin), false);
+    }
+  });
+  it("还有有效条目的检查中断单、红条黄条、待审单都不算", () => {
+    assert.equal(isDeadCompareFailed(task(COMPARE_BAR.task)), false);
+    assert.equal(isDeadCompareFailed(task({ ...COMPARE_BAR.task, hits: [sheet("备案版本号")] })), false);
+    for (const bar of BARS.slice(0, 2)) assert.equal(isDeadCompareFailed(task({ ...bar.task, hits: [] })), false, bar.name);
+    assert.equal(isDeadCompareFailed(task({ status: "pending_review", hits: [] })), false);
+    assert.equal(isDeadCompareFailed(null), false);
+  });
+  it("文案：不叫人联系管理员，不写重新上传；链接只写「回首页」", () => {
+    assert.equal(REVIEW_COPY.compareFailedNoHits, "这一单没法接着核了，请回首页重新新建一单");
+    assert.equal(REVIEW_COPY.backHome, "回首页");
+    assert.doesNotMatch(REVIEW_COPY.compareFailedNoHits, /请联系管理员|重新上传/u);
   });
 });

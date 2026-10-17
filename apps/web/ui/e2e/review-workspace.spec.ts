@@ -900,7 +900,11 @@ test("失败单：顶部不显示结论进度，只显示失败原因", async ({
   await expect(page.getByText(/这单还剩 \d+ 条待确认/)).toHaveCount(0);
   await expect(page.getByRole("button", { name: "复制修改清单" })).toHaveCount(0);
   await expect(page.getByText("检查未完成，暂时没有结果")).toBeVisible();
-  await expect(page.locator(".ant-alert").getByText("重新上传这一单")).toBeVisible();
+  // 对照失败没有条目（产品 10/17 选 1）：正文请回首页新建一单，后面是「回首页」链接；不再写「重新上传这一单」。
+  const bar = page.locator(".ant-alert").filter({ hasText: "这一单没法接着核了，请回首页重新新建一单" });
+  await expect(bar).toBeVisible();
+  await expect(bar.getByRole("link", { name: "回首页" })).toBeVisible();
+  await expect(page.getByText("重新上传这一单")).toHaveCount(0);
   await page.screenshot({ path: info.outputPath("failed-no-progress.png") });
 });
 

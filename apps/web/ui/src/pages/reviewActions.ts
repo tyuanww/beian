@@ -38,6 +38,14 @@ export function isReworkableTask(task: ReworkableFields | null): boolean {
 }
 
 /**
+ * 对照失败（`compare_failed`）且没有有效条目（含只剩工艺说明这类工艺表条目）：服务端 `/rework` 回 400，
+ * 也没有别的接口能接着这单走（产品 10/17 选 1）。失败条正文改成请回首页新建一单，后面给「回首页」链接。
+ */
+export function isDeadCompareFailed(task: Pick<TaskDetail, "status" | "verbatim_check" | "hits" | "hits_v2"> | null | undefined): boolean {
+  return task?.status === "compare_failed" && activeHitCount(task) === 0;
+}
+
+/**
  * 有效条目数，同服务端 `tasks.ts` `activeHits`：认字单 `hits_v2` 是数组就看它（空也算），否则看 `hits`；
  * 其他单 `hits_v2` 非空看 `hits_v2`，否则看 `hits`；都跳过工艺表字段（`skipPackSheetField`，同服务端 `sheetSkip.ts`）。
  */

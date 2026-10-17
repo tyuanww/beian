@@ -27,7 +27,8 @@ import { completePayload, needsOrderHeldConfirm } from "./orderHeldConfirm";
 import { unsavedNotesHint } from "./unsavedNotesHint";
 import { detailLoadState, shouldShowWaitCard } from "./waitCard";
 import { shouldUseReworkView } from "./reviewVersion";
-import { canReuploadFailed, isFailedJob, isReworkableTask, isReviewableStatus, reviewGate, reviewPageHits, reviewSubmitButtons } from "./reviewActions";
+import { hrefOf } from "../appRoute";
+import { canReuploadFailed, isDeadCompareFailed, isFailedJob, isReworkableTask, isReviewableStatus, reviewGate, reviewPageHits, reviewSubmitButtons } from "./reviewActions";
 import { ReviewDockPanel } from "./ReviewDockPanel";
 import { ReviewHitDetail } from "./ReviewHitDetail";
 import { SPOT_CARD_GAP, SPOT_CARD_MARGIN, SPOT_CARD_MIN_HEIGHT, SPOT_CARD_MIN_WIDTH, SPOT_CARD_WIDTH, avoidSpotObstacle, placeSpotCard, resolveSpotPosition, spotDragStarted, spotLane, spotSideRoom, type SpotObstacle } from "./spotCard";
@@ -921,7 +922,9 @@ export function ReviewPage({ taskId, userId, displayName = null, canComplete = t
   const failedJob = isFailedJob(task);
   const buttons = reviewSubmitButtons(task, hits, { locked: Boolean(locked), orderHeldConfirm, busy, hasUnsavedNotes, canComplete });
   const failedWithoutHits = failedJob && hits.length === 0;
-  const failedWithHits: FailedWithHitsKind | undefined = failedJob && hits.length > 0 ? (task?.job_kind === "rework" ? "rework" : "compare") : undefined;
+  const deadCompare = isDeadCompareFailed(task);
+  // 对照失败但没有有效条目（按服务端 activeHits 算，如认字单 hits_v2 为空）：不算「带上一轮条目」，走无条目失败条。
+  const failedWithHits: FailedWithHitsKind | undefined = failedJob && hits.length > 0 && !deadCompare ? (task?.job_kind === "rework" ? "rework" : "compare") : undefined;
   const reuploadFailed = canReuploadFailed(task, hits, { canCreate, admin, openId: userId, displayName });
   /** 和页头「上传新稿」同一条选文件 → /rework 流程。 */
   const pickReworkPdf = () => {
@@ -935,7 +938,13 @@ export function ReviewPage({ taskId, userId, displayName = null, canComplete = t
     <button type="button" className="btn-ghost review-upload-failed" disabled={busy || hasUnsavedNotes} onClick={pickReworkPdf}>
       {REVIEW_COPY.reupload}
     </button>
+  ) : deadCompare ? (
+    <a href={hrefOf({ view: "tasks" })} className="btn-ghost review-back-home" data-testid="review-back-home" onClick={(e) => { e.preventDefault(); onBack(); }}>
+      {REVIEW_COPY.backHome}
+    </a>
   ) : undefined;
+  /** 无条目失败单的正文：对照失败没救的单请回首页新建；其余照旧。 */
+  const failedNoHitsCopy = deadCompare ? REVIEW_COPY.compareFailedNoHits : REVIEW_COPY.reupload;
   const thumbs = thumbMarks(pages, hits, seenPages);
   const issueRows = rejectRows(hits, notes);
   const releaseHeld = task?.verbatim_check === true;
@@ -1025,8 +1034,8 @@ export function ReviewPage({ taskId, userId, displayName = null, canComplete = t
       {locked ? <Alert className="review-lock" type="warning" title={`🔒 ${locked}`} description={REVIEW_COPY.lockedNote} /> : null}
       {error ? <Alert type="error" title={error} /> : null}
       {task?.error || task?.job_error || task?.job_error_code ? (
-        <Alert type={reviewErrorType(task.job_error_code)} showIcon title={reviewErrorCopy(task.error || task.job_error || "", task.job_error_code, failedWithHits) || "检查失败。"} description={failedJob && !failedWithHits && !failedBarAction ? REVIEW_COPY.reupload : undefined} action={failedBarAction} />
-      ) : failedJob ? <Alert type="error" showIcon title={failedWithHits ? reviewErrorCopy("", undefined, failedWithHits) : REVIEW_COPY.reupload} action={failedBarAction} /> : null}
+        <Alert type={reviewErrorType(task.job_error_code)} showIcon title={reviewErrorCopy(task.error || task.job_error || "", task.job_error_code, failedWithHits) || "检查失败。"} description={failedJob && !failedWithHits && (deadCompare || !failedBarAction) ? failedNoHitsCopy : undefined} action={failedBarAction} />
+      ) : failedJob ? <Alert type="error" showIcon title={failedWithHits ? reviewErrorCopy("", undefined, failedWithHits) : failedNoHitsCopy} action={failedBarAction} /> : null}
       {signed && !locked ? <Alert type="success" showIcon title={task?.complete_kind === "rework" ? "已退回。" : "已签字。"} /> : null}
       {decisionError ? <Alert type="error" showIcon title={`未保存：${decisionError}`} /> : null}
 

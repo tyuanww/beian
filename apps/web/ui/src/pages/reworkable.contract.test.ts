@@ -4,7 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import type { TaskDetail } from "../api";
-import { isReworkableTask } from "./reviewActions";
+import { REVIEW_COPY } from "../copy/labels";
+import { isDeadCompareFailed, isReworkableTask } from "./reviewActions";
 
 /**
  * 前后端合同：核对页给不给「重新上传这一单」/「上传新稿」，与服务端 `/rework` 的 `isReworkableTask`（tasks.ts）逐例一致。
@@ -45,4 +46,19 @@ describe("isReworkableTask 前后端一致", () => {
       assert.equal(isReworkableTask(c.task as unknown as TaskDetail), c.expected, "前端");
     });
   }
+});
+
+describe("对照失败没有有效条目：前端「请回首页新建一单」与服务端 activeHits 为空、/rework 不放行一致", () => {
+  for (const c of CASES.filter((x) => x.task.status === "compare_failed")) {
+    it(c.name, () => {
+      const t = c.task as Parameters<typeof server.isReworkableTask>[0];
+      const serverEmpty = server.activeHits(t as Parameters<typeof server.activeHits>[0]).length === 0;
+      assert.equal(isDeadCompareFailed(c.task as unknown as TaskDetail), serverEmpty);
+      if (serverEmpty) assert.equal(server.isReworkableTask(t), false, "没有有效条目的对照失败单服务端一定不放行 /rework");
+    });
+  }
+  it("文案逐字", () => {
+    assert.equal(REVIEW_COPY.compareFailedNoHits, "这一单没法接着核了，请回首页重新新建一单");
+    assert.equal(REVIEW_COPY.backHome, "回首页");
+  });
 });

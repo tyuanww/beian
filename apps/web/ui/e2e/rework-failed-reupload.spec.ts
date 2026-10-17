@@ -40,17 +40,30 @@ const BARS: Bar[] = [
   },
 ];
 
-test("检查中断只剩工艺说明条目：服务端会回 400，自己的单也不给「重新上传这一单」", async ({ page, syntheticApi }) => {
-  await asReviewer(page);
-  const task = failedTask({ ...BARS[2], id: "e5969b58ce04" }, ME);
-  task.hits = [{ id: "s0", field: "工艺说明", status: "疑点", decision: "pending" }];
-  syntheticApi.tasks.push(task);
-  await page.goto(`/review/${task.id}`);
-  await expect(page.locator(".ant-alert-error").first()).toBeVisible();
-  await expect(page.getByRole("button", { name: REVIEW_COPY.reupload })).toHaveCount(0);
-  await expect(page.locator("button.review-sign")).toHaveCount(0);
-  await expect(page.locator("button.review-reject")).toHaveCount(0);
-});
+for (const [name, id, hits] of [
+  ["只剩工艺说明条目", "e5969b58ce04", [{ id: "s0", field: "工艺说明", status: "疑点", decision: "pending" }]],
+  ["没有条目", "e5969b58ce05", []],
+] as const) {
+  test(`检查中断${name}：服务端会回 400，不给重新上传；正文请回首页新建一单，「回首页」只跳路由不调接口`, async ({ page, syntheticApi }) => {
+    await asReviewer(page);
+    const task = failedTask({ ...BARS[2], id }, ME);
+    task.hits = [...hits];
+    syntheticApi.tasks.push(task);
+    const writes: string[] = [];
+    page.on("request", (r) => { if (r.method() !== "GET") writes.push(`${r.method()} ${new URL(r.url()).pathname}`); });
+    await page.goto(`/review/${task.id}`);
+    const bar = page.locator(".ant-alert-error").filter({ hasText: REVIEW_COPY.compareFailedNoHits });
+    await expect(bar).toBeVisible();
+    await expect(page.getByRole("button", { name: REVIEW_COPY.reupload })).toHaveCount(0);
+    await expect(page.getByText(REVIEW_COPY.reupload, { exact: true })).toHaveCount(0);
+    await expect(page.locator("button.review-sign")).toHaveCount(0);
+    await expect(page.locator("button.review-reject")).toHaveCount(0);
+    const before = writes.length;
+    await bar.getByRole("link", { name: REVIEW_COPY.backHome }).click();
+    await expect(page).toHaveURL(/\/reviewup$/u);
+    expect(writes.slice(before)).toEqual([]);
+  });
+}
 
 function failedTask(bar: Bar, owner: string): SyntheticTask {
   const task = reviewTask(bar.id);

@@ -164,6 +164,9 @@ export const REVIEW_COPY = {
   verbatimNoneLead: "这轮没有要退的字",
   verbatimNoneNote: "只核了稿上的字在不在确认单里",
   reupload: "重新上传这一单",
+  /** 对照失败且没有有效条目的单：没有接口能接着核（产品 10/17 选 1），只给「回首页」链接，不调接口。 */
+  compareFailedNoHits: "这一单没法接着核了，请回首页重新新建一单",
+  backHome: "回首页",
   allDecided: "全部已下结论",
   /** 右栏「待确认」列表空态（产品哥 2026-10-11；核对栏一行提示不带句号）。 */
   pendingEmpty: "没有待确认的了",
