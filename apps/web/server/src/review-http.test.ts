@@ -786,7 +786,25 @@ describe("review http", () => {
     });
     const res = await completeAs(tid, "无改稿项");
     assert.equal(res.status, 400);
-    assert.deepEqual(res.body, { detail: "仍有 1 条一致未处理" });
+    assert.deepEqual(res.body, { detail: "仍有 1 条认字存疑未处理" });
+  });
+
+  it("counts 待人工确认 and 认字存疑 separately in one message, in first-seen order", async () => {
+    const tid = seed({
+      id: "d9d9d9d9d9d9",
+      title: "两类都有",
+      product_name: "两类都有",
+      type: "excel_pdf",
+      status: "pending_review",
+      hits: [
+        hit({ id: "h1", status: "待人工确认", decision: "pending" }),
+        hit({ id: "h2", status: "一致", decision: undefined, coverage: { miss: ["CAPSULE MIST"] } }),
+        hit({ id: "h3", status: "待人工确认", decision: undefined }),
+      ],
+    });
+    const res = await completeAs(tid, "无改稿项");
+    assert.equal(res.status, 400);
+    assert.deepEqual(res.body, { detail: "仍有 2 条待人工确认、1 条认字存疑未处理" });
   });
 
   it("old task without created_by returns null creator, never the actor, after a verdict", async () => {

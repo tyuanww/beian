@@ -1,5 +1,5 @@
 import { skipPackSheetField } from "./sheetSkip.js";
-import { activeHits, hitNeedsDecision, isHitDecision, isReviewableStatus, isValidHitReviewState, type Hit, type Task } from "./tasks.js";
+import { activeHits, isHitDecision, isReviewableStatus, isValidHitReviewState, pendingWord, type Hit, type Task } from "./tasks.js";
 
 export type CompleteGate =
   | { ok: true; kind: "signed" | "rework" }
@@ -30,10 +30,15 @@ export function completeGate(task: Task, orderHeldConfirm: unknown): CompleteGat
   }
   // 非逐字单：未决「待人工确认」也算待确认（与前端 submitGate 在 !verbatim_check 时把 held 计入 pending 一致）。
   // 逐字单仍走下面的整单确认勾选，不在这里挡。
-  const pending = hits.filter((h) => hitNeedsDecision(h) || (task.verbatim_check !== true && isOpenHeld(h)));
-  if (pending.length) {
-    const words = [...new Set(pending.map((hit) => String(hit.status || "未决")))].join("、");
-    return { ok: false, status: 400, message: `仍有 ${pending.length} 条${words}未处理` };
+  const words = hits
+    .map((h) => pendingWord(h) ?? (task.verbatim_check !== true && isOpenHeld(h) ? "待人工确认" : null))
+    .filter((word): word is string => word !== null);
+  if (words.length) {
+    // 按词分开数，词序按首次出现，「、」连接：「仍有 2 条待人工确认、1 条认字存疑未处理」。
+    const counts = new Map<string, number>();
+    for (const word of words) counts.set(word, (counts.get(word) ?? 0) + 1);
+    const parts = [...counts].map(([word, n]) => `${n} 条${word}`).join("、");
+    return { ok: false, status: 400, message: `仍有 ${parts}未处理` };
   }
   const openHeld = task.verbatim_check === true
     ? hits.filter(isOpenHeld).length

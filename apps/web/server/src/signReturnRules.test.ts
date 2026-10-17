@@ -55,6 +55,25 @@ describe("签字/退回规则表（服务端 /complete）", () => {
     });
   }
 
+  it("拦截文案：只有认字存疑 / 只有待人工确认 / 两类都有，分开数、按首次出现排序", () => {
+    const gate = (hits: SignReturnInput["hits"]) => completeGate(taskFor({ role: "reviewer", status: "in_review", hits }), undefined);
+    assert.deepEqual(gate([{ status: "一致", coverageMiss: ["CAPSULE MIST"] }]), { ok: false, status: 400, message: "仍有 1 条认字存疑未处理" });
+    assert.deepEqual(gate([{ status: "待人工确认" }, { status: "待人工确认", decision: "pending" }]), {
+      ok: false,
+      status: 400,
+      message: "仍有 2 条待人工确认未处理",
+    });
+    assert.deepEqual(
+      gate([{ status: "待人工确认" }, { status: "缺空格", onlyInExcel: ["香柠檬"] }, { status: "待人工确认" }]),
+      { ok: false, status: 400, message: "仍有 2 条待人工确认、1 条认字存疑未处理" },
+    );
+    assert.deepEqual(gate([{ status: "疑点", decision: "pending" }, { status: "缺失" }, { status: "疑点" }]), {
+      ok: false,
+      status: 400,
+      message: "仍有 2 条疑点、1 条缺失未处理",
+    });
+  });
+
   for (const row of SIGN_RETURN_DISPUTED) {
     it(`待决（锁现状）：${row.name}`, () => {
       assert.deepEqual(serverAccepts(row.input), row.server, row.why);

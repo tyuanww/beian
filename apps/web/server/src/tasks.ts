@@ -416,11 +416,20 @@ const SPACE_ERRORS = new Set(VERBATIM_STATUSES.space_errors);
  * 非逐字单的未决「待人工确认」在 `completeGate` 里另算。
  */
 export function hitNeedsDecision(hit: Hit): boolean {
-  if (isHitDecision(hit.decision)) return false;
-  if (hit.status === "待人工确认") return false;
-  if (TRUE_ERRORS.has(String(hit.status || ""))) return true;
-  if (SPACE_ERRORS.has(String(hit.status || "")) && hit.decision === "pending") return true;
-  return hasReadingDoubt(hit);
+  return pendingWord(hit) !== null;
+}
+
+/**
+ * 没下结论时拦截文案里填的词：按状态要结论的写状态本身，只因认字存疑要结论的写「认字存疑」；不用拦时为 null。
+ * 非逐字单的未决「待人工确认」由 `completeGate` 自己写「待人工确认」。
+ */
+export function pendingWord(hit: Hit): string | null {
+  if (isHitDecision(hit.decision)) return null;
+  if (hit.status === "待人工确认") return null;
+  const status = String(hit.status || "");
+  if (TRUE_ERRORS.has(status)) return status;
+  if (SPACE_ERRORS.has(status) && hit.decision === "pending") return status;
+  return hasReadingDoubt(hit) ? "认字存疑" : null;
 }
 
 export type BoardColumn = "comparing" | "failed" | "review" | "done";
