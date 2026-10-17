@@ -1,5 +1,6 @@
 /**
- * 签字 / 退回规则表：前后端共用。本文件不 import 任何东西，前端测试可以直接读（同 `feishuLoginError.ts`）。
+ * 签字 / 退回规则表：前后端共用。本文件只 `import type` 零依赖码表 `reviewCodes.ts`（编译后不留 import），
+ * 前端测试可以直接读（同 `feishuLoginError.ts`）。
  *
  * 每行是「输入 → 期望」。服务端 `signReturnRules.test.ts` 用 `hasPerm(role, "complete")` + `completeGate`
  * （`/complete` 的真实拦截）逐行断言；前端 `apps/web/ui/src/pages/signReturnRules.contract.test.ts` 用
@@ -18,6 +19,8 @@
  * 第 1 条（复核失败带上一轮条目）老板 10/17 定 B：签字退回都拦，出路为重新上传对红（/rework），已进主表。
  * `SIGN_RETURN_DISPUTED` 只放前后端结论仍不一致的输入；表测试会拦住「其实已一致」的行。
  */
+
+import type { CompleteCode } from "./reviewCodes.js";
 
 type SignReturnButton = "hidden" | "disabled" | "enabled";
 export type SignReturnSide = { button: SignReturnButton; submits: boolean };
@@ -60,7 +63,17 @@ export type SignReturnInput = {
   hits: SignReturnHit[];
 };
 
-export type SignReturnRule = { name: string; input: SignReturnInput; expect: SignReturnExpect };
+export type SignReturnRule = {
+  name: string;
+  input: SignReturnInput;
+  expect: SignReturnExpect;
+  /**
+   * 这一行输入下 `/complete` 被拒时回的码（`reviewCodes.ts`）：按前端真会发的那次请求算（签字带不带整单确认
+   * 同 `orderHeldConfirm`），`/complete` 只有一个入口，同一输入只回一个结果，所以码记一份、不分 sign / ret。
+   * 收下时、或在 `need(c, "complete")` 就 403 的（viewer）不写。
+   */
+  code?: CompleteCode;
+};
 
 export type SignReturnDisputed = {
   name: string;
@@ -107,16 +120,17 @@ export const SIGN_RETURN_RULES: readonly SignReturnRule[] = [
     expect: RETURN_ONLY,
   },
   // —— 待确认 ——
-  { name: "疑点没下结论：签字灰，退回框挡住", input: reviewer([{ status: "疑点", decision: "pending" }]), expect: PENDING },
-  { name: "缺失没有 decision 字段也算待确认", input: reviewer([{ status: "缺失" }]), expect: PENDING },
+  { name: "疑点没下结论：签字灰，退回框挡住", input: reviewer([{ status: "疑点", decision: "pending" }]), expect: PENDING, code: "complete_hits_pending" },
+  { name: "缺失没有 decision 字段也算待确认", input: reviewer([{ status: "缺失" }]), expect: PENDING, code: "complete_hits_pending" },
   {
     name: "已有一条有错、另一条还没下结论：退回也提交不了",
     input: reviewer([{ status: "疑点", decision: "issue" }, { status: "缺失", decision: "pending" }]),
     expect: PENDING,
+    code: "complete_hits_pending",
   },
-  { name: "多空格标 pending 算待确认", input: reviewer([{ status: "多空格", decision: "pending" }]), expect: PENDING },
+  { name: "多空格标 pending 算待确认", input: reviewer([{ status: "多空格", decision: "pending" }]), expect: PENDING, code: "complete_hits_pending" },
   { name: "多空格没有 decision 字段不算待确认", input: reviewer([{ status: "多空格" }]), expect: SIGN_ONLY },
-  { name: "decision 是非法值：按待确认挡住", input: reviewer([{ status: "疑点", decision: "maybe" }]), expect: PENDING },
+  { name: "decision 是非法值：按待确认挡住", input: reviewer([{ status: "疑点", decision: "maybe" }]), expect: PENDING, code: "complete_hits_invalid" },
   // —— 确认单底部工艺表 ——
   {
     name: "工艺说明的疑点不挡签字",
@@ -133,30 +147,35 @@ export const SIGN_RETURN_RULES: readonly SignReturnRule[] = [
     name: "自己已签字：两个按钮都灰",
     input: reviewer([{ status: "疑点", decision: "confirm" }], { status: "completed" }),
     expect: BOTH_GREY,
+    code: "complete_status_not_reviewable",
   },
   {
     name: "别人已退回（锁页）：两个按钮都灰",
     input: reviewer([{ status: "疑点", decision: "issue" }], { status: "completed", completedByOther: true }),
     expect: BOTH_GREY,
+    code: "complete_status_not_reviewable",
   },
   // —— 作业 ——
-  { name: "对照排队中：等待卡，没有按钮", input: reviewer([], { status: "comparing", job: { kind: "compare", status: "queued" } }), expect: BOTH_HIDDEN },
-  { name: "对照进行中：等待卡，没有按钮", input: reviewer([], { status: "comparing", job: { kind: "compare", status: "running" } }), expect: BOTH_HIDDEN },
+  { name: "对照排队中：等待卡，没有按钮", input: reviewer([], { status: "comparing", job: { kind: "compare", status: "queued" } }), expect: BOTH_HIDDEN, code: "complete_job_running" },
+  { name: "对照进行中：等待卡，没有按钮", input: reviewer([], { status: "comparing", job: { kind: "compare", status: "running" } }), expect: BOTH_HIDDEN, code: "complete_job_running" },
   {
     name: "对红进行中：等待卡，没有按钮",
     input: reviewer([{ status: "疑点", decision: "confirm" }], { status: "comparing", job: { kind: "rework", status: "running" } }),
     expect: BOTH_HIDDEN,
+    code: "complete_job_running",
   },
-  { name: "对照失败没有条目：没有按钮", input: reviewer([], { status: "compare_failed", job: { kind: "compare", status: "failed" } }), expect: BOTH_HIDDEN },
+  { name: "对照失败没有条目：没有按钮", input: reviewer([], { status: "compare_failed", job: { kind: "compare", status: "failed" } }), expect: BOTH_HIDDEN, code: "complete_status_not_reviewable" },
   {
     name: "对照失败带上一轮条目：没有按钮",
     input: reviewer([{ status: "疑点", decision: "issue" }], { status: "compare_failed", job: { kind: "compare", status: "failed" } }),
     expect: BOTH_HIDDEN,
+    code: "complete_status_not_reviewable",
   },
   {
     name: "已完成单对红失败回到已完成：没有按钮",
     input: reviewer([{ status: "疑点", decision: "confirm" }], { status: "completed", job: { kind: "rework", status: "failed" } }),
     expect: BOTH_HIDDEN,
+    code: "complete_status_not_reviewable",
   },
   {
     name: "对红成功后待审：照常签字",
@@ -169,7 +188,7 @@ export const SIGN_RETURN_RULES: readonly SignReturnRule[] = [
     input: verbatim([{ status: "待人工确认" }], { verbatimWarning: false }),
     expect: SIGN_ONLY,
   },
-  { name: "逐字单有 warning、未决待人工确认、没勾整单确认：签字灰", input: verbatim([{ status: "待人工确认" }]), expect: BOTH_GREY },
+  { name: "逐字单有 warning、未决待人工确认、没勾整单确认：签字灰", input: verbatim([{ status: "待人工确认" }]), expect: BOTH_GREY, code: "complete_order_held_unconfirmed" },
   {
     name: "逐字单有 warning、未决待人工确认、勾了整单确认：可签字",
     input: verbatim([{ status: "待人工确认" }], { orderHeldConfirm: true }),
@@ -197,6 +216,7 @@ export const SIGN_RETURN_RULES: readonly SignReturnRule[] = [
     name: "条目状态不在已知集合：两个按钮都灰，提示审核数据状态异常",
     input: reviewer([{ status: "未知状态" }]),
     expect: BOTH_GREY,
+    code: "complete_hits_invalid",
   },
   // —— 认字存疑（结构化字段，`readingDoubt.ts`）：两边已一致的行 ——
   { name: "认字存疑：coverage.miss 全是空白不算存疑", input: reviewer([{ status: "一致", coverageMiss: ["", "  "] }]), expect: SIGN_ONLY },
@@ -231,22 +251,26 @@ export const SIGN_RETURN_RULES: readonly SignReturnRule[] = [
     name: "复核（对红）失败、单子回到待审且带上一轮条目（无有错）：两边都拦",
     input: reviewer([{ status: "疑点", decision: "confirm" }], { status: "pending_review", job: { kind: "rework", status: "failed" } }),
     expect: BOTH_HIDDEN,
+    code: "complete_rework_failed",
   },
   {
     name: "复核（对红）失败、单子回到待审且带上一轮有错条目：两边都拦",
     input: reviewer([{ status: "疑点", decision: "issue" }], { status: "in_review", job: { kind: "rework", status: "failed" } }),
     expect: BOTH_HIDDEN,
+    code: "complete_rework_failed",
   },
   {
     name: "复核（对红）失败且没有剩下条目：两边都拦",
     input: reviewer([], { status: "pending_review", job: { kind: "rework", status: "failed" } }),
     expect: BOTH_HIDDEN,
+    code: "complete_rework_failed",
   },
   // —— 产品已定（服务端对齐前端）：非逐字单待人工确认 / 认字存疑 ——
   {
     name: "非逐字单出现未决「待人工确认」：算待确认",
     input: reviewer([{ status: "待人工确认" }]),
     expect: PENDING,
+    code: "complete_hits_pending",
   },
   {
     name: "非逐字单「待人工确认」已标忽略：可签字",
@@ -257,26 +281,31 @@ export const SIGN_RETURN_RULES: readonly SignReturnRule[] = [
     name: "认字存疑：一致条目 coverage.miss 有词、没下结论",
     input: reviewer([{ status: "一致", coverageMiss: ["CAPSULE MIST"] }]),
     expect: PENDING,
+    code: "complete_hits_pending",
   },
   {
     name: "认字存疑：一致条目 coverage.miss 有词、decision 为 pending",
     input: reviewer([{ status: "一致", coverageMiss: ["CAPSULE MIST"], decision: "pending" }]),
     expect: PENDING,
+    code: "complete_hits_pending",
   },
   {
     name: "认字存疑：缺空格（已标记）带 sequence_diff、没下结论",
     input: reviewer([{ status: "缺空格", onlyInExcel: ["香柠檬"] }]),
     expect: PENDING,
+    code: "complete_hits_pending",
   },
   {
     name: "认字存疑：缺空格（已标记）带 doubt_bucket、没下结论",
     input: reviewer([{ status: "缺空格", doubtBucket: "ocr_graphic" }]),
     expect: PENDING,
+    code: "complete_hits_pending",
   },
   {
     name: "认字存疑：coverage.miss 只有核算说明（score=…）也算存疑，两边都不再滤文字",
     input: reviewer([{ status: "一致", coverageMiss: ["score=0.42 覆盖偏低"] }]),
     expect: PENDING,
+    code: "complete_hits_pending",
   },
 ];
 

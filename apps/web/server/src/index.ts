@@ -1253,9 +1253,9 @@ app.post("/api/tasks/:tid/complete", async (c) => {
   const task = loadTask(tid);
   assertCanAccessTask(task, viewerFromSession(s));
   const gate = completeGate(task, body.order_held_confirm);
-  if (!gate.ok) throw new HTTPException(gate.status, { message: gate.message });
+  if (!gate.ok) throw new ReviewProblem(gate.code, gate.params);
   const conclusion = (body.conclusion || "").trim();
-  if (!conclusion) throw new HTTPException(400, { message: "请写下结论" });
+  if (!conclusion) throw new ReviewProblem("complete_conclusion_missing");
   task.status = "completed";
   task.completed_at = nowIso();
   task.completed_by = s.display_name;

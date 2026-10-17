@@ -721,7 +721,7 @@ describe("review http", () => {
     assert.equal(body.detail, "整单待人工确认，签字即认可");
   });
 
-  // 签字/退回共用表（signReturnRules.ts）第 1、2 条与认字存疑在 HTTP 入口的落点：仍是 400 + {detail}，不加错误码。
+  // 签字/退回共用表（signReturnRules.ts）第 1、2 条与认字存疑在 HTTP 入口的落点：状态码和 detail 原文不变，加码后多带 code / params。
   async function completeAs(tid: string, conclusion: string) {
     const res = await app.request(`/api/tasks/${tid}/complete`, {
       method: "POST",
@@ -745,7 +745,7 @@ describe("review http", () => {
     });
     const sign = await completeAs(signTid, "无改稿项");
     assert.equal(sign.status, 400);
-    assert.deepEqual(sign.body, { detail: "当前状态不可签字" });
+    assert.deepEqual(sign.body, { detail: "当前状态不可签字", code: "complete_rework_failed" });
     assert.equal(loadTask(signTid).status, "pending_review");
 
     const retTid = seed({
@@ -760,7 +760,7 @@ describe("review http", () => {
     });
     const ret = await completeAs(retTid, "退回改稿");
     assert.equal(ret.status, 400);
-    assert.deepEqual(ret.body, { detail: "当前状态不可签字" });
+    assert.deepEqual(ret.body, { detail: "当前状态不可签字", code: "complete_rework_failed" });
     assert.equal(loadTask(retTid).status, "in_review");
 
     // 出路：同一单重新上传，走现有 /rework 入队。worker 立即失败，免得占住单槽。
@@ -793,7 +793,7 @@ describe("review http", () => {
     });
     const res = await completeAs(tid, "无改稿项");
     assert.equal(res.status, 400);
-    assert.deepEqual(res.body, { detail: "当前状态不可签字" });
+    assert.deepEqual(res.body, { detail: "当前状态不可签字", code: "complete_rework_failed" });
     assert.equal(loadTask(tid).status, "pending_review");
   });
 
@@ -831,7 +831,7 @@ describe("review http", () => {
       for (const conclusion of ["无改稿项", "退回：1 条有错，见清单"]) {
         const res = await completeAs(tid, conclusion);
         assert.equal(res.status, 400);
-        assert.deepEqual(res.body, { detail: "当前状态不可签字" });
+        assert.deepEqual(res.body, { detail: "当前状态不可签字", code: "complete_rework_failed" });
       }
       setJobsTestHooks({ runRework: async () => ({ code: 1, stdout: "", stderr: "", timedOut: false }) });
       try {
@@ -881,11 +881,12 @@ describe("review http", () => {
     throw new Error(`job for ${tid} did not finish`);
   }
 
-  async function assertSignAndReturnBlocked(tid: string) {
+  /** 检查中断（compare_failed）拦在状态门；复核失败落回待审后拦在对红失败门。原文同一句，码不同。 */
+  async function assertSignAndReturnBlocked(tid: string, code = "complete_status_not_reviewable") {
     for (const conclusion of ["无改稿项", "退回：1 条有错，见清单"]) {
       const res = await completeAs(tid, conclusion);
       assert.equal(res.status, 400);
-      assert.deepEqual(res.body, { detail: "当前状态不可签字" });
+      assert.deepEqual(res.body, { detail: "当前状态不可签字", code });
     }
   }
 
@@ -1001,7 +1002,7 @@ describe("review http", () => {
     const detail = (await (await app.request(`/api/tasks/${tid}`, { headers: authHeader() })).json()) as Record<string, unknown>;
     assert.equal(detail.job_error, "超时");
 
-    await assertSignAndReturnBlocked(tid);
+    await assertSignAndReturnBlocked(tid, "complete_rework_failed");
     setJobsTestHooks({ runRework: async () => ({ code: 1, stdout: "", stderr: "", timedOut: false }) });
     try {
       const again = await reworkAs(tid);
@@ -1066,7 +1067,7 @@ describe("review http", () => {
     });
     const res = await completeAs(tid, "无改稿项");
     assert.equal(res.status, 400);
-    assert.deepEqual(res.body, { detail: "仍有 1 条待人工确认未处理" });
+    assert.deepEqual(res.body, { detail: "仍有 1 条待人工确认未处理", code: "complete_hits_pending", params: { items: [{ kind: "held", count: 1 }] } });
   });
 
   it("treats a consistent hit with coverage.miss (认字存疑) as pending", async () => {
@@ -1080,7 +1081,7 @@ describe("review http", () => {
     });
     const res = await completeAs(tid, "无改稿项");
     assert.equal(res.status, 400);
-    assert.deepEqual(res.body, { detail: "仍有 1 条认字存疑未处理" });
+    assert.deepEqual(res.body, { detail: "仍有 1 条认字存疑未处理", code: "complete_hits_pending", params: { items: [{ kind: "reading_doubt", count: 1 }] } });
   });
 
   it("counts 待人工确认 and 认字存疑 separately in one message, in first-seen order", async () => {
@@ -1098,7 +1099,75 @@ describe("review http", () => {
     });
     const res = await completeAs(tid, "无改稿项");
     assert.equal(res.status, 400);
-    assert.deepEqual(res.body, { detail: "仍有 2 条待人工确认、1 条认字存疑未处理" });
+    assert.deepEqual(res.body, { detail: "仍有 2 条待人工确认、1 条认字存疑未处理", code: "complete_hits_pending", params: { items: [{ kind: "held", count: 2 }, { kind: "reading_doubt", count: 1 }] } });
+  });
+
+  // 加码：/complete 其余拦截的返回体 { detail, code, params? }，detail 与加码前逐字相同。
+  it("complete rejections carry a code: job running, invalid hits, order-held, empty conclusion", async () => {
+    const running = seed({
+      id: "e1c0de000001",
+      title: "排队中",
+      product_name: "排队中",
+      type: "excel_pdf",
+      status: "comparing",
+      job_kind: "compare",
+      job_status: "queued",
+      hits: [],
+    });
+    const r1 = await completeAs(running, "无改稿项");
+    assert.equal(r1.status, 409);
+    assert.deepEqual(r1.body, { detail: "对照还在排队或正在跑，不能签字", code: "complete_job_running" });
+
+    const invalid = seed({
+      id: "e1c0de000002",
+      title: "状态异常",
+      product_name: "状态异常",
+      type: "excel_pdf",
+      status: "in_review",
+      hits: [hit({ status: "看不清", decision: undefined })],
+    });
+    const r2 = await completeAs(invalid, "无改稿项");
+    assert.equal(r2.status, 400);
+    assert.deepEqual(r2.body, { detail: "有 1 条审核数据状态异常，请重新对照", code: "complete_hits_invalid", params: { count: 1 } });
+
+    const held = seed({
+      id: "e1c0de000003",
+      title: "整单确认",
+      product_name: "整单确认",
+      type: "excel_pdf",
+      status: "in_review",
+      verbatim_check: true,
+      verbatim_warning: "稿件未保留 Illustrator 编辑数据",
+      hits: [hit({ status: "待人工确认", decision: undefined })],
+    });
+    const r3 = await completeAs(held, "无改稿项");
+    assert.equal(r3.status, 400);
+    assert.deepEqual(r3.body, { detail: "整单待人工确认，签字即认可", code: "complete_order_held_unconfirmed", params: { count: 1 } });
+
+    const empty = seed({
+      id: "e1c0de000004",
+      title: "没结论",
+      product_name: "没结论",
+      type: "excel_pdf",
+      status: "in_review",
+      hits: [hit({ decision: "confirm" })],
+    });
+    const r4 = await completeAs(empty, "   ");
+    assert.equal(r4.status, 400);
+    assert.deepEqual(r4.body, { detail: "请写下结论", code: "complete_conclusion_missing" });
+    assert.equal(loadTask(empty).status, "in_review");
+
+    const done = seed({
+      id: "e1c0de000005",
+      title: "已签",
+      product_name: "已签",
+      type: "excel_pdf",
+      status: "completed",
+      hits: [hit({ decision: "confirm" })],
+    });
+    const r5 = await completeAs(done, "再签一次");
+    assert.equal(r5.status, 400);
+    assert.deepEqual(r5.body, { detail: "当前状态不可签字", code: "complete_status_not_reviewable" });
   });
 
   it("old task without created_by returns null creator, never the actor, after a verdict", async () => {
