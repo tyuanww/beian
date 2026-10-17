@@ -547,11 +547,11 @@ RF-10–RF-13 的原始依赖见 [ADR-007 §20.7](docs/adr-007-packaging-render-
 
 ## 2026-10-17 前端按报错文案判断状态（存量基线，只减不增）
 
-`node scripts/quality/error-text-match.mjs`（`npm run test:quality` 里由 `scripts/quality/error-text-match.test.mjs` 强制）禁止前端对报错文本做 `includes` / `startsWith` / `match` / `test` 等判断；判状态要认后端机读码（如 `job_error_code`）。下面是登记为 `// error-text-match-allow` 的存量例外，测试里 `ALLOWED` 按文件锁定（共 7 行；原 10 行，第 5 批清掉 App.tsx 3 行），清掉一处就把基线同步减小；不接受新增例外。
+`node scripts/quality/error-text-match.mjs`（`npm run test:quality` 里由 `scripts/quality/error-text-match.test.mjs` 强制）禁止前端对报错文本做 `includes` / `startsWith` / `match` / `test` 等判断；判状态要认后端机读码（如 `job_error_code`）。下面是登记为 `// error-text-match-allow` 的存量例外，测试里 `ALLOWED` 按文件锁定（共 5 行；原 10 行，第 5 批清掉 App.tsx 3 行，加码清掉 reviewErrorCopy / hitText 各 1 行），清掉一处就把基线同步减小；不接受新增例外。
 
 - [x] ~~`apps/web/ui/src/App.tsx` `authTitle`（3 行）：按飞书登录失败文案含「伸美 / 不允许 / 取消 / 过期」选标题。~~ 已清（第 5 批，`fix/pstack-batch5-login-title`）：服务端回跳 URL 本来就带 `feishu_error`（denied / expired / forbidden / failed），前端改由 `apps/web/ui/src/loginFailure.ts` 按码选标题，文字在 `copy/labels.ts` 的 `LOGIN_FAILURE_COPY`；3 行例外标记已删，`ALLOWED` 去掉 App.tsx，`MAX_TOTAL` 10 → 7。服务端只收紧类型（`feishuLoginError.ts` 导出 `FEISHU_LOGIN_ERROR_CODES`），运行时不变；前后端码由合同测试连起来。
-- `apps/web/ui/src/pages/reviewErrorCopy.ts` `reviewErrorCopy`（1 行）：`OCR_FAILED` 正则认「认字 / OCR / 文字识别」失败。需要后端给认字失败错误码（同 `page_over` 的做法）。
-- `apps/web/ui/src/pages/hitText.ts` `isAccountingCopy`（1 行）：**认的是后端 OCR 核对文本（score=、覆盖偏低、稿上命中 n/m 等），不是报错文案**。需要后端把这类核对说明给成结构化字段。只为存量登记，不作为新增例外的先例。
+- [x] ~~`apps/web/ui/src/pages/reviewErrorCopy.ts` `reviewErrorCopy`（1 行）：`OCR_FAILED` 正则认「认字 / OCR / 文字识别」失败。~~ 已清（加码 `34b36311`）：改按 `job_error_code === "ocr_failed"`（及 `result_truncated` / `private_data_failed`）选句，`ALLOWED` 去掉 reviewErrorCopy.ts，`MAX_TOTAL` 7 → 6。
+- [x] ~~`apps/web/ui/src/pages/hitText.ts` `isAccountingCopy`（1 行）：认后端 OCR 核对文本（score=、覆盖偏低等）。~~ 已清（加码 `cc44571a`）：改读服务端 `hit_text` 投影（缺这把键时用同一份共享 `server/src/hitText.ts` 现算），`ALLOWED` 去掉 hitText.ts，`MAX_TOTAL` 6 → 5。
 - 本检查首次扫描新发现的存量（批次 4 指派时未列入，同样只减不增；待后端错误码，第 5 批清）：
   - `apps/web/ui/src/pages/SettingsPage.tsx`（1 行）：保存失败文案含「App ID / Secret / 凭证」时跳到「飞书登录」分组。
   - `apps/web/ui/src/pages/setupBoard.ts`（3 行）：探测结果文案含「未启用」「超时」决定状态词与 MiniMax 提示。
@@ -570,21 +570,21 @@ RF-10–RF-13 的原始依赖见 [ADR-007 §20.7](docs/adr-007-packaging-render-
 - [x] 前端核对页给这种单加「重新上传这一单」入口（调现有 `/rework`）：红条（复核失败）、黄条（复核超页，按 `job_error_code === "page_over"`）已加，只在本人单（`owner === me.open_id` 且有 `create`）或管理员显示，viewer / 别人的单不显示；前端 `isReworkableTask`（`reviewActions.ts`）照服务端同名函数放行。三条定稿文案在 `labels.ts`，不拼服务端 `job_error` 原文。
 - [x] 「检查中断」单（方案 A，产品 10/17）：`isReworkableTask` 放行所有 `status: compare_failed` + `job_kind: compare` + `job_status: failed`、`activeHits` 还有条目、没有 `pages_v2` 的单，回收出来的失败和对照命令行自己失败的不区分；对照失败已没有条目的、有 `pages_v2` 的照旧回 400「当前状态不可对红」。`/rework` 对这种单把 `status_before_job` 记成 `pending_review` 并清掉旧 `error`，复核失败落到待审 + 对红失败（红条，签字退回拦，可再传），不再变成不可读单。签字退回在复核前仍 400。
 - [x] 前端跟上方案 A：`reviewActions.ts` 的 `isReworkableTask` 同条件放行检查中断单（有效条目同服务端 `activeHits`：认字单看 `hits_v2`、其他单 `hits_v2` 非空看它否则看 `hits`，跳过工艺表字段），条里文案「检查中断了，下面是上一轮的结果，可以重新上传这一单」+「重新上传这一单」按钮（本人单 / 管理员，viewer 不显示）。`reworkable.contract.test.ts` 把前后端 `isReworkableTask` 逐例对照（含只剩工艺说明条目的单两边都不放行）。
-- [ ] 对照失败且没有有效条目的单（`compare_failed`、按服务端 `activeHits` 算为 0，含只剩工艺说明的）：现状前端「这一单没法接着核了，请回首页重新新建一单」+「回首页」，服务端 `/rework` 回 400。**Q4 已从加码拆出去（项目哥 10/17）**：单独开 PR，合入前需要在装了模型的非生产机器上补跑一单逐字检查（design §7.4，无条目、有条目各一份，结果写进 PR 说明）。那个 PR 从届时的 main 开，撤回加码分支上的 revert `2f825f85`（即恢复 `d57dd2e0`：服务端 `isReworkableTask` 去掉条目条件 + 无条目 / 只剩工艺说明 200、管理员替别人无条目单 200 等测试），前端「回首页」→「可以重新上传这一单」（有 create 且本人或管理员才显示）和前端 `isReworkableTask` 放开一起放进去，`reworkable.contract.test.ts` 两边同改。另记：Q4 实验观察到首轮无结果的单对红后会显示成 round:2，到时一并处理。
+- [ ] 对照失败且没有有效条目的单（`compare_failed`、按服务端 `activeHits` 算为 0，含只剩工艺说明的）：现状前端「这一单没法接着核了，请回首页重新新建一单」+「回首页」，服务端 `/rework` 回 400。**Q4 已从加码拆出去（项目哥 10/17）**：单独开 PR，合入前需要在装了模型的非生产机器上补跑一单逐字检查（design §7.4，无条目、有条目各一份，结果写进 PR 说明）。那个 PR 从届时的 main 开，撤回加码分支上的 revert `2f825f85`（即恢复 `d57dd2e0`：服务端 `isReworkableTask` 去掉条目条件 + 无条目 / 只剩工艺说明 200、管理员替别人无条目单 200 等测试），前端「回首页」→「可以重新上传这一单」（有 create 且本人或管理员才显示）和前端 `isReworkableTask` 放开一起放进去，`reworkable.contract.test.ts` 两边同改。前端到时还要一起改：`reviewActions.ts` `canReuploadFailed` 去掉「没有条目只放行 rework」、`failedNoHitsBar` / `isDeadCompareFailed` 的「回首页」分支换成重新上传按钮（首次超页无条目单自己的单随之出 `pageOverReupload`「稿件超过 1 页，请改成 1 页后重新上传这一单」，别人的单仍只出「稿件超过 1 页」）；`reuploadFailed.test.ts`「对照失败且没有有效条目」「首次对照就超页」两组和 e2e `rework-failed-reupload.spec.ts` 的「检查中断只剩工艺说明条目 / 没有条目」「首次对照就超页」改断言。另记：Q4 实验观察到首轮无结果的单对红后会显示成 round:2，到时一并处理。
 - [x] 黄条原文：加码已把服务端超页 `job_error` / `verbatim_statuses.json` 写成前半句「稿件超过 1 页」（Q9 老板批）；前端按有没有「可以重新上传这一单」按钮出两种句子，不读这句原文拼后半。
-- [ ] 第 5 批签字文案复核留下的非阻塞项（找茬哥 10/17；(a)(b)(d) 归前端哥接加码 tip）：
-  1. (a) 前端：首次对照超页又没有条目的单，失败横条与「回首页」正文打架——随 Q9 前端无按钮只留「稿件超过 1 页」；有按钮的「请改成 1 页后重新上传这一单」要等 Q4 那个 PR 放开无条目重传后才会出现。
-  2. (b) 前端：`ReviewPage.tsx` 整单确认勾选框（`orderHeldNeeded && !failedJob && canComplete`）仍看 `canComplete`，应换成 `canCompleteThis`。
+- [x] 第 5 批签字文案复核留下的非阻塞项（找茬哥 10/17；(a)(b)(d) 归前端哥接加码 tip）：
+  1. [x] (a) 前端：首次对照超页又没有条目的单，失败横条与「回首页」正文打架。已改（`96c0720a`、`1a917d16`，产品哥 10/17 定）：标题按 `page_over` 码出「稿件超过 1 页」（`REVIEW_PAGE_LIMIT`，不显示服务端原文、不出「请联系管理员」）；自己的单（有 create 且本人或管理员）正文复用「这一单没法接着核了，请回首页重新新建一单」+「回首页」，别人的单只出标题。复核失败无条目有按钮的超页单出「稿件超过 1 页，请改成 1 页后重新上传这一单」。有条目超页单照旧黄条。首次超页无条目单的重新上传随 Q4 那个 PR。
+  2. [x] (b) 前端：`ReviewPage.tsx` 整单确认勾选框改看 `canCompleteThis`（`62ed79df`，`orderHeldConfirm.ts` `showOrderHeldCheckbox`）；同批另改：别人的「复核失败、没有剩余条目」单失败条不再出纯文字「重新上传这一单」正文（`3e0cb057`）。
   3. [x] (c) 服务端：非管理员对别人的单 `POST /complete` 回 403 `{detail: "没有权限"}`，不改状态（加码 HTTP 测试已锁）。
-  4. (d) 认字失败识别仍靠 `OCR_FAILED` 文字匹配（`reviewErrorCopy.ts`）；服务端已出 `ocr_failed` / `result_truncated` / `private_data_failed`，前端改按 `job_error_code` 判断并去掉文字匹配。
+  4. [x] (d) 认字失败识别改按 `job_error_code === "ocr_failed"`，删掉 `OCR_FAILED` 文字匹配；`result_truncated` / `private_data_failed` 按码出产品定稿句（`34b36311`）。签字退回失败也改按返回体码出文案，退回被拦不再出「处理完才能签字」，「当前状态不可签字」照原文（`bd867dde`）。
 - [x] 非逐字单出现未决「待人工确认」：两边都算待确认；服务端回 400「仍有 N 条待人工确认未处理」（逐字单仍走整单确认勾选）。
 - [x] 只读账号（viewer）：前端隐藏签字/退回；服务端 403。
 - [x] 条目状态不在已知集合：前端两个按钮灰并提示「审核数据状态异常」；服务端 400「有 N 条审核数据状态异常，请重新对照」。
 - [x] 认字存疑（`hasReadingDoubt`）且没下结论：两边都算待确认；服务端回 400「仍有 N 条认字存疑未处理」；多类同时出现时分开数，如「仍有 2 条待人工确认、1 条认字存疑未处理」。已标一致 / 忽略 / 有错后不再拦。
 - [x] 加码服务端：`/complete` `/decision` `/rework` 业务拦截带 `{detail, code, params?}`（`reviewCodes.ts` + `ReviewProblem`）；前端按码出文案（前端哥接）。401/403/404 与路径级 413 仍无码（Q1/Q7 另起一批，不在本 PR）。
 - [x] 待确认口径对齐（服务端）：服务端已改用共用 `reviewIssue.ts`（`isReviewIssue` / `pendingWord`），无状态正则；缺空格没结论一律要结论（Q2）；原「缺空格 + evidence」差异已对齐。
-- [ ] 待确认口径对齐（前端，前端哥）：`reviewEvidence.ts` 改用共用 `reviewIssue.ts`，删掉 `/不清|误/`；`SIGN_RETURN_DISPUTED` 里前端对齐后已一致的行（现在是「缺空格没有 decision、也没有存疑字段」一行）挪回主表（expect PENDING、code `complete_hits_pending`）；`reviewIssueGap.contract.test.ts` 补差异二的断言：前端没有状态正则（不再只断言 `/不清|误/` 不命中已知状态），并删掉「仍有差异」那条。
-- [ ] `isAccountingCopy`：服务端已有共用投影 `hitText.ts`（`hit_text` 字段），前端可改 import 并删本地正则；签字门仍按 `hasReadingDoubt`。
+- [x] 待确认口径对齐（前端，前端哥，`94c3fe9a`）：`reviewEvidence.ts` 改用共用 `reviewIssue.ts`，删掉 `/不清|误/`；`SIGN_RETURN_DISPUTED` 里前端对齐后已一致的行（现在是「缺空格没有 decision、也没有存疑字段」一行）挪回主表（expect PENDING、code `complete_hits_pending`）；`reviewIssueGap.contract.test.ts` 补差异二的断言：前端没有状态正则（不再只断言 `/不清|误/` 不命中已知状态），并删掉「仍有差异」那条。
+- [x] `isAccountingCopy`：前端 `hitText.ts` 改读 `hit_text`（缺这把键时用共用 `server/src/hitText.ts` 现算），本地正则已删（`cc44571a`）；签字门仍按 `hasReadingDoubt`。
 
 
 ## 2026-10-17 加码（`fix/pstack-batch5-errcode`）服务端已交
