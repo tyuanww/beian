@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Input, Modal } from "antd";
 import { REVIEW_COPY } from "../copy/labels";
 import type { RejectRow } from "./reviewFlat";
+import { submitDialogBlocked } from "./reviewActions";
 
 type Props = {
   kind: "sign" | "reject" | null;
@@ -21,7 +22,7 @@ type Props = {
 export function ReviewSubmitDialog({ kind, rows, pending = 0, held = 0, fscNote, busy, failed, onCancel, onConfirm }: Props) {
   const [extra, setExtra] = useState("");
   const reject = kind === "reject";
-  const blocked = pending > 0;
+  const blocked = submitDialogBlocked(pending);
   return (
     <Modal
       open={kind != null}

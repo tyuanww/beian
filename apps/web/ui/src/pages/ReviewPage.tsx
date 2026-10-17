@@ -12,21 +12,22 @@ import {
   fullscreenFailureMessage,
   isElementFullscreen,
 } from "./mockupFullscreen";
-import { readBoxesOn, readPinsOn, readSpotOn, skipPackSheetField, writeBoxesOn, writePinsOn, writeSpotOn } from "./reviewDock";
+import { readBoxesOn, readPinsOn, readSpotOn, writeBoxesOn, writePinsOn, writeSpotOn } from "./reviewDock";
 import { ReviewSubmitDialog } from "./ReviewSubmitDialog";
 import { createFlagStore, UndoToastGate } from "./undoToastGate";
 import {
   clampPinToView, conclusionFor, decisionFailureText, reworkUploadBlocked, submitFailureText, flatLayout, isTypingTarget, lockedBy, markShortcutsSeen, markerOutsideCorner, nextPendingAfter,
-  panToClearPanel, phonePendingLines, positionLabel, rejectNote, rejectRows, shouldShowShortcutsOnOpen, submitGate, tabIndices, thumbMarks, verdictCounts, verdictForKey, isOpenHeld,
+  panToClearPanel, phonePendingLines, positionLabel, rejectNote, rejectRows, shouldShowShortcutsOnOpen, tabIndices, thumbMarks, verdictCounts, verdictForKey, isOpenHeld,
   type FlatLayout, type FlatTab,
 } from "./reviewFlat";
 import { ReviewWorkspace } from "./ReviewWorkspace";
 import { phoneDraftPlan, useReviewSession } from "./useReviewSession";
 import { isDecisionAllowed, isHeldStatus } from "./reviewDecisions";
-import { completePayload, needsOrderHeldConfirm, signAllowedForOrderHeld } from "./orderHeldConfirm";
+import { completePayload, needsOrderHeldConfirm } from "./orderHeldConfirm";
 import { unsavedNotesHint } from "./unsavedNotesHint";
 import { detailLoadState, shouldShowWaitCard } from "./waitCard";
-import { reviewHits, shouldUseReworkView } from "./reviewVersion";
+import { shouldUseReworkView } from "./reviewVersion";
+import { isFailedJob, isReviewableStatus, reviewGate, reviewPageHits, reviewSubmitButtons } from "./reviewActions";
 import { ReviewDockPanel } from "./ReviewDockPanel";
 import { ReviewHitDetail } from "./ReviewHitDetail";
 import { SPOT_CARD_GAP, SPOT_CARD_MARGIN, SPOT_CARD_MIN_HEIGHT, SPOT_CARD_MIN_WIDTH, SPOT_CARD_WIDTH, avoidSpotObstacle, placeSpotCard, resolveSpotPosition, spotDragStarted, spotLane, spotSideRoom, type SpotObstacle } from "./spotCard";
@@ -56,10 +57,6 @@ type Props = {
   /** 手机底部导航「历史」。 */
   onHistory?: () => void;
 };
-
-function isReviewable(status?: string) {
-  return status === "pending_review" || status === "in_review";
-}
 
 function isReworkable(task: TaskDetail | null) {
   if (!task) return false;
@@ -291,11 +288,11 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
     return () => window.clearInterval(id);
   }, [taskId, waiting]);
 
-  const hits = reviewHits(task, useV2).filter((h) => !skipPackSheetField(h.field));
+  const hits = reviewPageHits(task, useV2);
   const pages = pageList(useV2 ? { ...(task as TaskDetail), pages: task?.pages_v2 } : task);
   const page = pages[pageIdx];
   const signed = task?.status === "completed";
-  const reviewable = isReviewable(task?.status);
+  const reviewable = isReviewableStatus(task?.status);
   const reworkable = isReworkable(task);
   const current = hits[active];
 
@@ -305,7 +302,7 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
       seededNav.current = `${task.id}:signed`;
       return;
     }
-    const phase = isReviewable(task.status) ? "review" : task.status;
+    const phase = isReviewableStatus(task.status) ? "review" : task.status;
     const key = `${task.id}:${phase}:${useV2 ? "v2" : "v1"}:${hits.length}`;
     if (seededNav.current === key) return;
     seededNav.current = key;
@@ -333,7 +330,7 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
     undoHidden.set(Boolean(locked));
     if (locked) message.destroy("review-undo");
   }, [locked]);
-  const gate = submitGate(hits, reviewable, Boolean(locked), task?.verbatim_check === true);
+  const gate = reviewGate(task, hits, Boolean(locked));
   const counts = verdictCounts(hits);
   const tabList = tabIndices(hits, tab, active);
   /** 有 SVG 却只显示了 PNG：高清（矢量）没加载出来，保留 PNG 并给重试。 */
@@ -612,7 +609,7 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
         clearNote(hitId, note);
         setDecisionError(null);
         const nextUseV2 = useV2Ref.current;
-        const nextHits = reviewHits(next, nextUseV2).filter((h) => !skipPackSheetField(h.field));
+        const nextHits = reviewPageHits(next, nextUseV2);
         const nextPages = pageList(nextUseV2 ? { ...next, pages: next.pages_v2 } : next);
         const nextPending = previous === decision ? null : nextPendingAfter(nextHits, fromIndex, decision);
         if (nextPending != null) {
@@ -768,7 +765,7 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
       const status = err instanceof ApiError ? err.status : null;
       let fresh: TaskDetail | null = null;
       if (status === 400) fresh = await api.task(task.id).catch(() => null);
-      const freshPending = fresh ? verdictCounts(reviewHits(fresh, useV2Ref.current).filter((h) => !skipPackSheetField(h.field))).pending : 0;
+      const freshPending = fresh ? verdictCounts(reviewPageHits(fresh, useV2Ref.current)).pending : 0;
       const text = submitFailureText(status, fresh, freshPending);
       if (text === REVIEW_COPY.submitFailed) console.error("[review] 提交失败", err);
       if (fresh) setTask((cur) => (cur?.id === fresh!.id ? fresh : cur));
@@ -920,9 +917,9 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
 
   const heldCount = hits.filter(isOpenHeld).length;
   const orderHeldNeeded = needsOrderHeldConfirm(task, hits);
-  const orderHeldOk = signAllowedForOrderHeld(orderHeldNeeded, orderHeldConfirm);
   const draftBlock = unsavedNotesHint(hasUnsavedNotes);
-  const failedJob = task?.status === "compare_failed" || task?.job_status === "failed";
+  const failedJob = isFailedJob(task);
+  const buttons = reviewSubmitButtons(task, hits, { locked: Boolean(locked), orderHeldConfirm, busy, hasUnsavedNotes });
   const failedWithoutHits = failedJob && hits.length === 0;
   const failedWithHits: FailedWithHitsKind | undefined = failedJob && hits.length > 0 ? (task?.job_kind === "rework" ? "rework" : "compare") : undefined;
   const thumbs = thumbMarks(pages, hits, seenPages);
@@ -1007,10 +1004,10 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
             {REVIEW_COPY.orderHeldConfirm}
           </Checkbox>
         ) : null}
-        {failedJob ? null : <button type="button" className="btn-ghost review-reject" disabled={!gate.canReject || busy || hasUnsavedNotes} title={gate.rejectTitle || gate.title || undefined} aria-describedby={gate.rejectTitle ? "review-reject-note" : undefined} onClick={() => { setSubmitFailed(null); setDialog("reject"); }}>
+        {buttons.reject === "hidden" ? null : <button type="button" className="btn-ghost review-reject" disabled={buttons.reject !== "enabled"} title={gate.rejectTitle || gate.title || undefined} aria-describedby={gate.rejectTitle ? "review-reject-note" : undefined} onClick={() => { setSubmitFailed(null); setDialog("reject"); }}>
           {REVIEW_COPY.reject}
         </button>}
-        {failedJob ? null : <button type="button" className="btn-primary review-sign" disabled={!gate.canSign || busy || hasUnsavedNotes || !orderHeldOk} title={gate.title || undefined} aria-describedby={gate.hint ? "review-sign-hint" : undefined} onClick={() => { setSubmitFailed(null); setDialog("sign"); }}>
+        {buttons.sign === "hidden" ? null : <button type="button" className="btn-primary review-sign" disabled={buttons.sign !== "enabled"} title={gate.title || undefined} aria-describedby={gate.hint ? "review-sign-hint" : undefined} onClick={() => { setSubmitFailed(null); setDialog("sign"); }}>
           {REVIEW_COPY.sign}
         </button>}
         </span>
