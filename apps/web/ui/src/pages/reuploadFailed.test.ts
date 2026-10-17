@@ -5,14 +5,17 @@ import { REVIEW_COPY } from "../copy/labels";
 import { reviewErrorCopy, type FailedWithHitsKind } from "./reviewErrorCopy";
 import { canReuploadFailed, reviewPageHits, reviewSubmitButtons, type ReuploadViewer } from "./reviewActions";
 
-/** 复核失败按 B：三种失败条（红条复核失败、黄条复核超页、检查中断）里给自己的单「重新上传这一单」。 */
+/**
+ * 复核失败按 B：红条（复核失败）、黄条（复核超页）里给自己的单「重新上传这一单」。
+ * 检查中断（compare_failed）服务端 /rework 现在回 400，先不给（等服务端放宽 isReworkableTask）。
+ */
 const HITS: FieldHit[] = [{ id: "h0", field: "中文品名", status: "疑点", decision: "confirm" }];
 
 const BARS: ReadonlyArray<{ name: string; kind: FailedWithHitsKind; code?: string; task: Partial<TaskDetail> }> = [
   { name: "红条：复核失败", kind: "rework", task: { status: "pending_review", job_kind: "rework", job_status: "failed", job_error: "对照中断" } },
   { name: "黄条：复核超页", kind: "rework", code: "page_over", task: { status: "pending_review", job_kind: "rework", job_status: "failed", job_error_code: "page_over" } },
-  { name: "检查中断带上一轮条目", kind: "compare", task: { status: "compare_failed", job_kind: "compare", job_status: "failed", error: "对照中断" } },
 ];
+const COMPARE_BAR = { name: "检查中断带上一轮条目", kind: "compare" as const, task: { status: "compare_failed", job_kind: "compare", job_status: "failed", error: "对照中断" } };
 
 const task = (extra: Partial<TaskDetail>, owner: string | null = "ou_me"): TaskDetail =>
   ({ id: "e5969b58cd99", title: "合成失败单", type: "pack", owner, hits: HITS, ...extra }) as TaskDetail;
@@ -52,9 +55,19 @@ describe("失败条里的「重新上传这一单」", () => {
     assert.equal(canReuploadFailed(t, HITS, { ...reviewer, displayName: "审核员乙" }), false);
   });
 
+  it("检查中断（compare_failed）：服务端 /rework 现回 400，先不给按钮，文案保持原句", () => {
+    assert.equal(canReuploadFailed(task(COMPARE_BAR.task), HITS, reviewer), false);
+    assert.equal(canReuploadFailed(task(COMPARE_BAR.task), HITS, admin), false);
+    assert.equal(reviewErrorCopy("对照中断", undefined, "compare"), "检查中断了，下面是上一轮的结果，请联系管理员");
+  });
+
+  it("已有新稿（pages_v2）：服务端 isReworkableTask 为假，不给按钮", () => {
+    assert.equal(canReuploadFailed(task({ ...BARS[0].task, pages_v2: [{ url: "x", page: 1 }] } as Partial<TaskDetail>), HITS, reviewer), false);
+  });
+
   it("不是失败单、或检查中断且没有条目时不在失败条给按钮", () => {
     assert.equal(canReuploadFailed(task({ status: "in_review" }), HITS, reviewer), false);
-    assert.equal(canReuploadFailed(task(BARS[2].task), [], reviewer), false);
+    assert.equal(canReuploadFailed(task(COMPARE_BAR.task), [], reviewer), false);
     assert.equal(canReuploadFailed(null, HITS, reviewer), false);
     assert.equal(REVIEW_COPY.reupload, "重新上传这一单");
   });

@@ -21,6 +21,17 @@ export function isFailedJob(task: Pick<TaskDetail, "status" | "job_status"> | nu
   return task?.status === "compare_failed" || task?.job_status === "failed";
 }
 
+/**
+ * 这一单现在能不能走 /rework：照服务端 `tasks.ts` 的 `isReworkableTask` 原样对齐（改了那边这里一起改）。
+ * 已有新稿（pages_v2）不行；待审 / 审核中可以；已完成只有退回（rework）的可以。
+ */
+export function isReworkableTask(task: Pick<TaskDetail, "status" | "complete_kind" | "pages_v2"> | null): boolean {
+  if (!task) return false;
+  if (Array.isArray(task.pages_v2) && task.pages_v2.length > 0) return false;
+  if (task.status === "pending_review" || task.status === "in_review") return true;
+  return task.status === "completed" && task.complete_kind === "rework";
+}
+
 /** 当前登录人：与服务端 `/rework` 的 `need(c, "create")` + `assertCanAccessTask` 用同一组字段（`/api/auth/me`）。 */
 export type ReuploadViewer = {
   /** `me.perms` 含 `create`（admin、reviewer 有；viewer 没有）。 */
@@ -37,11 +48,12 @@ export type ReuploadViewer = {
  * 失败单（`isFailedJob`）的失败条里给不给「重新上传这一单」（老板 2026-10-17 复核失败按 B）：
  * 带上一轮条目的三种失败条（复核失败红条、复核超页黄条、检查中断条），以及复核（对红）失败且没有剩余条目的单。
  * 首次检查失败且没有条目的单不在这里（那是要新建一单，不走 /rework）。
+ * 服务端会回 400「当前状态不可对红」的单（`isReworkableTask` 为假，如检查中断的 `compare_failed`）不给按钮。
  * 只照服务端 `/rework` 的权限：有 create，且是管理员或这单的 `owner` 等于自己的 open_id / 显示名
- * （同服务端 `canAccessOwner`）。单子当前能不能对红（`isReworkableTask`）不在这里判，交给服务端回话。
+ * （同服务端 `canAccessOwner`）。
  */
-export function canReuploadFailed(task: Pick<TaskDetail, "status" | "job_status" | "job_kind" | "owner"> | null, hits: readonly FieldHit[], viewer: ReuploadViewer): boolean {
-  if (!task || !isFailedJob(task)) return false;
+export function canReuploadFailed(task: Pick<TaskDetail, "status" | "job_status" | "job_kind" | "owner" | "complete_kind" | "pages_v2"> | null, hits: readonly FieldHit[], viewer: ReuploadViewer): boolean {
+  if (!task || !isFailedJob(task) || !isReworkableTask(task)) return false;
   if (hits.length === 0 && task.job_kind !== "rework") return false;
   if (!viewer.canCreate) return false;
   if (viewer.admin) return true;

@@ -940,8 +940,9 @@ test("compare_failed 带上一轮条目（reclaimTask 边角单）：进度、�
   expect(task.hits?.length).toBeGreaterThan(0);
   await page.goto(`/review/${task.id}`);
   const alert = page.locator(".ant-alert-error").first();
-  await expect(alert.locator(".ant-alert-title")).toHaveText("检查中断了，下面是上一轮的结果，可以重新上传这一单");
-  await expect(alert.getByRole("button", { name: "重新上传这一单" })).toBeVisible();
+  await expect(alert.locator(".ant-alert-title")).toHaveText("检查中断了，下面是上一轮的结果，请联系管理员");
+  // 服务端 /rework 对 compare_failed 现回 400：先不给重新上传。
+  await expect(page.getByRole("button", { name: "重新上传这一单" })).toHaveCount(0);
   await expect(page.getByTestId("review-posn")).toBeVisible();
   await expect(page.getByRole("button", { name: "上一条" })).toBeVisible();
   await expect(page.getByRole("button", { name: "下一条" })).toBeVisible();

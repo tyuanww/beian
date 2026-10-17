@@ -27,7 +27,7 @@ import { completePayload, needsOrderHeldConfirm } from "./orderHeldConfirm";
 import { unsavedNotesHint } from "./unsavedNotesHint";
 import { detailLoadState, shouldShowWaitCard } from "./waitCard";
 import { shouldUseReworkView } from "./reviewVersion";
-import { canReuploadFailed, isFailedJob, isReviewableStatus, reviewGate, reviewPageHits, reviewSubmitButtons } from "./reviewActions";
+import { canReuploadFailed, isFailedJob, isReworkableTask, isReviewableStatus, reviewGate, reviewPageHits, reviewSubmitButtons } from "./reviewActions";
 import { ReviewDockPanel } from "./ReviewDockPanel";
 import { ReviewHitDetail } from "./ReviewHitDetail";
 import { SPOT_CARD_GAP, SPOT_CARD_MARGIN, SPOT_CARD_MIN_HEIGHT, SPOT_CARD_MIN_WIDTH, SPOT_CARD_WIDTH, avoidSpotObstacle, placeSpotCard, resolveSpotPosition, spotDragStarted, spotLane, spotSideRoom, type SpotObstacle } from "./spotCard";
@@ -63,13 +63,6 @@ type Props = {
   /** 手机底部导航「历史」。 */
   onHistory?: () => void;
 };
-
-function isReworkable(task: TaskDetail | null) {
-  if (!task) return false;
-  if (Array.isArray(task.pages_v2) && task.pages_v2.length > 0) return false;
-  if (task.status === "pending_review" || task.status === "in_review") return true;
-  return task.status === "completed" && task.complete_kind === "rework";
-}
 
 function pageList(task: TaskDetail | null): TaskPage[] {
   const raw = task?.pages;
@@ -299,7 +292,7 @@ export function ReviewPage({ taskId, userId, displayName = null, canComplete = t
   const page = pages[pageIdx];
   const signed = task?.status === "completed";
   const reviewable = isReviewableStatus(task?.status);
-  const reworkable = isReworkable(task);
+  const reworkable = isReworkableTask(task);
   const current = hits[active];
 
   useLayoutEffect(() => {
@@ -720,12 +713,9 @@ export function ReviewPage({ taskId, userId, displayName = null, canComplete = t
 
   const hasUnsavedNotes = hits.some((hit) => hit.id && notes[hit.id] != null && notes[hit.id] !== (hit.note ?? ""));
 
-  /**
-   * 选 PDF 走 /rework。`fromFailedBar`：失败条里的「重新上传这一单」——单子能不能对红交给服务端判，
-   * 不先按前端 isReworkable 拦，被拒时照常把服务端的话提示出来。
-   */
-  async function uploadRework(file: File, fromFailedBar = false) {
-    if (!task || (!reworkable && !fromFailedBar) || hasUnsavedNotes) return;
+  /** 选 PDF 走 /rework（页头「上传新稿」和失败条「重新上传这一单」共用）；被拒时照常提示服务端的话。 */
+  async function uploadRework(file: File) {
+    if (!task || !reworkable || hasUnsavedNotes) return;
     // 公网上传上限预检：超了就直接提示，不发请求（否则会先被 413 HTML 拦掉）。
     const tooLarge = reworkUploadBlocked(file);
     if (tooLarge) {
@@ -934,15 +924,15 @@ export function ReviewPage({ taskId, userId, displayName = null, canComplete = t
   const failedWithHits: FailedWithHitsKind | undefined = failedJob && hits.length > 0 ? (task?.job_kind === "rework" ? "rework" : "compare") : undefined;
   const reuploadFailed = canReuploadFailed(task, hits, { canCreate, admin, openId: userId, displayName });
   /** 和页头「上传新稿」同一条选文件 → /rework 流程。 */
-  const pickReworkPdf = (fromFailedBar: boolean) => {
+  const pickReworkPdf = () => {
     const input = document.createElement("input");
     input.type = "file";
     input.accept = ".pdf";
-    input.onchange = () => { const f = input.files?.[0]; if (f) void uploadRework(f, fromFailedBar); };
+    input.onchange = () => { const f = input.files?.[0]; if (f) void uploadRework(f); };
     input.click();
   };
   const failedBarAction = reuploadFailed ? (
-    <button type="button" className="btn-ghost review-upload-failed" disabled={busy || hasUnsavedNotes} onClick={() => pickReworkPdf(true)}>
+    <button type="button" className="btn-ghost review-upload-failed" disabled={busy || hasUnsavedNotes} onClick={pickReworkPdf}>
       {REVIEW_COPY.reupload}
     </button>
   ) : undefined;
@@ -1004,7 +994,7 @@ export function ReviewPage({ taskId, userId, displayName = null, canComplete = t
             type="button"
             className="btn-ghost review-upload-new"
             disabled={busy || hasUnsavedNotes}
-            onClick={() => pickReworkPdf(false)}
+            onClick={pickReworkPdf}
           >
             上传新稿
           </button>
