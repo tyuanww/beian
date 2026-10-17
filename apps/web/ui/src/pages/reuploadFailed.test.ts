@@ -29,7 +29,8 @@ describe("失败条里的「重新上传这一单」", () => {
     it(`${bar.name}：文案不再叫人联系管理员，结尾引导重新上传；自己的单有按钮`, () => {
       const text = reviewErrorCopy("对照中断", bar.code, bar.kind);
       assert.doesNotMatch(text, /请联系管理员/u);
-      assert.ok(text.endsWith("下面是上一轮的结果，可以重新上传这一单"), text);
+      assert.ok(text.endsWith("重新上传这一单"), text);
+      assert.match(text, /下面是上一轮的结果/u);
       const t = task(bar.task);
       assert.equal(canReuploadFailed(t, reviewPageHits(t, false), reviewer), true);
     });

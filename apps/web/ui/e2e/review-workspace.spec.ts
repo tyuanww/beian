@@ -977,7 +977,7 @@ test("复核超页且条目还在：黄条写明这次复核没做，条里给�
   syntheticApi.tasks.push(task);
   expect(task.hits?.length).toBeGreaterThan(0);
   await page.goto(`/review/${task.id}`);
-  const alert = page.locator(".ant-alert-warning").filter({ hasText: "稿件超过 1 页，这次复核没做，下面是上一轮的结果，可以重新上传这一单" });
+  const alert = page.locator(".ant-alert-warning").filter({ hasText: "稿件超过 1 页，这次复核没做，下面是上一轮的结果。请改成 1 页后重新上传这一单" });
   await expect(alert).toBeVisible();
   await expect(page.locator(".ant-alert-error")).toHaveCount(0);
   await expect(alert.getByRole("button", { name: "重新上传这一单" })).toBeVisible();

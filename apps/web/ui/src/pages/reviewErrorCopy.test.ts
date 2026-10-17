@@ -27,8 +27,11 @@ describe("reviewErrorCopy", () => {
   });
 
   it("rework page_over with last round's hits gets its own sentence and a warning", () => {
-    assert.equal(REVIEW_COPY.reworkPageOver, "稿件超过 1 页，这次复核没做，下面是上一轮的结果，可以重新上传这一单");
+    assert.equal(REVIEW_COPY.reworkPageOver, "稿件超过 1 页，这次复核没做，下面是上一轮的结果。请改成 1 页后重新上传这一单");
     assert.equal(reviewErrorCopy("这一单页数超过可核对页数", "page_over", "rework"), REVIEW_COPY.reworkPageOver);
+    // 服务端 job_error 原文还带「请联系管理员」：黄条只看 job_error_code，不拼原文。
+    assert.equal(reviewErrorCopy("稿件超过 1 页，暂不支持核对，请联系管理员", "page_over", "rework"), REVIEW_COPY.reworkPageOver);
+    assert.doesNotMatch(REVIEW_COPY.reworkPageOver, /请联系管理员/u);
     assert.equal(reviewErrorCopy("这一单页数超过可核对页数", "page_over"), REVIEW_COPY.pageOver);
     assert.equal(reviewErrorType("page_over"), "warning");
   });
