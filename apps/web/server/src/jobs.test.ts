@@ -1897,7 +1897,7 @@ describe("jobs dispatcher", () => {
       runCompare: async () => ({
         code: 2,
         stdout: "",
-        stderr: JSON.stringify({ ok: false, error: "这一单认字超出内存，没有结果", code: "oom", cause: "rss limit" }) + "\n",
+        stderr: JSON.stringify({ ok: false, error: "本地认字不能访问外网", code: "verbatim_egress_other", cause: "x" }) + "\n",
         timedOut: false,
       }),
     });
@@ -1910,8 +1910,61 @@ describe("jobs dispatcher", () => {
       await new Promise((r) => setTimeout(r, 10));
     }
     const t = loadTask(id);
-    assert.equal(t.job_error, "这一单认字超出内存，没有结果");
+    assert.equal(t.job_error, "本地认字不能访问外网");
     assert.equal(t.job_error_code, undefined);
+  });
+
+  it("CLI 私有码按表映射成 job_error_code：六种认字失败 → ocr_failed，结果没写完 / 私有数据各自给码，原文照旧", async () => {
+    const cases: Array<[string, string, string | undefined]> = [
+      ["model_missing", "本地认字模型未安装", "ocr_failed"],
+      ["model_hash_mismatch", "本地认字模型校验失败", "ocr_failed"],
+      ["notice_missing", "认字版权声明没放在模型目录旁", "ocr_failed"],
+      ["dep_missing", "认字依赖没装齐", "ocr_failed"],
+      ["oom", "这一单认字超出内存，没有结果", "ocr_failed"],
+      ["ocr_unavailable", "未配置百度 OCR：backend/.env.baidu", "ocr_failed"],
+      ["result_truncated", "这一单结果没写完，没有结果", "result_truncated"],
+      ["private_data_limit", "私有数据解析失败", "private_data_failed"],
+      ["private_data_parse_failed", "私有数据解析失败", "private_data_failed"],
+      ["page_over_rendered", "稿件超过 1 页", "page_over"],
+      ["some_new_code", "别的失败", undefined],
+    ];
+    let n = 220;
+    for (const [code, error, want] of cases) {
+      const id = tid(n++);
+      setJobsTestHooks({
+        runCompare: async () => ({ code: 2, stdout: "", stderr: JSON.stringify({ ok: false, error, code, cause: "-" }) + "\n", timedOut: false }),
+      });
+      queuedCompare(id, `2026-08-24T02:${String(n - 220).padStart(2, "0")}:00.000Z`);
+      enqueue({ kind: "compare", id });
+      for (let i = 0; i < 50 && loadTask(id).job_status !== "failed"; i++) {
+        await new Promise((r) => setTimeout(r, 10));
+      }
+      const t = loadTask(id);
+      assert.equal(t.job_status, "failed", code);
+      assert.equal(t.job_error, error, code);
+      assert.equal(t.job_error_code, want, code);
+      const viewer = { id: "ou_ziye", name: "籽烨", admin: true };
+      assert.equal(publicTask(t, viewer).job_error_code, want, code);
+      assert.equal(listTasks("", viewer).find((r) => r.id === id)?.job_error_code, want, code);
+      resetJobsTestHooks();
+    }
+  });
+
+  it("逐字单被内存信号杀掉：原文照旧，job_error_code 记 ocr_failed", async () => {
+    const id = tid(240);
+    setJobsTestHooks({
+      runCompare: async () => ({ code: 1, stdout: "", stderr: "", timedOut: false, signal: "SIGKILL" }),
+    });
+    saveTask({ id, title: "精华", product_name: "某某精华", type: "excel_pdf", status: "comparing", created_at: "2026-08-24T01:20:00.000Z",
+      owner: "籽烨", job_kind: "compare", job_status: "queued", verbatim_check: true });
+    enqueue({ kind: "compare", id });
+    for (let i = 0; i < 50 && loadTask(id).job_status !== "failed"; i++) {
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    const t = loadTask(id);
+    assert.equal(t.job_error, "这一单认字超出内存，没有结果");
+    assert.equal(t.job_error_code, "ocr_failed");
+    resetJobsTestHooks();
   });
 
   it("mockup stderr JSON error is job_error not 打样中断", async () => {

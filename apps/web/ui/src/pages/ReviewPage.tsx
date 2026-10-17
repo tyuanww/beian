@@ -17,18 +17,18 @@ import { ReviewSubmitDialog } from "./ReviewSubmitDialog";
 import { createFlagStore, UndoToastGate } from "./undoToastGate";
 import {
   clampPinToView, conclusionFor, decisionFailureText, reworkUploadBlocked, submitFailureText, flatLayout, isTypingTarget, lockedBy, markShortcutsSeen, markerOutsideCorner, nextPendingAfter,
-  panToClearPanel, phonePendingLines, positionLabel, rejectNote, rejectRows, reviewPositionLabel, shouldShowShortcutsOnOpen, signHint, tabIndices, thumbMarks, verdictCounts, verdictForKey, isOpenHeld,
+  panToClearPanel, phonePendingLines, positionLabel, rejectNote, rejectRows, reviewPositionLabel, shouldShowShortcutsOnOpen, signHint, tabIndices, thumbMarks, verdictCounts, verdictForKey, isOpenHeld, pendingTally,
   type FlatLayout, type FlatTab,
 } from "./reviewFlat";
 import { ReviewWorkspace } from "./ReviewWorkspace";
 import { phoneDraftPlan, useReviewSession } from "./useReviewSession";
 import { isDecisionAllowed, isHeldStatus } from "./reviewDecisions";
-import { completePayload, needsOrderHeldConfirm } from "./orderHeldConfirm";
+import { completePayload, needsOrderHeldConfirm, showOrderHeldCheckbox } from "./orderHeldConfirm";
 import { unsavedNotesHint } from "./unsavedNotesHint";
 import { detailLoadState, shouldShowWaitCard } from "./waitCard";
 import { shouldUseReworkView } from "./reviewVersion";
 import { hrefOf } from "../appRoute";
-import { canAccessTaskOwner, canReuploadFailed, isDeadCompareFailed, isFailedJob, isReworkableTask, isReviewableStatus, reviewGate, reviewPageHits, reviewSubmitButtons } from "./reviewActions";
+import { canAccessTaskOwner, canReuploadFailed, failedNoHitsBar, isDeadCompareFailed, isFailedJob, isReworkableTask, isReviewableStatus, reviewGate, reviewPageHits, reviewSubmitButtons } from "./reviewActions";
 import { ReviewDockPanel } from "./ReviewDockPanel";
 import { ReviewHitDetail } from "./ReviewHitDetail";
 import { SPOT_CARD_GAP, SPOT_CARD_MARGIN, SPOT_CARD_MIN_HEIGHT, SPOT_CARD_MIN_WIDTH, SPOT_CARD_WIDTH, avoidSpotObstacle, placeSpotCard, resolveSpotPosition, spotDragStarted, spotLane, spotSideRoom, type SpotObstacle } from "./spotCard";
@@ -763,11 +763,13 @@ export function ReviewPage({ taskId, userId, displayName = null, canComplete = t
       setSubmitFailed(null);
       message.success(REVIEW_COPY_DONE[kind]);
     } catch (err) {
-      const status = err instanceof ApiError ? err.status : null;
+      const failure = err instanceof ApiError
+        ? { status: err.status, code: err.code, params: err.params, detail: err.message }
+        : { status: null, code: null, params: null, detail: "" };
       let fresh: TaskDetail | null = null;
-      if (status === 400) fresh = await api.task(task.id).catch(() => null);
-      const freshPending = fresh ? verdictCounts(reviewPageHits(fresh, useV2Ref.current)).pending : 0;
-      const text = submitFailureText(status, fresh, freshPending);
+      if (failure.status === 400) fresh = await api.task(task.id).catch(() => null);
+      const freshTally = fresh ? pendingTally(reviewPageHits(fresh, useV2Ref.current), fresh.verbatim_check === true) : [];
+      const text = submitFailureText(failure, fresh, freshTally);
       if (text === REVIEW_COPY.submitFailed) console.error("[review] 提交失败", err);
       if (fresh) setTask((cur) => (cur?.id === fresh!.id ? fresh : cur));
       if (fresh?.status === "completed") {
@@ -936,17 +938,19 @@ export function ReviewPage({ taskId, userId, displayName = null, canComplete = t
     input.onchange = () => { const f = input.files?.[0]; if (f) void uploadRework(f); };
     input.click();
   };
-  const failedBarAction = reuploadFailed ? (
+  // 没有上一轮条目的失败条：正文 + 按钮（超页无条目只给自己能动的人「回首页」，别人的单只出标题）。
+  const noHitsBar = failedNoHitsBar(task, reuploadFailed, { canCreate, admin, openId: userId, displayName });
+  const failedBarAction = noHitsBar.action === "reupload" ? (
     <button type="button" className="btn-ghost review-upload-failed" disabled={busy || hasUnsavedNotes} onClick={pickReworkPdf}>
       {REVIEW_COPY.reupload}
     </button>
-  ) : deadCompare ? (
+  ) : noHitsBar.action === "backHome" && !failedWithHits ? (
     <a href={hrefOf({ view: "tasks" })} className="btn-ghost review-back-home" data-testid="review-back-home" onClick={(e) => { e.preventDefault(); onBack(); }}>
       {REVIEW_COPY.backHome}
     </a>
   ) : undefined;
-  /** 无条目失败单的正文：对照失败没救的单请回首页新建；其余照旧。 */
-  const failedNoHitsCopy = deadCompare ? REVIEW_COPY.compareFailedNoHits : REVIEW_COPY.reupload;
+  /** 无条目失败单的正文（标题另出）：见 `failedNoHitsBar`。 */
+  const failedNoHitsCopy = failedJob && !failedWithHits ? noHitsBar.body : null;
   const thumbs = thumbMarks(pages, hits, seenPages);
   const issueRows = rejectRows(hits, notes);
   const releaseHeld = task?.verbatim_check === true;
@@ -1012,7 +1016,7 @@ export function ReviewPage({ taskId, userId, displayName = null, canComplete = t
         ) : null}
         {draftBlock ? <span className="review-draft-status" role="status" data-testid="review-unsaved-hint">{draftBlock}</span> : null}
         {signHint(gate.hint, buttons) ? <span className="review-signhint" id="review-sign-hint" title={gate.title} aria-live="polite">{gate.hint}</span> : null}
-        {orderHeldNeeded && !failedJob && canComplete ? (
+        {showOrderHeldCheckbox(orderHeldNeeded, failedJob, canCompleteThis) ? (
           <Checkbox
             className="review-order-held"
             data-testid="review-order-held"
@@ -1036,8 +1040,8 @@ export function ReviewPage({ taskId, userId, displayName = null, canComplete = t
       {locked ? <Alert className="review-lock" type="warning" title={`🔒 ${locked}`} description={REVIEW_COPY.lockedNote} /> : null}
       {error ? <Alert type="error" title={error} /> : null}
       {task?.error || task?.job_error || task?.job_error_code ? (
-        <Alert type={reviewErrorType(task.job_error_code)} showIcon title={reviewErrorCopy(task.error || task.job_error || "", task.job_error_code, failedWithHits, reuploadFailed) || "检查失败。"} description={failedJob && !failedWithHits && (deadCompare || !failedBarAction) ? failedNoHitsCopy : undefined} action={failedBarAction} />
-      ) : failedJob ? <Alert type="error" showIcon title={failedWithHits ? reviewErrorCopy("", undefined, failedWithHits, reuploadFailed) : failedNoHitsCopy} action={failedBarAction} /> : null}
+        <Alert type={reviewErrorType(task.job_error_code)} showIcon title={reviewErrorCopy(task.error || task.job_error || "", task.job_error_code, failedWithHits, reuploadFailed) || "检查失败。"} description={failedNoHitsCopy ?? undefined} action={failedBarAction} />
+      ) : failedJob ? <Alert type="error" showIcon title={failedWithHits ? reviewErrorCopy("", undefined, failedWithHits, reuploadFailed) : failedNoHitsCopy ?? (reuploadFailed ? REVIEW_COPY.reupload : "检查失败。")} action={failedBarAction} /> : null}
       {signed && !locked ? <Alert type="success" showIcon title={task?.complete_kind === "rework" ? "已退回。" : "已签字。"} /> : null}
       {decisionError ? <Alert type="error" showIcon title={`未保存：${decisionError}`} /> : null}
 

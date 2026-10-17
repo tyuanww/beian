@@ -16,6 +16,14 @@ describe("legacy page_over", () => {
     assert.equal(legacyPageOverCode({ id: "a", job_status: "failed", job_error: `${OLD}。` } as never), undefined);
   });
 
+  it("超页原文去掉「请联系管理员」后：旧整句照样补码；新原文（前半句）不靠补算，新单本来就带码", () => {
+    const NEW = "稿件超过 1 页";
+    assert.equal(legacyPageOverCode({ id: "a", job_status: "failed", job_error: OLD } as never), "page_over");
+    assert.equal(legacyPageOverCode({ id: "a", status: "compare_failed", job_error: "这一单页数超过可核对页数" } as never), "page_over");
+    assert.equal(legacyPageOverCode({ id: "a", job_status: "failed", job_error: NEW } as never), undefined);
+    assert.equal(legacyPageOverCode({ id: "a", job_status: "failed", job_error: NEW, job_error_code: "page_over" } as never), undefined);
+  });
+
   it("counts records still relying on the text match, via function and npm script", () => {
     const dir = join(makeTestTempDir("beian-legacy-page-over-"), "tasks");
     mkdirSync(dir);

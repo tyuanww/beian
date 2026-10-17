@@ -4,6 +4,8 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { JobErrorCode, Task } from "./tasks.js";
 
+// 只认发版前的旧整句：盘上旧单靠它补码，删了就补不上。加码后新原文是前半句「稿件超过 1 页」，
+// 新单一定带 job_error_code，不加进这里。
 const LEGACY_PAGE_OVER_TEXTS = new Set(["稿件超过 1 页，暂不支持核对，请联系管理员", "这一单页数超过可核对页数"]);
 
 export function legacyPageOverCode(t: Task): JobErrorCode | undefined {

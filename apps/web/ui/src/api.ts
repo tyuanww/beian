@@ -4,6 +4,8 @@ import type { GlbTextureInfo } from "./pages/mockupGlbTexture";
 import { API_DOWN_LOCAL } from "./apiHint";
 import { describeBrokenApi } from "./authGate";
 import { uploadTooLargeText } from "./uploadLimit";
+import type { JobErrorCode, ReviewParams } from "../../server/src/reviewCodes.ts";
+import type { HitTextProjection } from "../../server/src/hitText.ts";
 
 function apiHost(): string {
   return typeof window === "undefined" ? "" : window.location.host;
@@ -14,13 +16,21 @@ export class ApiError extends Error {
   brokenApi: boolean;
   code: string | null;
   reason: string | null;
-  constructor(status: number, message: string, brokenApi = false, code: string | null = null, reason: string | null = null) {
+  /** 审稿接口带码返回体 `{ detail, code, params? }` 的 `params`（加码 §1）；没有就是 null。 */
+  params: ReviewParams | null;
+  constructor(status: number, message: string, brokenApi = false, code: string | null = null, reason: string | null = null, params: ReviewParams | null = null) {
     super(message);
     this.status = status;
     this.brokenApi = brokenApi;
     this.code = code;
     this.reason = reason;
+    this.params = params;
   }
+}
+
+/** 返回体里的 `params`：只收对象，形状按码由 `reviewCodes.ts` 定义，前端用到时再按码取字段。 */
+function bodyParams(value: unknown): ReviewParams | null {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as ReviewParams) : null;
 }
 
 export const UPLOAD_RECEIPT_EXPIRED_CODE = "upload_receipt_expired";
@@ -111,20 +121,22 @@ async function fetchJson<T>(path: string, opts: RequestOptions): Promise<T> {
     let detail = res.statusText;
     let code: string | null = null;
     let reason: string | null = null;
+    let params: ReviewParams | null = null;
     try {
       if (ct.includes("application/json")) {
-        const body = (await res.json()) as { detail?: unknown; code?: unknown; reason?:unknown; message?:unknown };
+        const body = (await res.json()) as { detail?: unknown; code?: unknown; reason?:unknown; message?:unknown; params?: unknown };
         if (typeof body.detail === "string") detail = body.detail;
         else if (body.detail) detail = JSON.stringify(body.detail);
         else if (typeof body.message === "string") detail = body.message;
         if (typeof body.code === "string") code = body.code;
         if (typeof body.reason === "string") reason = body.reason;
+        params = bodyParams(body.params);
       }
     } catch {
       /* keep statusText */
     }
     const message = hint || detail || (res.status >= 500 ? "审稿服务暂时不可用，请稍后重试。" : "请求失败");
-    throw new ApiError(res.status, message, Boolean(hint) || message === API_DOWN_LOCAL, code,reason);
+    throw new ApiError(res.status, message, Boolean(hint) || message === API_DOWN_LOCAL, code, reason, params);
   }
   if (!ct.includes("application/json")) {
     throw new ApiError(res.status || 502, hint || "接口没有返回 JSON", true);
@@ -257,21 +269,23 @@ export function uploadWithProgress<T>(
       }
       let detail = xhr.statusText;
       let code: string | null = null;
+      let params: ReviewParams | null = null;
       try {
         if (ct.includes("application/json") && xhr.responseText) {
-          const body = JSON.parse(xhr.responseText) as T & { detail?: unknown; code?: unknown };
+          const body = JSON.parse(xhr.responseText) as T & { detail?: unknown; code?: unknown; params?: unknown };
           if (xhr.status >= 200 && xhr.status < 300) {
             succeed(body);
             return;
           }
           if (typeof body.detail === "string") detail = body.detail;
           if (typeof body.code === "string") code = body.code;
+          params = bodyParams(body.params);
         }
       } catch {
         /* keep statusText */
       }
       const hint = describeBrokenApi(xhr.status, ct, apiHost());
-      fail(new ApiError(xhr.status, hint || detail, Boolean(hint), code));
+      fail(new ApiError(xhr.status, hint || detail, Boolean(hint), code, null, params));
     };
     xhr.onerror = () => fail(new ApiError(0, "上传中断。请检查网络后重新上传。", true));
     xhr.ontimeout = () => fail(new ApiError(0, "上传超时。请检查网络后重新上传。", false));
@@ -578,8 +592,11 @@ export type TaskSummary = {
   job_stage_label?: string;
   job_eta_s?: number;
   job_error?: string;
-  /** 任务报错码（B06）：目前只有超页 "page_over"；其他报错不带，重跑/成功后清空。 */
-  job_error_code?: "page_over";
+  /**
+   * 任务报错码：取值从服务端共享码表 `reviewCodes.ts` 的 `JOB_ERROR_CODES` 推导（page_over / ocr_failed /
+   * result_truncated / private_data_failed），不手抄；其他报错不带，重跑/成功后清空。
+   */
+  job_error_code?: JobErrorCode;
   /** 仅 page_over 时可能带；后端暂未填充，前端不依赖。 */
   job_error_detail?: { page_count?: number; max_pages?: number };
   job_started_at?: string;
@@ -642,6 +659,8 @@ export type FieldHit = {
   excel_span?: [number, number];
   pdf_span_omit?: "duplicate" | "unmatched";
   excel_span_omit?: "duplicate" | "unmatched";
+  /** 服务端读时投影的结构化文案（加码 §5，`server/src/hitText.ts`）：人话漏读词、核算说明、人话 evidence、读到的字、有没有定位。不落盘。 */
+  hit_text?: HitTextProjection;
 };
 
 export type TaskPage = {

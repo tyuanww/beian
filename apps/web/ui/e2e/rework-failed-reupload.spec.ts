@@ -186,9 +186,9 @@ test("复核失败且没有剩余条目：显示「检查未完成，暂时没�
   await expect(page.locator("button.review-reject")).toHaveCount(0);
 });
 
-test("复核认字失败、没有剩余条目：自己的单有按钮，句尾留「再不行请联系管理员」退路；别人的单是原句", async ({ page, syntheticApi }) => {
+test("复核认字失败（job_error_code: ocr_failed）、没有剩余条目：自己的单有按钮，句尾留「再不行请联系管理员」退路；别人的单是原句", async ({ page, syntheticApi }) => {
   await asReviewer(page);
-  const ocr = { status: "pending_review", job_kind: "rework", job_status: "failed", job_error: "认字组件没装上，没有结果", hits: [] };
+  const ocr = { status: "pending_review", job_kind: "rework", job_status: "failed", job_error: "认字组件没装上，没有结果", job_error_code: "ocr_failed" as const, hits: [] };
   const own = reviewTask("e5969b58ce09");
   Object.assign(own, ocr, { owner: ME });
   const others = reviewTask("e5969b58ce0a");
@@ -206,7 +206,7 @@ test("复核认字失败、没有剩余条目：自己的单有按钮，句尾�
 
 test("复核认字失败、带上一轮条目：仍显示复核失败红条「复核出了问题…」", async ({ page, syntheticApi }) => {
   await asReviewer(page);
-  const task = failedTask({ ...BARS[0], id: "e5969b58ce0c", patch: { ...BARS[0].patch, job_error: "认字组件没装上，没有结果" } }, ME);
+  const task = failedTask({ ...BARS[0], id: "e5969b58ce0c", patch: { ...BARS[0].patch, job_error: "认字组件没装上，没有结果", job_error_code: "ocr_failed" } }, ME);
   syntheticApi.tasks.push(task);
   await page.goto(`/review/${task.id}`);
   await expect(page.locator(".ant-alert-error .ant-alert-title").first()).toHaveText(REVIEW_COPY.reworkFailed);
@@ -216,7 +216,7 @@ test("复核认字失败、带上一轮条目：仍显示复核失败红条「�
 test("首轮认字失败、没有上一轮结果：页面是原句「认字出了问题，请联系管理员」，不出「下面是上一轮的结果」", async ({ page, syntheticApi }) => {
   await asReviewer(page);
   const task = reviewTask("e5969b58ce0b");
-  Object.assign(task, { owner: ME, status: "compare_failed", board: "failed", job_kind: "compare", job_status: "failed", job_error: "认字组件没装上，没有结果", error: "认字组件没装上，没有结果", hits: [] });
+  Object.assign(task, { owner: ME, status: "compare_failed", board: "failed", job_kind: "compare", job_status: "failed", job_error: "认字组件没装上，没有结果", job_error_code: "ocr_failed", error: "认字组件没装上，没有结果", hits: [] });
   syntheticApi.tasks.push(task);
   await page.goto(`/review/${task.id}`);
   await expect(page.locator(".ant-alert-error .ant-alert-title").first()).toHaveText(REVIEW_COPY.ocrFailed);
@@ -236,4 +236,94 @@ test("服务端拒绝 /rework（如 409 对红还在排队或正在跑）：照�
   await (await chooser).setFiles(pdf);
   await expect(page.locator(".ant-message")).toContainText("对红还在排队或正在跑");
   await expect(page.locator(".wait-card")).toHaveCount(0);
+});
+
+for (const [code, raw, full] of [
+  ["result_truncated", "这一单结果没写完，没有结果", "这一单结果太多，没能写完，请联系管理员"],
+  ["private_data_failed", "私有数据解析失败", "稿件里的 Illustrator 私有数据读不出来，请联系管理员"],
+] as const) {
+  test(`复核失败 ${code}、没有剩余条目：自己的单有按钮、别人的单无按钮，标题都是 §2.3 整句`, async ({ page, syntheticApi }) => {
+    await asReviewer(page);
+    const base = { status: "pending_review", job_kind: "rework", job_status: "failed", job_error: raw, job_error_code: code, hits: [] };
+    const mine = reviewTask(code === "result_truncated" ? "e5969b58ce0d" : "e5969b58ce0e");
+    Object.assign(mine, base, { owner: ME });
+    const theirs = reviewTask(code === "result_truncated" ? "e5969b58ce0f" : "e5969b58ce10");
+    Object.assign(theirs, base, { owner: "ou_someone_else" });
+    syntheticApi.tasks.push(mine, theirs);
+    await page.goto(`/review/${theirs.id}`);
+    await expect(page.locator(".ant-alert-error .ant-alert-title").first()).toHaveText(full);
+    await expect(page.getByRole("button", { name: REVIEW_COPY.reupload })).toHaveCount(0);
+    await page.goto(`/review/${mine.id}`);
+    const bar = page.locator(".ant-alert-error").filter({ has: page.getByRole("button", { name: REVIEW_COPY.reupload }) });
+    await expect(bar.locator(".ant-alert-title")).toHaveText(full);
+  });
+}
+
+test("复核超页、没有剩余条目（Q9）：自己的单标题「稿件超过 1 页，请改成 1 页后重新上传这一单」+按钮；别人的单只有「稿件超过 1 页」", async ({ page, syntheticApi }) => {
+  await asReviewer(page);
+  const base = { status: "pending_review", job_kind: "rework", job_status: "failed", job_error: "稿件超过 1 页", job_error_code: "page_over" as const, hits: [] };
+  const mine = reviewTask("e5969b58ce11");
+  Object.assign(mine, base, { owner: ME });
+  const theirs = reviewTask("e5969b58ce12");
+  Object.assign(theirs, base, { owner: "ou_someone_else" });
+  syntheticApi.tasks.push(mine, theirs);
+  await page.goto(`/review/${mine.id}`);
+  const bar = page.locator(".ant-alert-warning");
+  await expect(bar.locator(".ant-alert-title")).toHaveText("稿件超过 1 页，请改成 1 页后重新上传这一单");
+  await expect(bar.getByRole("button", { name: REVIEW_COPY.reupload })).toBeVisible();
+  await expect(bar).not.toContainText(/请联系管理员|回首页|下面是上一轮的结果/u);
+  await page.goto(`/review/${theirs.id}`);
+  await expect(page.locator(".ant-alert-warning .ant-alert-title")).toHaveText("稿件超过 1 页");
+  await expect(page.locator(".ant-alert-warning")).not.toContainText(/请联系管理员|回首页|重新上传/u);
+  await expect(page.getByRole("button", { name: REVIEW_COPY.reupload })).toHaveCount(0);
+});
+
+test("首次对照就超页、没有条目：自己的单标题「稿件超过 1 页」+正文请回首页新建+「回首页」；别人的单只有标题", async ({ page, syntheticApi }) => {
+  await asReviewer(page);
+  const base = { status: "compare_failed", board: "failed", job_kind: "compare", job_status: "failed", job_error: "稿件超过 1 页", job_error_code: "page_over" as const, hits: [] };
+  const mine = reviewTask("e5969b58ce13");
+  Object.assign(mine, base, { owner: ME });
+  const theirs = reviewTask("e5969b58ce14");
+  Object.assign(theirs, base, { owner: "ou_someone_else" });
+  syntheticApi.tasks.push(mine, theirs);
+  await page.goto(`/review/${mine.id}`);
+  const bar = page.locator(".ant-alert-warning");
+  await expect(bar.locator(".ant-alert-title")).toHaveText("稿件超过 1 页");
+  await expect(bar.locator(".ant-alert-description")).toHaveText(REVIEW_COPY.compareFailedNoHits);
+  await expect(bar.getByRole("link", { name: REVIEW_COPY.backHome })).toBeVisible();
+  await expect(bar).not.toContainText(/请联系管理员|请改成/u);
+  await expect(page.getByRole("button", { name: REVIEW_COPY.reupload })).toHaveCount(0);
+  await page.goto(`/review/${theirs.id}`);
+  await expect(page.locator(".ant-alert-warning .ant-alert-title")).toHaveText("稿件超过 1 页");
+  await expect(page.locator(".ant-alert-warning .ant-alert-description")).toHaveCount(0);
+  await expect(page.locator(".ant-alert-warning")).not.toContainText(/请联系管理员|回首页|重新上传/u);
+  await expect(page.getByTestId("review-back-home")).toHaveCount(0);
+});
+
+test("逐字单整单待人工确认：自己的单有勾选框，审核员看别人的单签字退回和勾选框都不在", async ({ page, syntheticApi }) => {
+  await asReviewer(page);
+  const base = { status: "in_review", verbatim_check: true, verbatim_warning: "认字精度下降", hits: [{ id: "h0", field: "中文品名", status: "待人工确认", decision: "pending" }] };
+  const mine = reviewTask("e5969b58ce15");
+  Object.assign(mine, base, { owner: ME });
+  const theirs = reviewTask("e5969b58ce16");
+  Object.assign(theirs, base, { owner: "ou_someone_else" });
+  syntheticApi.tasks.push(mine, theirs);
+  await page.goto(`/review/${mine.id}`);
+  await expect(page.getByTestId("review-order-held")).toBeVisible();
+  await page.goto(`/review/${theirs.id}`);
+  await expect(page.getByTestId("review-root")).toBeVisible();
+  await expect(page.locator("button.review-sign")).toHaveCount(0);
+  await expect(page.getByTestId("review-order-held")).toHaveCount(0);
+});
+
+test("别人的复核失败、没有剩余条目的单：失败条只有标题，正文不出纯文字「重新上传这一单」", async ({ page, syntheticApi }) => {
+  await asReviewer(page);
+  const task = reviewTask("e5969b58ce17");
+  Object.assign(task, { owner: "ou_someone_else", status: "pending_review", job_kind: "rework", job_status: "failed", job_error: "对照中断", hits: [] });
+  syntheticApi.tasks.push(task);
+  await page.goto(`/review/${task.id}`);
+  const bar = page.locator(".ant-alert-error").first();
+  await expect(bar.locator(".ant-alert-title")).toHaveText("检查中断");
+  await expect(bar.locator(".ant-alert-description")).toHaveCount(0);
+  await expect(page.getByText(REVIEW_COPY.reupload, { exact: true })).toHaveCount(0);
 });

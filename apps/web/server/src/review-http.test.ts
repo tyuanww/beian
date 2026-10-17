@@ -359,8 +359,7 @@ describe("review http", () => {
       fd.set("pdf", new File([Buffer.from("%PDF-1.4\n")], "v2.pdf", { type: "application/pdf" }));
       const res = await app.request(`/api/tasks/${tid}/rework`, { method: "POST", headers: authHeader(), body: fd });
       assert.equal(res.status, 400);
-      const body = (await res.json()) as { detail?: string };
-      assert.equal(body.detail, "认字出了问题，请联系管理员");
+      assert.deepEqual(await res.json(), { detail: "认字出了问题，请联系管理员", code: "rework_verbatim_not_ready" });
       assert.equal(calls, 1);
       assert.equal(readFileSync(pdfPath, "utf8"), "keep");
       const saved = loadTask(tid);
@@ -721,7 +720,7 @@ describe("review http", () => {
     assert.equal(body.detail, "整单待人工确认，签字即认可");
   });
 
-  // 签字/退回共用表（signReturnRules.ts）第 1、2 条与认字存疑在 HTTP 入口的落点：仍是 400 + {detail}，不加错误码。
+  // 签字/退回共用表（signReturnRules.ts）第 1、2 条与认字存疑在 HTTP 入口的落点：状态码和 detail 原文不变，加码后多带 code / params。
   async function completeAs(tid: string, conclusion: string) {
     const res = await app.request(`/api/tasks/${tid}/complete`, {
       method: "POST",
@@ -745,7 +744,7 @@ describe("review http", () => {
     });
     const sign = await completeAs(signTid, "无改稿项");
     assert.equal(sign.status, 400);
-    assert.deepEqual(sign.body, { detail: "当前状态不可签字" });
+    assert.deepEqual(sign.body, { detail: "当前状态不可签字", code: "complete_rework_failed" });
     assert.equal(loadTask(signTid).status, "pending_review");
 
     const retTid = seed({
@@ -760,7 +759,7 @@ describe("review http", () => {
     });
     const ret = await completeAs(retTid, "退回改稿");
     assert.equal(ret.status, 400);
-    assert.deepEqual(ret.body, { detail: "当前状态不可签字" });
+    assert.deepEqual(ret.body, { detail: "当前状态不可签字", code: "complete_rework_failed" });
     assert.equal(loadTask(retTid).status, "in_review");
 
     // 出路：同一单重新上传，走现有 /rework 入队。worker 立即失败，免得占住单槽。
@@ -793,7 +792,7 @@ describe("review http", () => {
     });
     const res = await completeAs(tid, "无改稿项");
     assert.equal(res.status, 400);
-    assert.deepEqual(res.body, { detail: "当前状态不可签字" });
+    assert.deepEqual(res.body, { detail: "当前状态不可签字", code: "complete_rework_failed" });
     assert.equal(loadTask(tid).status, "pending_review");
   });
 
@@ -810,7 +809,7 @@ describe("review http", () => {
 
   for (const bar of [
     { name: "红条「复核出了问题」", id: "e1e1e1e1e1e1", job_error: "对照中断" },
-    { name: "黄条「稿件超过 1 页，这次复核没做」", id: "e2e2e2e2e2e2", job_error: "稿件超过 1 页，暂不支持核对，请联系管理员", job_error_code: "page_over" as const },
+    { name: "黄条「稿件超过 1 页，这次复核没做」", id: "e2e2e2e2e2e2", job_error: "稿件超过 1 页", job_error_code: "page_over" as const },
   ]) {
     it(`${bar.name}：签字退回都 400，同一单可重新上传对红`, async () => {
       const tid = seed({
@@ -831,7 +830,7 @@ describe("review http", () => {
       for (const conclusion of ["无改稿项", "退回：1 条有错，见清单"]) {
         const res = await completeAs(tid, conclusion);
         assert.equal(res.status, 400);
-        assert.deepEqual(res.body, { detail: "当前状态不可签字" });
+        assert.deepEqual(res.body, { detail: "当前状态不可签字", code: "complete_rework_failed" });
       }
       setJobsTestHooks({ runRework: async () => ({ code: 1, stdout: "", stderr: "", timedOut: false }) });
       try {
@@ -881,11 +880,12 @@ describe("review http", () => {
     throw new Error(`job for ${tid} did not finish`);
   }
 
-  async function assertSignAndReturnBlocked(tid: string) {
+  /** 检查中断（compare_failed）拦在状态门；复核失败落回待审后拦在对红失败门。原文同一句，码不同。 */
+  async function assertSignAndReturnBlocked(tid: string, code = "complete_status_not_reviewable") {
     for (const conclusion of ["无改稿项", "退回：1 条有错，见清单"]) {
       const res = await completeAs(tid, conclusion);
       assert.equal(res.status, 400);
-      assert.deepEqual(res.body, { detail: "当前状态不可签字" });
+      assert.deepEqual(res.body, { detail: "当前状态不可签字", code });
     }
   }
 
@@ -964,7 +964,7 @@ describe("review http", () => {
       assert.equal(res.body.complete_kind, flow.kind);
       const again = await reworkAs(tid);
       assert.equal(again.status, 400);
-      assert.deepEqual(again.body, { detail: "当前状态不可对红" });
+      assert.deepEqual(again.body, { detail: "当前状态不可对红", code: "rework_status_not_allowed" });
     });
   }
 
@@ -1001,7 +1001,7 @@ describe("review http", () => {
     const detail = (await (await app.request(`/api/tasks/${tid}`, { headers: authHeader() })).json()) as Record<string, unknown>;
     assert.equal(detail.job_error, "超时");
 
-    await assertSignAndReturnBlocked(tid);
+    await assertSignAndReturnBlocked(tid, "complete_rework_failed");
     setJobsTestHooks({ runRework: async () => ({ code: 1, stdout: "", stderr: "", timedOut: false }) });
     try {
       const again = await reworkAs(tid);
@@ -1035,7 +1035,7 @@ describe("review http", () => {
     const tid = seedInterrupted("e8e8e8e8e8e8", { hits: [] });
     const res = await reworkAs(tid);
     assert.equal(res.status, 400);
-    assert.deepEqual(res.body, { detail: "当前状态不可对红" });
+    assert.deepEqual(res.body, { detail: "当前状态不可对红", code: "rework_status_not_allowed" });
     assert.equal(loadTask(tid).status, "compare_failed");
     assert.equal(existsSync(join(process.env.WB_DATA_DIR as string, "uploads", tid, "artwork_v2.pdf")), false);
   });
@@ -1046,13 +1046,72 @@ describe("review http", () => {
     });
     const res = await reworkAs(tid);
     assert.equal(res.status, 400);
-    assert.deepEqual(res.body, { detail: "当前状态不可对红" });
+    assert.deepEqual(res.body, { detail: "当前状态不可对红", code: "rework_status_not_allowed" });
     const after = loadTask(tid);
     assert.equal(after.status, "compare_failed");
     assert.equal(after.job_kind, "compare");
     assert.equal(after.job_status, "failed");
     assert.equal(after.error, "对照中断");
     assert.equal(existsSync(join(process.env.WB_DATA_DIR as string, "uploads", tid, "artwork_v2.pdf")), false);
+  });
+
+  it("管理员替别人的「检查中断」单（有条目）/rework 回 200 并入队（方案 A 已有行为）", async () => {
+    const tid = seedInterrupted("a4a4a4a4a401");
+    const admin = issueSessionForTest("管理员", "admin", "ou_admin_rework_hits");
+    const fd = new FormData();
+    fd.set("pdf", new File([Buffer.from("%PDF-1.4\n")], "v2.pdf", { type: "application/pdf" }));
+    setJobsTestHooks({ runRework: async () => ({ code: 1, stdout: "", stderr: "", timedOut: false }) });
+    try {
+      const res = await app.request(`/api/tasks/${tid}/rework`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${admin.token}` },
+        body: fd,
+      });
+      assert.equal(res.status, 200);
+      const body = (await res.json()) as { job_kind?: string; job_status?: string };
+      assert.equal(body.job_kind, "rework");
+      assert.ok(body.job_status === "queued" || body.job_status === "running");
+      assert.equal(loadTask(tid).status_before_job, "pending_review");
+      assert.ok(existsSync(join(process.env.WB_DATA_DIR as string, "uploads", tid, "artwork_v2.pdf")));
+      await waitJobDone(tid);
+    } finally {
+      resetJobsTestHooks();
+    }
+  });
+
+  it("加码：非管理员对别人的单 POST /complete 回 403 {detail:没有权限}，不改状态、不写 audit", async () => {
+    const tid = "141414141415";
+    // audit 记在任务文件的 task.audit 上（/decision 追加）；先放一条，确认 403 后原样不变、没有追加。
+    const priorAudit = [{ at: "2026-10-17T00:00:00.000Z", actor: "刘籽烨", action: "decision", hit_id: "h1" }];
+    saveTask({
+      id: tid,
+      title: "别人的签",
+      product_name: "别人的签",
+      type: "excel_pdf",
+      status: "pending_review",
+      owner: "ou_review_http",
+      hits: [hit({ status: "一致", decision: "confirm" })],
+      audit: priorAudit,
+    });
+    const before = loadTask(tid);
+    assert.deepEqual(before.audit, priorAudit);
+    const snap = taskStoreSnapshot();
+    const other = issueSessionForTest("路人", "reviewer", "ou_other_complete_errcode");
+    const res = await app.request(`/api/tasks/${tid}/complete`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${other.token}`, "content-type": "application/json" },
+      body: JSON.stringify({ conclusion: "偷签" }),
+    });
+    assert.equal(res.status, 403);
+    assert.deepEqual(await res.json(), { detail: "没有权限" });
+    const after = loadTask(tid);
+    assert.equal(after.status, before.status);
+    assert.equal(after.conclusion, before.conclusion);
+    assert.equal(after.complete_kind, before.complete_kind);
+    assert.equal(after.completed_at, undefined);
+    assert.equal(after.completed_by, undefined);
+    assert.deepEqual(after.audit, priorAudit, "403 不写 audit");
+    assert.equal(taskStoreSnapshot().tasks.length, snap.tasks.length);
   });
 
   it("treats an open 待人工确认 on a non-verbatim order as pending", async () => {
@@ -1066,7 +1125,7 @@ describe("review http", () => {
     });
     const res = await completeAs(tid, "无改稿项");
     assert.equal(res.status, 400);
-    assert.deepEqual(res.body, { detail: "仍有 1 条待人工确认未处理" });
+    assert.deepEqual(res.body, { detail: "仍有 1 条待人工确认未处理", code: "complete_hits_pending", params: { items: [{ kind: "held", count: 1 }] } });
   });
 
   it("treats a consistent hit with coverage.miss (认字存疑) as pending", async () => {
@@ -1080,7 +1139,7 @@ describe("review http", () => {
     });
     const res = await completeAs(tid, "无改稿项");
     assert.equal(res.status, 400);
-    assert.deepEqual(res.body, { detail: "仍有 1 条认字存疑未处理" });
+    assert.deepEqual(res.body, { detail: "仍有 1 条认字存疑未处理", code: "complete_hits_pending", params: { items: [{ kind: "reading_doubt", count: 1 }] } });
   });
 
   it("counts 待人工确认 and 认字存疑 separately in one message, in first-seen order", async () => {
@@ -1098,7 +1157,75 @@ describe("review http", () => {
     });
     const res = await completeAs(tid, "无改稿项");
     assert.equal(res.status, 400);
-    assert.deepEqual(res.body, { detail: "仍有 2 条待人工确认、1 条认字存疑未处理" });
+    assert.deepEqual(res.body, { detail: "仍有 2 条待人工确认、1 条认字存疑未处理", code: "complete_hits_pending", params: { items: [{ kind: "held", count: 2 }, { kind: "reading_doubt", count: 1 }] } });
+  });
+
+  // 加码：/complete 其余拦截的返回体 { detail, code, params? }，detail 与加码前逐字相同。
+  it("complete rejections carry a code: job running, invalid hits, order-held, empty conclusion", async () => {
+    const running = seed({
+      id: "e1c0de000001",
+      title: "排队中",
+      product_name: "排队中",
+      type: "excel_pdf",
+      status: "comparing",
+      job_kind: "compare",
+      job_status: "queued",
+      hits: [],
+    });
+    const r1 = await completeAs(running, "无改稿项");
+    assert.equal(r1.status, 409);
+    assert.deepEqual(r1.body, { detail: "对照还在排队或正在跑，不能签字", code: "complete_job_running" });
+
+    const invalid = seed({
+      id: "e1c0de000002",
+      title: "状态异常",
+      product_name: "状态异常",
+      type: "excel_pdf",
+      status: "in_review",
+      hits: [hit({ status: "看不清", decision: undefined })],
+    });
+    const r2 = await completeAs(invalid, "无改稿项");
+    assert.equal(r2.status, 400);
+    assert.deepEqual(r2.body, { detail: "有 1 条审核数据状态异常，请重新对照", code: "complete_hits_invalid", params: { count: 1 } });
+
+    const held = seed({
+      id: "e1c0de000003",
+      title: "整单确认",
+      product_name: "整单确认",
+      type: "excel_pdf",
+      status: "in_review",
+      verbatim_check: true,
+      verbatim_warning: "稿件未保留 Illustrator 编辑数据",
+      hits: [hit({ status: "待人工确认", decision: undefined })],
+    });
+    const r3 = await completeAs(held, "无改稿项");
+    assert.equal(r3.status, 400);
+    assert.deepEqual(r3.body, { detail: "整单待人工确认，签字即认可", code: "complete_order_held_unconfirmed", params: { count: 1 } });
+
+    const empty = seed({
+      id: "e1c0de000004",
+      title: "没结论",
+      product_name: "没结论",
+      type: "excel_pdf",
+      status: "in_review",
+      hits: [hit({ decision: "confirm" })],
+    });
+    const r4 = await completeAs(empty, "   ");
+    assert.equal(r4.status, 400);
+    assert.deepEqual(r4.body, { detail: "请写下结论", code: "complete_conclusion_missing" });
+    assert.equal(loadTask(empty).status, "in_review");
+
+    const done = seed({
+      id: "e1c0de000005",
+      title: "已签",
+      product_name: "已签",
+      type: "excel_pdf",
+      status: "completed",
+      hits: [hit({ decision: "confirm" })],
+    });
+    const r5 = await completeAs(done, "再签一次");
+    assert.equal(r5.status, 400);
+    assert.deepEqual(r5.body, { detail: "当前状态不可签字", code: "complete_status_not_reviewable" });
   });
 
   it("old task without created_by returns null creator, never the actor, after a verdict", async () => {
@@ -1659,7 +1786,7 @@ describe("review http", () => {
         body: fd,
       });
       assert.equal(res.status, 400);
-      assert.match(String(((await res.json()) as { detail?: string }).detail || ""), /文件超过 1 MB/);
+      assert.deepEqual(await res.json(), { detail: "文件超过 1 MB", code: "rework_pdf_too_large" });
     } finally {
       saveSettings({ WB_MAX_UPLOAD_MB: "" });
     }
@@ -1793,5 +1920,119 @@ describe("review http", () => {
       body: "--foreign-large-body--\r\n",
     });
     assert.equal(res.status, 403);
+  });
+
+  // 加码：/decision、/rework 拦截带码，状态码和 detail 原文不变。
+  async function decide(tid: string, body: Record<string, unknown>) {
+    const res = await app.request(`/api/tasks/${tid}/decision`, {
+      method: "POST",
+      headers: { ...authHeader(), "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    return { status: res.status, body: (await res.json()) as Record<string, unknown> };
+  }
+
+  it("decision rejections carry a code", async () => {
+    const done = seed({ id: "dec0de000001", title: "已签", product_name: "已签", type: "excel_pdf", status: "completed", hits: [hit()] });
+    const r1 = await decide(done, { hit_id: "h1", decision: "issue" });
+    assert.equal(r1.status, 400);
+    assert.deepEqual(r1.body, { detail: "当前状态不可审核", code: "decision_status_not_reviewable" });
+
+    const open = seed({
+      id: "dec0de000002",
+      title: "在审",
+      product_name: "在审",
+      type: "excel_pdf",
+      status: "in_review",
+      hits: [hit(), hit({ id: "h2", status: "待人工确认", decision: undefined })],
+    });
+    const r2 = await decide(open, { hit_id: "h1", decision: "ai_pass" });
+    assert.equal(r2.status, 400);
+    assert.deepEqual(r2.body, { detail: "非法审核结论", code: "decision_value_invalid" });
+    const r3 = await decide(open, { hit_id: "nope", decision: "issue" });
+    assert.equal(r3.status, 404);
+    assert.deepEqual(r3.body, { detail: "字段不存在", code: "decision_hit_not_found" });
+    const r4 = await decide(open, { hit_id: "h2", decision: "confirm" });
+    assert.equal(r4.status, 400);
+    assert.deepEqual(r4.body, { detail: "待人工确认不能选一致", code: "decision_held_confirm_forbidden" });
+    assert.equal(loadTask(open).hits?.[1]?.decision, undefined);
+  });
+
+  it("rework rejections carry a code: job running, missing pdf, invalid pdf", async () => {
+    const running = seed({
+      id: "ae0de0000001",
+      title: "对红中",
+      product_name: "对红中",
+      type: "excel_pdf",
+      status: "comparing",
+      job_kind: "rework",
+      job_status: "running",
+      hits: [hit({ decision: "issue" })],
+    });
+    const r1 = await reworkAs(running);
+    assert.equal(r1.status, 409);
+    assert.deepEqual(r1.body, { detail: "对红还在排队或正在跑", code: "rework_job_running" });
+
+    const tid = seed({
+      id: "ae0de0000002",
+      title: "待改稿",
+      product_name: "待改稿",
+      type: "excel_pdf",
+      status: "completed",
+      complete_kind: "rework",
+      conclusion: "待设计改稿",
+      hits: [hit({ decision: "issue" })],
+    });
+    const empty = new FormData();
+    empty.set("note", "没有附件");
+    const r2 = await app.request(`/api/tasks/${tid}/rework`, { method: "POST", headers: authHeader(), body: empty });
+    assert.equal(r2.status, 400);
+    assert.deepEqual(await r2.json(), { detail: "需要改稿后的 PDF", code: "rework_pdf_missing" });
+
+    const bad = new FormData();
+    bad.set("pdf", new File([Buffer.from("not a pdf")], "v2.pdf", { type: "application/pdf" }));
+    const r3 = await app.request(`/api/tasks/${tid}/rework`, { method: "POST", headers: authHeader(), body: bad });
+    assert.equal(r3.status, 400);
+    assert.deepEqual(await r3.json(), { detail: "不是有效的 PDF", code: "rework_pdf_invalid" });
+    assert.equal(existsSync(join(process.env.WB_DATA_DIR as string, "uploads", tid, "artwork_v2.pdf")), false);
+    assert.equal(loadTask(tid).status, "completed");
+  });
+
+  it("task detail projects hit_text on hits / hits_v2 without touching the stored JSON", async () => {
+    const tid = seed({
+      id: "a17e70000001",
+      title: "投影",
+      product_name: "投影",
+      type: "excel_pdf",
+      status: "in_review",
+      hits: [{ id: "h1", field: "净含量", status: "疑点", decision: "pending", coverage: { miss: ["50g", "score=0.4 覆盖偏低"] } }],
+      hits_v2: [{ id: "h2", field: "中文品名", status: "一致" }],
+    });
+    const res = await app.request(`/api/tasks/${tid}`, { headers: authHeader() });
+    assert.equal(res.status, 200);
+    const body = (await res.json()) as { hits: Array<{ hit_text?: unknown }>; hits_v2: Array<{ hit_text?: unknown }> };
+    assert.deepEqual(body.hits[0].hit_text, { v: 1, miss: ["50g"], accounting: ["score=0.4 覆盖偏低"], evidence: null, observed: null, located: true });
+    assert.deepEqual(body.hits_v2[0].hit_text, { v: 1, miss: [], accounting: [], evidence: null, observed: null, located: true });
+    const stored = JSON.parse(readFileSync(join(process.env.WB_DATA_DIR as string, "tasks", `${tid}.json`), "utf8")) as { hits: object[] };
+    assert.equal("hit_text" in stored.hits[0], false);
+  });
+
+  it("加码 Q2：缺空格没标 pending、只靠核对要点有内容，服务端也要结论（原「前端更严」差异已对齐）", async () => {
+    const tid = seed({
+      id: "5bace0000001",
+      title: "缺空格",
+      product_name: "缺空格",
+      type: "excel_pdf",
+      status: "in_review",
+      hits: [{ id: "h1", field: "中文品名", status: "缺空格" }],
+    });
+    const res = await completeAs(tid, "无改稿项");
+    assert.equal(res.status, 400);
+    assert.deepEqual(res.body, {
+      detail: "仍有 1 条缺空格未处理",
+      code: "complete_hits_pending",
+      params: { items: [{ kind: "status", status: "missing_space", count: 1 }] },
+    });
+    assert.equal(loadTask(tid).status, "in_review");
   });
 });

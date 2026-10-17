@@ -8,7 +8,8 @@ import { guardErrorFields } from "./pathRedact.js";
 import { cleanCompleteKind, forgetHistory, noteHistoryReview } from "./historyIndex.js";
 import { skipPackSheetField } from "./sheetSkip.js";
 import { legacyPageOverCode } from "./legacyPageOver.js";
-import { hasReadingDoubt } from "./readingDoubt.js";
+import { pendingWord as sharedPendingWord } from "./reviewIssue.js";
+import type { JobErrorCode } from "./reviewCodes.js";
 
 export type Hit = {
   id?: string;
@@ -31,7 +32,7 @@ export type Hit = {
 
 export type JobStatus = "queued" | "running" | "succeeded" | "failed";
 export type JobKind = "compare" | "rework" | "mockup";
-export type JobErrorCode = "page_over";
+export type { JobErrorCode };
 
 export type Viewer = {
   id: string;
@@ -390,10 +391,10 @@ export function isReworkableTask(
   if (hasReworkPages(task)) return false;
   if (task.status === "pending_review" || task.status === "in_review") return true;
   // 产品 10/17 方案 A：「检查中断」单（对照失败、还留着上一轮条目）可重新上传对红。回收出来的失败
-  // 和对照命令行自己失败的不区分；对照失败已没有条目的照旧不放行。工艺说明这类不进机审的字段不算条目，
-  // 写法同 completeGate。
+  // 和对照命令行自己失败的不区分；对照失败已没有条目的照旧不放行。工艺说明这类不进机审的字段不算条目
+  // （activeHits 已经滤掉）。
   if (task.status === "compare_failed") {
-    return task.job_kind === "compare" && task.job_status === "failed" && activeHits(task as Task).filter((h) => !skipPackSheetField(h.field)).length > 0;
+    return task.job_kind === "compare" && task.job_status === "failed" && activeHits(task as Task).length > 0;
   }
   return task.status === "completed" && task.complete_kind === "rework";
 }
@@ -415,29 +416,20 @@ export function isValidHitReviewState(hit: Hit): boolean {
   return decision == null || decision === "pending" || isHitDecision(decision);
 }
 
-const TRUE_ERRORS = new Set([...VERBATIM_STATUSES.true_errors, "疑点", "缺失"]);
-const SPACE_ERRORS = new Set(VERBATIM_STATUSES.space_errors);
-
 /**
- * 这一条还要人下结论才能签字/退回。认字存疑（「一致」等粗状态下结构化字段仍说没读全）
- * 直接用前后端共用的 `hasReadingDoubt`，与核对页 `isReviewIssue` 同一套条件。
- * 非逐字单的未决「待人工确认」在 `completeGate` 里另算。
+ * 这一条还要人下结论才能签字/退回。口径在前后端共用的 `reviewIssue.ts`（与核对页 `isReviewIssue` 同一份），
+ * 认字存疑用 `readingDoubt.ts` 的 `hasReadingDoubt`。非逐字单的未决「待人工确认」在 `completeGate` 里另算。
  */
 export function hitNeedsDecision(hit: Hit): boolean {
   return pendingWord(hit) !== null;
 }
 
 /**
- * 没下结论时拦截文案里填的词：按状态要结论的写状态本身，只因认字存疑要结论的写「认字存疑」；不用拦时为 null。
+ * 没下结论时拦截文案里填的词（见 `reviewIssue.ts`）；不用拦时为 null。
  * 非逐字单的未决「待人工确认」由 `completeGate` 自己写「待人工确认」。
  */
 export function pendingWord(hit: Hit): string | null {
-  if (isHitDecision(hit.decision)) return null;
-  if (hit.status === "待人工确认") return null;
-  const status = String(hit.status || "");
-  if (TRUE_ERRORS.has(status)) return status;
-  if (SPACE_ERRORS.has(status) && hit.decision === "pending") return status;
-  return hasReadingDoubt(hit) ? "认字存疑" : null;
+  return sharedPendingWord(hit);
 }
 
 export type BoardColumn = "comparing" | "failed" | "review" | "done";

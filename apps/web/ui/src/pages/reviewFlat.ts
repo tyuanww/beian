@@ -5,9 +5,10 @@
 import type { Decision, FieldHit, TaskDetail, TaskPage } from "../api";
 import { REVIEW_COPY } from "../copy/labels";
 import { isPendingDecision } from "./reviewNav";
-import { hasReadingDoubt } from "../../../server/src/readingDoubt.ts";
-import { blockingStatusWord, hasInvalidHitStatus, invalidReviewStateCount, partitionReviewHits } from "./reviewEvidence";
+import { pendingWord } from "../../../server/src/reviewIssue.ts";
+import { hasInvalidHitStatus, invalidReviewStateCount, partitionReviewHits } from "./reviewEvidence";
 import { bytesTooLarge, uploadTooLargeText } from "../uploadLimit";
+import { HIT_STATUS_CODES, REVIEW_CODES, type PendingItem, type ReviewCode, type ReviewParams } from "../../../server/src/reviewCodes.ts";
 
 export const FLAT_PANEL_WIDTH = 320;
 export const FLAT_THUMB_WIDTH = 52;
@@ -61,9 +62,12 @@ export function openHeldAfterPending(previousPending: number, pending: number, h
   return previousPending > 0 && pending === 0 && held > 0;
 }
 
-/** 一条待确认在拦截文案里填的词：按状态要结论的写状态，只因认字存疑要结论的写「认字存疑」，其余写原状态。 */
+/**
+ * 一条待确认在拦截文案里填的词：同服务端，用共用 `reviewIssue.ts` 的 `pendingWord`（按状态要结论的写状态，
+ * 只因认字存疑的写「认字存疑」，缺空格没结论写「缺空格」）；共用规则不给词的（decision 非法值等）写原状态。
+ */
 function pendingWordFor(hit: FieldHit): string {
-  return blockingStatusWord(hit) ?? (hasReadingDoubt(hit) ? REVIEW_COPY.readingDoubtWord : String(hit.status || "未决"));
+  return pendingWord(hit) ?? String(hit.status || "未决");
 }
 
 /**
@@ -371,26 +375,51 @@ export function tabIndices(hits: FieldHit[], tab: FlatTab, active: number): numb
   return issues.filter(({ hit, index }) => isPendingDecision(hit.decision) || index === active).map(({ index }) => index);
 }
 
+/** 一次签字 / 退回失败：HTTP 状态 + 返回体的码、params、原文（`ApiError` 上的同名字段；网络错误 status 为 null）。 */
+export type SubmitFailure = { status: number | null; code: string | null; params: ReviewParams | null; detail: string };
+
+/** `complete_hits_pending.params.items` → 「仍有 2 条待人工确认、1 条认字存疑未处理」（英文枚举查共享码表的中文）。 */
+function pendingItemsText(items: readonly PendingItem[] | undefined): string | null {
+  if (!items || items.length === 0) return null;
+  const parts = items.map((item) => ({
+    word: item.kind === "status" ? HIT_STATUS_CODES[item.status] ?? String(item.status) : item.kind === "reading_doubt" ? REVIEW_COPY.readingDoubtWord : "待人工确认",
+    count: item.count,
+  }));
+  return REVIEW_COPY.pendingUnresolved(parts);
+}
+
+function isReviewCode(code: string | null): code is ReviewCode {
+  return code !== null && (REVIEW_CODES as readonly string[]).includes(code);
+}
+
+/** 带码的拦截：前端有自己那句的用前端句，没有的用服务端原文（加码 §6.3「提交失败按码出文案」）。 */
+function codedSubmitText(code: ReviewCode, params: ReviewParams | null, detail: string): string {
+  if (code === "complete_job_running") return REVIEW_COPY.submitStillChecking;
+  // 签字、退回被拦都是这一句，不再出「处理完才能签字」。
+  if (code === "complete_hits_pending") return pendingItemsText(params?.items) ?? detail;
+  if (code === "complete_hits_invalid" && typeof params?.count === "number") return REVIEW_COPY.invalidHitStatusDetail(params.count);
+  if (code === "complete_order_held_unconfirmed") return REVIEW_COPY.orderHeldConfirm;
+  // 「当前状态不可签字」（complete_status_not_reviewable / complete_rework_failed）等其余码：照服务端原文出原意。
+  return detail || REVIEW_COPY.submitFailed;
+}
+
 /**
- * 签字/退回失败的提示，只看 HTTP 状态 + 重读回来的任务（结构化字段），不匹配服务端原文。
- * 现有服务端 /complete（apps/web/server/src/index.ts）只回 status + detail 文本：
- * - 409 只在「对照还在排队或正在跑」时用 → 「这份稿还在检查，等一会儿再提交」；
- * - 400 有三种（已完成 / 还有疑点没处理 / 结论为空），文本区分不了，调用方重读任务后按状态判断；
- * - 其他一律通用文案，原文只打 console.error。
- * TODO(TODOS.md)：后端补错误码（后端第 1、6 项）后改成按 code 映射。
+ * 签字/退回失败的提示：按返回体 `code`（共享码表 `reviewCodes.ts`）选句，不匹配服务端原文。
+ * - 重读回来已完成（被别人抢先签字 / 退回）：锁页那句 `completedByText`；
+ * - 带码：见 `codedSubmitText`；
+ * - 没有码（旧服务端、网络错误、5xx）：409 照旧「还在检查」；400 重读后还有待确认就用「仍有 …未处理」
+ *   （`freshTally` 同 `pendingTally`）；其余才用「没提交成功，请重试」。
  */
 export function submitFailureText(
-  status: number | null,
+  failure: SubmitFailure,
   fresh: DoneTask | null,
-  freshPending: number,
+  freshTally: ReadonlyArray<{ word: string; count: number }>,
 ): string {
+  const { status, code } = failure;
+  if (fresh?.status === "completed" && (status === 400 || isReviewCode(code))) return completedByText(fresh);
+  if (isReviewCode(code)) return codedSubmitText(code, failure.params, failure.detail);
   if (status === 409) return REVIEW_COPY.submitStillChecking;
-  if (status === 400 && fresh) {
-    if (fresh.status === "completed") {
-      return completedByText(fresh);
-    }
-    if (freshPending > 0) return REVIEW_COPY.submitPending(freshPending);
-  }
+  if (status === 400 && fresh && freshTally.length > 0) return REVIEW_COPY.pendingUnresolved(freshTally);
   return REVIEW_COPY.submitFailed;
 }
 

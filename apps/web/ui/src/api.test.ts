@@ -15,6 +15,8 @@ import {
   uploadWithProgress,
 } from "./api.js";
 import { UPLOAD_TOO_LARGE } from "./uploadLimit.js";
+import type { TaskSummary } from "./api.js";
+import { JOB_ERROR_CODES } from "../../server/src/reviewCodes.ts";
 
 describe("brokenApiMessage", () => {
   it("uses the flag, not 8787/JSON in the copy", () => {
@@ -813,4 +815,54 @@ it("compression uploads retain purpose and stable asset fields in the existing c
     assert.ok(calls.some(call => call.path.endsWith("/files/asset1")));
     assert.ok(calls.some(call => call.path.endsWith("/files/asset2")));
   } finally { globalThis.fetch = original; }
+});
+
+describe("审稿接口带码返回体（加码 §1）", () => {
+  it("/complete 400 的 code 和 params 都进 ApiError，detail 仍是 message", async () => {
+    const original = globalThis.fetch;
+    globalThis.fetch = (async () => new Response(JSON.stringify({
+      detail: "仍有 1 条缺空格未处理",
+      code: "complete_hits_pending",
+      params: { items: [{ kind: "status", status: "missing_space", count: 1 }] },
+    }), { status: 400, headers: { "content-type": "application/json" } })) as typeof fetch;
+    try {
+      await assert.rejects(api.complete("e5969b58cd9a", { conclusion: "无改稿项" }), (err: unknown) => {
+        assert.ok(err instanceof ApiError);
+        assert.equal(err.status, 400);
+        assert.equal(err.message, "仍有 1 条缺空格未处理");
+        assert.equal(err.code, "complete_hits_pending");
+        assert.deepEqual(err.params, { items: [{ kind: "status", status: "missing_space", count: 1 }] });
+        return true;
+      });
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+
+  it("没有 params、或 params 不是对象时为 null；旧返回体 {detail} 照旧", async () => {
+    const original = globalThis.fetch;
+    const bodies = [{ detail: "当前状态不可签字", code: "complete_status_not_reviewable" }, { detail: "没有权限" }, { detail: "x", code: "c", params: [1] }];
+    let i = 0;
+    globalThis.fetch = (async () => new Response(JSON.stringify(bodies[i++]), { status: 400, headers: { "content-type": "application/json" } })) as typeof fetch;
+    try {
+      for (const body of bodies) {
+        await assert.rejects(api.complete("e5969b58cd9a", { conclusion: "无改稿项" }), (err: unknown) => {
+          assert.ok(err instanceof ApiError);
+          assert.equal(err.message, body.detail);
+          assert.equal(err.code, body.code ?? null);
+          assert.equal(err.params, null);
+          return true;
+        });
+      }
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+});
+
+describe("job_error_code 类型从共享码表推导", () => {
+  it("共享码表 JOB_ERROR_CODES 的每个码都是 TaskSummary.job_error_code 的合法值（含三个新码）", () => {
+    const codes: Array<NonNullable<TaskSummary["job_error_code"]>> = [...JOB_ERROR_CODES];
+    assert.deepEqual(codes, ["page_over", "ocr_failed", "result_truncated", "private_data_failed"]);
+  });
 });

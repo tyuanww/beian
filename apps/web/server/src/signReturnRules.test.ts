@@ -37,6 +37,13 @@ function serverAccepts(input: SignReturnInput): { sign: boolean; ret: boolean } 
   return { sign: sign.ok && sign.kind === "signed", ret: ret.ok && ret.kind === "rework" };
 }
 
+/** 前端真会发的那次 /complete（签字带不带整单确认同表）被拒时的码；收下或 403（viewer）时为 undefined。 */
+function serverCode(input: SignReturnInput): string | undefined {
+  if (!hasPerm(input.role, "complete")) return undefined;
+  const gate = completeGate(taskFor(input), input.orderHeldConfirm === true ? true : undefined);
+  return gate.ok ? undefined : gate.code;
+}
+
 describe("签字/退回规则表（服务端 /complete）", () => {
   it("表本身自洽：名字不重复，能提交的按钮一定可点", () => {
     const names = [...SIGN_RETURN_RULES, ...SIGN_RETURN_DISPUTED].map((row) => row.name);
@@ -55,23 +62,60 @@ describe("签字/退回规则表（服务端 /complete）", () => {
     });
   }
 
-  it("拦截文案：只有认字存疑 / 只有待人工确认 / 两类都有，分开数、按首次出现排序", () => {
+  for (const row of SIGN_RETURN_RULES) {
+    it(`码：${row.name}`, () => {
+      assert.equal(serverCode(row.input), row.code, `${row.name} 的拒绝码`);
+    });
+  }
+
+  it("拦截文案：只有认字存疑 / 只有待人工确认 / 两类都有，分开数、按首次出现排序，params.items 同序", () => {
     const gate = (hits: SignReturnInput["hits"]) => completeGate(taskFor({ role: "reviewer", status: "in_review", hits }), undefined);
-    assert.deepEqual(gate([{ status: "一致", coverageMiss: ["CAPSULE MIST"] }]), { ok: false, status: 400, message: "仍有 1 条认字存疑未处理" });
+    assert.deepEqual(gate([{ status: "一致", coverageMiss: ["CAPSULE MIST"] }]), {
+      ok: false,
+      status: 400,
+      message: "仍有 1 条认字存疑未处理",
+      code: "complete_hits_pending",
+      params: { items: [{ kind: "reading_doubt", count: 1 }] },
+    });
     assert.deepEqual(gate([{ status: "待人工确认" }, { status: "待人工确认", decision: "pending" }]), {
       ok: false,
       status: 400,
       message: "仍有 2 条待人工确认未处理",
+      code: "complete_hits_pending",
+      params: { items: [{ kind: "held", count: 2 }] },
     });
     assert.deepEqual(
       gate([{ status: "待人工确认" }, { status: "缺空格", onlyInExcel: ["香柠檬"] }, { status: "待人工确认" }]),
-      { ok: false, status: 400, message: "仍有 2 条待人工确认、1 条认字存疑未处理" },
+      {
+        ok: false,
+        status: 400,
+        message: "仍有 2 条待人工确认、1 条认字存疑未处理",
+        code: "complete_hits_pending",
+        params: { items: [{ kind: "held", count: 2 }, { kind: "reading_doubt", count: 1 }] },
+      },
     );
     assert.deepEqual(gate([{ status: "疑点", decision: "pending" }, { status: "缺失" }, { status: "疑点" }]), {
       ok: false,
       status: 400,
       message: "仍有 2 条疑点、1 条缺失未处理",
+      code: "complete_hits_pending",
+      params: {
+        items: [
+          { kind: "status", status: "suspect", count: 2 },
+          { kind: "status", status: "field_missing", count: 1 },
+        ],
+      },
     });
+  });
+
+  it("其余拦截带 params：状态异常与整单确认给条数", () => {
+    const invalid = completeGate(taskFor({ role: "reviewer", status: "in_review", hits: [{ status: "未知状态" }, { status: "看不清" }] }), undefined);
+    assert.deepEqual(invalid, { ok: false, status: 400, message: "有 2 条审核数据状态异常，请重新对照", code: "complete_hits_invalid", params: { count: 2 } });
+    const held = completeGate(
+      taskFor({ role: "reviewer", status: "in_review", verbatimCheck: true, verbatimWarning: true, hits: [{ status: "待人工确认" }, { status: "待人工确认" }] }),
+      undefined,
+    );
+    assert.deepEqual(held, { ok: false, status: 400, message: "整单待人工确认，签字即认可", code: "complete_order_held_unconfirmed", params: { count: 2 } });
   });
 
   for (const row of SIGN_RETURN_DISPUTED) {

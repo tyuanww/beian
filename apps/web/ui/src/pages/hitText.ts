@@ -1,4 +1,5 @@
 import { customerCopy } from "./customerCopy";
+import { hitTextOf, type HitTextProjection } from "../../../server/src/hitText.ts";
 
 /** pdfText() 什么都没读到时的返回值；reviewEvidence 用它做判断，改字只改这里。 */
 export const NOT_READ = "没读到";
@@ -31,11 +32,21 @@ export type HitText = {
     };
   };
   sequence_diff?: { only_in_excel?: string[] };
+  /** 服务端读时投影（加码 §5）：核算说明已从 evidence / coverage.miss 里拆出来。 */
+  hit_text?: HitTextProjection;
 };
 
-function isAccountingCopy(text: string): boolean {
-  // error-text-match-allow -- 这里认的是后端 OCR 核对文本（不是报错文案），待后端给结构化字段，见 TODOS.md；只为存量登记，不作为新增例外的先例
-  return /score\s*=|覆盖偏低|稿上命中\s*\d+\s*\/\s*\d+|best score|未见缺失/i.test(text);
+/**
+ * 条目的结构化文案：读服务端 `hit_text`（加码 §5）；没带这把键的（旧接口、合成数据）用同一份共享投影现算，
+ * 核算说明（score=…、覆盖偏低等）的识别只在服务端 `hitText.ts` 一处，前端不再自己认。
+ */
+function textOf(h: HitText): HitTextProjection {
+  return h.hit_text ?? hitTextOf(h);
+}
+
+/** evidence 有内容但是核算说明（hit_text.evidence 为 null）。 */
+function evidenceIsAccounting(h: HitText): boolean {
+  return Boolean((h.evidence || "").trim()) && textOf(h).evidence === null;
 }
 
 function expectedSnippet(h: HitText): string {
@@ -69,9 +80,7 @@ function isFlaggedReviewHit(h: HitText): boolean {
 }
 
 export function humanMissLines(h: HitText): string[] {
-  return (h.coverage?.miss || [])
-    .map((s) => String(s).trim())
-    .filter((s) => s && !isAccountingCopy(s));
+  return textOf(h).miss;
 }
 
 export function spokenLines(h: HitText, field?: string, located?: boolean): string[] {
@@ -98,8 +107,7 @@ export function spokenLines(h: HitText, field?: string, located?: boolean): stri
   if (fg === "二维码" || /二维码|QR/.test(name)) {
     return ["没读到完整扫码关注引导语", "钉若在码上，看的是码不是那句话"];
   }
-  const ev = (h.evidence || "").trim();
-  if (ev && isAccountingCopy(ev)) {
+  if (evidenceIsAccounting(h)) {
     return ["这些字没读全，请核对"];
   }
   return [];
@@ -128,8 +136,8 @@ export function spokenAsk(h: HitText, field?: string, located?: boolean): Spoken
     };
   }
   if (!flagged) return null;
-  const ev = (h.evidence || "").trim();
-  if (ev && !isAccountingCopy(ev)) {
+  const ev = textOf(h).evidence;
+  if (ev) {
     return { lead: customerCopy(ev).slice(0, 80), because: "这一面没读全，请核对", ask: "" };
   }
   return { lead: "这条请核对", because: "这一面没读全，请核对", ask: "" };
@@ -152,9 +160,8 @@ export function doubtLines(h: HitText): string[] {
     out.push(line);
   }
   if (!out.length && flagged) {
-    const ev = (h.evidence || "").trim();
-    const spokenEvidence = customerCopy(ev);
-    if (spokenEvidence && !isAccountingCopy(spokenEvidence)) out.push(spokenEvidence.slice(0, 120));
+    const spokenEvidence = customerCopy(textOf(h).evidence || "");
+    if (spokenEvidence) out.push(spokenEvidence.slice(0, 120));
   }
   return out;
 }
@@ -178,16 +185,13 @@ export function coverageTally(h: HitText): string {
 }
 
 export function pdfText(h: HitText, field?: string): string {
-  const direct = (h.pdf || "").trim() || (h.found || "").trim();
-  const hits = (h.coverage?.hit || []).map((s) => String(s).trim()).filter(Boolean);
-  const found = direct || (hits.length ? hits.join(" ") : "");
+  const found = textOf(h).observed || "";
   const imageNote = isImageOnlyField(field) && !found ? "这一块是图片，读不到字" : "";
   const parts: string[] = [];
   if (imageNote) parts.push(imageNote);
   if (found) parts.push(found);
   if (parts.length) return parts.join("\n");
-  const ev = (h.evidence || "").trim();
-  const spokenEvidence = customerCopy(ev);
-  if (spokenEvidence && !isAccountingCopy(spokenEvidence)) return spokenEvidence;
+  const spokenEvidence = customerCopy(textOf(h).evidence || "");
+  if (spokenEvidence) return spokenEvidence;
   return NOT_READ;
 }

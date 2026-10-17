@@ -1,5 +1,6 @@
 import { nativeRequest, prepareNativeRun, prepareNativeRequests, nativeBlocksOcr, nativeQueue, nativePublic, recoverNativeRequests, nativeDirectory, startNative } from "./nativeTextJobs.js";
 import { rewriteLegacyHits } from "./legacyCopy.js";
+import { withHitText } from "./hitText.js";
 import { runNativeText, verbatimMemoryFailure } from "./workers.js";
 import { createHash, randomBytes } from "node:crypto";
 import { closeSync, copyFileSync, existsSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, rmSync, writeFileSync } from "node:fs";
@@ -427,8 +428,9 @@ export function publicTask(task: Task, viewer?: Viewer): Record<string, unknown>
     created_by: task.created_by || null,
     // 最后一步兜底：脱敏后仍有本机路径 / 凭据特征时整条隐藏，加 error_hidden / error_ticket（单号 = task.id）。
     ...(redact ? guardErrorFields(task.id, { job_error: rest.job_error, error: rest.error }) : {}),
-    ...(Array.isArray(rest.hits) ? { hits: rewriteLegacyHits(rest.hits) } : {}),
-    ...(Array.isArray(rest.hits_v2) ? { hits_v2: rewriteLegacyHits(rest.hits_v2) } : {}),
+    // hit_text：读时投影（hitText.ts），不落盘；先做旧句替换再投影。
+    ...(Array.isArray(rest.hits) ? { hits: withHitText(rewriteLegacyHits(rest.hits)) } : {}),
+    ...(Array.isArray(rest.hits_v2) ? { hits_v2: withHitText(rewriteLegacyHits(rest.hits_v2)) } : {}),
     ...(nativePublic(task) ? { native_text: nativePublic(task) } : {}),
     queue_ahead: queueAheadFrom(queueRanks(), task.id, task.job_kind, task.job_status),
   };
@@ -3346,7 +3348,7 @@ function finishOcr(id: string, startedAt: string, result: RunPythonResult): void
   }
   const memoryFailure = verbatimMemoryFailure(result.signal);
   if (task.verbatim_check === true && memoryFailure) {
-    markOcrFailed(task, memoryFailure);
+    markOcrFailed(task, memoryFailure, "ocr_failed");
     return;
   }
   if (result.code !== 0) {
@@ -3596,6 +3598,17 @@ function logCliFailure(scope: string, failure: CliFailure): void {
 /** CLI 私有 problem 码 → 对外 job_error_code。只放前端要按码分支的；其余不带码。 */
 const PUBLIC_JOB_ERROR_CODES: Readonly<Record<string, JobErrorCode>> = {
   page_over_rendered: "page_over",
+  // 认字没出结果（加码 Q3：六种都算 ocr_failed；内存信号另在 finishOcr 里按 verbatimMemoryFailure 写）。
+  model_missing: "ocr_failed",
+  model_hash_mismatch: "ocr_failed",
+  notice_missing: "ocr_failed",
+  dep_missing: "ocr_failed",
+  oom: "ocr_failed",
+  ocr_unavailable: "ocr_failed",
+  // Q3：不并入 ocr_failed，各自单独给码。
+  result_truncated: "result_truncated",
+  private_data_limit: "private_data_failed",
+  private_data_parse_failed: "private_data_failed",
 };
 
 function publicJobErrorCode(code: string | undefined): JobErrorCode | undefined {

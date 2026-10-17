@@ -4,7 +4,7 @@ import type { FieldHit, TaskDetail } from "../api";
 import { REVIEW_COPY } from "../copy/labels";
 import { reviewErrorCopy, type FailedWithHitsKind } from "./reviewErrorCopy";
 import { rejectNote, signHint, submitGate } from "./reviewFlat";
-import { canAccessTaskOwner, canReuploadFailed, isDeadCompareFailed, reviewPageHits, reviewSubmitButtons, type ReuploadViewer } from "./reviewActions";
+import { canAccessTaskOwner, canReuploadFailed, failedNoHitsBar, isDeadCompareFailed, reviewPageHits, reviewSubmitButtons, type ReuploadViewer } from "./reviewActions";
 
 /**
  * 复核失败按 B：红条（复核失败）、黄条（复核超页）、检查中断条（方案 A）里给自己的单「重新上传这一单」。
@@ -93,7 +93,7 @@ describe("复核（对红）失败且没有剩余条目", () => {
   });
 
   it("认字失败、没有剩余条目：自己的单（rework 不要求有条目）有按钮，带「再不行请联系管理员」退路；别人的单、viewer 是原句", () => {
-    const ocr = (owner: string | null = "ou_me") => ({ ...noHits(owner), job_error: "认字组件没装上，没有结果" }) as TaskDetail;
+    const ocr = (owner: string | null = "ou_me") => ({ ...noHits(owner), job_error: "认字组件没装上，没有结果", job_error_code: "ocr_failed" }) as TaskDetail;
     const copyFor = (t: TaskDetail, v: ReuploadViewer) => reviewErrorCopy(String(t.job_error), t.job_error_code, undefined, canReuploadFailed(t, [], v));
     assert.equal(canReuploadFailed(ocr(), [], reviewer), true);
     assert.equal(copyFor(ocr(), reviewer), "认字出了问题，可以重新上传这一单，再不行请联系管理员");
@@ -103,7 +103,7 @@ describe("复核（对红）失败且没有剩余条目", () => {
   });
 
   it("首轮认字失败、没有上一轮结果：原句「认字出了问题，请联系管理员」，不出「下面是上一轮的结果」", () => {
-    const first = { ...noHits(), status: "compare_failed", job_kind: "compare", job_error: "认字组件没装上，没有结果" } as TaskDetail;
+    const first = { ...noHits(), status: "compare_failed", job_kind: "compare", job_error: "认字组件没装上，没有结果", job_error_code: "ocr_failed" } as TaskDetail;
     const hits = reviewPageHits(first, false);
     assert.equal(hits.length, 0);
     const text = reviewErrorCopy(String(first.job_error), first.job_error_code, undefined, canReuploadFailed(first, hits, reviewer));
@@ -111,8 +111,30 @@ describe("复核（对红）失败且没有剩余条目", () => {
     assert.doesNotMatch(text, /下面是上一轮的结果/u);
   });
 
+  it("复核 result_truncated / private_data_failed、没有剩余条目：自己的单 / 别人的单 / viewer 都用 §2.3 整句", () => {
+    for (const [code, full] of [
+      ["result_truncated", "这一单结果太多，没能写完，请联系管理员"],
+      ["private_data_failed", "稿件里的 Illustrator 私有数据读不出来，请联系管理员"],
+    ] as const) {
+      const t = (owner: string) => ({ ...noHits(owner), job_error: "x", job_error_code: code }) as TaskDetail;
+      const copyFor = (task: TaskDetail, v: ReuploadViewer) => reviewErrorCopy(String(task.job_error), task.job_error_code, undefined, canReuploadFailed(task, [], v));
+      assert.equal(copyFor(t("ou_me"), reviewer), full, code);
+      assert.equal(copyFor(t("ou_other"), reviewer), full, code);
+      assert.equal(copyFor(t("ou_me"), viewer), full, code);
+    }
+  });
+
+  it("复核超页、没有剩余条目（Q9）：自己的单有按钮拼「，请改成 1 页后重新上传这一单」，别人的单、viewer 只有前半句", () => {
+    const over = (owner: string) => ({ ...noHits(owner), job_error: "稿件超过 1 页", job_error_code: "page_over" }) as TaskDetail;
+    const copyFor = (t: TaskDetail, v: ReuploadViewer) => reviewErrorCopy(String(t.job_error), t.job_error_code, undefined, canReuploadFailed(t, [], v));
+    assert.equal(copyFor(over("ou_me"), reviewer), "稿件超过 1 页，请改成 1 页后重新上传这一单");
+    assert.equal(copyFor(over("ou_other"), admin), "稿件超过 1 页，请改成 1 页后重新上传这一单");
+    assert.equal(copyFor(over("ou_other"), reviewer), "稿件超过 1 页");
+    assert.equal(copyFor(over("ou_me"), viewer), "稿件超过 1 页");
+  });
+
   it("复核认字失败、带上一轮条目：仍显示红条「复核出了问题…」", () => {
-    const t = task({ ...BARS[0].task, job_error: "认字组件没装上，没有结果" });
+    const t = task({ ...BARS[0].task, job_error: "认字组件没装上，没有结果", job_error_code: "ocr_failed" });
     const copyFor = (v: ReuploadViewer) => reviewErrorCopy(String(t.job_error), t.job_error_code, "rework", canReuploadFailed(t, reviewPageHits(t, false), v));
     assert.equal(copyFor(reviewer), "复核出了问题，下面是上一轮的结果，可以重新上传这一单");
     assert.equal(copyFor(viewer), "复核出了问题，下面是上一轮的结果");
@@ -216,5 +238,43 @@ describe("签字和退回都做不了就不叫人去处理：右上和页头那�
     const l = lines(others, true, admin);
     assert.equal(l.hint, "仍有 1 条疑点未处理");
     assert.equal(l.note, "仍有 1 条疑点未处理");
+  });
+});
+
+describe("首次对照就超页、又没有条目（产品 10/17 定）：自己能动的人回首页，别人的单只出标题", () => {
+  const over = (owner: string | null) => ({ id: "e5969b58cd9b", title: "合成超页单", type: "pack", owner, status: "compare_failed", job_kind: "compare", job_status: "failed", job_error: "稿件超过 1 页", job_error_code: "page_over", hits: [] }) as unknown as TaskDetail;
+  const title = (t: TaskDetail, v: ReuploadViewer) => reviewErrorCopy(String(t.job_error), t.job_error_code, undefined, canReuploadFailed(t, [], v));
+  it("自己的单 / 管理员：标题「稿件超过 1 页」，正文复用「这一单没法接着核了，请回首页重新新建一单」，给「回首页」", () => {
+    for (const [t, v] of [[over("ou_me"), reviewer], [over("ou_other"), admin]] as const) {
+      assert.equal(canReuploadFailed(t, [], v), false, "Q4 不在本 PR：无条目检查中断单不给重新上传");
+      assert.equal(title(t, v), "稿件超过 1 页");
+      assert.deepEqual(failedNoHitsBar(t, false, v), { body: "这一单没法接着核了，请回首页重新新建一单", action: "backHome" });
+      assert.equal(failedNoHitsBar(t, false, v).body, REVIEW_COPY.compareFailedNoHits, "复用 B 的常量，不另写字串");
+    }
+  });
+  it("别人的单、viewer、没有 owner 的老单：只出标题，没有正文、没有按钮，不出「请联系管理员」", () => {
+    for (const [t, v] of [[over("ou_other"), reviewer], [over("ou_me"), viewer], [over(null), reviewer]] as const) {
+      assert.equal(title(t, v), "稿件超过 1 页");
+      assert.deepEqual(failedNoHitsBar(t, false, v), { body: null, action: null });
+    }
+  });
+  it("不是超页的无条目检查中断单：照旧人人都有正文和「回首页」", () => {
+    const plain = { ...over("ou_other"), job_error: "对照中断", job_error_code: undefined } as TaskDetail;
+    assert.deepEqual(failedNoHitsBar(plain, false, reviewer), { body: REVIEW_COPY.compareFailedNoHits, action: "backHome" });
+    assert.deepEqual(failedNoHitsBar(plain, false, viewer), { body: REVIEW_COPY.compareFailedNoHits, action: "backHome" });
+  });
+  it("有重新上传按钮：不写正文，给按钮", () => {
+    assert.deepEqual(failedNoHitsBar(over("ou_me"), true, reviewer), { body: null, action: "reupload" });
+  });
+});
+
+describe("别人的复核失败、没有剩余条目的单：正文不再出纯文字「重新上传这一单」", () => {
+  const noHits = (owner: string) => ({ id: "e5969b58cd9c", title: "合成失败单", type: "pack", owner, status: "pending_review", job_kind: "rework", job_status: "failed", job_error: "对照中断", hits: [] }) as unknown as TaskDetail;
+  it("别人的单、viewer：没有正文、没有按钮；自己的单有按钮不写正文", () => {
+    for (const [t, v] of [[noHits("ou_other"), reviewer], [noHits("ou_me"), viewer]] as const) {
+      assert.equal(canReuploadFailed(t, [], v), false);
+      assert.deepEqual(failedNoHitsBar(t, false, v), { body: null, action: null });
+    }
+    assert.deepEqual(failedNoHitsBar(noHits("ou_me"), canReuploadFailed(noHits("ou_me"), [], reviewer), reviewer), { body: null, action: "reupload" });
   });
 });

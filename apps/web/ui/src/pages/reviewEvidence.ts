@@ -1,6 +1,6 @@
 import type { FieldHit } from "../api";
 import statuses from "../../../backend/app/verbatim_statuses.json" with { type: "json" };
-import { hasReadingDoubt } from "../../../server/src/readingDoubt.ts";
+import { isReviewIssue as sharedIsReviewIssue } from "../../../server/src/reviewIssue.ts";
 import { coverageTally, doubtLines, excelText, humanMissLines, NOT_READ, pdfText, spokenAsk } from "./hitText";
 
 export type EvidenceText = {
@@ -16,8 +16,6 @@ export type ReviewEvidence = {
 
 export type IndexedReviewHit = { hit: FieldHit; index: number };
 
-const BLOCKING = new Set([...statuses.true_errors, "疑点", "缺失"]);
-const SPACE = new Set(statuses.space_errors);
 /** 与服务端 tasks.ts HIT_STATUSES 同口径；不在集合里的状态不能签字/退回。 */
 const KNOWN_HIT_STATUSES = new Set<string>(["一致", "疑点", "缺失", "跳过", ...statuses.statuses]);
 
@@ -39,31 +37,16 @@ export function hasInvalidHitStatus(hits: ReadonlyArray<{ status?: string }>): b
   return hits.some((hit) => !isKnownHitStatus(hit.status));
 }
 
-/**
- * 没下结论时按状态本身就要结论的条目，返回状态（拦截文案里直接写它，如「疑点」「多空格」）；否则 null。
- * 与服务端 `tasks.ts` 的 `pendingWord` 同序：真错 / 疑点 / 缺失，或标了 pending 的空格类。
- */
-export function blockingStatusWord(hit: FieldHit): string | null {
-  const status = String(hit.status || "");
-  if (BLOCKING.has(status)) return status;
-  if (SPACE.has(status) && hit.decision === "pending") return status;
-  return null;
-}
-
 function isHeldHit(hit: FieldHit): boolean {
   return hit.status === "待人工确认";
 }
 
-export function isReviewIssue(hit: FieldHit): boolean {
-  if (isHeldHit(hit)) return false;
-  if (hit.decision === "issue") return true;
-  if (BLOCKING.has(String(hit.status || ""))) return true;
-  if (SPACE.has(String(hit.status || "")) && hit.decision === "pending") return true;
-  if (/不清|误/.test(String(hit.status || ""))) return true;
-  // 认字存疑只按结构化字段（前后端共用 hasReadingDoubt）。
-  if (hasReadingDoubt(hit)) return true;
-  // 其余已标记条目（如未标 pending 的缺空格）仍按核对要点有无内容判断，与原规则一致。
-  return doubtLines(hit).length > 0;
+/**
+ * 核对页把这一条放进「要看」列表：前后端共用 `server/src/reviewIssue.ts`（加码 §6），口径与服务端 `/complete` 同一份。
+ * 只认明确状态集合（`BLOCKING_STATUSES` / `SPACE_STATUSES` + 缺空格），没有任何状态文字正则；认字存疑只按结构化字段。
+ */
+function isReviewIssue(hit: FieldHit): boolean {
+  return sharedIsReviewIssue(hit);
 }
 
 export function partitionReviewHits(hits: FieldHit[]): {

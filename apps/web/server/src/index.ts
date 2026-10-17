@@ -127,6 +127,7 @@ import { UnfoldedPrintHttpError } from "./unfoldedPrint.js";
 import { completeGate } from "./completeGate.js";
 import { CompressionProblem } from "./compressionModel.js";
 import { HistoryProblem, queryHistory } from "./historyIndex.js";
+import { ReviewProblem, reviewProblemBody } from "./reviewProblem.js";
 import { registerCompressionRoutes } from "./compressionApi.js";
 import { recoverCompressionBeforeReceipts } from "./compressionRuntime.js";
 import { compressionReceiptPersisted } from "./compressionStore.js";
@@ -440,6 +441,9 @@ function pngMagicAt(path: string): boolean {
 }
 
 app.onError((err, c) => {
+  if (err instanceof ReviewProblem) {
+    return c.json(reviewProblemBody(err), err.status);
+  }
   if (err instanceof ApiProblem) {
     return c.json({ detail: err.message, code: err.code }, err.status);
   }
@@ -1221,15 +1225,15 @@ app.post("/api/tasks/:tid/decision", async (c) => {
   const task = loadTask(tid);
   assertCanAccessTask(task, viewerFromSession(s));
   if (!isReviewableStatus(task.status)) {
-    throw new HTTPException(400, { message: "当前状态不可审核" });
+    throw new ReviewProblem("decision_status_not_reviewable");
   }
   if (!isHitDecision(body.decision)) {
-    throw new HTTPException(400, { message: "非法审核结论" });
+    throw new ReviewProblem("decision_value_invalid");
   }
   const hit = activeHits(task).find((h) => h.id === body.hit_id);
-  if (!hit) throw new HTTPException(404, { message: "字段不存在" });
+  if (!hit) throw new ReviewProblem("decision_hit_not_found");
   if (hit.status === "待人工确认" && body.decision === "confirm") {
-    throw new HTTPException(400, { message: "待人工确认不能选一致" });
+    throw new ReviewProblem("decision_held_confirm_forbidden");
   }
   hit.decision = body.decision;
   if (body.note != null) hit.note = String(body.note).trim();
@@ -1249,9 +1253,9 @@ app.post("/api/tasks/:tid/complete", async (c) => {
   const task = loadTask(tid);
   assertCanAccessTask(task, viewerFromSession(s));
   const gate = completeGate(task, body.order_held_confirm);
-  if (!gate.ok) throw new HTTPException(gate.status, { message: gate.message });
+  if (!gate.ok) throw new ReviewProblem(gate.code, gate.params);
   const conclusion = (body.conclusion || "").trim();
-  if (!conclusion) throw new HTTPException(400, { message: "请写下结论" });
+  if (!conclusion) throw new ReviewProblem("complete_conclusion_missing");
   task.status = "completed";
   task.completed_at = nowIso();
   task.completed_by = s.display_name;
@@ -1284,19 +1288,19 @@ app.post(
     const beforeParse = loadTask(tid);
     assertCanAccessTask(beforeParse, viewerFromSession(s));
     if (beforeParse.job_status === "queued" || beforeParse.job_status === "running") {
-      throw new HTTPException(409, { message: "对红还在排队或正在跑" });
+      throw new ReviewProblem("rework_job_running");
     }
     if (!isReworkableTask(beforeParse)) {
-      throw new HTTPException(400, { message: "当前状态不可对红" });
+      throw new ReviewProblem("rework_status_not_allowed");
     }
     const body = await c.req.parseBody();
     const pdf = body.pdf;
-    if (!(pdf instanceof File)) throw new HTTPException(400, { message: "需要改稿后的 PDF" });
+    if (!(pdf instanceof File)) throw new ReviewProblem("rework_pdf_missing");
     if (uploadTotalTooLarge([pdf.size])) {
       throw new HTTPException(413, { message: UPLOAD_BODY_TOO_LARGE });
     }
     if (tooLarge(pdf.size)) {
-      throw new HTTPException(400, { message: oversizeMessage() });
+      throw new ReviewProblem("rework_pdf_too_large", undefined, oversizeMessage());
     }
     const pdfBuf = Buffer.from(await pdf.arrayBuffer());
     // parseBody / arrayBuffer 会让出事件循环；另一标签可能已经删单、签字或启动
@@ -1304,26 +1308,26 @@ app.post(
     const task = loadTask(tid);
     assertCanAccessTask(task, viewerFromSession(s));
     if (task.job_status === "queued" || task.job_status === "running") {
-      throw new HTTPException(409, { message: "对红还在排队或正在跑" });
+      throw new ReviewProblem("rework_job_running");
     }
     if (!isReworkableTask(task)) {
-      throw new HTTPException(400, { message: "当前状态不可对红" });
+      throw new ReviewProblem("rework_status_not_allowed");
     }
     if (pdfBuf.length < 5 || pdfBuf.subarray(0, 4).toString("utf8") !== "%PDF") {
-      throw new HTTPException(400, { message: "不是有效的 PDF" });
+      throw new ReviewProblem("rework_pdf_invalid");
     }
     // 认字单缺运行依赖时停在写新稿之前：不覆盖 artwork_v2.pdf，不入队，不改走旧核对。
     let current = task;
     if (current.verbatim_check === true) {
       const blocked = await probeVerbatimReady(process.env.VERBATIM_MODEL_DIR || "");
-      if (blocked) throw new HTTPException(400, { message: blocked });
+      if (blocked) throw new ReviewProblem("rework_verbatim_not_ready", undefined, blocked);
       current = loadTask(tid);
       assertCanAccessTask(current, viewerFromSession(s));
       if (current.job_status === "queued" || current.job_status === "running") {
-        throw new HTTPException(409, { message: "对红还在排队或正在跑" });
+        throw new ReviewProblem("rework_job_running");
       }
       if (!isReworkableTask(current)) {
-        throw new HTTPException(400, { message: "当前状态不可对红" });
+        throw new ReviewProblem("rework_status_not_allowed");
       }
     }
     const dir = join(DATA_DIR, "uploads", tid);

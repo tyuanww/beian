@@ -170,9 +170,8 @@ export const REVIEW_COPY = {
   allDecided: "全部已下结论",
   /** 右栏「待确认」列表空态（产品哥 2026-10-11；核对栏一行提示不带句号）。 */
   pendingEmpty: "没有待确认的了",
-  /** 提交失败按服务端状态/错误码映射；不把服务端原文给用户看。 */
+  /** 提交失败按返回体码映射（`reviewFlat.ts` `submitFailureText`）：前端有自己那句的用前端句，没有的用服务端原文。 */
   submitStillChecking: "这份稿还在检查，等一会儿再提交",
-  submitPending: (n: number) => `还有 ${n} 条待确认，处理完才能签字`,
   collapse: "收起",
   expand: (n: number) => `展开疑点 · 待确认 ${n}`,
   tabs: { pending: "待确认", issue: "有错", all: "全部" },
@@ -231,8 +230,17 @@ export const REVIEW_COPY = {
   ocrFailed: "认字出了问题，请联系管理员",
   /** 复核认字失败、没有剩余条目、条里有「重新上传这一单」按钮时：产品哥 2026-10-17 定稿，句尾特意留「再不行请联系管理员」作退路。 */
   ocrFailedReupload: "认字出了问题，可以重新上传这一单，再不行请联系管理员",
-  /** 后端超页（page_over）：只核 1 页。不写「拆分后上传」。 */
-  pageOver: "稿件超过 1 页，暂不支持核对，请联系管理员",
+  /** job_error_code === "result_truncated"（加码 §2.3 产品定稿；有没有重新上传按钮都用整句）。 */
+  resultTruncated: "这一单结果太多，没能写完，请联系管理员",
+  /** job_error_code === "private_data_failed"（加码 §2.3 产品定稿；有没有重新上传按钮都用整句）。 */
+  privateDataFailed: "稿件里的 Illustrator 私有数据读不出来，请联系管理员",
+  /**
+   * 后端超页（page_over）、没有上一轮条目（老板 10/17 20:21 批 Q9）：服务端只存前半句，前端按码 + 有没有按钮选句，不显示服务端原文。
+   * 没有「重新上传这一单」按钮：只写前半句，不写出路（不写「回首页新建」也不写「联系管理员」）。不写「拆分后上传」。
+   */
+  pageOver: `稿件超过 ${REVIEW_PAGE_LIMIT} 页`,
+  /** 同上，条里有「重新上传这一单」按钮：补后半句（Q9 定稿「稿件超过 1 页，请改成 1 页后重新上传这一单」）。 */
+  pageOverReupload: `稿件超过 ${REVIEW_PAGE_LIMIT} 页，请改成 ${REVIEW_PAGE_LIMIT} 页后重新上传这一单`,
   /** 复核失败带上一轮条目的红条 / 黄条（老板 2026-10-17 复核失败按 B）：结尾引导重新上传，条里有「重新上传这一单」按钮。 */
   reworkFailed: "复核出了问题，下面是上一轮的结果，可以重新上传这一单",
   /** 检查中断带上一轮条目（产品 10/17 方案 A，服务端已放行 /rework）：条里同样有「重新上传这一单」。 */
