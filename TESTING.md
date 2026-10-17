@@ -59,7 +59,7 @@ cd apps/web/ui
 npm run verify:real-backend -- --scenario legacy-page-over --out <输出目录> [--no-build] [--keep-data]
 ```
 
-脚本先构建 UI（`--no-build` 复用现有 `dist/`），用 `mkdtemp` 新建临时 `WB_DATA_DIR` 写入场景任务记录，在空闲端口起真 Hono（serve 已构建 UI），本机显示名登录自动创建的「管理员」，导出接口 JSON、无头截图并按场景断言；结束时按 PID 结束自己起的服务进程组并删除临时目录。断言失败退出 1，环境/启动问题退出 2。场景放在 `apps/web/ui/scripts/verify-scenarios/*.json`（`tasks` / `api` / `pages`）；数据目录与输出目录禁止落在 `runtime/` 或 `apps/web/backend/data`。这是合成旧数据的真后端读取验证，不是真实稿或线上验收。
+脚本先构建 UI（`--no-build` 复用现有 `dist/`），用 `mkdtemp` 新建临时 `WB_DATA_DIR` 写入场景任务记录，在空闲端口起真 Hono（serve 已构建 UI），本机显示名登录自动创建的「管理员」，导出接口 JSON、无头截图并按场景断言；结束时按 PID 结束自己起的服务进程组并删除临时目录。断言失败退出 1，环境/启动问题退出 2。场景放在 `apps/web/ui/scripts/verify-scenarios/*.json`（`tasks` / `api` / `pages`）；数据目录与输出目录禁止落在 `runtime/` 或 `apps/web/backend/data`。分步驱动时用 `--serve`（起好后写 `<输出目录>/instance.json` 并常驻，`kill -TERM <instance.json 里的 pid>` 结束并清理）和 `--base-url http://127.0.0.1:<端口>`（只对本机实例做登录、导出、截图、断言，拒绝非回环地址）；完整步骤见 `.cursor/skills/verify-beian/SKILL.md`。这是合成旧数据的真后端读取验证，不是真实稿或线上验收。
 
 ## 有效证据与重跑
 

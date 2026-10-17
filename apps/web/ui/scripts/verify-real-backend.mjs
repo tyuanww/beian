@@ -6,6 +6,10 @@
  *   npm run verify:real-backend -- --scenario legacy-page-over --out /tmp/verify-out
  *   node scripts/verify-real-backend.mjs --scenario ./scripts/verify-scenarios/legacy-page-over.json --out <dir> [--no-build] [--keep-data]
  *
+ * 常驻 / 分步（给 .cursor/skills/verify-beian 用）：
+ *   --serve：只做构建 + 临时数据目录 + 写种子 + 起后端，写 <out>/instance.json 后常驻；收到 SIGTERM/SIGINT 再清理。
+ *   --base-url http://127.0.0.1:<port>：不起后端，只对已在跑的本机实例做登录 + 接口导出 + 截图 + 断言（只接受 127.0.0.1 / localhost）。
+ *
  * 场景 JSON：tasks（写进 <临时数据目录>/tasks/<id>.json 的任务记录）、
  * api（要导出的接口 + 字段断言；pick 用来从列表里挑一条）、pages（要截图的页面 + 选择器断言）、login（本机显示名，默认「管理员」）。
  * 输出：<out>/server.log、各接口 JSON、截图、summary.json。任一断言失败 → 退出码 1；环境/启动问题 → 退出码 2。
@@ -33,20 +37,34 @@ const TID = /^[0-9a-f]{12}$/;
 class SetupError extends Error {}
 
 function parseArgs(argv) {
-  const opts = { scenario: "", out: "", build: true, keepData: false };
+  const opts = { scenario: "", out: "", build: true, keepData: false, serve: false, baseUrl: "" };
   for (let i = 0; i < argv.length; i += 1) {
     const a = argv[i];
     if (a === "--scenario") opts.scenario = argv[++i] || "";
     else if (a === "--out") opts.out = argv[++i] || "";
     else if (a === "--no-build") opts.build = false;
     else if (a === "--keep-data") opts.keepData = true;
+    else if (a === "--serve") opts.serve = true;
+    else if (a === "--base-url") opts.baseUrl = argv[++i] || "";
     else if (a === "-h" || a === "--help") {
-      console.log("用法：verify-real-backend.mjs --scenario <名字|JSON 路径> --out <输出目录> [--no-build] [--keep-data]");
+      console.log("用法：verify-real-backend.mjs --scenario <名字|JSON 路径> --out <输出目录> [--no-build] [--keep-data] [--serve | --base-url http://127.0.0.1:<port>]");
       process.exit(0);
     } else throw new SetupError(`未知参数：${a}`);
   }
   if (!opts.scenario || !opts.out) throw new SetupError("必须给 --scenario 和 --out");
+  if (opts.serve && opts.baseUrl) throw new SetupError("--serve 和 --base-url 不能一起用");
+  if (opts.baseUrl) opts.baseUrl = assertLoopbackUrl(opts.baseUrl);
   return opts;
+}
+
+/** 只驱动本机实例：拒绝 www.jianghua.site 等任何非回环地址。 */
+export function assertLoopbackUrl(raw) {
+  let url;
+  try { url = new URL(raw); } catch { throw new SetupError(`--base-url 不是合法地址：${raw}`); }
+  if (url.protocol !== "http:" || !["127.0.0.1", "localhost"].includes(url.hostname)) {
+    throw new SetupError(`--base-url 只接受 http://127.0.0.1 或 http://localhost：${raw}`);
+  }
+  return url.origin;
 }
 
 function within(child, parent) {
@@ -133,18 +151,14 @@ function stopServer(child) {
   });
 }
 
-async function main() {
-  const opts = parseArgs(process.argv.slice(2));
-  const scenario = loadScenario(opts.scenario);
-  const out = assertSafeDir(opts.out, "输出目录");
-  mkdirSync(out, { recursive: true });
+function buildUi(out) {
+  const b = spawnSync("npm", ["run", "build"], { cwd: UI_ROOT, stdio: ["ignore", "pipe", "pipe"], encoding: "utf8" });
+  writeFileSync(join(out, "build.log"), `${b.stdout}\n${b.stderr}`);
+  if (b.status !== 0) throw new SetupError(`UI 构建失败，见 ${join(out, "build.log")}`);
+}
 
-  if (opts.build || !existsSync(join(UI_ROOT, "dist/index.html"))) {
-    const b = spawnSync("npm", ["run", "build"], { cwd: UI_ROOT, stdio: ["ignore", "pipe", "pipe"], encoding: "utf8" });
-    writeFileSync(join(out, "build.log"), `${b.stdout}\n${b.stderr}`);
-    if (b.status !== 0) throw new SetupError(`UI 构建失败，见 ${join(out, "build.log")}`);
-  }
-
+/** 临时数据目录 + 种子 + 起后端，返回实例和清理函数。 */
+async function launch(scenario, out, opts) {
   const dataDir = assertSafeDir(mkdtempSync(join(tmpdir(), "beian-verify-")), "数据目录");
   mkdirSync(join(dataDir, "tasks"), { recursive: true });
   for (const t of scenario.tasks) writeFileSync(join(dataDir, "tasks", `${t.id}.json`), `${JSON.stringify(t, null, 2)}\n`);
@@ -159,23 +173,28 @@ async function main() {
   child.stdout.pipe(log);
   child.stderr.pipe(log);
   console.log(`[verify] 场景 ${scenario.name}；后端 PID ${child.pid}，${base}；数据目录 ${dataDir}`);
-
-  const failures = [];
-  const results = { scenario: scenario.name, scenario_file: relative(REPO_ROOT, scenario.file), base, server_pid: child.pid, data_dir: dataDir, api: [], pages: [] };
-  let browser;
+  let cleaned = false;
   const cleanup = async () => {
-    await browser?.close().catch(() => {});
+    if (cleaned) return;
+    cleaned = true;
     await stopServer(child);
     log.end();
     if (!opts.keepData) rmSync(dataDir, { recursive: true, force: true });
   };
-  const onSignal = () => { void cleanup().then(() => process.exit(130)); };
-  process.once("SIGINT", onSignal);
-  process.once("SIGTERM", onSignal);
-
   try {
     await waitHealthy(base, child);
-    browser = await chromium.launch();
+  } catch (err) {
+    await cleanup();
+    throw err;
+  }
+  return { child, base, dataDir, cleanup };
+}
+
+/** 登录 + 接口导出 + 页面截图与断言。只连 base（本机实例）。 */
+async function drive(scenario, out, base, results) {
+  const failures = [];
+  const browser = await chromium.launch();
+  try {
     const context = await browser.newContext({ baseURL: base, viewport: { width: 1440, height: 900 } });
     const login = await context.request.post("/api/auth/login", { data: { display_name: scenario.login } });
     if (!login.ok()) throw new SetupError(`显示名登录失败：HTTP ${login.status()} ${await login.text()}`);
@@ -213,17 +232,74 @@ async function main() {
       results.pages.push({ path: item.path, screenshot: item.screenshot, ok: f.length === 0, failures: f });
     }
   } finally {
-    await cleanup();
-    results.data_dir_removed = !opts.keepData && !existsSync(dataDir);
-    results.server_exited = child.exitCode != null || child.signalCode != null;
-    results.failures = failures;
-    results.ok = failures.length === 0;
-    writeFileSync(join(out, "summary.json"), `${JSON.stringify(results, null, 2)}\n`);
+    await browser.close().catch(() => {});
+  }
+  return failures;
+}
+
+function report(results, failures, out, name) {
+  results.failures = failures;
+  results.ok = failures.length === 0;
+  writeFileSync(join(out, "summary.json"), `${JSON.stringify(results, null, 2)}\n`);
+  for (const f of failures) console.error(`[verify] FAIL ${f}`);
+  console.log(`[verify] ${failures.length ? "FAIL" : "PASS"} ${name}：API ${results.api.length} 项，页面 ${results.pages.length} 个；输出 ${out}`);
+  return failures.length ? 1 : 0;
+}
+
+async function main() {
+  const opts = parseArgs(process.argv.slice(2));
+  const scenario = loadScenario(opts.scenario);
+  const out = assertSafeDir(opts.out, "输出目录");
+  mkdirSync(out, { recursive: true });
+  const scenarioFile = relative(REPO_ROOT, scenario.file);
+
+  if (opts.baseUrl) {
+    const results = { scenario: scenario.name, scenario_file: scenarioFile, base: opts.baseUrl, mode: "base-url", api: [], pages: [] };
+    return report(results, await drive(scenario, out, opts.baseUrl, results), out, scenario.name);
   }
 
-  for (const f of failures) console.error(`[verify] FAIL ${f}`);
-  console.log(`[verify] ${failures.length ? "FAIL" : "PASS"} ${scenario.name}：API ${results.api.length} 项，页面 ${results.pages.length} 个；输出 ${out}`);
-  return failures.length ? 1 : 0;
+  if (opts.build || !existsSync(join(UI_ROOT, "dist/index.html"))) buildUi(out);
+  const inst = await launch(scenario, out, opts);
+
+  if (opts.serve) {
+    const health = await fetch(`${inst.base}/api/health`).then((r) => r.json()).catch(() => null);
+    const info = { mode: "serve", scenario: scenario.name, scenario_file: scenarioFile, pid: process.pid, server_pid: inst.child.pid, base: inst.base, data_dir: inst.dataDir, version: health?.version ?? null, started_at: new Date().toISOString() };
+    writeFileSync(join(out, "instance.json"), `${JSON.stringify(info, null, 2)}\n`);
+    console.log(`[verify] READY ${inst.base}（常驻；结束：kill -TERM ${process.pid}）`);
+    return new Promise((done) => {
+      let stopping = false;
+      const stop = (signal) => {
+        if (stopping) return;
+        stopping = true;
+        void inst.cleanup().then(() => {
+          info.stopped_at = new Date().toISOString();
+          info.stopped_by = signal;
+          info.data_dir_removed = !opts.keepData && !existsSync(inst.dataDir);
+          info.server_exited = inst.child.exitCode != null || inst.child.signalCode != null;
+          writeFileSync(join(out, "instance.json"), `${JSON.stringify(info, null, 2)}\n`);
+          console.log(`[verify] 已清理：后端已退出=${info.server_exited}，临时数据目录已删=${info.data_dir_removed}`);
+          done(0);
+        });
+      };
+      process.once("SIGINT", () => stop("SIGINT"));
+      process.once("SIGTERM", () => stop("SIGTERM"));
+      inst.child.once("exit", (code) => { if (!stopping) { console.error(`[verify] 后端意外退出 exit=${code}`); stop("server-exit"); } });
+    });
+  }
+
+  const results = { scenario: scenario.name, scenario_file: scenarioFile, base: inst.base, server_pid: inst.child.pid, data_dir: inst.dataDir, mode: "oneshot", api: [], pages: [] };
+  const onSignal = () => { void inst.cleanup().then(() => process.exit(130)); };
+  process.once("SIGINT", onSignal);
+  process.once("SIGTERM", onSignal);
+  let failures;
+  try {
+    failures = await drive(scenario, out, inst.base, results);
+  } finally {
+    await inst.cleanup();
+    results.data_dir_removed = !opts.keepData && !existsSync(inst.dataDir);
+    results.server_exited = inst.child.exitCode != null || inst.child.signalCode != null;
+  }
+  return report(results, failures, out, scenario.name);
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
