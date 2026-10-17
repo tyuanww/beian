@@ -224,9 +224,10 @@ export const REVIEW_COPY = {
   ocrFailed: "认字出了问题，请联系管理员",
   /** 后端超页（page_over）：只核 1 页。不写「拆分后上传」。 */
   pageOver: "稿件超过 1 页，暂不支持核对，请联系管理员",
-  reworkFailed: "复核出了问题，下面是上一轮的结果，请联系管理员",
-  compareFailedWithHits: "检查中断了，下面是上一轮的结果，请联系管理员",
-  reworkPageOver: "稿件超过 1 页，这次复核没做，下面是上一轮的结果，请联系管理员",
+  /** 复核失败 / 检查中断但带上一轮条目的三种失败条（老板 2026-10-17 复核失败按 B）：结尾引导重新上传，条里有「重新上传这一单」按钮。 */
+  reworkFailed: "复核出了问题，下面是上一轮的结果，可以重新上传这一单",
+  compareFailedWithHits: "检查中断了，下面是上一轮的结果，可以重新上传这一单",
+  reworkPageOver: "稿件超过 1 页，这次复核没做，下面是上一轮的结果，可以重新上传这一单",
   heldNote: "备注没对上",
   excelMissing: "确认单没有这段",
   spaceLabel: "空格",
