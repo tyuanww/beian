@@ -1041,7 +1041,7 @@ export function ReviewPage({ taskId, userId, displayName = null, canComplete = t
       {error ? <Alert type="error" title={error} /> : null}
       {task?.error || task?.job_error || task?.job_error_code ? (
         <Alert type={reviewErrorType(task.job_error_code)} showIcon title={reviewErrorCopy(task.error || task.job_error || "", task.job_error_code, failedWithHits, reuploadFailed) || "检查失败。"} description={failedNoHitsCopy ?? undefined} action={failedBarAction} />
-      ) : failedJob ? <Alert type="error" showIcon title={failedWithHits ? reviewErrorCopy("", undefined, failedWithHits, reuploadFailed) : failedNoHitsCopy ?? REVIEW_COPY.reupload} action={failedBarAction} /> : null}
+      ) : failedJob ? <Alert type="error" showIcon title={failedWithHits ? reviewErrorCopy("", undefined, failedWithHits, reuploadFailed) : failedNoHitsCopy ?? (reuploadFailed ? REVIEW_COPY.reupload : "检查失败。")} action={failedBarAction} /> : null}
       {signed && !locked ? <Alert type="success" showIcon title={task?.complete_kind === "rework" ? "已退回。" : "已签字。"} /> : null}
       {decisionError ? <Alert type="error" showIcon title={`未保存：${decisionError}`} /> : null}
 

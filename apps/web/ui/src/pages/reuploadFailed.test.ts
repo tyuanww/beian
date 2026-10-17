@@ -267,3 +267,14 @@ describe("首次对照就超页、又没有条目（产品 10/17 定）：自己
     assert.deepEqual(failedNoHitsBar(over("ou_me"), true, reviewer), { body: null, action: "reupload" });
   });
 });
+
+describe("别人的复核失败、没有剩余条目的单：正文不再出纯文字「重新上传这一单」", () => {
+  const noHits = (owner: string) => ({ id: "e5969b58cd9c", title: "合成失败单", type: "pack", owner, status: "pending_review", job_kind: "rework", job_status: "failed", job_error: "对照中断", hits: [] }) as unknown as TaskDetail;
+  it("别人的单、viewer：没有正文、没有按钮；自己的单有按钮不写正文", () => {
+    for (const [t, v] of [[noHits("ou_other"), reviewer], [noHits("ou_me"), viewer]] as const) {
+      assert.equal(canReuploadFailed(t, [], v), false);
+      assert.deepEqual(failedNoHitsBar(t, false, v), { body: null, action: null });
+    }
+    assert.deepEqual(failedNoHitsBar(noHits("ou_me"), canReuploadFailed(noHits("ou_me"), [], reviewer), reviewer), { body: null, action: "reupload" });
+  });
+});

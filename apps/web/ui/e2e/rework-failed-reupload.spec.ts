@@ -275,7 +275,7 @@ test("复核超页、没有剩余条目（Q9）：自己的单标题「稿件超
   await expect(bar).not.toContainText(/请联系管理员|回首页|下面是上一轮的结果/u);
   await page.goto(`/review/${theirs.id}`);
   await expect(page.locator(".ant-alert-warning .ant-alert-title")).toHaveText("稿件超过 1 页");
-  await expect(page.locator(".ant-alert-warning")).not.toContainText(/请联系管理员|回首页/u);
+  await expect(page.locator(".ant-alert-warning")).not.toContainText(/请联系管理员|回首页|重新上传/u);
   await expect(page.getByRole("button", { name: REVIEW_COPY.reupload })).toHaveCount(0);
 });
 
@@ -315,4 +315,16 @@ test("逐字单整单待人工确认：自己的单有勾选框，审核员看�
   await expect(page.getByTestId("review-root")).toBeVisible();
   await expect(page.locator("button.review-sign")).toHaveCount(0);
   await expect(page.getByTestId("review-order-held")).toHaveCount(0);
+});
+
+test("别人的复核失败、没有剩余条目的单：失败条只有标题，正文不出纯文字「重新上传这一单」", async ({ page, syntheticApi }) => {
+  await asReviewer(page);
+  const task = reviewTask("e5969b58ce17");
+  Object.assign(task, { owner: "ou_someone_else", status: "pending_review", job_kind: "rework", job_status: "failed", job_error: "对照中断", hits: [] });
+  syntheticApi.tasks.push(task);
+  await page.goto(`/review/${task.id}`);
+  const bar = page.locator(".ant-alert-error").first();
+  await expect(bar.locator(".ant-alert-title")).toHaveText("检查中断");
+  await expect(bar.locator(".ant-alert-description")).toHaveCount(0);
+  await expect(page.getByText(REVIEW_COPY.reupload, { exact: true })).toHaveCount(0);
 });

@@ -63,7 +63,7 @@ function activeHitCount(task: Pick<TaskDetail, "verbatim_check" | "hits" | "hits
  * - 对照失败且没有有效条目（`isDeadCompareFailed`）：正文「这一单没法接着核了，请回首页重新新建一单」+「回首页」；
  *   其中超页（`job_error_code === "page_over"`，产品 10/17 定）只给这单自己能动的人（有 create，且管理员或本人），
  *   别人的单只出标题「稿件超过 N 页」，不给正文和按钮；
- * - 其余（如别人的复核失败、没有剩余条目的单）：正文仍是「重新上传这一单」。
+ * - 其余（如别人的复核失败、没有剩余条目的单）：不写正文——自己做不了，不出看着能点的纯文字「重新上传这一单」（找茬哥复核 B）。
  */
 export type FailedNoHitsBar = { body: string | null; action: "reupload" | "backHome" | null };
 
@@ -78,7 +78,7 @@ export function failedNoHitsBar(
     if (task?.job_error_code === "page_over" && !ownsIt) return { body: null, action: null };
     return { body: REVIEW_COPY.compareFailedNoHits, action: "backHome" };
   }
-  return { body: REVIEW_COPY.reupload, action: null };
+  return { body: null, action: null };
 }
 
 /** 当前登录人：与服务端 `/rework` 的 `need(c, "create")` + `assertCanAccessTask` 用同一组字段（`/api/auth/me`）。 */
