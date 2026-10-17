@@ -45,7 +45,7 @@ function isHeldHit(hit: FieldHit): boolean {
  * 核对页把这一条放进「要看」列表：前后端共用 `server/src/reviewIssue.ts`（加码 §6），口径与服务端 `/complete` 同一份。
  * 只认明确状态集合（`BLOCKING_STATUSES` / `SPACE_STATUSES` + 缺空格），没有任何状态文字正则；认字存疑只按结构化字段。
  */
-export function isReviewIssue(hit: FieldHit): boolean {
+function isReviewIssue(hit: FieldHit): boolean {
   return sharedIsReviewIssue(hit);
 }
 
