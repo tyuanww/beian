@@ -116,6 +116,9 @@ export function actorLabel(name: string | null | undefined): string {
   return creatorLabel(name);
 }
 
+/** 本批可核对页数上限（仓库里服务端/后端没有可共用的常量，后端 page_over 门按 1 页）；B04 逐页核对上线后改 4，见 TODOS B04。 */
+const REVIEW_PAGE_LIMIT = 1;
+
 export const REVIEW_COPY = {
   reject: "退回",
   sign: "签字",
@@ -161,13 +164,15 @@ export const REVIEW_COPY = {
   verbatimNoneLead: "这轮没有要退的字",
   verbatimNoneNote: "只核了稿上的字在不在确认单里",
   reupload: "重新上传这一单",
+  /** 对照失败且没有有效条目的单：没有接口能接着核（产品 10/17 选 1），只给「回首页」链接，不调接口。 */
+  compareFailedNoHits: "这一单没法接着核了，请回首页重新新建一单",
+  backHome: "回首页",
   allDecided: "全部已下结论",
   /** 右栏「待确认」列表空态（产品哥 2026-10-11；核对栏一行提示不带句号）。 */
   pendingEmpty: "没有待确认的了",
   /** 提交失败按服务端状态/错误码映射；不把服务端原文给用户看。 */
   submitStillChecking: "这份稿还在检查，等一会儿再提交",
   submitPending: (n: number) => `还有 ${n} 条待确认，处理完才能签字`,
-  rejectBlockedByPending: (n: number) => `还有 ${n} 条待确认，处理完才能退回`,
   collapse: "收起",
   expand: (n: number) => `展开疑点 · 待确认 ${n}`,
   tabs: { pending: "待确认", issue: "有错", all: "全部" },
@@ -220,13 +225,24 @@ export const REVIEW_COPY = {
   heldUnread: "认字存疑",
   /** 条目状态不在已知集合：与服务端 /complete 400「审核数据状态异常」对齐。 */
   invalidHitStatus: "审核数据状态异常",
+  /** 页头与悬停用服务端 /complete 400 原话（产品哥 2026-10-17）；N 含非法 decision，同服务端 `isValidHitReviewState`。 */
+  invalidHitStatusDetail: (n: number) => `有 ${n} 条审核数据状态异常，请重新对照`,
   /** 审稿员可见的认字报错：不露组件名、路径或堆栈。 */
   ocrFailed: "认字出了问题，请联系管理员",
+  /** 复核认字失败、没有剩余条目、条里有「重新上传这一单」按钮时：产品哥 2026-10-17 定稿，句尾特意留「再不行请联系管理员」作退路。 */
+  ocrFailedReupload: "认字出了问题，可以重新上传这一单，再不行请联系管理员",
   /** 后端超页（page_over）：只核 1 页。不写「拆分后上传」。 */
   pageOver: "稿件超过 1 页，暂不支持核对，请联系管理员",
-  reworkFailed: "复核出了问题，下面是上一轮的结果，请联系管理员",
-  compareFailedWithHits: "检查中断了，下面是上一轮的结果，请联系管理员",
-  reworkPageOver: "稿件超过 1 页，这次复核没做，下面是上一轮的结果，请联系管理员",
+  /** 复核失败带上一轮条目的红条 / 黄条（老板 2026-10-17 复核失败按 B）：结尾引导重新上传，条里有「重新上传这一单」按钮。 */
+  reworkFailed: "复核出了问题，下面是上一轮的结果，可以重新上传这一单",
+  /** 检查中断带上一轮条目（产品 10/17 方案 A，服务端已放行 /rework）：条里同样有「重新上传这一单」。 */
+  compareFailedWithHits: "检查中断了，下面是上一轮的结果，可以重新上传这一单",
+  /** 同上三种条，但这一单不给「重新上传这一单」（别人的单、viewer、服务端不放行）：去掉句尾的重新上传（产品哥 2026-10-17）。 */
+  reworkFailedReadOnly: "复核出了问题，下面是上一轮的结果",
+  compareFailedWithHitsReadOnly: "检查中断了，下面是上一轮的结果",
+  reworkPageOverReadOnly: `稿件超过 ${REVIEW_PAGE_LIMIT} 页，这次复核没做，下面是上一轮的结果`,
+  /** 黄条（复核超页，按 job_error_code==="page_over"，不拼服务端 job_error 原文）：产品哥 2026-10-17 定稿。 */
+  reworkPageOver: `稿件超过 ${REVIEW_PAGE_LIMIT} 页，这次复核没做，下面是上一轮的结果。请改成 ${REVIEW_PAGE_LIMIT} 页后重新上传这一单`,
   heldNote: "备注没对上",
   excelMissing: "确认单没有这段",
   spaceLabel: "空格",

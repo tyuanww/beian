@@ -9,6 +9,8 @@ type Props = {
   rows: RejectRow[];
   /** 还没下结论的条数；>0 时服务端不收 /complete，确认按钮挡住。 */
   pending?: number;
+  /** 挡住时退回框里的提示：服务端 /complete 400 原话（`submitGate` 的 rejectTitle），如「仍有 1 条疑点未处理」。 */
+  blockedText?: string;
   held?: number;
   fscNote?: string;
   busy: boolean;
@@ -19,7 +21,7 @@ type Props = {
 };
 
 /** 签字/退回确认框；文案按 deviations.md 第 33–35b 行（已批 2026-10-11）。提交失败不关框、不清补充说明。 */
-export function ReviewSubmitDialog({ kind, rows, pending = 0, held = 0, fscNote, busy, failed, onCancel, onConfirm }: Props) {
+export function ReviewSubmitDialog({ kind, rows, pending = 0, blockedText = "", held = 0, fscNote, busy, failed, onCancel, onConfirm }: Props) {
   const [extra, setExtra] = useState("");
   const reject = kind === "reject";
   const blocked = submitDialogBlocked(pending);
@@ -37,7 +39,7 @@ export function ReviewSubmitDialog({ kind, rows, pending = 0, held = 0, fscNote,
       destroyOnHidden={false}
       className="review-submit-dialog"
     >
-      {reject && blocked ? <p id="review-reject-blocked" className="review-submit-error review-reject-blocked" role="status">{REVIEW_COPY.rejectBlockedByPending(pending)}</p> : null}
+      {reject && blocked ? <p id="review-reject-blocked" className="review-submit-error review-reject-blocked" role="status">{blockedText}</p> : null}
       <p>{reject ? REVIEW_COPY.rejectBody(rows.length) : REVIEW_COPY.signBody}</p>
       {!reject && held > 0 ? <p data-testid="review-sign-held">{REVIEW_COPY.heldLine(held)}</p> : null}
       {!reject && fscNote ? <p data-testid="review-sign-fsc">{fscNote}</p> : null}
