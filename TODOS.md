@@ -331,6 +331,8 @@ RF-10–RF-13 的原始依赖见 [ADR-007 §20.7](docs/adr-007-packaging-render-
   1. 后端超页时另带错误码 `page_over`（例如新增字段 `job_error_code`），文案照旧。
   2. 前端按错误码判断，不再匹配文案。
   3. **验收：** 超页单返回 `job_error_code: "page_over"`；其他报错不带或带各自的码；前端改文案后判断仍对；有回归。
+  4. pstack batch4：旧超页失败单（存盘无码）读取时按原文补码的兼容逻辑已独立为 `apps/web/server/src/legacyPageOver.ts`。**删除条件：** 在生产 tasks 目录跑 `npm run legacy:page-over -w beian-server -- <tasks 目录>` 得到 0（旧失败单都已重跑或归档）后，删该文件、`tasks.ts` 调用与测试。生产计数待有权限的人跑，未跑。
+  5. pstack batch4 Bug：老的失败超页单在核对页顶部导航显示「全部已下结论」（失败单无 hits，`positionLabel` 空列表回落该文案）。已本地修：失败单顶部不显示结论进度，只留失败原因 Alert；e2e 补回归。未发版。
 
 - [ ] **B07 — 渲染版本历史 `actor_label` 在 2026-10-16 前可能不准**
 
