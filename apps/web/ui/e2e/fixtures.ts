@@ -49,6 +49,9 @@ export type SyntheticTask = {
   job_kind?: string;
   job_status?: string;
   job_stage_label?: string;
+  job_error?: string;
+  job_error_code?: "page_over";
+  error?: string;
   queue_ahead?: number;
   hits?: SyntheticHit[];
   pages?: Array<{
