@@ -278,3 +278,25 @@ test("复核超页、没有剩余条目（Q9）：自己的单标题「稿件超
   await expect(page.locator(".ant-alert-warning")).not.toContainText(/请联系管理员|回首页/u);
   await expect(page.getByRole("button", { name: REVIEW_COPY.reupload })).toHaveCount(0);
 });
+
+test("首次对照就超页、没有条目：自己的单标题「稿件超过 1 页」+正文请回首页新建+「回首页」；别人的单只有标题", async ({ page, syntheticApi }) => {
+  await asReviewer(page);
+  const base = { status: "compare_failed", board: "failed", job_kind: "compare", job_status: "failed", job_error: "稿件超过 1 页", job_error_code: "page_over" as const, hits: [] };
+  const mine = reviewTask("e5969b58ce13");
+  Object.assign(mine, base, { owner: ME });
+  const theirs = reviewTask("e5969b58ce14");
+  Object.assign(theirs, base, { owner: "ou_someone_else" });
+  syntheticApi.tasks.push(mine, theirs);
+  await page.goto(`/review/${mine.id}`);
+  const bar = page.locator(".ant-alert-warning");
+  await expect(bar.locator(".ant-alert-title")).toHaveText("稿件超过 1 页");
+  await expect(bar.locator(".ant-alert-description")).toHaveText(REVIEW_COPY.compareFailedNoHits);
+  await expect(bar.getByRole("link", { name: REVIEW_COPY.backHome })).toBeVisible();
+  await expect(bar).not.toContainText(/请联系管理员|请改成/u);
+  await expect(page.getByRole("button", { name: REVIEW_COPY.reupload })).toHaveCount(0);
+  await page.goto(`/review/${theirs.id}`);
+  await expect(page.locator(".ant-alert-warning .ant-alert-title")).toHaveText("稿件超过 1 页");
+  await expect(page.locator(".ant-alert-warning .ant-alert-description")).toHaveCount(0);
+  await expect(page.locator(".ant-alert-warning")).not.toContainText(/请联系管理员|回首页|重新上传/u);
+  await expect(page.getByTestId("review-back-home")).toHaveCount(0);
+});

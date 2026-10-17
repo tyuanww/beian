@@ -4,6 +4,7 @@
  * `apps/web/server/src/signReturnRules.ts`，前端由 `signReturnRules.contract.test.ts` 逐行对照。
  */
 import type { FieldHit, TaskDetail } from "../api";
+import { REVIEW_COPY } from "../copy/labels";
 import { needsOrderHeldConfirm, signAllowedForOrderHeld } from "./orderHeldConfirm";
 import { skipPackSheetField } from "./reviewDock";
 import { submitGate, type SubmitGate } from "./reviewFlat";
@@ -54,6 +55,30 @@ function activeHitCount(task: Pick<TaskDetail, "verbatim_check" | "hits" | "hits
     ? (Array.isArray(task.hits_v2) ? task.hits_v2 : Array.isArray(task.hits) ? task.hits : [])
     : (Array.isArray(task.hits_v2) && task.hits_v2.length > 0 ? task.hits_v2 : task.hits || []);
   return hits.filter((hit) => !skipPackSheetField(hit.field)).length;
+}
+
+/**
+ * 没有上一轮条目的失败条：正文和按钮（标题另由 `reviewErrorCopy` 出）。
+ * - 有「重新上传这一单」按钮：不写正文，给按钮；
+ * - 对照失败且没有有效条目（`isDeadCompareFailed`）：正文「这一单没法接着核了，请回首页重新新建一单」+「回首页」；
+ *   其中超页（`job_error_code === "page_over"`，产品 10/17 定）只给这单自己能动的人（有 create，且管理员或本人），
+ *   别人的单只出标题「稿件超过 N 页」，不给正文和按钮；
+ * - 其余（如别人的复核失败、没有剩余条目的单）：正文仍是「重新上传这一单」。
+ */
+export type FailedNoHitsBar = { body: string | null; action: "reupload" | "backHome" | null };
+
+export function failedNoHitsBar(
+  task: (Pick<TaskDetail, "status" | "job_error_code" | "verbatim_check" | "hits" | "hits_v2" | "owner">) | null,
+  reupload: boolean,
+  viewer: Pick<ReuploadViewer, "canCreate" | "admin" | "openId" | "displayName">,
+): FailedNoHitsBar {
+  if (reupload) return { body: null, action: "reupload" };
+  if (isDeadCompareFailed(task)) {
+    const ownsIt = viewer.canCreate && canAccessTaskOwner(task, viewer);
+    if (task?.job_error_code === "page_over" && !ownsIt) return { body: null, action: null };
+    return { body: REVIEW_COPY.compareFailedNoHits, action: "backHome" };
+  }
+  return { body: REVIEW_COPY.reupload, action: null };
 }
 
 /** 当前登录人：与服务端 `/rework` 的 `need(c, "create")` + `assertCanAccessTask` 用同一组字段（`/api/auth/me`）。 */

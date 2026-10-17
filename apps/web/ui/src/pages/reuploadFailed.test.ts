@@ -4,7 +4,7 @@ import type { FieldHit, TaskDetail } from "../api";
 import { REVIEW_COPY } from "../copy/labels";
 import { reviewErrorCopy, type FailedWithHitsKind } from "./reviewErrorCopy";
 import { rejectNote, signHint, submitGate } from "./reviewFlat";
-import { canAccessTaskOwner, canReuploadFailed, isDeadCompareFailed, reviewPageHits, reviewSubmitButtons, type ReuploadViewer } from "./reviewActions";
+import { canAccessTaskOwner, canReuploadFailed, failedNoHitsBar, isDeadCompareFailed, reviewPageHits, reviewSubmitButtons, type ReuploadViewer } from "./reviewActions";
 
 /**
  * 复核失败按 B：红条（复核失败）、黄条（复核超页）、检查中断条（方案 A）里给自己的单「重新上传这一单」。
@@ -238,5 +238,32 @@ describe("签字和退回都做不了就不叫人去处理：右上和页头那�
     const l = lines(others, true, admin);
     assert.equal(l.hint, "仍有 1 条疑点未处理");
     assert.equal(l.note, "仍有 1 条疑点未处理");
+  });
+});
+
+describe("首次对照就超页、又没有条目（产品 10/17 定）：自己能动的人回首页，别人的单只出标题", () => {
+  const over = (owner: string | null) => ({ id: "e5969b58cd9b", title: "合成超页单", type: "pack", owner, status: "compare_failed", job_kind: "compare", job_status: "failed", job_error: "稿件超过 1 页", job_error_code: "page_over", hits: [] }) as unknown as TaskDetail;
+  const title = (t: TaskDetail, v: ReuploadViewer) => reviewErrorCopy(String(t.job_error), t.job_error_code, undefined, canReuploadFailed(t, [], v));
+  it("自己的单 / 管理员：标题「稿件超过 1 页」，正文复用「这一单没法接着核了，请回首页重新新建一单」，给「回首页」", () => {
+    for (const [t, v] of [[over("ou_me"), reviewer], [over("ou_other"), admin]] as const) {
+      assert.equal(canReuploadFailed(t, [], v), false, "Q4 不在本 PR：无条目检查中断单不给重新上传");
+      assert.equal(title(t, v), "稿件超过 1 页");
+      assert.deepEqual(failedNoHitsBar(t, false, v), { body: "这一单没法接着核了，请回首页重新新建一单", action: "backHome" });
+      assert.equal(failedNoHitsBar(t, false, v).body, REVIEW_COPY.compareFailedNoHits, "复用 B 的常量，不另写字串");
+    }
+  });
+  it("别人的单、viewer、没有 owner 的老单：只出标题，没有正文、没有按钮，不出「请联系管理员」", () => {
+    for (const [t, v] of [[over("ou_other"), reviewer], [over("ou_me"), viewer], [over(null), reviewer]] as const) {
+      assert.equal(title(t, v), "稿件超过 1 页");
+      assert.deepEqual(failedNoHitsBar(t, false, v), { body: null, action: null });
+    }
+  });
+  it("不是超页的无条目检查中断单：照旧人人都有正文和「回首页」", () => {
+    const plain = { ...over("ou_other"), job_error: "对照中断", job_error_code: undefined } as TaskDetail;
+    assert.deepEqual(failedNoHitsBar(plain, false, reviewer), { body: REVIEW_COPY.compareFailedNoHits, action: "backHome" });
+    assert.deepEqual(failedNoHitsBar(plain, false, viewer), { body: REVIEW_COPY.compareFailedNoHits, action: "backHome" });
+  });
+  it("有重新上传按钮：不写正文，给按钮", () => {
+    assert.deepEqual(failedNoHitsBar(over("ou_me"), true, reviewer), { body: null, action: "reupload" });
   });
 });
