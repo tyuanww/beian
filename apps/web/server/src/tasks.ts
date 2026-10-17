@@ -390,10 +390,11 @@ export function isReworkableTask(
 ): boolean {
   if (hasReworkPages(task)) return false;
   if (task.status === "pending_review" || task.status === "in_review") return true;
-  // 产品 10/17 方案 A → 加码 Q4：「检查中断」单（对照失败、没有 pages_v2）可重新上传对红，
-  // 不再要求还留着上一轮条目（无条目 / 只剩工艺说明也放行）。回收出来的失败和对照命令行自己失败的不区分。
+  // 产品 10/17 方案 A：「检查中断」单（对照失败、还留着上一轮条目）可重新上传对红。回收出来的失败
+  // 和对照命令行自己失败的不区分；对照失败已没有条目的照旧不放行。工艺说明这类不进机审的字段不算条目
+  // （activeHits 已经滤掉）。
   if (task.status === "compare_failed") {
-    return task.job_kind === "compare" && task.job_status === "failed";
+    return task.job_kind === "compare" && task.job_status === "failed" && activeHits(task as Task).length > 0;
   }
   return task.status === "completed" && task.complete_kind === "rework";
 }
