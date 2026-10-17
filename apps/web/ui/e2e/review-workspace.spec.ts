@@ -858,14 +858,19 @@ test("超页：后端回 job_error_code=page_over 时显示黄色提醒", async 
   const task = reviewTask("e5969b58cd60");
   task.status = "compare_failed";
   task.board = "failed";
+  task.job_kind = "compare";
   task.job_status = "failed";
   task.job_error = "这一单页数超过可核对页数";
   task.job_error_code = "page_over";
   syntheticApi.tasks.push(task);
   await page.goto(`/review/${task.id}`);
-  const alert = page.locator(".ant-alert").filter({ hasText: "稿件超过 1 页，暂不支持核对，请联系管理员" });
+  // 这张合成单带着上一轮条目（检查中断 + page_over，找茬哥 10/17）：管理员有「重新上传这一单」，
+  // 用黄条定稿文案，后半句跟着按钮；同一条里不出「请联系管理员」。
+  const alert = page.locator(".ant-alert").filter({ hasText: "稿件超过 1 页，这次复核没做，下面是上一轮的结果。请改成 1 页后重新上传这一单" });
   await expect(alert).toBeVisible();
   await expect(alert).toHaveClass(/ant-alert-warning/);
+  await expect(alert.getByRole("button", { name: "重新上传这一单" })).toBeVisible();
+  await expect(alert).not.toContainText("请联系管理员");
   await page.screenshot({ path: info.outputPath("page-over-warning.png") });
 });
 

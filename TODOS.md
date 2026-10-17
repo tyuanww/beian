@@ -570,7 +570,7 @@ RF-10–RF-13 的原始依赖见 [ADR-007 §20.7](docs/adr-007-packaging-render-
 - [x] 前端核对页给这种单加「重新上传这一单」入口（调现有 `/rework`）：红条（复核失败）、黄条（复核超页，按 `job_error_code === "page_over"`）已加，只在本人单（`owner === me.open_id` 且有 `create`）或管理员显示，viewer / 别人的单不显示；前端 `isReworkableTask`（`reviewActions.ts`）照服务端同名函数放行。三条定稿文案在 `labels.ts`，不拼服务端 `job_error` 原文。
 - [x] 「检查中断」单（方案 A，产品 10/17）：`isReworkableTask` 放行所有 `status: compare_failed` + `job_kind: compare` + `job_status: failed`、`activeHits` 还有条目、没有 `pages_v2` 的单，回收出来的失败和对照命令行自己失败的不区分；对照失败已没有条目的、有 `pages_v2` 的照旧回 400「当前状态不可对红」。`/rework` 对这种单把 `status_before_job` 记成 `pending_review` 并清掉旧 `error`，复核失败落到待审 + 对红失败（红条，签字退回拦，可再传），不再变成不可读单。签字退回在复核前仍 400。
 - [x] 前端跟上方案 A：`reviewActions.ts` 的 `isReworkableTask` 同条件放行检查中断单（有效条目同服务端 `activeHits`：认字单看 `hits_v2`、其他单 `hits_v2` 非空看它否则看 `hits`，跳过工艺表字段），条里文案「检查中断了，下面是上一轮的结果，可以重新上传这一单」+「重新上传这一单」按钮（本人单 / 管理员，viewer 不显示）。`reworkable.contract.test.ts` 把前后端 `isReworkableTask` 逐例对照（含只剩工艺说明条目的单两边都不放行）。
-- [ ] 对照失败且没有有效条目的单（`compare_failed`、按服务端 `activeHits` 算为 0，含只剩工艺说明的）：产品 10/17 选 1，前端失败条正文「这一单没法接着核了，请回首页重新新建一单」+「回首页」链接（只跳路由，不调接口；`reviewActions.ts` `isDeadCompareFailed`），不再显示看着能点的纯文字「重新上传这一单」。能否原地重新上传留到加码 PR 评估（服务端那条见开发哥记的条目）；放行后前端去掉这条分支。
+- [ ] 对照失败且没有有效条目的单（`compare_failed`、按服务端 `activeHits` 算为 0，含只剩工艺说明的）：产品 10/17 选 1，前端失败条正文「这一单没法接着核了，请回首页重新新建一单」+「回首页」链接（只跳路由，不调接口；`reviewActions.ts` `isDeadCompareFailed`），不再显示看着能点的纯文字「重新上传这一单」。能否原地重新上传留到加码 PR 评估（服务端那条见开发哥记的条目）；加码 PR 放开无条目重新上传时，前端把正文换成「可以重新上传这一单」并去掉「回首页」（`isDeadCompareFailed` 分支）。
 - [ ] 黄条原文：服务端超页 `job_error` 现在是「稿件超过 1 页，暂不支持核对，请联系管理员」，要去掉「请联系管理员」，放到加码 PR 里做；前端按 `job_error_code: "page_over"` 显示自己的文案，不读这句原文。
 - [x] 非逐字单出现未决「待人工确认」：两边都算待确认；服务端回 400「仍有 N 条待人工确认未处理」（逐字单仍走整单确认勾选）。
 - [x] 只读账号（viewer）：前端隐藏签字/退回；服务端 403。

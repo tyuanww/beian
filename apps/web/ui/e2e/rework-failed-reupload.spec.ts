@@ -24,18 +24,18 @@ async function asReviewer(page: Page) {
   }));
 }
 
-type Bar = { name: string; id: string; alert: string; title: string; patch: Partial<SyntheticTask> };
+type Bar = { name: string; id: string; alert: string; title: string; readOnly: string; patch: Partial<SyntheticTask> };
 const BARS: Bar[] = [
   {
-    name: "红条：复核失败", id: "e5969b58ce01", alert: ".ant-alert-error", title: REVIEW_COPY.reworkFailed,
+    name: "红条：复核失败", id: "e5969b58ce01", alert: ".ant-alert-error", title: REVIEW_COPY.reworkFailed, readOnly: REVIEW_COPY.reworkFailedReadOnly,
     patch: { status: "pending_review", job_kind: "rework", job_status: "failed", job_error: "对照中断" },
   },
   {
-    name: "黄条：复核超页", id: "e5969b58ce02", alert: ".ant-alert-warning", title: REVIEW_COPY.reworkPageOver,
+    name: "黄条：复核超页", id: "e5969b58ce02", alert: ".ant-alert-warning", title: REVIEW_COPY.reworkPageOver, readOnly: REVIEW_COPY.reworkPageOverReadOnly,
     patch: { status: "pending_review", job_kind: "rework", job_status: "failed", job_error: "这一单页数超过可核对页数", job_error_code: "page_over" },
   },
   {
-    name: "检查中断带上一轮条目", id: "e5969b58ce03", alert: ".ant-alert-error", title: REVIEW_COPY.compareFailedWithHits,
+    name: "检查中断带上一轮条目", id: "e5969b58ce03", alert: ".ant-alert-error", title: REVIEW_COPY.compareFailedWithHits, readOnly: REVIEW_COPY.compareFailedWithHitsReadOnly,
     patch: { status: "compare_failed", board: "failed", job_kind: "compare", job_status: "failed", job_error: "对照中断", error: "对照中断" },
   },
 ];
@@ -108,7 +108,8 @@ for (const bar of BARS) {
     const task = failedTask(bar, "ou_someone_else");
     syntheticApi.tasks.push(task);
     await page.goto(`/review/${task.id}`);
-    await expect(page.locator(bar.alert).filter({ hasText: bar.title })).toBeVisible();
+    // 不给按钮就不写句尾的「可以重新上传这一单」。
+    await expect(page.locator(bar.alert).locator(".ant-alert-title")).toHaveText(bar.readOnly);
     await expect(page.getByRole("button", { name: REVIEW_COPY.reupload })).toHaveCount(0);
     await expect(page.locator("#review-sign-hint")).toHaveCount(0);
     await expect(page.getByTestId("review-reject-note")).toHaveCount(0);

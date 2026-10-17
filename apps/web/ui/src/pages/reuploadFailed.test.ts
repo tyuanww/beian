@@ -28,7 +28,7 @@ const viewer: ReuploadViewer = { canCreate: false, admin: false, openId: "ou_me"
 describe("失败条里的「重新上传这一单」", () => {
   for (const bar of BARS) {
     it(`${bar.name}：文案不再叫人联系管理员，结尾引导重新上传；自己的单有按钮`, () => {
-      const text = reviewErrorCopy("对照中断", bar.code, bar.kind);
+      const text = reviewErrorCopy("对照中断", bar.code, bar.kind, true);
       assert.doesNotMatch(text, /请联系管理员/u);
       assert.ok(text.endsWith("重新上传这一单"), text);
       assert.match(text, /下面是上一轮的结果/u);
@@ -124,6 +124,35 @@ describe("对照失败且没有有效条目：请回首页新建一单（产品 
     assert.equal(REVIEW_COPY.compareFailedNoHits, "这一单没法接着核了，请回首页重新新建一单");
     assert.equal(REVIEW_COPY.backHome, "回首页");
     assert.doesNotMatch(REVIEW_COPY.compareFailedNoHits, /请联系管理员|重新上传/u);
+  });
+});
+
+describe("不给重新上传的失败条：句尾不写重新上传（别人的单、viewer）", () => {
+  const READ_ONLY: Record<string, string> = {
+    "红条：复核失败": "复核出了问题，下面是上一轮的结果",
+    "黄条：复核超页": "稿件超过 1 页，这次复核没做，下面是上一轮的结果",
+    "检查中断带上一轮条目": "检查中断了，下面是上一轮的结果",
+  };
+  for (const bar of BARS) {
+    it(`${bar.name}：自己的单带「可以重新上传这一单」句尾，别人的单和 viewer 没有`, () => {
+      const own = task(bar.task);
+      const others = task(bar.task, "ou_other");
+      const copyFor = (t: TaskDetail, v: ReuploadViewer) => reviewErrorCopy("对照中断", bar.code, bar.kind, canReuploadFailed(t, reviewPageHits(t, false), v));
+      assert.match(copyFor(own, reviewer), /重新上传这一单$/u);
+      assert.equal(copyFor(others, reviewer), READ_ONLY[bar.name]);
+      assert.equal(copyFor(own, viewer), READ_ONLY[bar.name]);
+      assert.equal(canReuploadFailed(others, reviewPageHits(others, false), admin), true);
+      assert.equal(copyFor(others, admin), reviewErrorCopy("对照中断", bar.code, bar.kind, true), "管理员看别人的单：按钮在，句尾跟着留");
+      assert.doesNotMatch(READ_ONLY[bar.name], /重新上传|请联系管理员/u);
+    });
+  }
+  it("文案逐字（页数仍用上限常量）", () => {
+    assert.equal(REVIEW_COPY.reworkFailedReadOnly, "复核出了问题，下面是上一轮的结果");
+    assert.equal(REVIEW_COPY.reworkPageOverReadOnly, "稿件超过 1 页，这次复核没做，下面是上一轮的结果");
+    assert.equal(REVIEW_COPY.compareFailedWithHitsReadOnly, "检查中断了，下面是上一轮的结果");
+    assert.ok(REVIEW_COPY.reworkFailed.startsWith(REVIEW_COPY.reworkFailedReadOnly));
+    assert.ok(REVIEW_COPY.reworkPageOver.startsWith(REVIEW_COPY.reworkPageOverReadOnly));
+    assert.ok(REVIEW_COPY.compareFailedWithHits.startsWith(REVIEW_COPY.compareFailedWithHitsReadOnly));
   });
 });
 
