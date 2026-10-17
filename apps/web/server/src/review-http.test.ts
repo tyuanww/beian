@@ -1031,28 +1031,124 @@ describe("review http", () => {
     assert.equal(existsSync(join(process.env.WB_DATA_DIR as string, "uploads", tid, "artwork_v2.pdf")), false);
   });
 
-  it("对照失败且已没有条目：/rework 仍 400「当前状态不可对红」，不落盘", async () => {
+  it("加码 Q4：对照失败且已没有条目：/rework 200 入队，status_before_job 记 pending_review；失败后单可读、可再传", async () => {
     const tid = seedInterrupted("e8e8e8e8e8e8", { hits: [] });
-    const res = await reworkAs(tid);
-    assert.equal(res.status, 400);
-    assert.deepEqual(res.body, { detail: "当前状态不可对红", code: "rework_status_not_allowed" });
-    assert.equal(loadTask(tid).status, "compare_failed");
-    assert.equal(existsSync(join(process.env.WB_DATA_DIR as string, "uploads", tid, "artwork_v2.pdf")), false);
+    setJobsTestHooks({ runRework: async () => ({ code: 1, stdout: "", stderr: "boom", timedOut: false }) });
+    try {
+      const res = await reworkAs(tid);
+      assert.equal(res.status, 200);
+      assert.equal(res.body.job_kind, "rework");
+      assert.ok(res.body.job_status === "queued" || res.body.job_status === "running");
+      assert.equal(loadTask(tid).status_before_job, "pending_review");
+      assert.ok(existsSync(join(process.env.WB_DATA_DIR as string, "uploads", tid, "artwork_v2.pdf")));
+      await waitJobDone(tid);
+      const after = loadTask(tid);
+      assert.equal(after.status, "pending_review");
+      assert.equal(after.job_kind, "rework");
+      assert.equal(after.job_status, "failed");
+      assert.ok(hasValidTaskJobState(after));
+      const again = await reworkAs(tid);
+      assert.equal(again.status, 200);
+      assert.ok(again.body.job_status === "queued" || again.body.job_status === "running");
+      assert.equal(loadTask(tid).status_before_job, "pending_review");
+      await waitJobDone(tid);
+    } finally {
+      resetJobsTestHooks();
+    }
   });
 
-  it("对照失败且只剩工艺说明条目：不算剩余条目，/rework 回 400「当前状态不可对红」，不入队不落盘", async () => {
+  it("加码 Q4：对照失败且只剩工艺说明条目：也放行 /rework 200 入队", async () => {
     const tid = seedInterrupted("e9e9e9e9e9e9", {
       hits: [hit({ id: "h1", field: "工艺说明", decision: "pending" }), hit({ id: "h2", field: "颜色要求：专色", decision: "pending" })],
     });
-    const res = await reworkAs(tid);
-    assert.equal(res.status, 400);
-    assert.deepEqual(res.body, { detail: "当前状态不可对红", code: "rework_status_not_allowed" });
+    setJobsTestHooks({ runRework: async () => ({ code: 1, stdout: "", stderr: "", timedOut: false }) });
+    try {
+      const res = await reworkAs(tid);
+      assert.equal(res.status, 200);
+      assert.equal(res.body.job_kind, "rework");
+      assert.ok(res.body.job_status === "queued" || res.body.job_status === "running");
+      assert.equal(loadTask(tid).status_before_job, "pending_review");
+      assert.ok(existsSync(join(process.env.WB_DATA_DIR as string, "uploads", tid, "artwork_v2.pdf")));
+      await waitJobDone(tid);
+    } finally {
+      resetJobsTestHooks();
+    }
+  });
+
+  it("加码 Q4：管理员替别人的检查中断单 /rework（有条目）回 200 并入队", async () => {
+    const tid = seedInterrupted("a4a4a4a4a401");
+    const admin = issueSessionForTest("管理员", "admin", "ou_admin_rework_hits");
+    const fd = new FormData();
+    fd.set("pdf", new File([Buffer.from("%PDF-1.4\n")], "v2.pdf", { type: "application/pdf" }));
+    setJobsTestHooks({ runRework: async () => ({ code: 1, stdout: "", stderr: "", timedOut: false }) });
+    try {
+      const res = await app.request(`/api/tasks/${tid}/rework`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${admin.token}` },
+        body: fd,
+      });
+      assert.equal(res.status, 200);
+      const body = (await res.json()) as { job_kind?: string; job_status?: string };
+      assert.equal(body.job_kind, "rework");
+      assert.ok(body.job_status === "queued" || body.job_status === "running");
+      assert.equal(loadTask(tid).status_before_job, "pending_review");
+      assert.ok(existsSync(join(process.env.WB_DATA_DIR as string, "uploads", tid, "artwork_v2.pdf")));
+      await waitJobDone(tid);
+    } finally {
+      resetJobsTestHooks();
+    }
+  });
+
+  it("加码 Q4：管理员替别人的检查中断单 /rework（无条目）回 200 并入队", async () => {
+    const tid = seedInterrupted("a4a4a4a4a402", { hits: [] });
+    const admin = issueSessionForTest("管理员", "admin", "ou_admin_rework_nohits");
+    const fd = new FormData();
+    fd.set("pdf", new File([Buffer.from("%PDF-1.4\n")], "v2.pdf", { type: "application/pdf" }));
+    setJobsTestHooks({ runRework: async () => ({ code: 1, stdout: "", stderr: "", timedOut: false }) });
+    try {
+      const res = await app.request(`/api/tasks/${tid}/rework`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${admin.token}` },
+        body: fd,
+      });
+      assert.equal(res.status, 200);
+      const body = (await res.json()) as { job_kind?: string; job_status?: string };
+      assert.equal(body.job_kind, "rework");
+      assert.ok(body.job_status === "queued" || body.job_status === "running");
+      assert.equal(loadTask(tid).status_before_job, "pending_review");
+      assert.ok(existsSync(join(process.env.WB_DATA_DIR as string, "uploads", tid, "artwork_v2.pdf")));
+      await waitJobDone(tid);
+    } finally {
+      resetJobsTestHooks();
+    }
+  });
+
+  it("加码：非管理员对别人的单 POST /complete 回 403 {detail:没有权限}，不改状态、不写 audit", async () => {
+    const tid = "141414141415";
+    seed({
+      id: tid,
+      title: "别人的签",
+      product_name: "别人的签",
+      type: "excel_pdf",
+      status: "pending_review",
+      owner: "ou_review_http",
+      hits: [hit({ status: "一致", decision: "confirm" })],
+    });
+    const before = loadTask(tid);
+    const snap = taskStoreSnapshot();
+    const other = issueSessionForTest("路人", "reviewer", "ou_other_complete_q4");
+    const res = await app.request(`/api/tasks/${tid}/complete`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${other.token}`, "content-type": "application/json" },
+      body: JSON.stringify({ conclusion: "偷签" }),
+    });
+    assert.equal(res.status, 403);
+    assert.deepEqual(await res.json(), { detail: "没有权限" });
     const after = loadTask(tid);
-    assert.equal(after.status, "compare_failed");
-    assert.equal(after.job_kind, "compare");
-    assert.equal(after.job_status, "failed");
-    assert.equal(after.error, "对照中断");
-    assert.equal(existsSync(join(process.env.WB_DATA_DIR as string, "uploads", tid, "artwork_v2.pdf")), false);
+    assert.equal(after.status, before.status);
+    assert.equal(after.conclusion, before.conclusion);
+    assert.equal(after.complete_kind, before.complete_kind);
+    assert.equal(taskStoreSnapshot().tasks.length, snap.tasks.length);
   });
 
   it("treats an open 待人工确认 on a non-verbatim order as pending", async () => {

@@ -12,8 +12,7 @@ import { partitionReviewHits } from "./reviewEvidence";
 const isReviewIssue = (hit: FieldHit) => partitionReviewHits([hit]).issues.length === 1;
 
 /**
- * 锁住已知差异（TODOS「isReviewIssue 比 hitNeedsDecision 多拦」，产品哥 10/17：以前端为准、服务端在加码 PR 跟上）。
- * 这里不改任何一边，只把差异钉死：哪一边先动了，这里就变红，提醒同时改 TODOS 和这份测试。
+ * 加码 Q2 服务端已跟上：缺空格没结论一律要结论。原「差异一」已对齐；仍钉死「无存疑字段的缺空格」两侧分歧，前端哥对齐 isReviewIssue 后改掉。
  */
 const dataDir = mkdtempSync(join(tmpdir(), "beian-ui-issue-gap-"));
 process.once("exit", () => rmSync(dataDir, { recursive: true, force: true }));
@@ -30,19 +29,28 @@ function bothSides(hit: FieldHit) {
   return { ui, server: gate.ok ? null : gate.message };
 }
 
-describe("isReviewIssue 与服务端 hitNeedsDecision 的已知差异", () => {
-  it("差异一：缺空格没标 pending、只靠核对要点（evidence）有内容——前端算待确认、签字灰；服务端放行", () => {
+describe("isReviewIssue 与服务端 hitNeedsDecision（加码 Q2 后）", () => {
+  it("已对齐：缺空格没标 pending、只靠核对要点有内容——两边都拦（服务端写「仍有 1 条缺空格未处理」）", () => {
     const hit: FieldHit = { id: "h0", field: "中文品名", status: "缺空格", evidence: "稿件「香柠檬精油」少一个空格" };
     assert.equal(isReviewIssue(hit), true);
     const { ui, server } = bothSides(hit);
-    assert.equal(server, null, "服务端 pendingWord 只在缺空格标 pending 时拦");
+    assert.equal(server, "仍有 1 条缺空格未处理");
     assert.equal(ui.canSign, false);
     assert.equal(ui.canReject, true);
     assert.equal(ui.pending, 1);
     assert.equal(ui.hint, REVIEW_COPY.pendingUnresolved([{ word: "缺空格", count: 1 }]));
   });
 
-  it("差异二：正则 /不清|误/ 在已知状态里一个都不命中，只会撞上未知状态——两边都按状态异常拦，不产生实际分歧", () => {
+  it("仍有差异：缺空格无 decision、也无存疑字段——服务端拦、前端不算待确认（见 SIGN_RETURN_DISPUTED；前端哥对齐 isReviewIssue 后删）", () => {
+    const hit: FieldHit = { id: "h0", field: "中文品名", status: "缺空格" };
+    assert.equal(isReviewIssue(hit), false, "前端仍看核对要点有无内容");
+    const { ui, server } = bothSides(hit);
+    assert.equal(server, "仍有 1 条缺空格未处理");
+    assert.equal(ui.canSign, true);
+    assert.equal(ui.canReject, false);
+  });
+
+  it("正则 /不清|误/ 在已知状态里一个都不命中，只会撞上未知状态——两边都按状态异常拦，不产生实际分歧", () => {
     for (const status of KNOWN_STATUSES) {
       assert.equal(isValidHitReviewState({ status }), true, `${status} 服务端认得`);
       assert.doesNotMatch(status, /不清|误/u, status);
