@@ -954,7 +954,7 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
             </button>
           </span>
         ) : null}
-        {!phone ? (
+        {!phone && !failedJob ? (
           <span className="review-posn" role="group" aria-label="当前位置">
             <button type="button" aria-label="上一条" onClick={() => step(-1)}>‹</button>
             <b data-testid="review-posn">{locked ? positionLabel(tabIndices(hits, "all", active), active, undefined, heldCount) : positionLabel(tabList, active, tab === "pending" ? counts.pending : undefined, heldCount)}</b>

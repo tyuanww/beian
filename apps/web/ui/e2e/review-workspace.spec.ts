@@ -867,3 +867,19 @@ test("超页：报错文案像超页但没有 page_over 码时不显示超页提
   await expect(page.locator(".ant-alert-warning")).toHaveCount(0);
   await page.screenshot({ path: info.outputPath("page-over-no-code-error.png") });
 });
+
+test("失败单：顶部不显示结论进度，只显示失败原因", async ({ page, syntheticApi }, info) => {
+  const task = reviewTask("e5969b58cd62");
+  task.status = "compare_failed";
+  task.board = "failed";
+  task.job_status = "failed";
+  task.job_error = "稿件超过 1 页，暂不支持核对，请联系管理员";
+  task.job_error_code = "page_over";
+  task.hits = [];
+  syntheticApi.tasks.push(task);
+  await page.goto(`/review/${task.id}`);
+  await expect(page.locator(".ant-alert").filter({ hasText: "稿件超过 1 页，暂不支持核对，请联系管理员" })).toBeVisible();
+  await expect(page.getByTestId("review-posn")).toHaveCount(0);
+  await expect(page.getByText("全部已下结论")).toHaveCount(0);
+  await page.screenshot({ path: info.outputPath("failed-no-progress.png") });
+});
