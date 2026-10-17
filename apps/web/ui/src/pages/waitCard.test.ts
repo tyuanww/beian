@@ -185,7 +185,7 @@ describe("waitCardCopy", () => {
 
   it("feishuReady true tells her she can leave", () => {
     const copy = waitCardCopy({ kind: "compare", job_status: "running", feishuReady: true });
-    assert.match(copy.hint, /可以离开，完了飞书叫你/);
+    assert.match(copy.hint, /可以离开，完成后飞书会通知/);
   });
 
   it("running uses Figma wait-card body, not a fake cancel", () => {

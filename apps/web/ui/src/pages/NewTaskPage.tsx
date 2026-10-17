@@ -188,7 +188,7 @@ export function NewTaskPage({ canCreate, receiptId, onCreated, onBack }: Props) 
           } else {
             await uploadStore.abandon("compare");
           }
-          message.success("已放弃这次上传，文件资源已释放。");
+          message.success("已放弃这次上传。");
           onBack();
         } catch (err) {
           message.error(err instanceof Error ? err.message : "无法放弃这次上传");
@@ -312,11 +312,11 @@ export function NewTaskPage({ canCreate, receiptId, onCreated, onBack }: Props) 
         <article className="step-card">
           <b>2</b>
           <strong>自动检查</strong>
-          <p>不确定的内容会请你确认。</p>
+          <p>不确定的内容会留下来确认。</p>
         </article>
         <article className="step-card">
           <b>3</b>
-          <strong>你来确认</strong>
+          <strong>人工确认</strong>
           <p>看完疑点后提交结果。</p>
         </article>
       </div>

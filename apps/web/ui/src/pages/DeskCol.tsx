@@ -24,7 +24,7 @@ export function DeskCol({ title, hint, rows, onOpen }: Props) {
       </div>
       <p className="review-col-hint">{hint}</p>
       <div className="review-col-list">
-        {rows.length === 0 ? <div className="review-col-empty">没有单</div> : null}
+        {rows.length === 0 ? <div className="review-col-empty" /> : null}
         {rows.map((row) => (
           <button
             key={row.id}
@@ -57,7 +57,7 @@ export function DeskCol({ title, hint, rows, onOpen }: Props) {
           size="small"
           pagination={false}
           dataSource={rows}
-          locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="没有单" /> }}
+          locale={{ emptyText: <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="这一列是空的" /> }}
           onRow={(row) => ({
             onClick: () => {
               setOpen(false);

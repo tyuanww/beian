@@ -1,4 +1,5 @@
 import type { FieldHit } from "../api";
+import { REVIEW_COPY } from "../copy/labels";
 import statuses from "../../../backend/app/verbatim_statuses.json" with { type: "json" };
 import { isReviewIssue as sharedIsReviewIssue } from "../../../server/src/reviewIssue.ts";
 import { coverageTally, doubtLines, excelText, humanMissLines, NOT_READ, pdfText, spokenAsk } from "./hitText";
@@ -82,8 +83,10 @@ export function buildRevisionList(
     `品名：${productName || "—"}`,
     ...issues.map((hit, index) => {
       const note = hit.note ? `（${hit.note}）` : "";
-      const spoken = spokenAsk(hit, hit.field, options.located?.(hit));
+      const located = options.located?.(hit);
+      const spoken = spokenAsk(hit, hit.field, located);
       const doubts = spoken ? [spoken.lead, spoken.ask].filter(Boolean) : doubtLines(hit);
+      if (located === false && !doubts.includes(REVIEW_COPY.noBox)) doubts.unshift(REVIEW_COPY.noBox);
       const miss = humanMissLines(hit);
       const missText = miss.length ? ` / 没读到：${miss.join("；")}` : "";
       const doubtText = doubts.length ? ` / 疑点：${doubts.join("；")}` : "";

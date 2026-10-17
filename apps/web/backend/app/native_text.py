@@ -313,7 +313,7 @@ def attach_evidence(hits: list[dict], audit: list[dict]) -> None:
         # silently truncated compact card as the complete source evidence.
         if len(native) > 8192 or len(ocr or "") > 8192:
             continue
-        message = "两种文字来源无法唯一对应，请对照稿面。" if status == "conflict" else (
-            "原稿文字已直接参与核对规则。" if not ocr else "已核对可见稿面及文字位置，原稿文字已参与现有核对规则。"
+        message = "两种读法对不上，请看稿面。" if status == "conflict" else (
+            "原稿文字已经参与核对。" if not ocr else "已核对稿面和文字位置。"
         )
         hit["native_text_evidence"] = {"version": 1, "status": status, "native_text": native, "ocr_text": ocr, "message": message}

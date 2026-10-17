@@ -681,7 +681,7 @@ export function MockupNewPage({
           } else {
             await uploadStore.abandon("mockup");
           }
-          message.success("已放弃这次上传，文件资源已释放。");
+          message.success("已放弃这次上传。");
           onBack();
         } catch (err) {
           message.error(err instanceof Error ? err.message : "无法放弃这次上传");

@@ -242,12 +242,26 @@ export function lockedBy(task: DoneTask | null, me: string | null, now: Date = n
   return completedByText(task, now);
 }
 
+/** 带码的审稿拦截，给审稿员看的句子。没有对应句就返回 null，调用处再用服务端原文。 */
+export function reviewerCodeText(code: string): string | null {
+  if (code === "decision_value_invalid") return REVIEW_COPY.decisionInvalid;
+  if (code === "decision_hit_not_found") return REVIEW_COPY.decisionMissing;
+  if (code === "decision_status_not_reviewable") return REVIEW_COPY.decisionNotReviewable;
+  if (code === "rework_status_not_allowed") return REVIEW_COPY.reworkNotAllowed;
+  if (code === "rework_job_running") return REVIEW_COPY.reworkStillRunning;
+  return null;
+}
+
 /** 断网或请求没到服务器 → 「没连上网，这条没存上」；不排队、不自动重发。 */
 export function decisionFailureText(err: unknown, online: boolean): string {
   if (!online) return REVIEW_COPY.offline;
   if (err instanceof TypeError) return REVIEW_COPY.offline;
   // api.ts 把没到服务器的请求包成 status 0 的 ApiError。
   if (err && typeof err === "object" && (err as { status?: unknown }).status === 0) return REVIEW_COPY.offline;
+  if (err && typeof err === "object" && typeof (err as { code?: unknown }).code === "string") {
+    const mapped = reviewerCodeText((err as { code: string }).code);
+    if (mapped) return mapped;
+  }
   return err instanceof Error && err.message ? err.message : REVIEW_COPY.saveFailed;
 }
 
@@ -399,6 +413,8 @@ function codedSubmitText(code: ReviewCode, params: ReviewParams | null, detail: 
   if (code === "complete_hits_pending") return pendingItemsText(params?.items) ?? detail;
   if (code === "complete_hits_invalid" && typeof params?.count === "number") return REVIEW_COPY.invalidHitStatusDetail(params.count);
   if (code === "complete_order_held_unconfirmed") return REVIEW_COPY.orderHeldConfirm;
+  const mapped = reviewerCodeText(code);
+  if (mapped) return mapped;
   // 「当前状态不可签字」（complete_status_not_reviewable / complete_rework_failed）等其余码：照服务端原文出原意。
   return detail || REVIEW_COPY.submitFailed;
 }
@@ -421,6 +437,26 @@ export function submitFailureText(
   if (status === 409) return REVIEW_COPY.submitStillChecking;
   if (status === 400 && fresh && freshTally.length > 0) return REVIEW_COPY.pendingUnresolved(freshTally);
   return REVIEW_COPY.submitFailed;
+}
+
+/** 右栏搜索。空查询匹配全部。比较时去掉空白，条码和批号中间的空格不影响。 */
+export function hitMatchesQuery(
+  hit: { field?: string; status?: string; excel?: string; excel_value?: string; pdf?: string; found?: string; note?: string; page?: number | string },
+  query: string,
+): boolean {
+  const needle = query.trim().toLowerCase().replace(/\s+/g, "");
+  if (!needle) return true;
+  const hay = [hit.field, hit.status, hit.excel, hit.excel_value, hit.pdf, hit.found, hit.note, hit.page]
+    .filter((part) => part != null && part !== "")
+    .join(" ")
+    .toLowerCase()
+    .replace(/\s+/g, "");
+  return hay.includes(needle);
+}
+
+/** 失败单不说「没发现问题」或「这轮没有要退的字」，免得和顶部失败条抢话。 */
+export function showCleanBill(failed: boolean, total: number, held: number): boolean {
+  return !failed && total === 0 && held === 0;
 }
 
 /** 核对页「上传新稿」发请求前的大小预检：超限返回按当前账号上限生成的统一提示，不超返回 null。 */
