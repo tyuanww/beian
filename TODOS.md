@@ -549,6 +549,10 @@ RF-10–RF-13 的原始依赖见 [ADR-007 §20.7](docs/adr-007-packaging-render-
 - `apps/web/ui/src/App.tsx` `authTitle`（3 行）：按飞书登录失败文案含「伸美 / 不允许 / 取消 / 过期」选标题。需要后端在登录回跳里给原因码（denied / expired / forbidden / failed）。
 - `apps/web/ui/src/pages/reviewErrorCopy.ts` `reviewErrorCopy`（1 行）：`OCR_FAILED` 正则认「认字 / OCR / 文字识别」失败。需要后端给认字失败错误码（同 `page_over` 的做法）。
 - `apps/web/ui/src/pages/hitText.ts` `isAccountingCopy`（1 行）：**认的是后端 OCR 核对文本（score=、覆盖偏低、稿上命中 n/m 等），不是报错文案**。需要后端把这类核对说明给成结构化字段。只为存量登记，不作为新增例外的先例。
-- 本检查首次扫描新发现的存量（批次 4 指派时未列入，同样只减不增，待项目哥确认是否按此登记）：
+- 本检查首次扫描新发现的存量（批次 4 指派时未列入，同样只减不增；待后端错误码，第 5 批清）：
   - `apps/web/ui/src/pages/SettingsPage.tsx`（1 行）：保存失败文案含「App ID / Secret / 凭证」时跳到「飞书登录」分组。
-  - `apps/web/ui/src/pages/setupBoard.ts`（4 行）：探测结果文案含「未启用」「超时」决定状态词与 MiniMax 提示；`probeErrorMessage` 按浏览器 fetch 报错文案（failed to fetch 等）换成「服务没连上」。
+  - `apps/web/ui/src/pages/setupBoard.ts`（3 行）：探测结果文案含「未启用」「超时」决定状态词与 MiniMax 提示。
+
+永久例外（不在待清清单里，仍计入 `ALLOWED`，不作为新增例外的先例）：
+
+- `apps/web/ui/src/pages/setupBoard.ts` `probeErrorMessage`（1 行）：认的是浏览器 fetch 自己抛的报错（failed to fetch / networkerror / load failed，请求没到服务器），后端永远给不了码，只能按浏览器文案换成「服务没连上，请稍后重试。」。

@@ -7,6 +7,7 @@ import { ALLOW_MARKER, allowedLinesByFile, scanRepo, scanSource } from "./error-
  * 清掉一处就把对应数字减 1（为 0 就删掉这一行）；任何新增或调大都会让本测试失败。
  * 前三个文件是批次 4 指派时已知的三处；SettingsPage / setupBoard 是本检查首次扫描新发现的存量，同样只减不增。
  * hitText.ts 认的是后端 OCR 核对文本，不是报错文案，只为存量登记，不作为新增例外的先例。
+ * setupBoard.ts 中 probeErrorMessage 那 1 行是永久例外：认浏览器 fetch 自己抛的报错，后端给不了码；同样不作先例。
  */
 const ALLOWED = Object.freeze({
   "apps/web/ui/src/App.tsx": 3,
