@@ -358,7 +358,7 @@ async function installSyntheticApi(page: Page, state: SyntheticApi) {
           avatar_url: null,
           open_id: "ou_e2e_synthetic",
           role: "admin",
-          perms: ["read", "create", "delete", "export", "confirm_structure"],
+          perms: ["read", "create", "decide", "complete", "delete", "export", "confirm_structure"],
         });
       }
       if (method === "GET" && (path === "/api/status" || path === "/api/health")) {

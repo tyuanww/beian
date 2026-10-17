@@ -53,6 +53,8 @@ type Props = {
   userId: string | null;
   /** 当前登录人显示名；只用来判断「已被别人签字」。 */
   displayName?: string | null;
+  /** 有 complete 权限才能看见签字/退回；viewer 为 false。缺省 true。 */
+  canComplete?: boolean;
   onBack: () => void;
   /** 手机底部导航「历史」。 */
   onHistory?: () => void;
@@ -87,7 +89,7 @@ function spotTabObstacle(canvas: HTMLElement): SpotObstacle | null {
   return obstacle;
 }
 
-export function ReviewPage({ taskId, userId, displayName = null, onBack, onHistory }: Props) {
+export function ReviewPage({ taskId, userId, displayName = null, canComplete = true, onBack, onHistory }: Props) {
   const { message, modal } = App.useApp();
   const [task, setTask] = useState<TaskDetail | null>(() => reviewHandoffFor(taskId));
   const [error, setError] = useState<string | null>(null);
@@ -919,7 +921,7 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
   const orderHeldNeeded = needsOrderHeldConfirm(task, hits);
   const draftBlock = unsavedNotesHint(hasUnsavedNotes);
   const failedJob = isFailedJob(task);
-  const buttons = reviewSubmitButtons(task, hits, { locked: Boolean(locked), orderHeldConfirm, busy, hasUnsavedNotes });
+  const buttons = reviewSubmitButtons(task, hits, { locked: Boolean(locked), orderHeldConfirm, busy, hasUnsavedNotes, canComplete });
   const failedWithoutHits = failedJob && hits.length === 0;
   const failedWithHits: FailedWithHitsKind | undefined = failedJob && hits.length > 0 ? (task?.job_kind === "rework" ? "rework" : "compare") : undefined;
   const thumbs = thumbMarks(pages, hits, seenPages);

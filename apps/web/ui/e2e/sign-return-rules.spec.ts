@@ -1,6 +1,7 @@
 import {
   SIGN_RETURN_DISPUTED,
   SIGN_RETURN_RULES,
+  signReturnHitExtras,
   type SignReturnExpect,
   type SignReturnInput,
   type SignReturnSide,
@@ -11,7 +12,7 @@ import type { Page } from "@playwright/test";
 
 // 按前后端共用的签字/退回规则表渲染核对页：hidden 行断言按钮不存在，其余行断言按钮在、可点与否、
 // 确认框能不能提交。表里同时有「失败单按钮不在」和「正常单按钮在」的对照行。
-// 核对页不看角色（合成登录固定是 admin），viewer 待决行按前端现状断言。
+// 合成登录默认是 admin；viewer 行把 /api/auth/me 换成只读账号（perms 不含 complete），核对页隐藏两个按钮。
 test.use({ viewport: { width: 1440, height: 900 } });
 test.beforeEach(async ({ page }) => {
   await page.addInitScript(() => {
@@ -39,6 +40,7 @@ function seed(api: SyntheticApi, n: number, input: SignReturnInput): string {
       field: hit.field ?? "中文品名",
       status: hit.status,
       ...(hit.decision === undefined ? {} : { decision: hit.decision }),
+      ...signReturnHitExtras(hit),
       excel: "合成核对单",
       pdf: "合成核对",
       page: 1,
@@ -70,6 +72,14 @@ async function expectSide(page: Page, cls: "review-sign" | "review-reject", side
 }
 
 async function expectRow(page: Page, api: SyntheticApi, n: number, input: SignReturnInput, want: SignReturnExpect) {
+  if (input.role === "viewer") {
+    // 后注册的路由优先：只读账号，perms 与服务端 viewer 一致（不含 complete）。
+    await page.route("**/api/auth/me", (route) => route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ logged_in: true, display_name: ME, avatar_url: null, open_id: "ou_e2e_synthetic", role: "viewer", perms: ["read", "export", "confirm_structure"] }),
+    }));
+  }
   await page.goto(`/review/${seed(api, n, input)}`);
   // 先确认页面已经画出来，「按钮不在」才有意义。
   if (input.job?.status === "queued" || input.job?.status === "running") await expect(page.locator(".wait-card")).toBeVisible();

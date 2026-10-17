@@ -1,5 +1,6 @@
 import type { FieldHit } from "../api";
 import statuses from "../../../backend/app/verbatim_statuses.json" with { type: "json" };
+import { hasReadingDoubt } from "../../../server/src/readingDoubt.ts";
 import { coverageTally, doubtLines, excelText, humanMissLines, NOT_READ, pdfText, spokenAsk } from "./hitText";
 
 export type EvidenceText = {
@@ -17,6 +18,16 @@ export type IndexedReviewHit = { hit: FieldHit; index: number };
 
 const BLOCKING = new Set([...statuses.true_errors, "疑点", "缺失"]);
 const SPACE = new Set(statuses.space_errors);
+/** 与服务端 tasks.ts HIT_STATUSES 同口径；不在集合里的状态不能签字/退回。 */
+const KNOWN_HIT_STATUSES = new Set<string>(["一致", "疑点", "缺失", "跳过", ...statuses.statuses]);
+
+export function isKnownHitStatus(status: string | undefined): boolean {
+  return KNOWN_HIT_STATUSES.has(String(status || ""));
+}
+
+export function hasInvalidHitStatus(hits: ReadonlyArray<{ status?: string }>): boolean {
+  return hits.some((hit) => !isKnownHitStatus(hit.status));
+}
 
 function isHeldHit(hit: FieldHit): boolean {
   return hit.status === "待人工确认";
@@ -27,7 +38,11 @@ export function isReviewIssue(hit: FieldHit): boolean {
   if (hit.decision === "issue") return true;
   if (BLOCKING.has(String(hit.status || ""))) return true;
   if (SPACE.has(String(hit.status || "")) && hit.decision === "pending") return true;
-  return /不清|误/.test(String(hit.status || "")) || doubtLines(hit).length > 0;
+  if (/不清|误/.test(String(hit.status || ""))) return true;
+  // 认字存疑只按结构化字段（前后端共用 hasReadingDoubt）。
+  if (hasReadingDoubt(hit)) return true;
+  // 其余已标记条目（如未标 pending 的缺空格）仍按核对要点有无内容判断，与原规则一致。
+  return doubtLines(hit).length > 0;
 }
 
 export function partitionReviewHits(hits: FieldHit[]): {

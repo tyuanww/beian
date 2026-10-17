@@ -3,11 +3,13 @@ import { describe, it } from "node:test";
 import {
   SIGN_RETURN_DISPUTED,
   SIGN_RETURN_RULES,
+  signReturnHitExtras,
   type SignReturnExpect,
   type SignReturnInput,
 } from "../../../server/src/signReturnRules.ts";
 import type { TaskDetail } from "../api";
-import { reviewPageHits, reviewSubmitButtons } from "./reviewActions";
+import { REVIEW_COPY } from "../copy/labels";
+import { reviewGate, reviewPageHits, reviewSubmitButtons } from "./reviewActions";
 import { lockedBy } from "./reviewFlat";
 
 /**
@@ -31,11 +33,12 @@ function taskFor(input: SignReturnInput): TaskDetail {
       field: hit.field ?? "中文品名",
       status: hit.status,
       ...(hit.decision === undefined ? {} : { decision: hit.decision }),
+      ...signReturnHitExtras(hit),
     })),
   } as TaskDetail;
 }
 
-/** 核对页当前怎么摆两个按钮（不忙、没有未保存备注；角色核对页不看）。 */
+/** 核对页当前怎么摆两个按钮（不忙、没有未保存备注；viewer 没有 complete 权限）。 */
 function uiButtons(input: SignReturnInput): SignReturnExpect {
   const task = taskFor(input);
   const hits = reviewPageHits(task, false);
@@ -44,6 +47,8 @@ function uiButtons(input: SignReturnInput): SignReturnExpect {
     orderHeldConfirm: input.orderHeldConfirm === true,
     busy: false,
     hasUnsavedNotes: false,
+    // 同 App.tsx：me.perms 含 complete 才给按钮；viewer 没有。
+    canComplete: input.role !== "viewer",
   });
   return { sign: { button: b.sign, submits: b.signSubmits }, ret: { button: b.reject, submits: b.rejectSubmits } };
 }
@@ -66,6 +71,13 @@ describe("签字/退回规则表（前端核对页）", () => {
       assert.deepEqual(uiButtons(row.input), row.ui, row.why);
     });
   }
+
+  it("未知状态：签字/退回都灰，提示「审核数据状态异常」", () => {
+    const task = taskFor({ role: "reviewer", status: "in_review", hits: [{ status: "未知状态" }] });
+    const gate = reviewGate(task, reviewPageHits(task, false), false);
+    assert.deepEqual([gate.canSign, gate.canReject, gate.hint, gate.title, gate.rejectTitle], [false, false, REVIEW_COPY.invalidHitStatus, REVIEW_COPY.invalidHitStatus, REVIEW_COPY.invalidHitStatus]);
+    assert.equal(REVIEW_COPY.invalidHitStatus, "审核数据状态异常");
+  });
 
   it("忙碌中或有未保存备注：本该可点的按钮变灰（前端临时状态，不进表）", () => {
     const task = taskFor(SIGN_RETURN_RULES[0].input);

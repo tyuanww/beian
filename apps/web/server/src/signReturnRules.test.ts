@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { SIGN_RETURN_DISPUTED, SIGN_RETURN_RULES, type SignReturnInput } from "./signReturnRules.js";
+import { SIGN_RETURN_DISPUTED, SIGN_RETURN_RULES, signReturnHitExtras, type SignReturnInput } from "./signReturnRules.js";
 import type { Task } from "./tasks.js";
 import { makeTestTempDir } from "./testTemp.js";
 
@@ -23,6 +23,7 @@ function taskFor(input: SignReturnInput): Task {
       field: hit.field ?? "中文品名",
       status: hit.status,
       ...(hit.decision === undefined ? {} : { decision: hit.decision }),
+      ...signReturnHitExtras(hit),
     })),
   } as Task;
 }

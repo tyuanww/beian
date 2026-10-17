@@ -5,7 +5,7 @@
 import type { Decision, FieldHit, TaskDetail, TaskPage } from "../api";
 import { REVIEW_COPY } from "../copy/labels";
 import { isPendingDecision } from "./reviewNav";
-import { partitionReviewHits } from "./reviewEvidence";
+import { hasInvalidHitStatus, partitionReviewHits } from "./reviewEvidence";
 import { bytesTooLarge, uploadTooLargeText } from "../uploadLimit";
 
 export const FLAT_PANEL_WIDTH = 320;
@@ -65,6 +65,11 @@ export function submitGate(hits: FieldHit[], reviewable: boolean, locked = false
   const held = hits.filter(isOpenHeld).length;
   const pending = c.pending + (releaseHeld ? 0 : held);
   if (!reviewable || locked) return { canSign: false, canReject: false, hint: "", title: "", rejectTitle: "", pending };
+  // 与服务端 completeGate 同序：先拦未知状态，再看待确认。
+  if (hasInvalidHitStatus(hits)) {
+    const msg = REVIEW_COPY.invalidHitStatus;
+    return { canSign: false, canReject: false, hint: msg, title: msg, rejectTitle: msg, pending };
+  }
   if (pending > 0) {
     return {
       canSign: false,

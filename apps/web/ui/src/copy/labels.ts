@@ -211,6 +211,8 @@ export const REVIEW_COPY = {
   /** 签字/退回因未存备注灰掉时旁边的原因。 */
   unsavedNotesBlock: "备注未保存，请先保存",
   heldUnread: "认字存疑",
+  /** 条目状态不在已知集合：与服务端 /complete 400「审核数据状态异常」对齐。 */
+  invalidHitStatus: "审核数据状态异常",
   /** 审稿员可见的认字报错：不露组件名、路径或堆栈。 */
   ocrFailed: "认字出了问题，请联系管理员",
   /** 后端超页（page_over）：只核 1 页。不写「拆分后上传」。 */

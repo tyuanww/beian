@@ -40,6 +40,8 @@ export type SubmitButtonsInput = {
   orderHeldConfirm: boolean;
   busy: boolean;
   hasUnsavedNotes: boolean;
+  /** 无 complete 权限（viewer）时签字/退回都不渲染；缺省 true。 */
+  canComplete?: boolean;
 };
 
 export type SubmitButtons = {
@@ -55,6 +57,8 @@ const HIDDEN: SubmitButtons = { sign: "hidden", reject: "hidden", signSubmits: f
 export function reviewSubmitButtons(task: TaskDetail | null, hits: FieldHit[], opts: SubmitButtonsInput): SubmitButtons {
   // 等待卡（排队/对照中）整页换掉，失败单不渲染两个按钮。
   if (!task || shouldShowWaitCard(task) || isFailedJob(task)) return HIDDEN;
+  // viewer 无 complete：隐藏签字/退回，避免点了才 403（产品 2026-10-17）。
+  if (opts.canComplete === false) return HIDDEN;
   const gate = reviewGate(task, hits, opts.locked);
   const orderHeldOk = signAllowedForOrderHeld(needsOrderHeldConfirm(task, hits), opts.orderHeldConfirm);
   const held = opts.busy || opts.hasUnsavedNotes;

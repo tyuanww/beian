@@ -12,7 +12,9 @@
  *   （签字 = `complete_kind: "signed"`，退回 = `"rework"`）。`submits` 为 true 时 `button` 必须是 enabled。
  * 只看规则本身：忙碌中、备注未保存这两个前端临时状态不进表（两者都只会让按钮变灰，服务端不知道）。
  *
- * `SIGN_RETURN_DISPUTED` 是目前前后端结论不一致的输入，不算规则，只把两边现状各自锁住，等产品定了再挪进主表。
+ * 产品口径（2026-10-17）：该拦的两边都拦，服务端必须能独立拦住。
+ * 第 3、4 条（viewer / 未知状态）以前端对齐服务端，已进主表。
+ * 第 1、2 条与「认字存疑」等服务端改完后进主表；现状锁在 `SIGN_RETURN_DISPUTED`。
  */
 
 type SignReturnButton = "hidden" | "disabled" | "enabled";
@@ -25,7 +27,22 @@ type SignReturnHit = {
   decision?: string;
   /** 不写 = 「中文品名」。 */
   field?: string;
+  /** 认字存疑的结构化字段（见 `readingDoubt.ts`），落盘为 `coverage.miss`。 */
+  coverageMiss?: string[];
+  /** 落盘为 `sequence_diff.only_in_excel`。 */
+  onlyInExcel?: string[];
+  /** 落盘为 `doubt_bucket`。 */
+  doubtBucket?: string;
 };
+
+/** 表里一条 hit 的认字存疑字段 → 落盘字段。服务端测试、前端合同测试和 e2e 共用，保证三边喂的是同一份数据。 */
+export function signReturnHitExtras(hit: SignReturnHit): Record<string, unknown> {
+  return {
+    ...(hit.coverageMiss ? { coverage: { miss: hit.coverageMiss } } : {}),
+    ...(hit.onlyInExcel ? { sequence_diff: { only_in_excel: hit.onlyInExcel } } : {}),
+    ...(hit.doubtBucket ? { doubt_bucket: hit.doubtBucket } : {}),
+  };
+}
 
 export type SignReturnInput = {
   role: "admin" | "reviewer" | "viewer";
@@ -168,6 +185,40 @@ export const SIGN_RETURN_RULES: readonly SignReturnRule[] = [
     input: reviewer([{ status: "疑点", decision: "confirm" }], { verbatimWarning: true }),
     expect: SIGN_ONLY,
   },
+  // —— 产品已定（前端对齐服务端）：viewer / 未知状态 ——
+  {
+    name: "只读账号（viewer）打开正常单：隐藏签字和退回",
+    input: reviewer([], { role: "viewer" }),
+    expect: BOTH_HIDDEN,
+  },
+  {
+    name: "条目状态不在已知集合：两个按钮都灰，提示审核数据状态异常",
+    input: reviewer([{ status: "未知状态" }]),
+    expect: BOTH_GREY,
+  },
+  // —— 认字存疑（结构化字段，`readingDoubt.ts`）：两边已一致的行 ——
+  { name: "认字存疑：coverage.miss 全是空白不算存疑", input: reviewer([{ status: "一致", coverageMiss: ["", "  "] }]), expect: SIGN_ONLY },
+  {
+    name: "认字存疑：一致条目只有 sequence_diff 不算存疑（未标记条目不看）",
+    input: reviewer([{ status: "一致", onlyInExcel: ["香柠檬"] }]),
+    expect: SIGN_ONLY,
+  },
+  {
+    name: "认字存疑：一致条目只有 doubt_bucket 不算存疑（未标记条目不看）",
+    input: reviewer([{ status: "一致", doubtBucket: "ocr_smallprint" }]),
+    expect: SIGN_ONLY,
+  },
+  {
+    name: "认字存疑：已标一致后可签字",
+    input: reviewer([{ status: "一致", coverageMiss: ["CAPSULE MIST"], decision: "confirm" }]),
+    expect: SIGN_ONLY,
+  },
+  {
+    name: "认字存疑：标有错只能退回",
+    input: reviewer([{ status: "一致", coverageMiss: ["CAPSULE MIST"], decision: "issue" }]),
+    expect: RETURN_ONLY,
+  },
+  { name: "缺空格没有 decision、也没有存疑字段：不算待确认", input: reviewer([{ status: "缺空格" }]), expect: SIGN_ONLY },
 ];
 
 export const SIGN_RETURN_DISPUTED: readonly SignReturnDisputed[] = [
@@ -176,27 +227,41 @@ export const SIGN_RETURN_DISPUTED: readonly SignReturnDisputed[] = [
     input: reviewer([{ status: "疑点", decision: "confirm" }], { status: "pending_review", job: { kind: "rework", status: "failed" } }),
     ui: BOTH_HIDDEN,
     server: { sign: true, ret: false },
-    why: "前端失败单一律不给按钮（审稿合同「失败单在核对页上的显示」）；服务端 /complete 不看 job_status=failed，照收签字。",
+    why: "前端失败单一律不给按钮；服务端 /complete 尚未看 job_status=failed（等开发哥）。",
   },
   {
     name: "非逐字单出现未决「待人工确认」",
     input: reviewer([{ status: "待人工确认" }]),
     ui: PENDING,
     server: { sign: true, ret: false },
-    why: "前端只在 verbatim_check 单上放开待人工确认，其他单把它算进待确认；服务端 hitNeedsDecision 对待人工确认一律不要结论。",
+    why: "前端算进待确认；服务端 hitNeedsDecision 对待人工确认一律不要结论（等开发哥）。",
   },
   {
-    name: "只读账号（viewer）打开正常单",
-    input: reviewer([], { role: "viewer" }),
-    ui: SIGN_ONLY,
-    server: { sign: false, ret: false },
-    why: "核对页不看权限，按钮照常可点；服务端 need(c, \"complete\") 回 403。",
+    name: "认字存疑：一致条目 coverage.miss 有词、没下结论",
+    input: reviewer([{ status: "一致", coverageMiss: ["CAPSULE MIST"] }]),
+    ui: PENDING,
+    server: { sign: true, ret: false },
+    why: "前端 hasReadingDoubt 认 coverage.miss，算待确认；服务端 hitNeedsDecision 尚未接 hasReadingDoubt（等开发哥）。",
   },
   {
-    name: "条目状态不在已知集合",
-    input: reviewer([{ status: "未知状态" }]),
-    ui: SIGN_ONLY,
-    server: { sign: false, ret: false },
-    why: "前端把认不出的状态当一致；服务端 isValidHitReviewState 回 400「审核数据状态异常」。",
+    name: "认字存疑：一致条目 coverage.miss 有词、decision 为 pending",
+    input: reviewer([{ status: "一致", coverageMiss: ["CAPSULE MIST"], decision: "pending" }]),
+    ui: PENDING,
+    server: { sign: true, ret: false },
+    why: "同上，pending 不算结论（等开发哥）。",
+  },
+  {
+    name: "认字存疑：缺空格（已标记）带 sequence_diff、没下结论",
+    input: reviewer([{ status: "缺空格", onlyInExcel: ["香柠檬"] }]),
+    ui: PENDING,
+    server: { sign: true, ret: false },
+    why: "已标记条目的 sequence_diff 算存疑；服务端空格类只认 decision=pending（等开发哥）。",
+  },
+  {
+    name: "认字存疑：缺空格（已标记）带 doubt_bucket、没下结论",
+    input: reviewer([{ status: "缺空格", doubtBucket: "ocr_graphic" }]),
+    ui: PENDING,
+    server: { sign: true, ret: false },
+    why: "已标记条目的 OCR 存疑分桶算存疑；服务端未认 doubt_bucket（等开发哥）。",
   },
 ];
