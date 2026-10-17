@@ -917,11 +917,13 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
   const orderHeldOk = signAllowedForOrderHeld(orderHeldNeeded, orderHeldConfirm);
   const draftBlock = unsavedNotesHint(hasUnsavedNotes);
   const failedJob = task?.status === "compare_failed" || task?.job_status === "failed";
+  const failedWithoutHits = failedJob && hits.length === 0;
   const thumbs = thumbMarks(pages, hits, seenPages);
   const issueRows = rejectRows(hits, notes);
   const releaseHeld = task?.verbatim_check === true;
   const pendingLines = phonePendingLines(hits, releaseHeld);
   const phone = layout === "phone";
+  const posnLabel = failedWithoutHits ? null : locked ? positionLabel(tabIndices(hits, "all", active), active, undefined, heldCount) : positionLabel(tabList, active, tab === "pending" ? counts.pending : undefined, heldCount);
   const noteFor = (h?: FieldHit) => (h?.id ? notes[h.id] ?? h.note ?? "" : "");
   const zoomBy = (factor: number) => {
     const el = viewRef.current;
@@ -954,10 +956,10 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
             </button>
           </span>
         ) : null}
-        {!phone && !failedJob ? (
+        {!phone && posnLabel !== null ? (
           <span className="review-posn" role="group" aria-label="当前位置">
             <button type="button" aria-label="上一条" onClick={() => step(-1)}>‹</button>
-            <b data-testid="review-posn">{locked ? positionLabel(tabIndices(hits, "all", active), active, undefined, heldCount) : positionLabel(tabList, active, tab === "pending" ? counts.pending : undefined, heldCount)}</b>
+            <b data-testid="review-posn">{posnLabel}</b>
             <button type="button" aria-label="下一条" onClick={() => step(1)}>›</button>
           </span>
         ) : null}
@@ -1055,10 +1057,10 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
         onPanelOpen={setPanelOpen}
         thumbs={thumbs.map((t) => (
           <button key={pages[t.index]?.url || t.index} type="button" className={`review-th s-${t.state}${t.index === pageIdx ? " is-on" : ""}`}
-            aria-label={t.label} aria-current={t.index === pageIdx ? "page" : undefined} title={t.label} disabled={busy} onClick={() => setPageIdx(t.index)}>
+            aria-label={failedWithoutHits ? `第${t.page}页` : t.label} aria-current={t.index === pageIdx ? "page" : undefined} title={failedWithoutHits ? `第${t.page}页` : t.label} disabled={busy} onClick={() => setPageIdx(t.index)}>
             <span className="review-th-p">P{t.page}</span>
-            <span className="review-th-s" aria-hidden="true">{t.symbol}</span>
-            <span className="review-th-w" aria-hidden="true">{t.word}</span>
+            {failedWithoutHits ? null : <span className="review-th-s" aria-hidden="true">{t.symbol}</span>}
+            {failedWithoutHits ? null : <span className="review-th-w" aria-hidden="true">{t.word}</span>}
           </button>
         ))}
         panel={
@@ -1079,6 +1081,7 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
             locationCopy={current && missLineUnboxed(locateBoxesForHit(current), pageNo, metrics) ? REVIEW_COPY.lineNotBoxed : REVIEW_COPY.noBox}
             showDetail={!showSpot}
             closeHeldPulse={closeHeldPulse}
+            showProgress={!failedWithoutHits}
           />
         }
       >
@@ -1287,7 +1290,7 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
                 }}
               >
                 {(() => {
-                  const title = spotTitleParts(current.field, current.status || "项目", current.item, REVIEW_COPY.tabs[locked ? "all" : tab], locked ? positionLabel(tabIndices(hits, "all", active), active, undefined, heldCount) : positionLabel(tabList, active, tab === "pending" ? counts.pending : undefined, heldCount));
+                  const title = spotTitleParts(current.field, current.status || "项目", current.item, REVIEW_COPY.tabs[locked ? "all" : tab], posnLabel ?? "");
                   return (
                     <strong className="review-spot-title" data-testid="review-spot-title" aria-label={title.full}>
                       {title.field ? <span className="review-spot-field" title={title.field}>{title.field}</span> : null}
