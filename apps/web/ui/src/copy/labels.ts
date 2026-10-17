@@ -170,9 +170,8 @@ export const REVIEW_COPY = {
   allDecided: "全部已下结论",
   /** 右栏「待确认」列表空态（产品哥 2026-10-11；核对栏一行提示不带句号）。 */
   pendingEmpty: "没有待确认的了",
-  /** 提交失败按服务端状态/错误码映射；不把服务端原文给用户看。 */
+  /** 提交失败按返回体码映射（`reviewFlat.ts` `submitFailureText`）：前端有自己那句的用前端句，没有的用服务端原文。 */
   submitStillChecking: "这份稿还在检查，等一会儿再提交",
-  submitPending: (n: number) => `还有 ${n} 条待确认，处理完才能签字`,
   collapse: "收起",
   expand: (n: number) => `展开疑点 · 待确认 ${n}`,
   tabs: { pending: "待确认", issue: "有错", all: "全部" },

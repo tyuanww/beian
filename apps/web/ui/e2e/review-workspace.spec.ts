@@ -477,12 +477,40 @@ test("提交失败按状态码映射：409 还在检查；400 重读后还有待
   await expect(dialog.getByText("这份稿还在检查，等一会儿再提交")).toBeVisible();
   await expect(dialog.getByText("对照还在排队")).toHaveCount(0);
 
-  // 服务端那边又多出一条没下结论（别的窗口改的）→ 400，重读后写「还有 1 条待确认」。
+  // 服务端那边又多出一条没下结论（别的窗口改的）→ 400 complete_hits_pending，按 params 写与服务端同一句。
   Object.assign(task.hits![0], { status: "疑点", decision: "pending" });
   await dialog.getByRole("button", { name: "重试" }).click();
-  await expect(dialog.getByText("还有 1 条待确认，处理完才能签字")).toBeVisible();
-  await expect(dialog.getByText("仍有")).toHaveCount(0);
+  await expect(dialog.getByText("仍有 1 条疑点未处理", { exact: true })).toBeVisible();
+  await expect(dialog.getByText(/处理完才能签字/u)).toHaveCount(0);
   await dialog.getByRole("button", { name: "再看看" }).click();
+});
+
+test("退回被服务端拦（complete_hits_pending）：提示「仍有 …未处理」，不出「处理完才能签字」", async ({ page, syntheticApi }) => {
+  const task = reviewTask("e5969b58cd6a");
+  task.hits![0].decision = "issue";
+  syntheticApi.tasks.push(task);
+  await page.goto(`/review/${task.id}`);
+  await page.locator("button.review-reject").click();
+  const dialog = page.getByRole("dialog");
+  // 页面打开后别的窗口又多出一条没下结论的缺失：前端提交时不知道，服务端拦。
+  task.hits!.push({ id: "late0", field: "净含量", status: "缺失", decision: "pending" } as NonNullable<typeof task.hits>[number]);
+  await dialog.getByRole("button", { name: "确认退回" }).click();
+  await expect(dialog.getByRole("alert")).toHaveText("仍有 1 条缺失未处理");
+  await expect(page.getByTestId("review-root")).not.toContainText("处理完才能签字");
+  await expect(dialog.getByText("没提交成功，请重试")).toHaveCount(0);
+});
+
+test("签字被拦「当前状态不可签字」（complete_rework_failed）：照服务端原文出原意，不改写成「没提交成功，请重试」", async ({ page, syntheticApi }) => {
+  const task = reviewTask("e5969b58cd6b");
+  task.hits![0].decision = "confirm";
+  syntheticApi.tasks.push(task);
+  await page.goto(`/review/${task.id}`);
+  syntheticApi.completeFailBody = { status: 400, body: { detail: "当前状态不可签字", code: "complete_rework_failed" } };
+  await page.getByRole("button", { name: "签字", exact: true }).click();
+  const dialog = page.getByRole("dialog");
+  await dialog.getByRole("button", { name: "确认签字" }).click();
+  await expect(dialog.getByText("当前状态不可签字", { exact: true })).toBeVisible();
+  await expect(dialog.getByText("没提交成功，请重试")).toHaveCount(0);
 });
 
 test("已被别人签字：提交 400 后重读锁页并提示「这一单已被某某签字」", async ({ page, syntheticApi }) => {

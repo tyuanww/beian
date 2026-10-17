@@ -17,7 +17,7 @@ import { ReviewSubmitDialog } from "./ReviewSubmitDialog";
 import { createFlagStore, UndoToastGate } from "./undoToastGate";
 import {
   clampPinToView, conclusionFor, decisionFailureText, reworkUploadBlocked, submitFailureText, flatLayout, isTypingTarget, lockedBy, markShortcutsSeen, markerOutsideCorner, nextPendingAfter,
-  panToClearPanel, phonePendingLines, positionLabel, rejectNote, rejectRows, reviewPositionLabel, shouldShowShortcutsOnOpen, signHint, tabIndices, thumbMarks, verdictCounts, verdictForKey, isOpenHeld,
+  panToClearPanel, phonePendingLines, positionLabel, rejectNote, rejectRows, reviewPositionLabel, shouldShowShortcutsOnOpen, signHint, tabIndices, thumbMarks, verdictCounts, verdictForKey, isOpenHeld, pendingTally,
   type FlatLayout, type FlatTab,
 } from "./reviewFlat";
 import { ReviewWorkspace } from "./ReviewWorkspace";
@@ -763,11 +763,13 @@ export function ReviewPage({ taskId, userId, displayName = null, canComplete = t
       setSubmitFailed(null);
       message.success(REVIEW_COPY_DONE[kind]);
     } catch (err) {
-      const status = err instanceof ApiError ? err.status : null;
+      const failure = err instanceof ApiError
+        ? { status: err.status, code: err.code, params: err.params, detail: err.message }
+        : { status: null, code: null, params: null, detail: "" };
       let fresh: TaskDetail | null = null;
-      if (status === 400) fresh = await api.task(task.id).catch(() => null);
-      const freshPending = fresh ? verdictCounts(reviewPageHits(fresh, useV2Ref.current)).pending : 0;
-      const text = submitFailureText(status, fresh, freshPending);
+      if (failure.status === 400) fresh = await api.task(task.id).catch(() => null);
+      const freshTally = fresh ? pendingTally(reviewPageHits(fresh, useV2Ref.current), fresh.verbatim_check === true) : [];
+      const text = submitFailureText(failure, fresh, freshTally);
       if (text === REVIEW_COPY.submitFailed) console.error("[review] 提交失败", err);
       if (fresh) setTask((cur) => (cur?.id === fresh!.id ? fresh : cur));
       if (fresh?.status === "completed") {

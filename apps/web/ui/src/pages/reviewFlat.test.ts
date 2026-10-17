@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { FieldHit } from "../api";
+import { REVIEW_COPY } from "../copy/labels";
+import { REVIEW_CODES } from "../../../server/src/reviewCodes.ts";
 import { PUBLIC_UPLOAD_BYTES, UPLOAD_TOO_LARGE, setUploadLimitFromMe } from "../uploadLimit";
 import {
   rejectNote,
-  clampPinToView, completedAtLabel, completedByText, conclusionFor, decisionFailureText, reworkUploadBlocked, submitFailureText, flatLayout, isTypingTarget, lockedBy, markerOutsideCorner, nextPendingAfter,
+  clampPinToView, completedAtLabel, completedByText, conclusionFor, decisionFailureText, reworkUploadBlocked, submitFailureText, type SubmitFailure, flatLayout, isTypingTarget, lockedBy, markerOutsideCorner, nextPendingAfter,
   openHeldAfterPending, panToClearPanel, pendingTally, phonePendingLines, positionLabel, rejectRows, reviewPositionLabel, shouldShowShortcutsOnOpen, signHint, submitGate, tabIndices, thumbMarks, verdictCounts, verdictForKey,
 } from "./reviewFlat.js";
 
@@ -129,14 +131,52 @@ describe("reviewFlat", () => {
     assert.equal(shouldShowShortcutsOnOpen({ getItem: () => { throw new DOMException("denied", "SecurityError"); } }), false);
     assert.throws(() => shouldShowShortcutsOnOpen({ getItem: () => { throw new TypeError("bug"); } }), TypeError);
   });
-  it("提交失败只按状态码 + 重读任务映射文案", () => {
-    assert.equal(submitFailureText(409, null, 0), "这份稿还在检查，等一会儿再提交");
-    assert.equal(submitFailureText(400, { status: "completed", completed_by: "天元", complete_kind: "signed" }, 0), "这一单已被天元签字");
-    assert.equal(submitFailureText(400, { status: "completed", completed_by: "" }, 0), "这份稿已经提交过了");
-    assert.equal(submitFailureText(400, { status: "in_review" }, 2), "还有 2 条待确认，处理完才能签字");
-    assert.equal(submitFailureText(400, { status: "in_review" }, 0), "没提交成功，请重试");
-    assert.equal(submitFailureText(400, null, 3), "没提交成功，请重试");
-    assert.equal(submitFailureText(500, null, 0), "没提交成功，请重试");
+  it("提交失败：没有码时只按状态码 + 重读任务映射文案（旧服务端 / 网络错误）", () => {
+    const f = (status: number | null): SubmitFailure => ({ status, code: null, params: null, detail: "x" });
+    assert.equal(submitFailureText(f(409), null, []), "这份稿还在检查，等一会儿再提交");
+    assert.equal(submitFailureText(f(400), { status: "completed", completed_by: "天元", complete_kind: "signed" }, []), "这一单已被天元签字");
+    assert.equal(submitFailureText(f(400), { status: "completed", completed_by: "" }, []), "这份稿已经提交过了");
+    // 不再出「处理完才能签字」：签字、退回都用与服务端同一句「仍有 …未处理」。
+    assert.equal(submitFailureText(f(400), { status: "in_review" }, [{ word: "疑点", count: 2 }]), "仍有 2 条疑点未处理");
+    assert.equal(submitFailureText(f(400), { status: "in_review" }, []), "没提交成功，请重试");
+    assert.equal(submitFailureText(f(400), null, [{ word: "疑点", count: 3 }]), "没提交成功，请重试");
+    assert.equal(submitFailureText(f(500), null, []), "没提交成功，请重试");
+    assert.equal(submitFailureText(f(null), null, []), "没提交成功，请重试");
+  });
+  it("提交失败按返回体码出文案：有前端句用前端句，没有的用服务端原文", () => {
+    const f = (status: number, code: string, detail: string, params: SubmitFailure["params"] = null): SubmitFailure => ({ status, code, params, detail });
+    assert.equal(submitFailureText(f(409, "complete_job_running", "对照还在排队或正在跑，不能签字"), null, []), "这份稿还在检查，等一会儿再提交");
+    // 退回被拦：params.items 拼「仍有 …未处理」，英文枚举查共享码表；不出「处理完才能签字」。
+    const pending = f(400, "complete_hits_pending", "仍有 2 条待人工确认、1 条认字存疑、1 条缺失未处理", {
+      items: [{ kind: "held", count: 2 }, { kind: "reading_doubt", count: 1 }, { kind: "status", status: "field_missing", count: 1 }],
+    });
+    for (const tally of [[], [{ word: "疑点", count: 9 }]]) {
+      const text = submitFailureText(pending, { status: "in_review" }, tally);
+      assert.equal(text, "仍有 2 条待人工确认、1 条认字存疑、1 条缺失未处理");
+      assert.doesNotMatch(text, /处理完才能签字/u);
+    }
+    assert.equal(submitFailureText(f(400, "complete_hits_pending", "仍有 1 条缺空格未处理", { items: [{ kind: "status", status: "missing_space", count: 1 }] }), null, []), "仍有 1 条缺空格未处理");
+    assert.equal(submitFailureText(f(400, "complete_hits_pending", "仍有 1 条疑点未处理"), null, []), "仍有 1 条疑点未处理", "没有 params 用服务端原文");
+    // 「当前状态不可签字」照码出原意，不改写成「没提交成功，请重试」。
+    for (const code of ["complete_status_not_reviewable", "complete_rework_failed"]) {
+      const text = submitFailureText(f(400, code, "当前状态不可签字"), { status: "pending_review" }, []);
+      assert.equal(text, "当前状态不可签字", code);
+      assert.notEqual(text, REVIEW_COPY.submitFailed);
+    }
+    // 已被别人完成：仍按重读结果出锁页那句。
+    assert.equal(submitFailureText(f(400, "complete_status_not_reviewable", "当前状态不可签字"), { status: "completed", completed_by: "天元", complete_kind: "rework" }, []), "这一单已被天元退回，等新稿");
+    assert.equal(submitFailureText(f(400, "complete_hits_invalid", "有 2 条审核数据状态异常，请重新对照", { count: 2 }), null, []), "有 2 条审核数据状态异常，请重新对照");
+    assert.equal(submitFailureText(f(400, "complete_order_held_unconfirmed", "整单待人工确认，签字即认可"), null, []), REVIEW_COPY.orderHeldConfirm);
+    assert.equal(submitFailureText(f(400, "complete_conclusion_missing", "请写下结论"), null, []), "请写下结论");
+    assert.equal(submitFailureText(f(400, "rework_status_not_allowed", "当前状态不可对红"), null, []), "当前状态不可对红");
+    // 不在共享码表里的码按没有码处理。
+    assert.equal(submitFailureText(f(400, "something_else", "别的"), null, []), "没提交成功，请重试");
+  });
+  it("每个返回体码都有落点：前端句或服务端原文，不落到「没提交成功，请重试」", () => {
+    for (const code of REVIEW_CODES) {
+      const text = submitFailureText({ status: 400, code, params: { count: 1, items: [{ kind: "held", count: 1 }] }, detail: "服务端原文" }, null, []);
+      assert.notEqual(text, REVIEW_COPY.submitFailed, code);
+    }
   });
   it("已被别人完成：签字/退回/未知种类 + 完成时间（上海时区，今天只写时分）", () => {
     const now = new Date("2026-10-11T10:30:00Z"); // 上海 18:30

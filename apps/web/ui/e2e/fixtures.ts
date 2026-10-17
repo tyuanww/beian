@@ -8,7 +8,7 @@ import {
   type Request,
   type Route,
 } from "@playwright/test";
-import type { JobErrorCode } from "../../server/src/reviewCodes.ts";
+import { hitStatusCode, pendingDetail, type JobErrorCode, type PendingItem } from "../../server/src/reviewCodes.ts";
 
 type SyntheticHit = {
   native_text_evidence?: unknown;
@@ -202,6 +202,8 @@ export type SyntheticApi = {
   completeDelayMs: number;
   /** 下一次 /complete 用这个状态码失败（如 409 = 对照还在跑）。 */
   completeFailStatus: number | null;
+  /** 下一次 /complete 原样回这个状态和返回体（如带码的 400「当前状态不可签字」）。 */
+  completeFailBody: { status: number; body: Record<string, unknown> } | null;
   /** 下一次 /decision 或 /complete 之前，模拟别人先把这单签字/退回了。 */
   otherCompletesNext: { by: string; kind: "signed" | "rework" | null; at?: string } | null;
   loseNextUploadResponse: boolean;
@@ -598,7 +600,12 @@ async function installSyntheticApi(page: Page, state: SyntheticApi) {
         if (state.completeFailStatus) {
           const status = state.completeFailStatus;
           state.completeFailStatus = null;
-          return json(route, { detail: status === 409 ? "对照还在排队或正在跑，不能签字" : "合成提交失败" }, status);
+          return json(route, status === 409 ? { detail: "对照还在排队或正在跑，不能签字", code: "complete_job_running" } : { detail: "合成提交失败" }, status);
+        }
+        if (state.completeFailBody) {
+          const { status, body: failBody } = state.completeFailBody;
+          state.completeFailBody = null;
+          return json(route, failBody, status);
         }
         if (state.failNextComplete) {
           state.failNextComplete = false;
@@ -606,10 +613,20 @@ async function installSyntheticApi(page: Page, state: SyntheticApi) {
         }
         const data = (body || {}) as Record<string, unknown>;
         // 与服务端 /complete 同口径：已完成、还有疑点/缺失没下结论、结论为空都 400。
-        if (task.status === "completed") return json(route, { detail: "当前状态不可签字" }, 400);
+        // 带码返回体同加码服务端：{ detail, code, params? }，原文从共享码表拼。
+        if (task.status === "completed") return json(route, { detail: "当前状态不可签字", code: "complete_status_not_reviewable" }, 400);
         const undecided = (task.hits || []).filter((hit) => (hit.status === "疑点" || hit.status === "缺失") && !["confirm", "issue", "ignore"].includes(String(hit.decision)));
-        if (undecided.length) return json(route, { detail: `仍有 ${undecided.length} 条疑点/缺失未处理` }, 400);
-        if (!String(data.conclusion || "").trim()) return json(route, { detail: "请写下结论" }, 400);
+        if (undecided.length) {
+          const items: PendingItem[] = [];
+          for (const hit of undecided) {
+            const code = hitStatusCode(hit.status)!;
+            const item = items.find((x) => x.kind === "status" && x.status === code);
+            if (item) item.count += 1;
+            else items.push({ kind: "status", status: code, count: 1 });
+          }
+          return json(route, { detail: pendingDetail(items), code: "complete_hits_pending", params: { items } }, 400);
+        }
+        if (!String(data.conclusion || "").trim()) return json(route, { detail: "请写下结论", code: "complete_conclusion_missing" }, 400);
         if (state.completeDelayMs) await new Promise((resolve) => setTimeout(resolve, state.completeDelayMs));
         // 与服务端 /complete 同口径：有「有错」→ rework，否则 signed。
         task.complete_kind = (task.hits || []).some((hit) => hit.decision === "issue") ? "rework" : "signed";
@@ -795,6 +812,7 @@ export const test = base.extend<{ syntheticApi: SyntheticApi }>({
       failNextComplete: false,
       completeDelayMs: 0,
       completeFailStatus: null,
+      completeFailBody: null,
       otherCompletesNext: null,
       loseNextUploadResponse: false,
       holdNextUploadComplete: false,
