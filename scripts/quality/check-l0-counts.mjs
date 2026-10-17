@@ -95,6 +95,20 @@ export function checkL0(parsed, baseline) {
   return problems;
 }
 
+export function minTestsHints(parsed, baseline) {
+  const hints = [];
+  baseline.node_suites.forEach((suite, i) => {
+    const got = parsed.nodeSuites[i];
+    if (got && got.tests > suite.min_tests) hints.push(`${suite.name}：实际 ${got.tests} 条，基线最低 ${suite.min_tests} 条`);
+  });
+  const py = parsed.pytest;
+  if (py) {
+    const collected = (py.passed ?? 0) + (py.skipped ?? 0) + (py.failed ?? 0) + (py.xfailed ?? 0) + (py.xpassed ?? 0);
+    if (collected > baseline.pytest.min_tests) hints.push(`pytest：实际 ${collected} 条，基线最低 ${baseline.pytest.min_tests} 条`);
+  }
+  return hints;
+}
+
 if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
   const logPath = process.argv[2];
   if (!logPath) {
@@ -114,4 +128,7 @@ if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
     process.exit(1);
   }
   console.log("L0 数字与基线一致");
+  for (const h of minTestsHints(parsed, baseline)) {
+    console.log(`::notice title=L0 用例数高于基线::${h}。用例变多的 PR 要在同一个 PR 里把 min_tests 抬到实际数，并在 PR 描述里写明`);
+  }
 }

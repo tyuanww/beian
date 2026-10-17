@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { BASELINE_PATH, checkL0, parseL0Log } from "./check-l0-counts.mjs";
+import { BASELINE_PATH, checkL0, minTestsHints, parseL0Log } from "./check-l0-counts.mjs";
 
 const baseline = JSON.parse(readFileSync(BASELINE_PATH, "utf8"));
 const [serverSkipA, serverSkipB, serverSkipC] = baseline.node_suites[0].allowed_skips;
@@ -42,6 +42,13 @@ const check = (text) => checkL0(parseL0Log(text), baseline);
 describe("check-l0-counts", () => {
   it("passes when every suite matches the baseline", () => {
     assert.deepEqual(check(log()), []);
+  });
+
+  it("passes but hints when a suite has more tests than min_tests", () => {
+    const text = log({ ui: { tests: uiMin + 3, pass: uiMin + 3 } });
+    assert.deepEqual(check(text), []);
+    assert.deepEqual(minTestsHints(parseL0Log(text), baseline), [`ui：实际 ${uiMin + 3} 条，基线最低 ${uiMin} 条`]);
+    assert.deepEqual(minTestsHints(parseL0Log(log()), baseline), []);
   });
 
   it("reads GitHub log lines that carry a timestamp prefix", () => {
