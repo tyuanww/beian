@@ -2,6 +2,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { DATA_DIR } from "./config.js";
+import type { FeishuLoginErrorCode } from "./feishuLoginError.js";
 import { httpsJson } from "./outbound.js";
 import { getSetting, saveSettings } from "./settings.js";
 
@@ -19,7 +20,7 @@ export class AuthBoundaryError extends Error {
   }
 }
 
-export function loginFailureCode(error: unknown): "forbidden" | "failed" {
+export function loginFailureCode(error: unknown): Extract<FeishuLoginErrorCode, "forbidden" | "failed"> {
   return error instanceof AuthBoundaryError && error.status === 403 ? "forbidden" : "failed";
 }
 

@@ -3,6 +3,7 @@ import { bootOnce } from "./appBoot";
 import { api, brokenApiMessage, type Me } from "./api";
 import { setUploadLimitFromMe, resetUploadLimit } from "./uploadLimit";
 import { authFailureAction, feishuLoginHref, shouldAutoRedirectToFeishu } from "./authGate";
+import { loginFailure, type LoginFailure } from "./loginFailure";
 import { Sidebar, type NavKey } from "./chrome/Sidebar";
 import { isAdmin } from "./authRole";
 import { hrefOf, parsePath, type AppRoute, type AppView } from "./appRoute";
@@ -32,12 +33,6 @@ type View = AppView;
 
 const AUTH_HINT = "wb_login_hint";
 const SIDEBAR_KEY = "wb_sidebar";
-const AUTH_FALLBACK: Record<string, string> = {
-  denied: "已取消飞书授权。",
-  expired: "登录已过期，请再点一次。",
-  forbidden: "只允许伸美公司的飞书号进入。",
-  failed: "飞书授权失败，请再试一次。",
-};
 
 function readAuthHint(): string {
   const raw = document.cookie.split(";").map((s) => s.trim());
@@ -46,16 +41,6 @@ function readAuthHint(): string {
   const val = decodeURIComponent(hit.slice(AUTH_HINT.length + 1));
   document.cookie = `${AUTH_HINT}=; Path=/; Max-Age=0`;
   return val;
-}
-
-function authTitle(message: string): string {
-  // error-text-match-allow -- 待后端错误码，见 TODOS.md「前端按报错文案判断状态」
-  if (message.includes("伸美") || message.includes("不允许")) return "进不了这间审稿室";
-  // error-text-match-allow -- 待后端错误码，见 TODOS.md「前端按报错文案判断状态」
-  if (message.includes("取消")) return "授权未完成";
-  // error-text-match-allow -- 待后端错误码，见 TODOS.md「前端按报错文案判断状态」
-  if (message.includes("过期")) return "登录已过期";
-  return "飞书授权未完成";
 }
 
 function AuthShell({ title, children }: { title?: string; children: ReactNode }) {
@@ -131,7 +116,9 @@ export function App() {
   const [me, setMe] = useState<Me | null>(null);
   const boot = bootRoute();
   const [view, setView] = useState<View>(boot.view);
-  const [authError, setAuthError] = useState<string | null>(null);
+  // 飞书回跳失败：标题按 feishu_error 码定（loginFailure），原因原样显示。
+  const [authFailure, setAuthFailure] = useState<LoginFailure | null>(null);
+  const authError = authFailure?.message ?? null;
   const [apiBroken, setApiBroken] = useState<string | null>(null);
   const [taskId, setTaskId] = useState<string | null>(boot.taskId);
   const [compressionId, setCompressionId] = useState<string | null>(boot.compressionId);
@@ -152,7 +139,7 @@ export function App() {
         if (next.open_id) setActor(next.open_id);
         const r = parsePath(window.location.pathname, window.location.search, window.location.hash);
         setView((cur) => (cur === "tasks" && r.view === "settings" ? "settings" : cur));
-        setAuthError(null);
+        setAuthFailure(null);
       } else {
         uploadStore.setOwner(null);
         setTaskId(null);
@@ -171,7 +158,7 @@ export function App() {
     if (boot.taskId) stashTid(TASK_STASH, boot.taskId);
     if (boot.mockupId) stashTid(MOCK_STASH, boot.mockupId);
     if (err) {
-      setAuthError(readAuthHint() || AUTH_FALLBACK[err] || "飞书授权未完成。");
+      setAuthFailure(loginFailure(err, readAuthHint()));
       const url = new URL(window.location.href);
       url.searchParams.delete("feishu_error");
       window.history.replaceState({}, "", url.pathname + url.search);
@@ -372,7 +359,7 @@ export function App() {
         host: window.location.host,
       });
       return (
-        <AuthShell title={authError ? authTitle(authError) : "进不了这间审稿室"}>
+        <AuthShell title={authFailure ? authFailure.title : "进不了这间审稿室"}>
           <p>{message}</p>
           <a className="auth-result-retry" href={action.href}>
             {action.label}

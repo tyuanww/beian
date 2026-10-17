@@ -63,6 +63,7 @@ import {
   runProbe,
   saveSettings,
 } from "./settings.js";
+import type { FeishuLoginErrorCode } from "./feishuLoginError.js";
 import { scanLocalApps } from "./scanLocal.js";
 import {
   AuthBoundaryError,
@@ -640,7 +641,7 @@ app.post("/api/auth/logout", (c) => {
 
 const HINT = "wb_login_hint";
 
-function failLogin(c: Context, code: string, hint: string) {
+function failLogin(c: Context, code: FeishuLoginErrorCode, hint: string) {
   setCookie(c, HINT, hint.slice(0, 200), {
     httpOnly: false,
     sameSite: "Lax",
