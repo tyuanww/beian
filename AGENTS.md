@@ -28,6 +28,11 @@
 - Mac 绿灯不等于 Windows 已验收。杭州生产怎么升版见 [发布合同](docs/contracts/release.md)。合 `main` 后 runner 自动跑 `release.ps1`；Actions 红或公网 health 对不上 VERSION 时不要报已上线。
 - 对照失败或已完成的单不能签字；干净签字单不能再对红；对红后优先读非空 `hits_v2`（空数组回退第一轮）。工艺说明 / 颜色要求 / 版本号 / 更新内容的 pending 不挡签字。
 - 飞书授权失败回到飞书，不要把远程验收人送到本机 `:8787`。JSON 404 不是 Vite 挂了；只有 HTML 或空 Content-Type 才当开发页没转到 8787。
+- 杭州生产机、`apps/web/backend/data/runtime/`、生产 tasks 目录：不登录、不读写、不跑任何脚本（含只读统计），每次须老板单独批准。
+- 不往线上传测试稿或测试数据；需要真后端验证时用临时数据目录（`npm run verify:real-backend`）。
+- 合 `main` 只在老板本轮明确说「合 #N」后执行；「继续」「推进」不算合并授权。
+- 只结束自己启动的进程，按 PID；禁止 `pkill`/`killall` 按名字匹配。
+- 改共用电脑的全局 git 配置、凭据或令牌权限，先问。
 
 ## 按任务加载合同
 
@@ -57,6 +62,9 @@
 - 可用 `npm run verify -- <lane>` 记录验证回执，具体分组见 TESTING；它不自动跳过测试。
 - 有共享文件或构建产物依赖的步骤按顺序运行；每条命令单独保留退出码。质量探针已隔离；其他步骤仍须确认共享状态后再并行。不要让后一个成功命令覆盖前一个失败结果。
 - 完成报告写改动、验证、未执行项和当前阶段。Code、L0、发版 L1、质量门杭州实跑、真实稿 L2、UAT、生产发布分别举证；不以合成数据或日期证明验收通过。
+- 报 L0 时 server / UI / pytest / e2e 分开写 tests、pass、fail、skipped，跳过的用例写名字；只跑了部分文件要写出文件名，没跑的写「未跑」。
+- PR 改了基线（`config/quality/l0-baseline.json`、error-text-match 的 `ALLOWED`/`MAX_TOTAL`、quality 基线），要在 PR 描述里单独列出；评审人逐条确认，不能跟功能改动一起默认放行。
+- 挡住签字或退回的界面条件，必须同时有「按钮不存在」的断言和「正常单上按钮存在」的对照断言；界面隐藏不能代替服务端拦截。
 
 ## Skill routing
 
@@ -82,3 +90,19 @@
 ## Deploy Configuration (configured by /setup-deploy)
 
 合 `main` 会自动触发杭州发布，合并授权必须涵盖这一效果；状态查询不授权恢复 runner、重跑或操作生产。平台为杭州 Windows self-hosted runner + Named Tunnel，合并方式 squash，产品地址 `https://www.jianghua.site`。完整步骤和禁止事项按 [杭州发布合同](docs/contracts/release.md) 执行，不根据 Skill 的通用平台默认项部署或删分支。
+
+## 规则与执行方式
+
+| 错误类型 | 拦截方式（lint/测试/CI/流程/只靠文字） | 位置或 PR |
+|---|---|---|
+| 前端靠匹配报错文案判断状态 | lint error-text-match，只减不增 | `scripts/quality/error-text-match.mjs` |
+| 改了数据格式，旧存盘读出来出错 | 测试 `legacyPageOver` 加真后端自证场景 | `apps/web/server/src/legacyPageOver.ts` |
+| CI 数字人工抄写 | CI `check-l0-counts` | `scripts/quality/check-l0-counts.mjs` |
+| 文档规则和代码对不上 | 测试 `contractSamples` | `apps/web/server/src/contractSamples.test.ts` |
+| 文档提交漏进 PR | 流程，文档直接提交到功能分支 | 流程 |
+| 靠计时的测试不稳定 | 测试改成断言状态 | `apps/web/ui/e2e/review-workspace.spec.ts`（「锁页后收起撤销提示」） |
+| 隐藏界面条件太宽或没有断言 | 测试，要有「不存在」和「对照组存在」两条断言 | `apps/web/ui/e2e/review-workspace.spec.ts` |
+| 没跑的检查说成跑过 | 只靠文字：「只跑了部分文件要写出文件名，没跑的写「未跑」」 | `AGENTS.md` |
+| 按名字结束进程 | 只靠文字：「只结束自己启动的进程，按 PID；禁止 `pkill`/`killall` 按名字匹配」 | `AGENTS.md` |
+
+被纠正一次就补一行；表里已有的规则又犯了，就要升级成检查。

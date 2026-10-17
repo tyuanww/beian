@@ -10,7 +10,12 @@ function isPageOver(code?: string): boolean {
 }
 
 /** 核对页给审稿员看的任务报错。超页按错误码、认字失败换成定稿口径，其余仍走 customerCopy。 */
-export function reviewErrorCopy(raw: string, code?: string): string {
+/** 失败但保留上一轮条目的单子：复核失败，或首次核对被中断回收（compare）。 */
+export type FailedWithHitsKind = "rework" | "compare";
+
+export function reviewErrorCopy(raw: string, code?: string, failedWithHits?: FailedWithHitsKind): string {
+  if (failedWithHits === "rework") return isPageOver(code) ? REVIEW_COPY.reworkPageOver : REVIEW_COPY.reworkFailed;
+  if (failedWithHits === "compare" && !isPageOver(code)) return REVIEW_COPY.compareFailedWithHits;
   if (isPageOver(code)) return REVIEW_COPY.pageOver;
   const text = String(raw || "");
   // error-text-match-allow -- 待后端错误码，见 TODOS.md「前端按报错文案判断状态」

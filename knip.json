@@ -34,7 +34,7 @@
       ]
     },
     "apps/web/server": {
-      "entry": ["src/index.ts!", "src/recoverNativeText.ts!", "src/glbWebpProbe.ts!", "src/glbWebpMemoryProbe.ts!"],
+      "entry": ["src/index.ts!", "src/recoverNativeText.ts!", "src/glbWebpProbe.ts!", "src/glbWebpMemoryProbe.ts!", "src/legacyPageOver.ts!"],
       "project": [
         "src/**/*.ts!",
         "!src/**/*.test.ts!",

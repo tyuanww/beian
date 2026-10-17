@@ -17,7 +17,7 @@ import { ReviewSubmitDialog } from "./ReviewSubmitDialog";
 import { createFlagStore, UndoToastGate } from "./undoToastGate";
 import {
   clampPinToView, conclusionFor, decisionFailureText, reworkUploadBlocked, submitFailureText, flatLayout, isTypingTarget, lockedBy, markShortcutsSeen, markerOutsideCorner, nextPendingAfter,
-  panToClearPanel, phonePendingLines, positionLabel, rejectRows, shouldShowShortcutsOnOpen, submitGate, tabIndices, thumbMarks, verdictCounts, verdictForKey, isOpenHeld,
+  panToClearPanel, phonePendingLines, positionLabel, rejectNote, rejectRows, shouldShowShortcutsOnOpen, submitGate, tabIndices, thumbMarks, verdictCounts, verdictForKey, isOpenHeld,
   type FlatLayout, type FlatTab,
 } from "./reviewFlat";
 import { ReviewWorkspace } from "./ReviewWorkspace";
@@ -32,7 +32,7 @@ import { ReviewHitDetail } from "./ReviewHitDetail";
 import { SPOT_CARD_GAP, SPOT_CARD_MARGIN, SPOT_CARD_MIN_HEIGHT, SPOT_CARD_MIN_WIDTH, SPOT_CARD_WIDTH, avoidSpotObstacle, placeSpotCard, resolveSpotPosition, spotDragStarted, spotLane, spotSideRoom, type SpotObstacle } from "./spotCard";
 import { spotTitleParts, spotNavTarget, spotPendingEmptyLine } from "./spotCopy";
 import { firstPendingIssueIndex, pageIndexForHit } from "./reviewNav";
-import { reviewErrorCopy, reviewErrorType } from "./reviewErrorCopy";
+import { reviewErrorCopy, reviewErrorType, type FailedWithHitsKind } from "./reviewErrorCopy";
 import { reviewVersionToggle } from "./reviewStatus";
 import { buildRevisionList, partitionReviewHits, withLocalNotes } from "./reviewEvidence";
 import {
@@ -923,11 +923,14 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
   const orderHeldOk = signAllowedForOrderHeld(orderHeldNeeded, orderHeldConfirm);
   const draftBlock = unsavedNotesHint(hasUnsavedNotes);
   const failedJob = task?.status === "compare_failed" || task?.job_status === "failed";
+  const failedWithoutHits = failedJob && hits.length === 0;
+  const failedWithHits: FailedWithHitsKind | undefined = failedJob && hits.length > 0 ? (task?.job_kind === "rework" ? "rework" : "compare") : undefined;
   const thumbs = thumbMarks(pages, hits, seenPages);
   const issueRows = rejectRows(hits, notes);
   const releaseHeld = task?.verbatim_check === true;
   const pendingLines = phonePendingLines(hits, releaseHeld);
   const phone = layout === "phone";
+  const posnLabel = failedWithoutHits ? null : locked ? positionLabel(tabIndices(hits, "all", active), active, undefined, heldCount) : positionLabel(tabList, active, tab === "pending" ? counts.pending : undefined, heldCount);
   const noteFor = (h?: FieldHit) => (h?.id ? notes[h.id] ?? h.note ?? "" : "");
   const zoomBy = (factor: number) => {
     const el = viewRef.current;
@@ -960,10 +963,10 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
             </button>
           </span>
         ) : null}
-        {!phone ? (
+        {!phone && posnLabel !== null ? (
           <span className="review-posn" role="group" aria-label="当前位置">
             <button type="button" aria-label="上一条" onClick={() => step(-1)}>‹</button>
-            <b data-testid="review-posn">{locked ? positionLabel(tabIndices(hits, "all", active), active, undefined, heldCount) : positionLabel(tabList, active, tab === "pending" ? counts.pending : undefined, heldCount)}</b>
+            <b data-testid="review-posn">{posnLabel}</b>
             <button type="button" aria-label="下一条" onClick={() => step(1)}>›</button>
           </span>
         ) : null}
@@ -1013,12 +1016,12 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
         </span>
       </header>
 
-      {gate.rejectTitle ? <p className="review-reject-note" id="review-reject-note" data-testid="review-reject-note">{gate.rejectTitle}</p> : null}
+      {rejectNote(gate.rejectTitle, Boolean(failedWithHits)) ? <p className="review-reject-note" id="review-reject-note" data-testid="review-reject-note">{gate.rejectTitle}</p> : null}
       {locked ? <Alert className="review-lock" type="warning" title={`🔒 ${locked}`} description={REVIEW_COPY.lockedNote} /> : null}
       {error ? <Alert type="error" title={error} /> : null}
       {task?.error || task?.job_error || task?.job_error_code ? (
-        <Alert type={reviewErrorType(task.job_error_code)} showIcon title={reviewErrorCopy(task.error || task.job_error || "", task.job_error_code) || "检查失败。"} description={failedJob ? REVIEW_COPY.reupload : undefined} />
-      ) : failedJob ? <Alert type="error" showIcon title={REVIEW_COPY.reupload} /> : null}
+        <Alert type={reviewErrorType(task.job_error_code)} showIcon title={reviewErrorCopy(task.error || task.job_error || "", task.job_error_code, failedWithHits) || "检查失败。"} description={failedJob && !failedWithHits ? REVIEW_COPY.reupload : undefined} />
+      ) : failedJob ? <Alert type="error" showIcon title={failedWithHits ? reviewErrorCopy("", undefined, failedWithHits) : REVIEW_COPY.reupload} /> : null}
       {signed && !locked ? <Alert type="success" showIcon title={task?.complete_kind === "rework" ? "已退回。" : "已签字。"} /> : null}
       {decisionError ? <Alert type="error" showIcon title={`未保存：${decisionError}`} /> : null}
 
@@ -1061,10 +1064,10 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
         onPanelOpen={setPanelOpen}
         thumbs={thumbs.map((t) => (
           <button key={pages[t.index]?.url || t.index} type="button" className={`review-th s-${t.state}${t.index === pageIdx ? " is-on" : ""}`}
-            aria-label={t.label} aria-current={t.index === pageIdx ? "page" : undefined} title={t.label} disabled={busy} onClick={() => setPageIdx(t.index)}>
+            aria-label={failedWithoutHits ? `第${t.page}页` : t.label} aria-current={t.index === pageIdx ? "page" : undefined} title={failedWithoutHits ? `第${t.page}页` : t.label} disabled={busy} onClick={() => setPageIdx(t.index)}>
             <span className="review-th-p">P{t.page}</span>
-            <span className="review-th-s" aria-hidden="true">{t.symbol}</span>
-            <span className="review-th-w" aria-hidden="true">{t.word}</span>
+            {failedWithoutHits ? null : <span className="review-th-s" aria-hidden="true">{t.symbol}</span>}
+            {failedWithoutHits ? null : <span className="review-th-w" aria-hidden="true">{t.word}</span>}
           </button>
         ))}
         panel={
@@ -1085,6 +1088,7 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
             locationCopy={current && missLineUnboxed(locateBoxesForHit(current), pageNo, metrics) ? REVIEW_COPY.lineNotBoxed : REVIEW_COPY.noBox}
             showDetail={!showSpot}
             closeHeldPulse={closeHeldPulse}
+            showProgress={!failedWithoutHits}
           />
         }
       >
@@ -1293,7 +1297,7 @@ export function ReviewPage({ taskId, userId, displayName = null, onBack, onHisto
                 }}
               >
                 {(() => {
-                  const title = spotTitleParts(current.field, current.status || "项目", current.item, REVIEW_COPY.tabs[locked ? "all" : tab], locked ? positionLabel(tabIndices(hits, "all", active), active, undefined, heldCount) : positionLabel(tabList, active, tab === "pending" ? counts.pending : undefined, heldCount));
+                  const title = spotTitleParts(current.field, current.status || "项目", current.item, REVIEW_COPY.tabs[locked ? "all" : tab], posnLabel ?? "");
                   return (
                     <strong className="review-spot-title" data-testid="review-spot-title" aria-label={title.full}>
                       {title.field ? <span className="review-spot-field" title={title.field}>{title.field}</span> : null}
