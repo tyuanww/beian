@@ -11,7 +11,8 @@
  *     或匹配用的字符串/正则是人话（含汉字，或两个以上英文单词）。
  * 被匹配对象先剥掉无参的字符串规整调用（toLowerCase / toUpperCase / toLocale*Case / trim / trimStart / trimEnd 等）再取名字，
  * 所以 err.message.toLowerCase().includes("x") 一样会被抓。另外，上述报错名字与非空字符串字面量用 === / !== / == / != 直接比较（左右都算）也算；
- * 字面量是 snake_case 机读码（如 reason === "permission_denied"）时不算，那是在认码。
+ * 豁免只看字段名：码字段（reason / code / 以 _code 或 Code 结尾）与 ^[a-z][a-z0-9_]*$ 形字面量比较时放过（在认码）；
+ * message / error 等报错字段与任何非空字面量比较都拦，下划线形式也拦。
  * 允许的例外：紧挨在调用上一行写 `// error-text-match-allow -- <理由>`。例外总数只减不增，
  * 由 scripts/quality/error-text-match.test.mjs 里的 ALLOWED 基线按文件锁定。
  */
@@ -35,7 +36,9 @@ const STRONG_NAME = /^(message|msg|error|err|detail|details|reason|job_error|err
 const WEAK_NAME = /^(raw|text)$/u;
 const ERRORISH_INIT = /\b(message|error|err|detail|job_error)\b/u;
 const PROSE = /\p{Script=Han}|[A-Za-z]{2,}\s+[A-Za-z]{2,}/u;
-const MACHINE_CODE = /^[a-z][a-z0-9]*(?:_[a-z0-9]+)+$/u;
+// 相等比较的豁免看被比较的字段名：码字段（reason / code / *_code / *Code）与机读码形字面量比较是在认码。
+const CODE_FIELD = /^(reason|code)$|(_code|Code)$/u;
+const CODE_LITERAL = /^[a-z][a-z0-9_]*$/u;
 const NORMALIZERS = new Set(["toLowerCase", "toUpperCase", "toLocaleLowerCase", "toLocaleUpperCase", "trim", "trimStart", "trimEnd", "trimLeft", "trimRight"]);
 const EQUALITY = new Set([ts.SyntaxKind.EqualsEqualsEqualsToken, ts.SyntaxKind.ExclamationEqualsEqualsToken, ts.SyntaxKind.EqualsEqualsToken, ts.SyntaxKind.ExclamationEqualsToken]);
 
@@ -96,9 +99,10 @@ export function scanSource(code, file = "inline.ts") {
     if (ts.isBinaryExpression(node) && EQUALITY.has(node.operatorToken.kind)) {
       const sides = [[node.left, node.right], [node.right, node.left]];
       for (const [subject, literal] of sides) {
-        // 空串、snake_case 机读码（如 "permission_denied"）不是文案比较。
-        if (!ts.isStringLiteralLike(literal) || literal.text === "" || MACHINE_CODE.test(literal.text)) continue;
+        if (!ts.isStringLiteralLike(literal) || literal.text === "") continue;
         const name = subjectName(subject);
+        // 只有码字段才按字面量形状放过；message / error 等不管字面量长什么样都拦。
+        if (CODE_FIELD.test(name) && CODE_LITERAL.test(literal.text)) continue;
         if (errorish(name, literal.text)) {
           record(node, name, node.operatorToken.getText(source));
           break;

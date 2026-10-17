@@ -113,6 +113,25 @@ test("比较的正例：机读码、空串、非报错名字不拦", () => {
   assert.deepEqual(scanSource(code), []);
 });
 
+test("报错字段与下划线形字面量比较也拦：err.message === \"network_error\"", () => {
+  const hits = scanSource('declare const err: Error;\nif (err.message === "network_error") {}\nif (err.message.trim().toLowerCase() !== "timeout_error") {}');
+  assert.deepEqual(hits.map((h) => `${h.name}.${h.method}`), ["message.===", "message.!=="]);
+});
+
+test("码字段与码形字面量比较放过：reason === \"denied\"、job_error_code / errorCode；码字段比人话照拦", () => {
+  const ok = [
+    'declare const reason: string; declare const t: { job_error_code?: string; errorCode?: string; code?: string };',
+    'reason === "denied";',
+    '"denied" !== reason;',
+    't.job_error_code === "page_over";',
+    't.errorCode == "auth_failed";',
+    't.code != "timeout";',
+  ].join("\n");
+  assert.deepEqual(scanSource(ok), []);
+  const bad = scanSource('declare const reason: string;\nreason === "Permission denied";');
+  assert.deepEqual(bad.map((h) => `${h.name}.${h.method}`), ["reason.==="]);
+});
+
 test(`紧挨上一行写 ${ALLOW_MARKER} 才算登记例外`, () => {
   const code = [
     'declare const message: string;',
