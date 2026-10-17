@@ -568,6 +568,9 @@ RF-10–RF-13 的原始依赖见 [ADR-007 §20.7](docs/adr-007-packaging-render-
 
 - [x] 对红（复核）失败、单子回到待审且带上一轮条目：老板 10/17 定 B，签字退回都拦，出路为重新上传对红（`POST /api/tasks/:tid/rework`，审核员只能传自己的单，别人的单回 403）。服务端 `completeGate` 在 `job_kind: rework` + `job_status: failed` 时（不论还剩不剩条目）回 400「当前状态不可签字」；对照失败等其他失败按 main 不受影响。前端失败单本来就不给签字/退回按钮。
 - [ ] 前端核对页给这种单加「重新上传这一单」入口（调现有 `/rework`）：现在「上传新稿」只在 `status: completed` 时显示，待审态的对红失败单在界面上没有出路。**前端哥负责。**
+- [x] 「检查中断」单（方案 A，产品 10/17）：`isReworkableTask` 放行所有 `status: compare_failed` + `job_kind: compare` + `job_status: failed`、`activeHits` 还有条目、没有 `pages_v2` 的单，回收出来的失败和对照命令行自己失败的不区分；对照失败已没有条目的、有 `pages_v2` 的照旧回 400「当前状态不可对红」。`/rework` 对这种单把 `status_before_job` 记成 `pending_review` 并清掉旧 `error`，复核失败落到待审 + 对红失败（红条，签字退回拦，可再传），不再变成不可读单。签字退回在复核前仍 400。
+- [ ] 前端 `isReworkable`（`ReviewPage.tsx`）跟上方案 A：同一条件下也给「重新上传这一单」入口；e2e `review-workspace.spec.ts` 里「compare_failed 带上一轮条目」那条断言没有入口，到时一起改。**前端哥负责。**
+- [ ] 黄条原文：服务端超页 `job_error` 现在是「稿件超过 1 页，暂不支持核对，请联系管理员」，要去掉「请联系管理员」，放到加码 PR 里做；前端按 `job_error_code: "page_over"` 显示自己的文案，不读这句原文。
 - [x] 非逐字单出现未决「待人工确认」：两边都算待确认；服务端回 400「仍有 N 条待人工确认未处理」（逐字单仍走整单确认勾选）。
 - [x] 只读账号（viewer）：前端隐藏签字/退回；服务端 403。
 - [x] 条目状态不在已知集合：前端两个按钮灰并提示「审核数据状态异常」；服务端 400「有 N 条审核数据状态异常，请重新对照」。
