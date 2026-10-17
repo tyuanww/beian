@@ -245,7 +245,6 @@ export const SIGN_RETURN_RULES: readonly SignReturnRule[] = [
     input: reviewer([{ status: "一致", coverageMiss: ["CAPSULE MIST"], decision: "issue" }]),
     expect: RETURN_ONLY,
   },
-  { name: "缺空格没有 decision、也没有存疑字段：不算待确认", input: reviewer([{ status: "缺空格" }]), expect: SIGN_ONLY },
   // —— 老板 10/17 定 B：签字退回都拦，出路为重新上传对红（/rework）——
   {
     name: "复核（对红）失败、单子回到待审且带上一轮条目（无有错）：两边都拦",
@@ -309,4 +308,14 @@ export const SIGN_RETURN_RULES: readonly SignReturnRule[] = [
   },
 ];
 
-export const SIGN_RETURN_DISPUTED: readonly SignReturnDisputed[] = [];
+export const SIGN_RETURN_DISPUTED: readonly SignReturnDisputed[] = [
+  {
+    // 加码 Q2：服务端已改（reviewIssue.ts）；前端 isReviewIssue 由前端哥在同一 PR 跟上后，挪回主表：
+    // expect PENDING，code "complete_hits_pending"。
+    name: "缺空格没有 decision、也没有存疑字段",
+    input: reviewer([{ status: "缺空格" }]),
+    ui: SIGN_ONLY,
+    server: { sign: false, ret: false },
+    why: "加码 Q2：缺空格没下结论一律要结论。服务端已拦（仍有 1 条缺空格未处理）；前端还按核对要点有无内容判断，待前端对齐",
+  },
+];

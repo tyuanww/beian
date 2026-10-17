@@ -1957,4 +1957,23 @@ describe("review http", () => {
     const stored = JSON.parse(readFileSync(join(process.env.WB_DATA_DIR as string, "tasks", `${tid}.json`), "utf8")) as { hits: object[] };
     assert.equal("hit_text" in stored.hits[0], false);
   });
+
+  it("加码 Q2：缺空格没标 pending、只靠核对要点有内容，服务端也要结论（原「前端更严」差异已对齐）", async () => {
+    const tid = seed({
+      id: "5bace0000001",
+      title: "缺空格",
+      product_name: "缺空格",
+      type: "excel_pdf",
+      status: "in_review",
+      hits: [{ id: "h1", field: "中文品名", status: "缺空格" }],
+    });
+    const res = await completeAs(tid, "无改稿项");
+    assert.equal(res.status, 400);
+    assert.deepEqual(res.body, {
+      detail: "仍有 1 条缺空格未处理",
+      code: "complete_hits_pending",
+      params: { items: [{ kind: "status", status: "missing_space", count: 1 }] },
+    });
+    assert.equal(loadTask(tid).status, "in_review");
+  });
 });
