@@ -35,9 +35,18 @@ type Studio = { product_light: number; background_light: number };
 
 export class RenderBridgeError extends Error {
   readonly fix = "保留当前产物，核对输入与执行环境后重新验证";
-  constructor(readonly code: string, readonly cause: string) {
+  /** Internal diagnostic only (e.g. the errno code behind resource_accounting_unavailable); never the public cause. */
+  declare readonly detail?: string;
+  constructor(readonly code: string, readonly cause: string, detail?: string) {
     super(`候选渲染未完成：${cause}`);
+    if (detail !== undefined) Object.defineProperty(this, "detail", { value: detail, enumerable: true });
   }
+}
+
+/** Bounded, path-free code of an unexpected sampling failure (ENOENT, ETIMEDOUT, ...). */
+function samplingFailureCode(error: unknown): string {
+  const code = (error as NodeJS.ErrnoException | undefined)?.code;
+  return typeof code === "string" && /^[A-Z][A-Z0-9_]{0,31}$/.test(code) ? code : "uncoded";
 }
 
 export type RenderBridgeObserver = {
@@ -236,9 +245,9 @@ function command(options: ResolvedBridgeOptions, request: Json, observer: Render
       try { signalRenderGenerationGroup(child.pid, force); }
       catch { /* No fallback to an unverified/reused standalone PID. */ }
     };
-    const stop = (cause: string, code = "render_generation_failed"): void => {
+    const stop = (cause: string, code = "render_generation_failed", detail?: string): void => {
       if (failure || closed) return;
-      failure = new RenderBridgeError(code, cause);
+      failure = new RenderBridgeError(code, cause, detail);
       signalTree(false);
       forceTimer = setTimeout(() => signalTree(true), options.terminationGraceMs);
     };
@@ -251,7 +260,10 @@ function command(options: ResolvedBridgeOptions, request: Json, observer: Render
         // The post-close census below stays strict.
         observer.lifecycle!.observe(String(request.candidate_dir ?? join(String(request.job_root), ".render-generations", ".candidate-none")),
           child.pid, { tolerateVanished: true });
-      } catch (err) { stop(err instanceof RenderBudgetError ? err.cause : "resource_accounting_unavailable"); }
+      } catch (err) {
+        if (err instanceof RenderBudgetError) stop(err.cause);
+        else stop("resource_accounting_unavailable", undefined, samplingFailureCode(err));
+      }
     }, 100) : undefined;
     observer.signal?.addEventListener("abort", abort, { once: true });
     child.stdout.on("data", (chunk: Buffer) => {

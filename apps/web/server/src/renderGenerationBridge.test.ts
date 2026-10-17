@@ -263,6 +263,36 @@ describe("RF-03C2.1 async render bridge", { skip: !renderGenerationProcessSuppor
     assert.ok(final === undefined || final.tolerateVanished !== true, "post-close census must stay strict");
   });
 
+  for (const [thrown, detail] of [[Object.assign(new Error("private /path"), { code: "ENOENT" }), "ENOENT"],
+    [new Error("private /path"), "uncoded"]] as Array<[Error, string]>) {
+    it(`an unexpected sampling failure keeps the public cause and carries ${detail} as diagnostic detail`, async () => {
+      const f = fixture(10000);
+      const receipt = await f.bridge.verify(f.input);
+      f.behavior("await-release");
+      const lifecycle: RenderLifecycle = { deadline: Infinity, check: () => {}, beforeWrite: () => {}, release: () => {},
+        observe: () => { throw thrown; } };
+      let spawned!: () => void;
+      const spawn = new Promise<void>(resolve => { spawned = resolve; });
+      let owned = false;
+      mock.timers.enable({ apis: ["setInterval"] });
+      try {
+        const rendering = f.bridge.render(receipt, f.candidate, process.execPath,
+          { lifecycle, onSpawn: () => { owned = true; spawned(); }, onClose: () => { owned = false; } });
+        await spawn;
+        mock.timers.tick(100);
+        await assert.rejects(rendering, (error: Error & { code?: string; cause?: string; detail?: string }) => {
+          assert.equal(error.message, "候选渲染未完成：resource_accounting_unavailable");
+          assert.equal(error.code, "render_generation_failed");
+          assert.equal(error.cause, "resource_accounting_unavailable");
+          assert.equal(error.detail, detail);
+          assert.equal(JSON.stringify(error).includes("/path"), false);
+          return true;
+        });
+      } finally { mock.timers.reset(); }
+      assert.equal(owned, false);
+    });
+  }
+
   for (const damage of ["none", "files", "bytes", "faces", "contract", "fingerprint", "mode", "extra", "missing", "duplicate"]) {
     it(`binds one-shot partial seal proof to copied evidence: ${damage}`, async () => {
       const f = fixture();
