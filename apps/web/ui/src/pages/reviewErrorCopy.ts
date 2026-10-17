@@ -11,7 +11,7 @@ function isPageOver(code?: string): boolean {
 
 /** 核对页给审稿员看的任务报错。超页按错误码、认字失败换成定稿口径，其余仍走 customerCopy。 */
 export function reviewErrorCopy(raw: string, code?: string, reworkFailedWithHits = false): string {
-  if (reworkFailedWithHits) return REVIEW_COPY.reworkFailed;
+  if (reworkFailedWithHits) return isPageOver(code) ? REVIEW_COPY.reworkPageOver : REVIEW_COPY.reworkFailed;
   if (isPageOver(code)) return REVIEW_COPY.pageOver;
   const text = String(raw || "");
   if (OCR_FAILED.test(text)) return REVIEW_COPY.ocrFailed;

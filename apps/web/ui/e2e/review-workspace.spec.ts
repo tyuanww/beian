@@ -946,3 +946,25 @@ test("签字/退回按钮定位器在正常待审单上能找到（失败单断�
   await expect(page.locator("button.review-sign")).toHaveCount(1);
   await expect(page.locator("button.review-reject")).toHaveCount(1);
 });
+
+test("复核超页且条目还在：黄条写明这次复核没做，不提供重新上传，条目和进度保留", async ({ page, syntheticApi }, info) => {
+  const task = reviewTask("e5969b58cd66");
+  task.job_kind = "rework";
+  task.status = "pending_review";
+  task.job_status = "failed";
+  task.job_error = "这一单页数超过可核对页数";
+  task.job_error_code = "page_over";
+  syntheticApi.tasks.push(task);
+  expect(task.hits?.length).toBeGreaterThan(0);
+  await page.goto(`/review/${task.id}`);
+  const alert = page.locator(".ant-alert-warning").filter({ hasText: "稿件超过 1 页，这次复核没做，下面是上一轮的结果，请联系管理员" });
+  await expect(alert).toBeVisible();
+  await expect(page.locator(".ant-alert-error")).toHaveCount(0);
+  await expect(page.getByText("重新上传这一单")).toHaveCount(0);
+  await expect(page.getByTestId("review-posn")).toBeVisible();
+  await expect(page.locator(".review-th-w").first()).toBeVisible();
+  await expect(page.locator(".review-dock-panel").getByText("中文品名").first()).toBeVisible();
+  await expect(page.getByText(/这单还剩 \d+ 条待确认/)).toBeVisible();
+  await expect(page.getByRole("button", { name: "复制修改清单" })).toBeVisible();
+  await page.screenshot({ path: info.outputPath("rework-page-over.png") });
+});
