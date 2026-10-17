@@ -319,15 +319,25 @@ export function markShortcutsSeen(store: Pick<Storage, "setItem"> | null): void 
   }
 }
 
-/** 退回门槛小字。失败但带上一轮条目时签字/退回按钮都不在，小字也不显示。 */
-export function rejectNote(rejectTitle: string | undefined, failedWithHits: boolean, canComplete = true): string | null {
-  // viewer（没有 complete）不签不退：叫人做事的句子不出（产品哥 2026-10-17），只读信息照常。
-  return rejectTitle && !failedWithHits && canComplete ? rejectTitle : null;
+/** 签字 / 退回两个按钮各自显示与否（`reviewSubmitButtons` 的结果；只看是否 hidden）。 */
+type SubmitVisibility = { sign: "hidden" | "disabled" | "enabled"; reject: "hidden" | "disabled" | "enabled" };
+
+/**
+ * 签字和退回都做不了（两个按钮都不在：viewer、失败单、别人的失败单等）时，叫人去做事的句子不出
+ * （产品哥 2026-10-17：做不了的事不叫他做）。只要有一个按钮在（哪怕灰着），就照常说明为什么。
+ */
+function canSignOrReject(buttons: SubmitVisibility): boolean {
+  return buttons.sign !== "hidden" || buttons.reject !== "hidden";
 }
 
-/** 签字左侧提示（「仍有 …未处理」等）：viewer 不显示。 */
-export function signHint(hint: string, canComplete = true): string | null {
-  return hint && canComplete ? hint : null;
+/** 页头退回门槛小字（「仍有 …未处理」等）。 */
+export function rejectNote(rejectTitle: string | undefined, buttons: SubmitVisibility): string | null {
+  return rejectTitle && canSignOrReject(buttons) ? rejectTitle : null;
+}
+
+/** 右上签字左侧提示（「仍有 …未处理」等）。 */
+export function signHint(hint: string, buttons: SubmitVisibility): string | null {
+  return hint && canSignOrReject(buttons) ? hint : null;
 }
 
 /**

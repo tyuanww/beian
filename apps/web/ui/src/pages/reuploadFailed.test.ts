@@ -3,7 +3,8 @@ import { describe, it } from "node:test";
 import type { FieldHit, TaskDetail } from "../api";
 import { REVIEW_COPY } from "../copy/labels";
 import { reviewErrorCopy, type FailedWithHitsKind } from "./reviewErrorCopy";
-import { canReuploadFailed, isDeadCompareFailed, reviewPageHits, reviewSubmitButtons, type ReuploadViewer } from "./reviewActions";
+import { rejectNote, signHint, submitGate } from "./reviewFlat";
+import { canAccessTaskOwner, canReuploadFailed, isDeadCompareFailed, reviewPageHits, reviewSubmitButtons, type ReuploadViewer } from "./reviewActions";
 
 /**
  * 复核失败按 B：红条（复核失败）、黄条（复核超页）、检查中断条（方案 A）里给自己的单「重新上传这一单」。
@@ -123,5 +124,42 @@ describe("对照失败且没有有效条目：请回首页新建一单（产品 
     assert.equal(REVIEW_COPY.compareFailedNoHits, "这一单没法接着核了，请回首页重新新建一单");
     assert.equal(REVIEW_COPY.backHome, "回首页");
     assert.doesNotMatch(REVIEW_COPY.compareFailedNoHits, /请联系管理员|重新上传/u);
+  });
+});
+
+describe("签字和退回都做不了就不叫人去处理：右上和页头那句跟着按钮走", () => {
+  const opts = (canComplete: boolean) => ({ locked: false, orderHeldConfirm: false, busy: false, hasUnsavedNotes: false, canComplete });
+  /** 同 ReviewPage：有 complete 且这单自己能动（canAccessTaskOwner）才算能签退。 */
+  const lines = (t: TaskDetail, canComplete: boolean, who: ReuploadViewer = reviewer) => {
+    const hits = reviewPageHits(t, false);
+    const g = submitGate(hits, true);
+    const b = reviewSubmitButtons(t, hits, opts(canComplete && canAccessTaskOwner(t, who)));
+    return { hint: signHint(g.hint, b), note: rejectNote(g.rejectTitle, b), pending: g.pending };
+  };
+  const PENDING: FieldHit[] = [{ id: "p0", field: "中文品名", status: "疑点", decision: "pending" }];
+  for (const bar of BARS) {
+    it(`${bar.name}：本人单、别人的单都没有「仍有 …未处理」；待确认条数照常算`, () => {
+      for (const [t, who] of [[task({ ...bar.task, hits: PENDING }), reviewer], [task({ ...bar.task, hits: PENDING }, "ou_other"), reviewer], [task({ ...bar.task, hits: PENDING }, "ou_other"), admin]] as const) {
+        const l = lines(t, true, who);
+        assert.equal(l.hint, null);
+        assert.equal(l.note, null);
+        assert.equal(l.pending, 1, "疑点列表里的条目数照常");
+      }
+    });
+  }
+  it("viewer 看正常待审单：没有；审核员看自己正常待审单：签字灰、退回可点，照常显示", () => {
+    const normal = task({ status: "in_review", hits: PENDING });
+    assert.deepEqual(lines(normal, false), { hint: null, note: null, pending: 1 });
+    const l = lines(normal, true);
+    assert.equal(l.hint, "仍有 1 条疑点未处理");
+    assert.equal(l.note, "仍有 1 条疑点未处理");
+  });
+  it("别人的正常待审单：审核员两个按钮都不在、那句也没有（服务端 /complete 403）；管理员能签能退，照常显示", () => {
+    const others = task({ status: "in_review", hits: PENDING }, "ou_other");
+    assert.deepEqual(lines(others, true, reviewer), { hint: null, note: null, pending: 1 });
+    assert.equal(lines(task({ status: "in_review", hits: PENDING }, null), true, reviewer).hint, null, "没有 owner 的老单同服务端：非管理员不能动");
+    const l = lines(others, true, admin);
+    assert.equal(l.hint, "仍有 1 条疑点未处理");
+    assert.equal(l.note, "仍有 1 条疑点未处理");
   });
 });

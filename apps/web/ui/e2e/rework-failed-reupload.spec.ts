@@ -87,6 +87,10 @@ for (const bar of BARS) {
     const alert = page.locator(bar.alert).filter({ hasText: bar.title });
     await expect(alert.locator(".ant-alert-title")).toHaveText(bar.title);
     await expect(alert).not.toContainText("请联系管理员");
+    // 签字退回都做不了：右上和页头不叫人去处理；疑点列表的待确认数照常。
+    await expect(page.locator("#review-sign-hint")).toHaveCount(0);
+    await expect(page.getByTestId("review-reject-note")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /展开疑点 · 待确认 \d+/u })).toBeVisible();
     await expect(page.locator("button.review-sign")).toHaveCount(0);
     await expect(page.locator("button.review-reject")).toHaveCount(0);
     const pdf = info.outputPath("new.pdf");
@@ -106,12 +110,40 @@ for (const bar of BARS) {
     await page.goto(`/review/${task.id}`);
     await expect(page.locator(bar.alert).filter({ hasText: bar.title })).toBeVisible();
     await expect(page.getByRole("button", { name: REVIEW_COPY.reupload })).toHaveCount(0);
+    await expect(page.locator("#review-sign-hint")).toHaveCount(0);
+    await expect(page.getByTestId("review-reject-note")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /展开疑点 · 待确认 \d+/u })).toBeVisible();
     await expect(page.locator("button.review-sign")).toHaveCount(0);
     await expect(page.locator("button.review-reject")).toHaveCount(0);
   });
 }
 
-test("审核员看别人的正常待审单：服务端 /complete 会 403，签字退回都不在", async ({ page, syntheticApi }) => {
+test("管理员看别人的红条单：服务端 /rework 对管理员不看归属，照样给「重新上传这一单」并带句尾", async ({ page, syntheticApi }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem("wb_review_shortcuts_seen_v1", "1");
+    localStorage.setItem("wb_review_spot", "off");
+  });
+  const task = failedTask(BARS[0], "ou_someone_else");
+  syntheticApi.tasks.push(task);
+  await page.goto(`/review/${task.id}`);
+  await expect(page.locator(BARS[0].alert).locator(".ant-alert-title")).toHaveText(BARS[0].title);
+  await expect(page.getByRole("button", { name: REVIEW_COPY.reupload })).toBeVisible();
+  await expect(page.locator("#review-sign-hint")).toHaveCount(0);
+});
+
+test("审核员看自己正常待审单（签字灰、退回可点）：右上和页头照常写「仍有 …未处理」", async ({ page, syntheticApi }) => {
+  await asReviewer(page);
+  const task = reviewTask("e5969b58ce06");
+  Object.assign(task, { owner: ME, status: "in_review", hits: [{ id: "p0", field: "中文品名", status: "疑点", decision: "pending" }] });
+  syntheticApi.tasks.push(task);
+  await page.goto(`/review/${task.id}`);
+  await expect(page.locator("#review-sign-hint")).toHaveText("仍有 1 条疑点未处理");
+  await expect(page.getByTestId("review-reject-note")).toHaveText("仍有 1 条疑点未处理");
+  await expect(page.locator("button.review-sign")).toBeDisabled();
+  await expect(page.locator("button.review-reject")).toBeEnabled();
+});
+
+test("审核员看别人的正常待审单：服务端 /complete 会 403，签字退回都不在，右上和页头不叫人去处理", async ({ page, syntheticApi }) => {
   await asReviewer(page);
   const task = reviewTask("e5969b58ce07");
   Object.assign(task, { owner: "ou_someone_else", status: "in_review", hits: [{ id: "p0", field: "中文品名", status: "疑点", decision: "pending" }] });
@@ -120,10 +152,12 @@ test("审核员看别人的正常待审单：服务端 /complete 会 403，签�
   await expect(page.getByTestId("review-root")).toBeVisible();
   await expect(page.locator("button.review-sign")).toHaveCount(0);
   await expect(page.locator("button.review-reject")).toHaveCount(0);
+  await expect(page.locator("#review-sign-hint")).toHaveCount(0);
+  await expect(page.getByTestId("review-reject-note")).toHaveCount(0);
   await expect(page.getByRole("button", { name: /展开疑点 · 待确认 1/u })).toBeVisible();
 });
 
-test("管理员看别人的正常待审单：能签能退", async ({ page, syntheticApi }) => {
+test("管理员看别人的正常待审单：能签能退，右上和页头照常写「仍有 …未处理」", async ({ page, syntheticApi }) => {
   await page.addInitScript(() => {
     localStorage.setItem("wb_review_shortcuts_seen_v1", "1");
     localStorage.setItem("wb_review_spot", "off");
@@ -132,6 +166,8 @@ test("管理员看别人的正常待审单：能签能退", async ({ page, synth
   Object.assign(task, { owner: "ou_someone_else", status: "in_review", hits: [{ id: "p0", field: "中文品名", status: "疑点", decision: "pending" }] });
   syntheticApi.tasks.push(task);
   await page.goto(`/review/${task.id}`);
+  await expect(page.locator("#review-sign-hint")).toHaveText("仍有 1 条疑点未处理");
+  await expect(page.getByTestId("review-reject-note")).toHaveText("仍有 1 条疑点未处理");
   await expect(page.locator("button.review-reject")).toBeEnabled();
 });
 

@@ -1011,7 +1011,7 @@ export function ReviewPage({ taskId, userId, displayName = null, canComplete = t
           </button>
         ) : null}
         {draftBlock ? <span className="review-draft-status" role="status" data-testid="review-unsaved-hint">{draftBlock}</span> : null}
-        {signHint(gate.hint, canComplete) ? <span className="review-signhint" id="review-sign-hint" title={gate.title} aria-live="polite">{gate.hint}</span> : null}
+        {signHint(gate.hint, buttons) ? <span className="review-signhint" id="review-sign-hint" title={gate.title} aria-live="polite">{gate.hint}</span> : null}
         {orderHeldNeeded && !failedJob && canComplete ? (
           <Checkbox
             className="review-order-held"
@@ -1032,7 +1032,7 @@ export function ReviewPage({ taskId, userId, displayName = null, canComplete = t
         </span>
       </header>
 
-      {rejectNote(gate.rejectTitle, Boolean(failedWithHits), canComplete) ? <p className="review-reject-note" id="review-reject-note" data-testid="review-reject-note">{gate.rejectTitle}</p> : null}
+      {rejectNote(gate.rejectTitle, buttons) ? <p className="review-reject-note" id="review-reject-note" data-testid="review-reject-note">{gate.rejectTitle}</p> : null}
       {locked ? <Alert className="review-lock" type="warning" title={`🔒 ${locked}`} description={REVIEW_COPY.lockedNote} /> : null}
       {error ? <Alert type="error" title={error} /> : null}
       {task?.error || task?.job_error || task?.job_error_code ? (

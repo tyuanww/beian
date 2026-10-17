@@ -24,8 +24,8 @@ describe("reviewFlat", () => {
     assert.equal(g.title, "仍有 1 条疑点未处理");
     assert.equal(g.rejectTitle, "仍有 1 条疑点未处理");
     assert.equal(g.pending, 1);
-    assert.equal(rejectNote(g.rejectTitle, false), "仍有 1 条疑点未处理");
-    assert.equal(rejectNote(g.rejectTitle, true), null, "失败但带条目：按钮都不在，小字也不显示");
+    assert.equal(rejectNote(g.rejectTitle, { sign: "disabled", reject: "enabled" }), "仍有 1 条疑点未处理");
+    assert.equal(rejectNote(g.rejectTitle, { sign: "hidden", reject: "hidden" }), null, "失败单：按钮都不在，小字也不显示");
     assert.deepEqual([submitGate([hit("a", "issue")], true).canSign, submitGate([hit("a", "issue")], true).canReject], [false, true]);
     assert.equal(submitGate([hit("a", "ignore")], true).canSign, true);
     assert.equal(submitGate([], true).canSign, true, "零疑点可直接签字");
@@ -199,14 +199,17 @@ describe("签字门提示与服务端 /complete 拦截同一句", () => {
   });
 });
 
-describe("viewer：页头叫人做事的句子不出", () => {
-  it("签字旁「仍有 …未处理」、退回那行都不出；有 complete 时照常", () => {
+describe("签字和退回都做不了：右上和页头叫人做事的句子不出", () => {
+  it("两个按钮都不在才藏；有一个在（哪怕灰着）就照常说明", () => {
     const g = submitGate([hit("a")], true);
-    assert.equal(signHint(g.hint, false), null);
-    assert.equal(rejectNote(g.rejectTitle, false, false), null);
-    assert.equal(signHint(g.hint, true), g.hint);
-    assert.equal(rejectNote(g.rejectTitle, false, true), g.rejectTitle);
-    assert.equal(signHint("", true), null);
+    const none = { sign: "hidden", reject: "hidden" } as const;
+    assert.equal(signHint(g.hint, none), null);
+    assert.equal(rejectNote(g.rejectTitle, none), null);
+    for (const b of [{ sign: "disabled", reject: "enabled" }, { sign: "disabled", reject: "disabled" }, { sign: "enabled", reject: "hidden" }] as const) {
+      assert.equal(signHint(g.hint, b), g.hint, JSON.stringify(b));
+      assert.equal(rejectNote(g.rejectTitle, b), g.rejectTitle, JSON.stringify(b));
+    }
+    assert.equal(signHint("", { sign: "disabled", reject: "enabled" }), null);
   });
 });
 
