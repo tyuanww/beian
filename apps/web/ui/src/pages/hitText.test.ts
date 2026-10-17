@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { coverageTally, doubtLines, excelText, isImageOnlyField, pdfText, spokenAsk, spokenLines } from "./hitText.js";
+import { readFileSync } from "node:fs";
+import { hitTextOf } from "../../../server/src/hitText.ts";
+import { coverageTally, doubtLines, excelText, humanMissLines, isImageOnlyField, pdfText, spokenAsk, spokenLines } from "./hitText.js";
 
 describe("doubtLines", () => {
   it("does not put score= coverage talk in the issue column", () => {
@@ -233,5 +235,39 @@ describe("single-line 这些字没读全", () => {
     const ask = spokenAsk({ status: "疑点", coverage: { miss: ["烟酰胺", "甘油"] }, bboxes: box });
     assert.equal(ask?.lead, "这些字没读全，请核对");
     assert.equal(ask?.because, "烟酰胺；甘油");
+  });
+});
+
+describe("改读服务端 hit_text（加码 §5）", () => {
+  const box = [{ left: 1, top: 1, width: 10, height: 10 }];
+  it("带 hit_text 时以它为准：miss / evidence / observed 都读投影，不再自己认核算说明", () => {
+    const hit = {
+      status: "疑点",
+      bboxes: box,
+      coverage: { miss: ["score=12", "CAPSULE"], hit: ["旧读数"] },
+      evidence: "稿件少一个空格",
+      hit_text: { v: 1 as const, miss: ["投影里的漏读词"], accounting: ["score=12"], evidence: "投影里的人话", observed: "投影读到的字", located: true },
+    };
+    assert.deepEqual(humanMissLines(hit), ["投影里的漏读词"]);
+    assert.equal(pdfText(hit), "投影读到的字");
+    const noMiss = { ...hit, hit_text: { ...hit.hit_text, miss: [], observed: null } };
+    assert.equal(spokenAsk(noMiss)?.lead, "投影里的人话");
+    assert.equal(pdfText(noMiss), "投影里的人话");
+    // evidence 有字但投影判为核算说明（evidence: null）：按「这些字没读全」说，不露原文。
+    const accounting = { ...hit, coverage: undefined, hit_text: { ...hit.hit_text, miss: [], evidence: null, observed: null } };
+    assert.deepEqual(spokenLines(accounting), ["这些字没读全，请核对"]);
+    assert.equal(pdfText(accounting), "没读到");
+  });
+  it("没有 hit_text（旧接口 / 合成数据）：用同一份共享投影现算，结果和服务端逐字相同", () => {
+    const hit = { status: "疑点", bboxes: box, coverage: { miss: ["仅覆盖 3/5 关键短语 · 未见缺失：x", "CAPSULE MIST"] }, evidence: "覆盖偏低 0/5 · best score=40" };
+    const projected = hitTextOf(hit);
+    assert.deepEqual(humanMissLines(hit), projected.miss);
+    assert.deepEqual(humanMissLines({ ...hit, hit_text: projected }), humanMissLines(hit));
+    assert.equal(pdfText(hit), pdfText({ ...hit, hit_text: projected }));
+    assert.deepEqual(spokenLines(hit), spokenLines({ ...hit, hit_text: projected }));
+  });
+  it("前端源码里不再有核算说明正则和 isAccountingCopy", () => {
+    const src = readFileSync(new URL("./hitText.ts", import.meta.url), "utf8");
+    assert.doesNotMatch(src, /isAccountingCopy|error-text-match-allow|\/score/u);
   });
 });

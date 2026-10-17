@@ -5,6 +5,7 @@ import { API_DOWN_LOCAL } from "./apiHint";
 import { describeBrokenApi } from "./authGate";
 import { uploadTooLargeText } from "./uploadLimit";
 import type { JobErrorCode, ReviewParams } from "../../server/src/reviewCodes.ts";
+import type { HitTextProjection } from "../../server/src/hitText.ts";
 
 function apiHost(): string {
   return typeof window === "undefined" ? "" : window.location.host;
@@ -658,6 +659,8 @@ export type FieldHit = {
   excel_span?: [number, number];
   pdf_span_omit?: "duplicate" | "unmatched";
   excel_span_omit?: "duplicate" | "unmatched";
+  /** 服务端读时投影的结构化文案（加码 §5，`server/src/hitText.ts`）：人话漏读词、核算说明、人话 evidence、读到的字、有没有定位。不落盘。 */
+  hit_text?: HitTextProjection;
 };
 
 export type TaskPage = {
