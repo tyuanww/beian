@@ -728,8 +728,8 @@ describe("review http", () => {
     return { status: res.status, body: (await res.json()) as Record<string, unknown> };
   }
 
-  // 待老板定（signReturnRules.ts 待决行）：暂按 main，对红失败不挡签字/退回。
-  it("still accepts signing and returning after a failed rework that kept last round's hits (main behavior)", async () => {
+  // 老板 10/17 定 B：对红失败、带上一轮条目的单签字退回都拦，出路是重新上传对红（/rework）。
+  it("rejects signing and returning after a failed rework that kept last round's hits, and lets the same order rework again", async () => {
     const signTid = seed({
       id: "d7d7d7d7d7d7",
       title: "复核失败签字",
@@ -741,9 +741,9 @@ describe("review http", () => {
       hits: [hit({ decision: "confirm" })],
     });
     const sign = await completeAs(signTid, "无改稿项");
-    assert.equal(sign.status, 200);
-    assert.equal(sign.body.status, "completed");
-    assert.equal(sign.body.complete_kind, "signed");
+    assert.equal(sign.status, 400);
+    assert.deepEqual(sign.body, { detail: "当前状态不可签字" });
+    assert.equal(loadTask(signTid).status, "pending_review");
 
     const retTid = seed({
       id: "d8d8d8d8d8d8",
@@ -756,9 +756,42 @@ describe("review http", () => {
       hits: [hit({ decision: "issue" })],
     });
     const ret = await completeAs(retTid, "退回改稿");
-    assert.equal(ret.status, 200);
-    assert.equal(ret.body.status, "completed");
-    assert.equal(ret.body.complete_kind, "rework");
+    assert.equal(ret.status, 400);
+    assert.deepEqual(ret.body, { detail: "当前状态不可签字" });
+    assert.equal(loadTask(retTid).status, "in_review");
+
+    // 出路：同一单重新上传，走现有 /rework 入队。worker 立即失败，免得占住单槽。
+    setJobsTestHooks({ runRework: async () => ({ code: 1, stdout: "", stderr: "", timedOut: false }) });
+    try {
+      const fd = new FormData();
+      fd.set("pdf", new File([Buffer.from("%PDF-1.4\n")], "v2.pdf", { type: "application/pdf" }));
+      const res = await app.request(`/api/tasks/${signTid}/rework`, { method: "POST", headers: authHeader(), body: fd });
+      assert.equal(res.status, 200);
+      const body = (await res.json()) as { status?: string; job_kind?: string; job_status?: string };
+      assert.equal(body.status, "comparing");
+      assert.equal(body.job_kind, "rework");
+      assert.ok(body.job_status === "queued" || body.job_status === "running");
+      assert.equal(existsSync(join(process.env.WB_DATA_DIR as string, "uploads", signTid, "artwork_v2.pdf")), true);
+    } finally {
+      resetJobsTestHooks();
+    }
+  });
+
+  it("a failed rework with no hits left is blocked too", async () => {
+    const tid = seed({
+      id: "dcdcdcdcdcdc",
+      title: "复核失败无条目",
+      product_name: "复核失败无条目",
+      type: "excel_pdf",
+      status: "pending_review",
+      job_kind: "rework",
+      job_status: "failed",
+      hits: [],
+    });
+    const res = await completeAs(tid, "无改稿项");
+    assert.equal(res.status, 400);
+    assert.deepEqual(res.body, { detail: "当前状态不可签字" });
+    assert.equal(loadTask(tid).status, "pending_review");
   });
 
   it("treats an open 待人工确认 on a non-verbatim order as pending", async () => {
@@ -1447,6 +1480,33 @@ describe("review http", () => {
     });
     assert.equal(res.status, 413);
     assert.deepEqual(await res.json(), { detail: "上传总量超过 100 MB" });
+  });
+
+  it("a reviewer cannot re-upload another reviewer's failed rework: 403, nothing queued, no new artwork", async () => {
+    const tid = seed({
+      id: "dbdbdbdbdbdb",
+      title: "别人的复核失败",
+      product_name: "别人的复核失败",
+      type: "excel_pdf",
+      status: "pending_review",
+      job_kind: "rework",
+      job_status: "failed",
+      hits: [hit({ decision: "confirm" })],
+    });
+    const other = issueSessionForTest("路人", "reviewer", "ou_rework_failed_other");
+    const fd = new FormData();
+    fd.set("pdf", new File([Buffer.from("%PDF-1.4\n")], "v2.pdf", { type: "application/pdf" }));
+    const res = await app.request(`/api/tasks/${tid}/rework`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${other.token}` },
+      body: fd,
+    });
+    assert.equal(res.status, 403);
+    const after = loadTask(tid);
+    assert.equal(after.status, "pending_review");
+    assert.equal(after.job_kind, "rework");
+    assert.equal(after.job_status, "failed");
+    assert.equal(existsSync(join(process.env.WB_DATA_DIR as string, "uploads", tid, "artwork_v2.pdf")), false);
   });
 
   it("checks rework ownership before accepting or sizing the request body", async () => {

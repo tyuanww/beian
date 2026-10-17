@@ -15,7 +15,7 @@
  * 产品口径（2026-10-17）：该拦的两边都拦，服务端必须能独立拦住。
  * 第 3、4 条（viewer / 未知状态）由前端对齐服务端；第 2 条与「认字存疑」由服务端对齐前端
  * （`completeGate` / `hitNeedsDecision` → `readingDoubt.ts` 的 `hasReadingDoubt`），已进主表。
- * 第 1 条（复核失败带上一轮条目）待老板定，两边各保持现状，锁在 `SIGN_RETURN_DISPUTED`。
+ * 第 1 条（复核失败带上一轮条目）老板 10/17 定 B：签字退回都拦，出路为重新上传对红（/rework），已进主表。
  * `SIGN_RETURN_DISPUTED` 只放前后端结论仍不一致的输入；表测试会拦住「其实已一致」的行。
  */
 
@@ -226,6 +226,22 @@ export const SIGN_RETURN_RULES: readonly SignReturnRule[] = [
     expect: RETURN_ONLY,
   },
   { name: "缺空格没有 decision、也没有存疑字段：不算待确认", input: reviewer([{ status: "缺空格" }]), expect: SIGN_ONLY },
+  // —— 老板 10/17 定 B：签字退回都拦，出路为重新上传对红（/rework）——
+  {
+    name: "复核（对红）失败、单子回到待审且带上一轮条目（无有错）：两边都拦",
+    input: reviewer([{ status: "疑点", decision: "confirm" }], { status: "pending_review", job: { kind: "rework", status: "failed" } }),
+    expect: BOTH_HIDDEN,
+  },
+  {
+    name: "复核（对红）失败、单子回到待审且带上一轮有错条目：两边都拦",
+    input: reviewer([{ status: "疑点", decision: "issue" }], { status: "in_review", job: { kind: "rework", status: "failed" } }),
+    expect: BOTH_HIDDEN,
+  },
+  {
+    name: "复核（对红）失败且没有剩下条目：两边都拦",
+    input: reviewer([], { status: "pending_review", job: { kind: "rework", status: "failed" } }),
+    expect: BOTH_HIDDEN,
+  },
   // —— 产品已定（服务端对齐前端）：非逐字单待人工确认 / 认字存疑 ——
   {
     name: "非逐字单出现未决「待人工确认」：算待确认",
@@ -264,22 +280,4 @@ export const SIGN_RETURN_RULES: readonly SignReturnRule[] = [
   },
 ];
 
-const REWORK_FAILED_WHY =
-  "待老板定，8/20 设计 review-job-module.md 为对红失败仍可签字。前端失败单一律不给按钮；服务端 /complete 不看 job_status=failed，照 main 按条目收签字/退回。";
-
-export const SIGN_RETURN_DISPUTED: readonly SignReturnDisputed[] = [
-  {
-    name: "复核（对红）失败、单子回到待审且带上一轮条目（无有错）",
-    input: reviewer([{ status: "疑点", decision: "confirm" }], { status: "pending_review", job: { kind: "rework", status: "failed" } }),
-    ui: BOTH_HIDDEN,
-    server: { sign: true, ret: false },
-    why: REWORK_FAILED_WHY,
-  },
-  {
-    name: "复核（对红）失败、单子回到待审且带上一轮有错条目",
-    input: reviewer([{ status: "疑点", decision: "issue" }], { status: "in_review", job: { kind: "rework", status: "failed" } }),
-    ui: BOTH_HIDDEN,
-    server: { sign: false, ret: true },
-    why: REWORK_FAILED_WHY,
-  },
-];
+export const SIGN_RETURN_DISPUTED: readonly SignReturnDisputed[] = [];

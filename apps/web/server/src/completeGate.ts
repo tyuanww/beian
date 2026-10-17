@@ -18,9 +18,12 @@ export function completeGate(task: Task, orderHeldConfirm: unknown): CompleteGat
   if (task.job_status === "queued" || task.job_status === "running") {
     return { ok: false, status: 409, message: "对照还在排队或正在跑，不能签字" };
   }
-  // 不看 job_status=failed：复核失败回到待审、带上一轮条目的单照 main 收签字/退回（8/20 设计
-  // review-job-module.md「对红失败仍可签字」）。是否改成不可签待老板定，见 signReturnRules.ts 待决行。
   if (!isReviewableStatus(task.status)) {
+    return { ok: false, status: 400, message: "当前状态不可签字" };
+  }
+  // 老板 10/17 定 B：对红（复核）失败的单（不论还剩不剩条目），签字退回都拦；出路是重新上传走 /rework。
+  // 只限对红失败；对照失败等其他失败按 main 不受影响。不加对外错误码，沿用「当前状态不可签字」。
+  if (task.job_kind === "rework" && task.job_status === "failed") {
     return { ok: false, status: 400, message: "当前状态不可签字" };
   }
   const hits = activeHits(task).filter((h) => !skipPackSheetField(h.field));
