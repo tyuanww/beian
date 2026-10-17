@@ -1,0 +1,87 @@
+name: e2e
+
+# Playwright 端到端测试（合成数据，拦截全部 /api 请求；不连真实后端、不需要任何 secret）。
+# 单独成一个 workflow / job：不改 quality.yml（必选检查 `quality` 的名字和步骤不动），
+# 也不会和 quality.yml 里的其他改动冲突。是否设为必选检查由仓库所有者在分支保护里决定。
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: e2e-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: apps/web/ui
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install Node dependencies
+        working-directory: .
+        run: npm ci --no-audit --no-fund
+
+      - name: Repair npm optional Rollup native on Linux
+        working-directory: .
+        run: |
+          if ! node -e "try { require.resolve('@rollup/rollup-linux-x64-gnu', { paths: ['./apps/web/ui'] }); } catch { process.exit(1); }"; then
+            rollup_native_version="$(node -p "require('./apps/web/ui/node_modules/rollup/package.json').version")"
+            npm install --prefix apps/web/ui --no-save --package-lock=false --ignore-scripts \
+              "@rollup/rollup-linux-x64-gnu@${rollup_native_version}"
+          fi
+
+      - name: Read Playwright version
+        id: pw
+        run: echo "version=$(node -p "require('@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Playwright browsers
+        id: pw-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.pw.outputs.version }}-chromium
+
+      - name: Install Chromium and system deps
+        if: steps.pw-cache.outputs.cache-hit != 'true'
+        run: npx playwright install --with-deps chromium
+
+      - name: Install system deps only (browser cached)
+        if: steps.pw-cache.outputs.cache-hit == 'true'
+        run: npx playwright install-deps chromium
+
+      # 本地基准机装有 Noto CJK；不装的话中文回落字体不同，部分版式断言（换行/溢出）会和本地不一致。
+      - name: Install CJK fonts
+        run: sudo apt-get install -y --no-install-recommends fonts-noto-cjk
+
+      - name: Typecheck e2e
+        run: npx tsc -p tsconfig.e2e.json --noEmit
+
+      - name: Run Playwright e2e
+        run: npx playwright test --workers=1 --reporter=line,github,html
+
+      - name: Upload Playwright report and traces
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            apps/web/ui/playwright-report
+            apps/web/ui/test-results
+          retention-days: 7
+          if-no-files-found: ignore

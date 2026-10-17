@@ -50,6 +50,17 @@ cd apps/web/backend
 
 对仓库外真实 `.ai` 跑 `workers/packaging/tools/export_one_structure.py --dry-run` 只核 SHA-256 与层名 payload，仍不启 COM，也不等于杭州结构导出或金标。这不是默认 pytest，也不走 `export-one-structure.ps1`（该脚本不传 `--dry-run`）。层名是「刀版」的稿要显式 `--proposal-layers 刀版`；多张连核每张独立 `--out-dir`。
 
+### 真后端自检（旧数据场景）
+
+需要确认「旧数据在真后端上读出来对不对」时，不手工起服务，跑场景脚本：
+
+```bash
+cd apps/web/ui
+npm run verify:real-backend -- --scenario legacy-page-over --out <输出目录> [--no-build] [--keep-data]
+```
+
+脚本先构建 UI（`--no-build` 复用现有 `dist/`），用 `mkdtemp` 新建临时 `WB_DATA_DIR` 写入场景任务记录，在空闲端口起真 Hono（serve 已构建 UI），本机显示名登录自动创建的「管理员」，导出接口 JSON、无头截图并按场景断言；结束时按 PID 结束自己起的服务进程组并删除临时目录。断言失败退出 1，环境/启动问题退出 2。场景放在 `apps/web/ui/scripts/verify-scenarios/*.json`（`tasks` / `api` / `pages`）；数据目录与输出目录禁止落在 `runtime/` 或 `apps/web/backend/data`。分步驱动时用 `--serve`（起好后写 `<输出目录>/instance.json` 并常驻，`kill -TERM <instance.json 里的 pid>` 结束并清理）和 `--base-url http://127.0.0.1:<端口>`（只对本机实例做登录、导出、截图、断言，拒绝非回环地址）；完整步骤见 `.cursor/skills/verify-beian/SKILL.md`。这是合成旧数据的真后端读取验证，不是真实稿或线上验收。
+
 ## 有效证据与重跑
 
 每次验证记录：目标 base/head 或源码快照、命令、退出码、环境、耗时、结果位置、skip/deselect 及原因。源码、测试、配置、锁文件或环境变化会使相关证据失效；只改文档可复用不受影响的业务结果。无法界定影响时扩大测试。可使用下列统一入口记录命令与源码指纹；它不自动跳过测试，也不代替依赖/运行时变化审查。
