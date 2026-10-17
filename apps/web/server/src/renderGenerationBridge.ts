@@ -247,7 +247,10 @@ function command(options: ResolvedBridgeOptions, request: Json, observer: Render
     const budgetTimer = observer.lifecycle ? setInterval(() => {
       if (closed || failure) return;
       try {
-        observer.lifecycle!.observe(String(request.candidate_dir ?? join(String(request.job_root), ".render-generations", ".candidate-none")), child.pid);
+        // In-flight sample only: the worker's atomic temp+rename writes may vanish mid-census.
+        // The post-close census below stays strict.
+        observer.lifecycle!.observe(String(request.candidate_dir ?? join(String(request.job_root), ".render-generations", ".candidate-none")),
+          child.pid, { tolerateVanished: true });
       } catch (err) { stop(err instanceof RenderBudgetError ? err.cause : "resource_accounting_unavailable"); }
     }, 100) : undefined;
     observer.signal?.addEventListener("abort", abort, { once: true });
