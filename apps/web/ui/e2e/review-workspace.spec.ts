@@ -736,11 +736,23 @@ test("锁页后收起撤销提示", async ({ page, syntheticApi }) => {
   await page.goto(`/review/${task.id}`);
   await page.getByTestId("review-dock").getByRole("button", { name: /^有错/ }).first().click();
   await expect(page.getByTestId("review-undo-toast")).toBeVisible();
+  // 不靠计时：在页面里记下锁页条第一次出现那一刻撤销提示还在不在。
+  // 提示自身 5 秒后自动消失、antd 退出动画约 0.3 秒（靠 animationend 删节点，忙时更久），都不该参与判定。
+  await page.evaluate(() => {
+    const w = window as unknown as { __undoAtLock?: boolean };
+    const observer = new MutationObserver(() => {
+      if (!document.querySelector(".review-lock")) return;
+      w.__undoAtLock = Boolean(document.querySelector("[data-testid=review-undo-toast]"));
+      observer.disconnect();
+    });
+    observer.observe(document.body, { subtree: true, childList: true });
+  });
   syntheticApi.otherCompletesNext = { by: "天元", kind: "signed" };
   await page.getByTestId("review-dock").getByRole("button", { name: /^一致/ }).first().click();
   await expect(page.locator(".review-lock")).toBeVisible();
-  // 撤销提示本身 5 秒才自动消失；这里 1 秒内就得没了。
-  await expect(page.getByTestId("review-undo-toast")).toHaveCount(0, { timeout: 1000 });
+  // 锁页那一次渲染里提示就卸掉了：不重试、不等待。
+  expect(await page.evaluate(() => (window as unknown as { __undoAtLock?: boolean }).__undoAtLock)).toBe(false);
+  expect(await page.getByTestId("review-undo-toast").count()).toBe(0);
 });
 
 test("对照：每条框出范围，对照窗贴在当前框右侧，右栏只留清单", async ({ page, syntheticApi }) => {
