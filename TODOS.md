@@ -582,7 +582,8 @@ RF-10–RF-13 的原始依赖见 [ADR-007 §20.7](docs/adr-007-packaging-render-
 - [x] 条目状态不在已知集合：前端两个按钮灰并提示「审核数据状态异常」；服务端 400「有 N 条审核数据状态异常，请重新对照」。
 - [x] 认字存疑（`hasReadingDoubt`）且没下结论：两边都算待确认；服务端回 400「仍有 N 条认字存疑未处理」；多类同时出现时分开数，如「仍有 2 条待人工确认、1 条认字存疑未处理」。已标一致 / 忽略 / 有错后不再拦。
 - [x] 加码服务端：`/complete` `/decision` `/rework` 业务拦截带 `{detail, code, params?}`（`reviewCodes.ts` + `ReviewProblem`）；前端按码出文案（前端哥接）。401/403/404 与路径级 413 仍无码（Q1/Q7 另起一批，不在本 PR）。
-- [x] 服务端待确认口径已与共用 `reviewIssue.ts`（`isReviewIssue` / `pendingWord`）对齐：缺空格没结论一律要结论（Q2）；无状态正则。原「缺空格 + evidence」差异已对齐。仍待前端哥：`reviewEvidence.ts` 改 import 共用文件、删 `/不清|误/`；`SIGN_RETURN_DISPUTED` 里「缺空格无 decision 也无存疑字段」一行前端对齐后挪回主表；`reviewIssueGap.contract.test.ts` 相应收口。
+- [x] 待确认口径对齐（服务端）：服务端已改用共用 `reviewIssue.ts`（`isReviewIssue` / `pendingWord`），无状态正则；缺空格没结论一律要结论（Q2）；原「缺空格 + evidence」差异已对齐。
+- [ ] 待确认口径对齐（前端，前端哥）：`reviewEvidence.ts` 改用共用 `reviewIssue.ts`，删掉 `/不清|误/`；`SIGN_RETURN_DISPUTED` 里前端对齐后已一致的行（现在是「缺空格没有 decision、也没有存疑字段」一行）挪回主表（expect PENDING、code `complete_hits_pending`）；`reviewIssueGap.contract.test.ts` 补差异二的断言：前端没有状态正则（不再只断言 `/不清|误/` 不命中已知状态），并删掉「仍有差异」那条。
 - [ ] `isAccountingCopy`：服务端已有共用投影 `hitText.ts`（`hit_text` 字段），前端可改 import 并删本地正则；签字门仍按 `hasReadingDoubt`。
 
 
