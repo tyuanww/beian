@@ -95,14 +95,14 @@
 
 | 错误类型 | 拦截方式（lint/测试/CI/流程/只靠文字） | 位置或 PR |
 |---|---|---|
-| 前端靠匹配报错文案判断状态 | lint error-text-match，只减不增 | #35 |
-| 改了数据格式，旧存盘读出来出错 | 测试 `legacyPageOver` 加真后端自证场景 | #34/#35 |
-| CI 数字人工抄写 | CI `check-l0-counts` | #36 |
-| 文档规则和代码对不上 | 测试 `contractSamples` | #36 |
-| 文档提交漏进 PR | 流程，文档直接提交到功能分支 | — |
-| 靠计时的测试不稳定 | 测试改成断言状态 | #35 |
-| 隐藏界面条件太宽或没有断言 | 测试，要有「不存在」和「对照组存在」两条断言 | #34 |
-| 没跑的检查说成跑过 | 只靠文字 | 「执行与验证」第 1 条 |
-| 按名字结束进程 | 只靠文字 | 「项目与安全边界」第 4 条 |
+| 前端靠匹配报错文案判断状态 | lint error-text-match，只减不增 | `scripts/quality/error-text-match.mjs` |
+| 改了数据格式，旧存盘读出来出错 | 测试 `legacyPageOver` 加真后端自证场景 | `apps/web/server/src/legacyPageOver.ts` |
+| CI 数字人工抄写 | CI `check-l0-counts` | `scripts/quality/check-l0-counts.mjs` |
+| 文档规则和代码对不上 | 测试 `contractSamples` | `apps/web/server/src/contractSamples.test.ts` |
+| 文档提交漏进 PR | 流程，文档直接提交到功能分支 | 流程 |
+| 靠计时的测试不稳定 | 测试改成断言状态 | `apps/web/ui/e2e/review-workspace.spec.ts`（「锁页后收起撤销提示」） |
+| 隐藏界面条件太宽或没有断言 | 测试，要有「不存在」和「对照组存在」两条断言 | `apps/web/ui/e2e/review-workspace.spec.ts` |
+| 没跑的检查说成跑过 | 只靠文字：「只跑了部分文件要写出文件名，没跑的写「未跑」」 | `AGENTS.md` |
+| 按名字结束进程 | 只靠文字：「只结束自己启动的进程，按 PID；禁止 `pkill`/`killall` 按名字匹配」 | `AGENTS.md` |
 
 被纠正一次就补一行；表里已有的规则又犯了，就要升级成检查。
