@@ -595,6 +595,13 @@ RF-10–RF-13 的原始依赖见 [ADR-007 §20.7](docs/adr-007-packaging-render-
 - 新作业码：`ocr_failed` / `result_truncated` / `private_data_failed`；`page_over` 原文仅「稿件超过 1 页」。
 - 记下（不在本 PR 关）：Q1/Q7（401/403/404 带码）另起一批；Q4（无条目检查中断单重新上传）已拆出去单独开 PR，见上文「对照失败且没有有效条目的单」。
 
+找茬哥审前端增量后非阻塞项（2026-10-17）：
+
+- [x] ~~`result_truncated` / `private_data_failed` 有按钮时自造短句~~ 已定：改回 §2.3 带「请联系管理员」的整句（有没有按钮都一样）；本提交已改。
+- [ ] 空状态「请返回看板重新上传」（`ReviewPage.tsx` 无图空状态）和失败横幅「回首页 / 重新上传这一单」可同时出现、口径拧（产品扣 0.5）。本 PR 不改正文；后续单独改空状态文案或隐藏其一，与横幅出口对齐。
+- [ ] `hitText.ts` 口述文案里还有状态正则（不是 `isReviewIssue`），加码未清；以后清文案匹配基线时一并看。
+- [ ] `94c3fe9a` 提交信息是 `fix(ui)`，但动了服务端 `signReturnRules`（DISPUTED 挪回主表）。逻辑对；以后同类改动拆成 ui / server 两个提交。
+
 ## 2026-10-17 CI 偶发：RF-02 adapter 资源采样把原子替换当成账算不清
 
 - **用例**：`apps/web/backend/tests/test_packaging_render_generation.py::test_node_bridge_calls_real_rf02_validator_without_blender[adapter]`。同一用例另外 5 个参数（missing / bridge / jobs / seal-proof / seal-tamper）没有出过这个错。

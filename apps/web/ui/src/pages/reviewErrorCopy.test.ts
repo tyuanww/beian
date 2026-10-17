@@ -35,9 +35,9 @@ describe("reviewErrorCopy", () => {
     assert.equal(reviewErrorType("ocr_failed"), "error");
   });
 
-  it("result_truncated / private_data_failed 有按钮（复核失败且没有剩余条目）：只留前半句，不叫人联系管理员", () => {
-    assert.equal(reviewErrorCopy("这一单结果没写完，没有结果", "result_truncated", undefined, true), "这一单结果太多，没能写完");
-    assert.equal(reviewErrorCopy("私有数据解析失败", "private_data_failed", undefined, true), "稿件里的 Illustrator 私有数据读不出来");
+  it("result_truncated / private_data_failed 有没有按钮都用 §2.3 整句（带请联系管理员）", () => {
+    assert.equal(reviewErrorCopy("这一单结果没写完，没有结果", "result_truncated", undefined, true), "这一单结果太多，没能写完，请联系管理员");
+    assert.equal(reviewErrorCopy("私有数据解析失败", "private_data_failed", undefined, true), "稿件里的 Illustrator 私有数据读不出来，请联系管理员");
   });
 
   it("rework failures that keep the last round's hits get the agreed sentence", () => {
@@ -79,11 +79,10 @@ describe("reviewErrorCopy", () => {
     assert.equal(reviewErrorCopy("这一单页数超过可核对页数", "page_over", "compare", false), REVIEW_COPY.reworkPageOverReadOnly);
   });
 
-  it("同一条里有重新上传按钮时，除没有剩余条目的认字失败（ocr_failed）外任何分支都不出「请联系管理员」", () => {
-    // 只对 ocrFailedReupload 这一句放开：产品哥 2026-10-17 定稿，没有剩余条目的认字失败单在重新上传后面特意留
-    // 「再不行请联系管理员」作退路——认字失败重新上传未必能好（可能是认字服务本身的问题），得给审稿员一条找人的路。
-    // 其他分支（复核失败红条含认字失败、检查中断、超页黄条、result_truncated / private_data_failed、其他报错）仍锁住。
-    // 原文含「认字」「请联系管理员」也不影响：只按码选句。
+  it("同一条里有重新上传按钮时：ocr_failed 无上一轮用 ocrFailedReupload；result_truncated / private_data_failed 用 §2.3 整句；其余分支不出「请联系管理员」", () => {
+    // ocrFailedReupload：产品哥 2026-10-17 定稿，没有剩余条目的认字失败单留「再不行请联系管理员」。
+    // result_truncated / private_data_failed：产品哥 10/17 拍回 §2.3 整句，有没有按钮都带「请联系管理员」。
+    // 其他分支（复核失败红条、检查中断、超页黄条）仍锁住不出「请联系管理员」。
     const raws = ["认字组件没装上，没有结果", "认字出了问题，请联系管理员", "对照中断", "对照失败", "这一单页数超过可核对页数", "私有数据解析失败，请联系管理员", ""];
     const codes = [undefined, "page_over", "ocr_failed", "result_truncated", "private_data_failed"] as const;
     let opened = 0;
@@ -92,10 +91,12 @@ describe("reviewErrorCopy", () => {
         for (const kind of [undefined, "rework", "compare"] as const) {
           const text = reviewErrorCopy(raw, code, kind, true);
           const label = `${raw} ${code} ${kind}`;
-          // 走到 ocrFailedReupload 的只有：ocr_failed 码、没有带上一轮条目（带条目的失败条优先）。
           if (code === "ocr_failed" && kind === undefined) {
             opened += 1;
             assert.equal(text, REVIEW_COPY.ocrFailedReupload, label);
+          } else if ((code === "result_truncated" || code === "private_data_failed") && kind === undefined) {
+            assert.match(text, /请联系管理员/u, label);
+            assert.notEqual(text, REVIEW_COPY.ocrFailedReupload, label);
           } else {
             assert.notEqual(text, REVIEW_COPY.ocrFailedReupload, label);
             if (code !== undefined || !/请联系管理员/u.test(raw)) assert.doesNotMatch(text, /请联系管理员/u, label);
@@ -104,7 +105,6 @@ describe("reviewErrorCopy", () => {
       }
     }
     assert.equal(opened, raws.length, "放开的只有 ocr_failed + 没有上一轮条目 这一格");
-    // 没有按钮：原样。
     assert.equal(reviewErrorCopy("这一单页数超过可核对页数", "page_over"), REVIEW_COPY.pageOver);
     assert.equal(reviewErrorCopy("认字组件没装上", "ocr_failed"), REVIEW_COPY.ocrFailed);
   });
