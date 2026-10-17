@@ -3,12 +3,12 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync, symlinkSync, linkSync } from "node:fs";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
-import { describe, it } from "node:test";
+import { describe, it, mock } from "node:test";
 import { makeTestTempDir } from "./testTemp.js";
 import { createRenderGenerationBridge, type RenderBridgeValidation } from "./renderGenerationBridge.js";
 import { renderGenerationProcessSupported } from "./renderGenerationProcess.js";
 import { contentFingerprint, type QualityVerifyInput } from "./renderGenerations.js";
-import { createRenderLifecycle, renderReservationPath } from "./renderGenerationBudget.js";
+import { createRenderLifecycle, renderReservationPath, type RenderLifecycle } from "./renderGenerationBudget.js";
 
 const faces = ["front", "right", "back", "left", "top", "bottom"] as const;
 const hash = (bytes: string | Buffer) => `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
@@ -118,6 +118,14 @@ process.stdin.on('end', () => {
     result.ok=false; result.code='render_generation_failed';
     result.cause=behavior === 'structured-error' ? 'missing_blender' : '/private/secret';
   }
+  if (behavior === 'await-release') {
+    // Stays alive (no stdout) until the test writes 'release'; the test never waits on wall time.
+    const wait = setInterval(() => {
+      if (!fs.existsSync(path.join(__dirname, 'release'))) return;
+      clearInterval(wait); console.log(JSON.stringify(result));
+    }, 5);
+    return;
+  }
   console.log(JSON.stringify(result));
 });
 `;
@@ -224,6 +232,71 @@ describe("RF-03C2.1 async render bridge", { skip: !renderGenerationProcessSuppor
       } finally { lifecycle.release(!owned); }
       assert.equal(existsSync(renderReservationPath(root, "resources")), false);
       if (resource === "disk") assert.equal(existsSync(join(f.candidate, "undeclared.bin")), true);
+    });
+  }
+
+  it("only the in-flight 100ms sample tolerates vanished entries; the post-close census stays strict", async () => {
+    const f = fixture(10000);
+    const receipt = await f.bridge.verify(f.input);
+    f.behavior("await-release");
+    const calls: Array<{ dir: string; pid: number | undefined; options: unknown }> = [];
+    const lifecycle: RenderLifecycle = { deadline: Infinity, check: () => {}, beforeWrite: () => {}, release: () => {},
+      observe: (dir, pid, ...rest: unknown[]) => { calls.push({ dir, pid, options: rest[0] }); } };
+    let spawned!: () => void;
+    const spawn = new Promise<void>(resolve => { spawned = resolve; });
+    let pid = 0;
+    mock.timers.enable({ apis: ["setInterval"] });
+    try {
+      const rendering = f.bridge.render(receipt, f.candidate, process.execPath,
+        { lifecycle, onSpawn: p => { pid = p; spawned(); } });
+      await spawn;
+      assert.equal(calls.length, 0);
+      mock.timers.tick(100);
+      assert.deepEqual(calls, [{ dir: f.candidate, pid, options: { tolerateVanished: true } }]);
+      writeFileSync(join(f.options.packagingDir, "release"), "");
+      await rendering;
+    } finally { mock.timers.reset(); }
+    assert.equal(calls.length, 2);
+    assert.equal(calls[1].dir, f.candidate);
+    assert.equal(calls[1].pid, undefined);
+    const final = calls[1].options as { tolerateVanished?: boolean } | undefined;
+    assert.ok(final === undefined || final.tolerateVanished !== true, "post-close census must stay strict");
+  });
+
+  for (const [thrown, detail] of [[Object.assign(new Error("private /path"), { code: "ENOENT" }), "ENOENT"],
+    [new Error("private /path"), "uncoded"]] as Array<[Error, string]>) {
+    it(`an unexpected sampling failure keeps the public cause and carries ${detail} as diagnostic detail`, async () => {
+      const f = fixture(10000);
+      const receipt = await f.bridge.verify(f.input);
+      f.behavior("await-release");
+      const lifecycle: RenderLifecycle = { deadline: Infinity, check: () => {}, beforeWrite: () => {}, release: () => {},
+        observe: () => { throw thrown; } };
+      let spawned!: () => void;
+      const spawn = new Promise<void>(resolve => { spawned = resolve; });
+      let owned = false;
+      const stderr = mock.method(console, "error", () => {});
+      mock.timers.enable({ apis: ["setInterval"] });
+      try {
+        const rendering = f.bridge.render(receipt, f.candidate, process.execPath,
+          { lifecycle, onSpawn: () => { owned = true; spawned(); }, onClose: () => { owned = false; } });
+        await spawn;
+        mock.timers.tick(100);
+        await assert.rejects(rendering, (error: Error & { code?: string; cause?: string; detail?: string }) => {
+          assert.equal(error.message, "候选渲染未完成：resource_accounting_unavailable");
+          assert.equal(error.code, "render_generation_failed");
+          assert.equal(error.cause, "resource_accounting_unavailable");
+          assert.equal(error.detail, detail);
+          assert.equal(JSON.stringify(error).includes("/path"), false);
+          return true;
+        });
+      } finally { mock.timers.reset(); stderr.mock.restore(); }
+      assert.equal(owned, false);
+      // The stderr diagnostic (what pytest prints from run.stderr) names the errno; still no path.
+      const lines = stderr.mock.calls.map(call => call.arguments.map(String).join(" "));
+      const diagnostic = lines.filter(line => line.includes(`cause=resource_accounting_unavailable detail=${detail}`));
+      assert.equal(diagnostic.length, 1, JSON.stringify(lines));
+      assert.match(diagnostic[0], /^render-generation standalone\/standalone: problem=render_generation_failed /);
+      assert.equal(lines.some(line => line.includes("/path") || line.includes(f.root)), false);
     });
   }
 
