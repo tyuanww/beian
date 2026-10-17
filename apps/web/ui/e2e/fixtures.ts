@@ -8,6 +8,7 @@ import {
   type Request,
   type Route,
 } from "@playwright/test";
+import type { JobErrorCode } from "../../server/src/reviewCodes.ts";
 
 type SyntheticHit = {
   native_text_evidence?: unknown;
@@ -50,7 +51,7 @@ export type SyntheticTask = {
   job_status?: string;
   job_stage_label?: string;
   job_error?: string;
-  job_error_code?: "page_over";
+  job_error_code?: JobErrorCode;
   error?: string;
   queue_ahead?: number;
   hits?: SyntheticHit[];

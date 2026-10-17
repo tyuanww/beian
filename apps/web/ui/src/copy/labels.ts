@@ -231,6 +231,16 @@ export const REVIEW_COPY = {
   ocrFailed: "认字出了问题，请联系管理员",
   /** 复核认字失败、没有剩余条目、条里有「重新上传这一单」按钮时：产品哥 2026-10-17 定稿，句尾特意留「再不行请联系管理员」作退路。 */
   ocrFailedReupload: "认字出了问题，可以重新上传这一单，再不行请联系管理员",
+  /** job_error_code === "result_truncated"（加码 §2.3 产品定稿）。 */
+  resultTruncated: "这一单结果太多，没能写完，请联系管理员",
+  /** job_error_code === "private_data_failed"（加码 §2.3 产品定稿）。 */
+  privateDataFailed: "稿件里的 Illustrator 私有数据读不出来，请联系管理员",
+  /**
+   * 上面两句在条里有「重新上传这一单」按钮时（只会是复核失败且没有剩余条目的单）：只留前半句，不叫人联系管理员
+   * （有按钮时不出「请联系管理员」，只对认字失败那句放开）。产品未单独定这两句，待产品哥确认。
+   */
+  resultTruncatedReupload: "这一单结果太多，没能写完",
+  privateDataFailedReupload: "稿件里的 Illustrator 私有数据读不出来",
   /** 后端超页（page_over）：只核 1 页。不写「拆分后上传」。 */
   pageOver: "稿件超过 1 页，暂不支持核对，请联系管理员",
   /** 复核失败带上一轮条目的红条 / 黄条（老板 2026-10-17 复核失败按 B）：结尾引导重新上传，条里有「重新上传这一单」按钮。 */
