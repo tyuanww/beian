@@ -100,3 +100,32 @@ SIGN_RETURN_DISPUTED.forEach((row, n) => {
     await expectRow(page, syntheticApi, 0x100 + n, row.input, row.ui);
   });
 });
+
+// 签字灰态旁 / 悬停的「仍有 N 条…未处理」与服务端 /complete 拦截同一句（逐字对照见 src/pages/signCopy.contract.test.ts）。
+const SIGN_COPY_ROWS: ReadonlyArray<{ name: string; input: SignReturnInput; text: string }> = [
+  {
+    name: "只有认字存疑（状态本是一致）",
+    input: { role: "reviewer", status: "in_review", hits: [{ status: "一致", coverageMiss: ["CAPSULE MIST"] }] },
+    text: "仍有 1 条认字存疑未处理",
+  },
+  {
+    name: "待人工确认与认字存疑分开数",
+    input: { role: "reviewer", status: "in_review", hits: [{ status: "待人工确认" }, { status: "一致", coverageMiss: ["CAPSULE MIST"] }, { status: "待人工确认" }] },
+    text: "仍有 2 条待人工确认、1 条认字存疑未处理",
+  },
+  {
+    name: "疑点与缺失分开数",
+    input: { role: "reviewer", status: "in_review", hits: [{ status: "疑点", decision: "pending" }, { status: "缺失" }, { status: "疑点" }] },
+    text: "仍有 2 条疑点、1 条缺失未处理",
+  },
+];
+
+SIGN_COPY_ROWS.forEach((row, n) => {
+  test(`签字拦截文案：${row.name}`, async ({ page, syntheticApi }) => {
+    await page.goto(`/review/${seed(syntheticApi, 0x200 + n, row.input)}`);
+    const sign = page.locator("button.review-sign");
+    await expect(sign).toBeDisabled();
+    await expect(page.locator("#review-sign-hint")).toHaveText(row.text);
+    await expect(sign).toHaveAttribute("title", row.text);
+  });
+});
