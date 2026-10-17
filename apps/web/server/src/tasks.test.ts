@@ -122,6 +122,16 @@ describe("review gates", () => {
     assert.equal(hitNeedsDecision({ status: "疑点", decision: "confirmed" }), true);
     assert.equal(hitNeedsDecision({ status: "缺失", decision: "pending" }), true);
     assert.equal(hitNeedsDecision({ status: "疑点", decision: "ignore" }), false);
+    assert.equal(hitNeedsDecision({ status: "一致" }), false);
+    assert.equal(hitNeedsDecision({ status: "一致", coverage: { miss: ["CAPSULE MIST"] } }), true);
+    assert.equal(hitNeedsDecision({ status: "一致", coverage: { miss: ["CAPSULE MIST"] }, decision: "confirm" }), false);
+    assert.equal(hitNeedsDecision({ status: "一致", coverage: { miss: ["  "] } }), false);
+    // 认字存疑走共用 hasReadingDoubt：已标记条目才看 sequence_diff / doubt_bucket，不看说明文字。
+    assert.equal(hitNeedsDecision({ status: "缺空格", sequence_diff: { only_in_excel: ["香柠檬"] } }), true);
+    assert.equal(hitNeedsDecision({ status: "缺空格", doubt_bucket: "ocr_graphic" }), true);
+    assert.equal(hitNeedsDecision({ status: "一致", sequence_diff: { only_in_excel: ["香柠檬"] } }), false);
+    assert.equal(hitNeedsDecision({ status: "一致", doubt_bucket: "ocr_smallprint" }), false);
+    assert.equal(hitNeedsDecision({ status: "一致", note: "认字存疑" }), false);
   });
 
   it("lets signed tasks rework but not failed or comparing ones", () => {

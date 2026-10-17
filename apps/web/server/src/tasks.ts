@@ -8,6 +8,7 @@ import { guardErrorFields } from "./pathRedact.js";
 import { cleanCompleteKind, forgetHistory, noteHistoryReview } from "./historyIndex.js";
 import { skipPackSheetField } from "./sheetSkip.js";
 import { legacyPageOverCode } from "./legacyPageOver.js";
+import { hasReadingDoubt } from "./readingDoubt.js";
 
 export type Hit = {
   id?: string;
@@ -22,6 +23,10 @@ export type Hit = {
   found?: string;
   page?: number | string;
   bboxes?: unknown[];
+  /** 认字存疑的结构化字段，由 `readingDoubt.ts` 的 `hasReadingDoubt` 判断（前后端共用）。 */
+  coverage?: { hit?: string[]; miss?: string[]; matched?: number; total?: number };
+  sequence_diff?: { only_in_excel?: string[] };
+  doubt_bucket?: string;
 };
 
 export type JobStatus = "queued" | "running" | "succeeded" | "failed";
@@ -405,11 +410,17 @@ export function isValidHitReviewState(hit: Hit): boolean {
 const TRUE_ERRORS = new Set([...VERBATIM_STATUSES.true_errors, "疑点", "缺失"]);
 const SPACE_ERRORS = new Set(VERBATIM_STATUSES.space_errors);
 
+/**
+ * 这一条还要人下结论才能签字/退回。认字存疑（「一致」等粗状态下结构化字段仍说没读全）
+ * 直接用前后端共用的 `hasReadingDoubt`，与核对页 `isReviewIssue` 同一套条件。
+ * 非逐字单的未决「待人工确认」在 `completeGate` 里另算。
+ */
 export function hitNeedsDecision(hit: Hit): boolean {
   if (isHitDecision(hit.decision)) return false;
   if (hit.status === "待人工确认") return false;
   if (TRUE_ERRORS.has(String(hit.status || ""))) return true;
-  return SPACE_ERRORS.has(String(hit.status || "")) && hit.decision === "pending";
+  if (SPACE_ERRORS.has(String(hit.status || "")) && hit.decision === "pending") return true;
+  return hasReadingDoubt(hit);
 }
 
 export type BoardColumn = "comparing" | "failed" | "review" | "done";

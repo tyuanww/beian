@@ -13,8 +13,10 @@
  * 只看规则本身：忙碌中、备注未保存这两个前端临时状态不进表（两者都只会让按钮变灰，服务端不知道）。
  *
  * 产品口径（2026-10-17）：该拦的两边都拦，服务端必须能独立拦住。
- * 第 3、4 条（viewer / 未知状态）以前端对齐服务端，已进主表。
- * 第 1、2 条与「认字存疑」等服务端改完后进主表；现状锁在 `SIGN_RETURN_DISPUTED`。
+ * 第 3、4 条（viewer / 未知状态）由前端对齐服务端；第 2 条与「认字存疑」由服务端对齐前端
+ * （`completeGate` / `hitNeedsDecision` → `readingDoubt.ts` 的 `hasReadingDoubt`），已进主表。
+ * 第 1 条（复核失败带上一轮条目）待老板定，两边各保持现状，锁在 `SIGN_RETURN_DISPUTED`。
+ * `SIGN_RETURN_DISPUTED` 只放前后端结论仍不一致的输入；表测试会拦住「其实已一致」的行。
  */
 
 type SignReturnButton = "hidden" | "disabled" | "enabled";
@@ -209,8 +211,13 @@ export const SIGN_RETURN_RULES: readonly SignReturnRule[] = [
     expect: SIGN_ONLY,
   },
   {
-    name: "认字存疑：已标一致后可签字",
+    name: "认字存疑：一致条目 miss 有词，已标一致，可签字",
     input: reviewer([{ status: "一致", coverageMiss: ["CAPSULE MIST"], decision: "confirm" }]),
+    expect: SIGN_ONLY,
+  },
+  {
+    name: "认字存疑：一致条目 miss 有词，已标忽略，可签字",
+    input: reviewer([{ status: "一致", coverageMiss: ["CAPSULE MIST"], decision: "ignore" }]),
     expect: SIGN_ONLY,
   },
   {
@@ -219,49 +226,60 @@ export const SIGN_RETURN_RULES: readonly SignReturnRule[] = [
     expect: RETURN_ONLY,
   },
   { name: "缺空格没有 decision、也没有存疑字段：不算待确认", input: reviewer([{ status: "缺空格" }]), expect: SIGN_ONLY },
-];
-
-export const SIGN_RETURN_DISPUTED: readonly SignReturnDisputed[] = [
+  // —— 产品已定（服务端对齐前端）：非逐字单待人工确认 / 认字存疑 ——
   {
-    name: "复核（对红）失败、单子回到待审且带上一轮条目",
-    input: reviewer([{ status: "疑点", decision: "confirm" }], { status: "pending_review", job: { kind: "rework", status: "failed" } }),
-    ui: BOTH_HIDDEN,
-    server: { sign: true, ret: false },
-    why: "前端失败单一律不给按钮；服务端 /complete 尚未看 job_status=failed（等开发哥）。",
+    name: "非逐字单出现未决「待人工确认」：算待确认",
+    input: reviewer([{ status: "待人工确认" }]),
+    expect: PENDING,
   },
   {
-    name: "非逐字单出现未决「待人工确认」",
-    input: reviewer([{ status: "待人工确认" }]),
-    ui: PENDING,
-    server: { sign: true, ret: false },
-    why: "前端算进待确认；服务端 hitNeedsDecision 对待人工确认一律不要结论（等开发哥）。",
+    name: "非逐字单「待人工确认」已标忽略：可签字",
+    input: reviewer([{ status: "待人工确认", decision: "ignore" }]),
+    expect: SIGN_ONLY,
   },
   {
     name: "认字存疑：一致条目 coverage.miss 有词、没下结论",
     input: reviewer([{ status: "一致", coverageMiss: ["CAPSULE MIST"] }]),
-    ui: PENDING,
-    server: { sign: true, ret: false },
-    why: "前端 hasReadingDoubt 认 coverage.miss，算待确认；服务端 hitNeedsDecision 尚未接 hasReadingDoubt（等开发哥）。",
+    expect: PENDING,
   },
   {
     name: "认字存疑：一致条目 coverage.miss 有词、decision 为 pending",
     input: reviewer([{ status: "一致", coverageMiss: ["CAPSULE MIST"], decision: "pending" }]),
-    ui: PENDING,
-    server: { sign: true, ret: false },
-    why: "同上，pending 不算结论（等开发哥）。",
+    expect: PENDING,
   },
   {
     name: "认字存疑：缺空格（已标记）带 sequence_diff、没下结论",
     input: reviewer([{ status: "缺空格", onlyInExcel: ["香柠檬"] }]),
-    ui: PENDING,
-    server: { sign: true, ret: false },
-    why: "已标记条目的 sequence_diff 算存疑；服务端空格类只认 decision=pending（等开发哥）。",
+    expect: PENDING,
   },
   {
     name: "认字存疑：缺空格（已标记）带 doubt_bucket、没下结论",
     input: reviewer([{ status: "缺空格", doubtBucket: "ocr_graphic" }]),
-    ui: PENDING,
+    expect: PENDING,
+  },
+  {
+    name: "认字存疑：coverage.miss 只有核算说明（score=…）也算存疑，两边都不再滤文字",
+    input: reviewer([{ status: "一致", coverageMiss: ["score=0.42 覆盖偏低"] }]),
+    expect: PENDING,
+  },
+];
+
+const REWORK_FAILED_WHY =
+  "待老板定，8/20 设计 review-job-module.md 为对红失败仍可签字。前端失败单一律不给按钮；服务端 /complete 不看 job_status=failed，照 main 按条目收签字/退回。";
+
+export const SIGN_RETURN_DISPUTED: readonly SignReturnDisputed[] = [
+  {
+    name: "复核（对红）失败、单子回到待审且带上一轮条目（无有错）",
+    input: reviewer([{ status: "疑点", decision: "confirm" }], { status: "pending_review", job: { kind: "rework", status: "failed" } }),
+    ui: BOTH_HIDDEN,
     server: { sign: true, ret: false },
-    why: "已标记条目的 OCR 存疑分桶算存疑；服务端未认 doubt_bucket（等开发哥）。",
+    why: REWORK_FAILED_WHY,
+  },
+  {
+    name: "复核（对红）失败、单子回到待审且带上一轮有错条目",
+    input: reviewer([{ status: "疑点", decision: "issue" }], { status: "in_review", job: { kind: "rework", status: "failed" } }),
+    ui: BOTH_HIDDEN,
+    server: { sign: false, ret: true },
+    why: REWORK_FAILED_WHY,
   },
 ];
