@@ -5,7 +5,9 @@
 修改用户可见的布局、样式、文案或交互前先读 `DESIGN.md`；同轮已读且未变化可复用，不要求无关后端/文档任务读取。字体、色、间距、侧栏、核对页都以那份为准。锁定稿是 Figma Web 页，不是飞书顶栏。
 
 - Figma：https://www.figma.com/design/BL3PGUjLGLPb9iUZMzRhD6 （`Web · 锁定稿`。侧栏材质对照：`Web · 侧栏材质对照`。iPad 页是探索，不是实现依据。）
-- Ant Design 6 只当零件箱。`colorPrimary` = `#805898`，不要默认蓝，不要旧主色 `#722ED1`。
+- Ant Design 6 只当零件箱。`colorPrimary` = `#805898`，不要默认蓝，不要旧主色 `#722ED1`。页面动作用 `Button`。两个汉字不要插空格，只在 `AppearanceRoot` 关一次：`button={{ autoInsertSpace: false }}`。
+- 核对页普通 `button` 最小 44×44，写在 `reviewWorkspace.css`。`.pin` 和输入框清除钮 `.ant-input-clear-icon` 不用这个最小尺寸。高清失败条里的「重试」是 `Button type="link"`。稿面没加载时，中间的「重试」是描边 `Button`。上传卡的「继续上传」是 `Button type="primary"`。
+- 打样主区在深色外观下仍是白底。antd 要用整份浅色主题：`buildTheme("light")` 加上 `defaultAlgorithm`。只改 `colorText` 时，按钮底会留在外层深色上，深字就看不见。
 - 左侧玻璃侧栏切「审稿台 / 3D 打样 / 文件压缩 / 历史记录 / 设置」，「设置」只对管理员显示（`sideNavFor`）。展开 280px，折叠 76px。不要飞书顶栏。页底淡紫雾；侧栏与主区连成一块 28px 圆角工作场。≤1024 默认折叠，跨断点自动折叠，回桌面恢复原偏好；窄屏手动开合不覆盖桌面偏好。≤720 展开为遮罩抽屉。
 - 侧栏顶用 `apps/web/ui/public/brand/logo-mark.png`。折叠时悬停变成展开按钮（同一 44pt）。完整 `shine-mage.png` 只放拒绝页。
 - 左下角飞书头像 36px + `花名（真名）` 15px，例如 `天元（魏炜）`；服务端版本用弱化文字紧跟在姓名下面。

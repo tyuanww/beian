@@ -458,7 +458,7 @@ def _surface_job(
     if native_reason:
         for hit in hits:
             hit.setdefault("native_text_evidence", {"version": 1, "status": "not_used", "native_text": None, "ocr_text": None,
-                "message": "原稿文字与当前可见稿面未能可靠对应，本字段继续使用原有识别结果。"})
+                "message": "原稿文字对不上这一条，仍用原来读到的字。"})
     # 面标签
     for h in hits:
         h["surface"] = surface_label

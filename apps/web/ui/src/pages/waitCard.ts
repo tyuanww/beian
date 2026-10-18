@@ -31,7 +31,7 @@ function queueLine(queue_ahead?: number): string {
 }
 
 function leaveHint(kind: WaitKind, feishuReady?: boolean): string {
-  if (feishuReady) return "可以离开，完了飞书叫你";
+  if (feishuReady) return "可以离开，完成后飞书会通知";
   return kind === "mockup" ? "完成后回到 3D 打样" : "完成后回到审稿台";
 }
 

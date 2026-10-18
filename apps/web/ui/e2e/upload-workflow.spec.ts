@@ -179,7 +179,7 @@ test("回执生成后整页刷新，仍可开工且恢复页保留品名与包�
   await page.getByRole("dialog").getByRole("button", { name: "放弃上传" }).click();
 
   await expect(page).toHaveURL(/\/reviewup$/);
-  await expect(page.getByText("已放弃这次上传，文件资源已释放。")).toBeVisible();
+  await expect(page.getByText("已放弃这次上传。")).toBeVisible();
   expect(syntheticApi.receipts).toEqual([]);
   expect(
     syntheticApi.calls.some(

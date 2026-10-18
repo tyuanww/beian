@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { delimiter, dirname, join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import {
@@ -273,6 +273,15 @@ test("wrapper entrypoint reports argument errors with exit code 2", () => {
   const result = spawnSync(process.execPath, [ANTD_WRAPPER, "info"], { encoding: "utf8" });
   assert.equal(result.status, 2);
   assert.match(result.stderr, /位置参数数量不合法/);
+  assert.match(result.stderr, /code: ANTD_READONLY_ARGS/);
+  assert.match(result.stderr, /--help/);
+});
+
+test("wrapper entrypoint prints help without calling the CLI", () => {
+  const result = spawnSync(process.execPath, [ANTD_WRAPPER, "--help"], { encoding: "utf8" });
+  assert.equal(result.status, 0);
+  assert.match(result.stdout, /info <组件>/);
+  assert.equal(result.stderr, "");
 });
 
 test("wrapper entrypoint propagates the approved CLI exit code", (t) => {
@@ -293,7 +302,7 @@ if (process.argv[2] === "-V") {
   chmodSync(fake, 0o755);
   const result = spawnSync(process.execPath, [ANTD_WRAPPER, "list"], {
     encoding: "utf8",
-    env: { ...process.env, PATH: `${root}${delimiter}${process.env.PATH || ""}` },
+    env: { ...process.env, ANTD_READONLY_BIN: fake },
   });
   assert.equal(result.status, 7);
 });

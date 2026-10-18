@@ -17,7 +17,7 @@ import { ReviewSubmitDialog } from "./ReviewSubmitDialog";
 import { createFlagStore, UndoToastGate } from "./undoToastGate";
 import {
   clampPinToView, conclusionFor, decisionFailureText, reworkUploadBlocked, submitFailureText, flatLayout, isTypingTarget, lockedBy, markShortcutsSeen, markerOutsideCorner, nextPendingAfter,
-  panToClearPanel, phonePendingLines, positionLabel, rejectNote, rejectRows, reviewPositionLabel, shouldShowShortcutsOnOpen, signHint, tabIndices, thumbMarks, verdictCounts, verdictForKey, isOpenHeld, pendingTally,
+  panToClearPanel, phonePendingLines, positionLabel, rejectNote, rejectRows, reviewPositionLabel, shouldShowShortcutsOnOpen, showCleanBill, signHint, tabIndices, thumbMarks, verdictCounts, verdictForKey, isOpenHeld, openHeldAfterPending, pendingTally,
   type FlatLayout, type FlatTab,
 } from "./reviewFlat";
 import { ReviewWorkspace } from "./ReviewWorkspace";
@@ -35,6 +35,7 @@ import { SPOT_CARD_GAP, SPOT_CARD_MARGIN, SPOT_CARD_MIN_HEIGHT, SPOT_CARD_MIN_WI
 import { spotTitleParts, spotNavTarget, spotPendingEmptyLine } from "./spotCopy";
 import { firstPendingIssueIndex, pageIndexForHit } from "./reviewNav";
 import { reviewErrorCopy, reviewErrorType, type FailedWithHitsKind } from "./reviewErrorCopy";
+import { customerCopy } from "./customerCopy";
 import { reviewVersionToggle } from "./reviewStatus";
 import { buildRevisionList, partitionReviewHits, withLocalNotes } from "./reviewEvidence";
 import {
@@ -96,6 +97,8 @@ export function ReviewPage({ taskId, userId, displayName = null, canComplete = t
   const [layout, setLayout] = useState<FlatLayout>(viewportLayout);
   const [panelOpen, setPanelOpen] = useState(() => viewportLayout() === "wide");
   const [tab, setTab] = useState<FlatTab>("pending");
+  const [heldOpen, setHeldOpen] = useState(false);
+  const [dockQuery, setDockQuery] = useState("");
   const [seenPages, setSeenPages] = useState<Set<number>>(() => new Set());
   const [dialog, setDialog] = useState<"sign" | "reject" | null>(null);
   const [orderHeldConfirm, setOrderHeldConfirm] = useState(false);
@@ -332,6 +335,27 @@ export function ReviewPage({ taskId, userId, displayName = null, canComplete = t
   }, [locked]);
   const gate = reviewGate(task, hits, Boolean(locked));
   const counts = verdictCounts(hits);
+  const heldSeeded = useRef(false);
+  const pendingWas = useRef(0);
+  useEffect(() => {
+    heldSeeded.current = false;
+    pendingWas.current = 0;
+    setHeldOpen(false);
+    setDockQuery("");
+  }, [taskId, useV2]);
+  useEffect(() => {
+    if (!task || task.id !== taskId) return;
+    const pending = counts.pending;
+    const held = hits.filter(isOpenHeld).length;
+    if (!heldSeeded.current) {
+      heldSeeded.current = true;
+      pendingWas.current = pending;
+      if (pending === 0 && held > 0) setHeldOpen(true);
+      return;
+    }
+    if (openHeldAfterPending(pendingWas.current, pending, held)) setHeldOpen(true);
+    pendingWas.current = pending;
+  }, [task, taskId, hits, counts.pending]);
   const tabList = tabIndices(hits, tab, active);
   /** 有 SVG 却只显示了 PNG：高清（矢量）没加载出来，保留 PNG 并给重试。 */
   const hiResFailed = Boolean(reviewMedia && reviewMedia.source === "raster" && page?.url && page.raster_url && page.url !== page.raster_url);
@@ -542,24 +566,37 @@ export function ReviewPage({ taskId, userId, displayName = null, canComplete = t
     }
   }, []);
 
-  /** <1440 浮层展开后，当前标记若被右栏盖住就平移画布（第 7 行）。对照改为重新框进可见区域。 */
-  useEffect(() => {
-    if (layout !== "overlay" || !panelOpen || spotOn) return;
-    const id = window.requestAnimationFrame(() => {
-      const pin = viewRef.current?.querySelector(".pin.is-on") || viewRef.current?.querySelector(".hit-box.is-on");
-      const aside = pageRef.current?.querySelector(".review-sidebar.is-overlay");
-      if (!pin || !aside) return;
-      const dx = panToClearPanel(pin.getBoundingClientRect().right, aside.getBoundingClientRect().left);
-      if (dx < 0) commitZoom(panBy(zoomRef.current, dx, 0));
-    });
-    return () => window.cancelAnimationFrame(id);
+  // 对照刚接上才适配段落。用户改缩放只平移，避免浮层开着时放大被拉回适配比例。
+  useLayoutEffect(() => {
+    if (layout !== "overlay" || !panelOpen || !spotOn) return;
+    fitHitRef.current(activeRef.current);
+  }, [layout, panelOpen, active, reviewMedia?.url, spotOn]);
+
+  useLayoutEffect(() => {
+    if (layout !== "overlay" || !panelOpen) return;
+    const pin = viewRef.current?.querySelector(".pin.is-on") || viewRef.current?.querySelector(".hit-box.is-on");
+    const aside = pageRef.current?.querySelector(".review-sidebar.is-overlay");
+    if (!pin || !aside) return;
+    const dx = panToClearPanel(pin.getBoundingClientRect().right, aside.getBoundingClientRect().left);
+    if (dx < 0) commitZoom(panBy(zoomRef.current, dx, 0));
   }, [layout, panelOpen, active, reviewMedia?.url, zoom.scale, spotOn]);
 
-  useEffect(() => {
-    if (!spotOn || layout !== "overlay" || !panelOpen) return;
-    const id = window.requestAnimationFrame(() => fitHitRef.current(activeRef.current));
-    return () => window.cancelAnimationFrame(id);
-  }, [spotOn, layout, panelOpen, active, reviewMedia?.url]);
+  useLayoutEffect(() => {
+    const page = pageRef.current;
+    if (!page || layout !== "phone") return;
+    const bar = page.querySelector(".review-actions");
+    if (!(bar instanceof HTMLElement)) return;
+    const write = () => {
+      page.style.setProperty("--review-phone-actions", `${Math.ceil(bar.getBoundingClientRect().height)}px`);
+    };
+    write();
+    const ro = new ResizeObserver(write);
+    ro.observe(bar);
+    return () => {
+      ro.disconnect();
+      page.style.removeProperty("--review-phone-actions");
+    };
+  }, [layout]);
 
   const keyHandlerRef = useRef<(e: KeyboardEvent) => void>(() => undefined);
   useEffect(() => {
@@ -890,9 +927,9 @@ export function ReviewPage({ taskId, userId, displayName = null, canComplete = t
       <section className="review-page">
         <header className="page-head">
           <h1 className="page-title">审稿单</h1>
-          <button type="button" className="btn-ghost" onClick={onBack}>
+          <Button onClick={onBack}>
             返回列表
-          </button>
+          </Button>
         </header>
         <Alert type="error" showIcon title={error || "审稿单加载失败"} />
       </section>
@@ -941,13 +978,13 @@ export function ReviewPage({ taskId, userId, displayName = null, canComplete = t
   // 没有上一轮条目的失败条：正文 + 按钮（超页无条目只给自己能动的人「回首页」，别人的单只出标题）。
   const noHitsBar = failedNoHitsBar(task, reuploadFailed, { canCreate, admin, openId: userId, displayName });
   const failedBarAction = noHitsBar.action === "reupload" ? (
-    <button type="button" className="btn-ghost review-upload-failed" disabled={busy || hasUnsavedNotes} onClick={pickReworkPdf}>
+    <Button className="review-upload-failed" disabled={busy || hasUnsavedNotes} onClick={pickReworkPdf}>
       {REVIEW_COPY.reupload}
-    </button>
+    </Button>
   ) : noHitsBar.action === "backHome" && !failedWithHits ? (
-    <a href={hrefOf({ view: "tasks" })} className="btn-ghost review-back-home" data-testid="review-back-home" onClick={(e) => { e.preventDefault(); onBack(); }}>
+    <Button href={hrefOf({ view: "tasks" })} className="review-back-home" data-testid="review-back-home" onClick={(e) => { e.preventDefault(); onBack(); }}>
       {REVIEW_COPY.backHome}
-    </a>
+    </Button>
   ) : undefined;
   /** 无条目失败单的正文（标题另出）：见 `failedNoHitsBar`。 */
   const failedNoHitsCopy = failedJob && !failedWithHits ? noHitsBar.body : null;
@@ -984,9 +1021,9 @@ export function ReviewPage({ taskId, userId, displayName = null, canComplete = t
         {Array.isArray(task?.pages_v2) && task.pages_v2.length > 0 ? (
           <span className="review-ver">
             <Tag className="review-version-current" color={useV2 ? "processing" : "default"}>{reviewVersionToggle(useV2).current}</Tag>
-            <button type="button" className="btn-ghost" disabled={busy} onClick={() => { setUseV2((v) => !v); setPageIdx(0); setActive(0); commitZoom(resetZoom()); }}>
+            <Button disabled={busy} onClick={() => { setUseV2((v) => !v); setPageIdx(0); setActive(0); commitZoom(resetZoom()); }}>
               {reviewVersionToggle(useV2).button}
-            </button>
+            </Button>
           </span>
         ) : null}
         {!phone && posnLabel !== null ? (
@@ -1005,14 +1042,13 @@ export function ReviewPage({ taskId, userId, displayName = null, canComplete = t
         <span className="review-actions">
         {/* 产品哥：「上传新稿」不放看稿工具条，只在退回后出现在页头。 */}
           {!phone && reworkable && task?.status === "completed" ? (
-          <button
-            type="button"
-            className="btn-ghost review-upload-new"
+          <Button
+            className="review-upload-new"
             disabled={busy || hasUnsavedNotes}
             onClick={pickReworkPdf}
           >
             上传新稿
-          </button>
+          </Button>
         ) : null}
         {draftBlock ? <span className="review-draft-status" role="status" data-testid="review-unsaved-hint">{draftBlock}</span> : null}
         {signHint(gate.hint, buttons) ? <span className="review-signhint" id="review-sign-hint" title={gate.title} aria-live="polite">{gate.hint}</span> : null}
@@ -1021,18 +1057,19 @@ export function ReviewPage({ taskId, userId, displayName = null, canComplete = t
             className="review-order-held"
             data-testid="review-order-held"
             checked={orderHeldConfirm}
+            title={REVIEW_COPY.orderHeldConfirm}
             disabled={busy || Boolean(locked) || hasUnsavedNotes || !gate.canSign}
             onChange={(e) => setOrderHeldConfirm(e.target.checked)}
           >
             {REVIEW_COPY.orderHeldConfirm}
           </Checkbox>
         ) : null}
-        {buttons.reject === "hidden" ? null : <button type="button" className="btn-ghost review-reject" disabled={buttons.reject !== "enabled"} title={gate.rejectTitle || gate.title || undefined} aria-describedby={gate.rejectTitle ? "review-reject-note" : undefined} onClick={() => { setSubmitFailed(null); setDialog("reject"); }}>
+        {buttons.reject === "hidden" ? null : <Button className="review-reject" disabled={buttons.reject !== "enabled"} title={gate.rejectTitle || gate.title || undefined} aria-describedby={gate.rejectTitle ? "review-reject-note" : undefined} onClick={() => { setSubmitFailed(null); setDialog("reject"); }}>
           {REVIEW_COPY.reject}
-        </button>}
-        {buttons.sign === "hidden" ? null : <button type="button" className="btn-primary review-sign" disabled={buttons.sign !== "enabled"} title={gate.title || undefined} aria-describedby={gate.hint ? "review-sign-hint" : undefined} onClick={() => { setSubmitFailed(null); setDialog("sign"); }}>
+        </Button>}
+        {buttons.sign === "hidden" ? null : <Button type="primary" className="review-sign" disabled={buttons.sign !== "enabled"} title={gate.title || undefined} aria-describedby={gate.hint ? "review-sign-hint" : undefined} onClick={() => { setSubmitFailed(null); setDialog("sign"); }}>
           {REVIEW_COPY.sign}
-        </button>}
+        </Button>}
         </span>
       </header>
 
@@ -1054,13 +1091,20 @@ export function ReviewPage({ taskId, userId, displayName = null, canComplete = t
               <ul>{hits.filter(isOpenHeld).map((hit) => <li key={hit.id || hit.field}>{hit.status} · 第{hit.page ?? "?"}页</li>)}</ul>
             </details>
           ) : null}
-          {task?.verbatim_check && counts.total === 0 && heldCount === 0 ? (
+          {phone && pages.length > 1 ? (
+            <div className="review-phone-pages">
+              <Button disabled={busy || pageIdx <= 0} onClick={() => setPageIdx((i) => i - 1)}>{REVIEW_COPY.prevPage}</Button>
+              <span>{`第${pageNo}页，共${pages.length}页`}</span>
+              <Button disabled={busy || pageIdx >= pages.length - 1} onClick={() => setPageIdx((i) => i + 1)}>{REVIEW_COPY.nextPage}</Button>
+            </div>
+          ) : null}
+          {task?.verbatim_check && showCleanBill(failedJob, counts.total, heldCount) ? (
             <div className="review-verbatim-none">
               <p>{REVIEW_COPY.verbatimNoneLead}</p>
               <p>{REVIEW_COPY.verbatimNoneNote}</p>
             </div>
           ) : null}
-          {!task?.verbatim_check && counts.total === 0 && heldCount === 0 ? <p className="review-zero">{REVIEW_COPY.zeroIssues}</p> : null}
+          {!task?.verbatim_check && showCleanBill(failedJob, counts.total, heldCount) ? <p className="review-zero">{REVIEW_COPY.zeroIssues}</p> : null}
           {/* 逐字单的待人工确认在上面单独一组，不在这里再开一条「待确认 0」。 */}
           {counts.total > 0 || (!releaseHeld && heldCount > 0) ? (
             <details open={phoneListOpen} onToggle={(e) => setPhoneListOpen((e.currentTarget as HTMLDetailsElement).open)}>
@@ -1104,19 +1148,24 @@ export function ReviewPage({ taskId, userId, displayName = null, canComplete = t
             onCopy={() => void copyList()}
             onNoteChange={(value) => { if (current?.id) setNote(current.id, value); }}
             verbatim={task?.verbatim_check === true}
+            failed={failedJob}
             fscNote={task?.fsc_note}
             locationCopy={current && missLineUnboxed(locateBoxesForHit(current), pageNo, metrics) ? REVIEW_COPY.lineNotBoxed : REVIEW_COPY.noBox}
             showDetail={!showSpot}
             closeHeldPulse={closeHeldPulse}
             showProgress={!failedWithoutHits}
+            heldOpen={heldOpen}
+            onHeldOpen={setHeldOpen}
+            query={dockQuery}
+            onQuery={setDockQuery}
           />
         }
       >
-        {task?.verbatim_warning ? <p className="review-verbatim-warning" role="status" data-testid="review-verbatim-warning">{task.verbatim_warning}</p> : null}
+        {task?.verbatim_warning ? <p className="review-verbatim-warning" role="status" data-testid="review-verbatim-warning">{customerCopy(task.verbatim_warning)}</p> : null}
         <div className="canvas" ref={canvasRef}>
           {hiResFailed ? (
             <p className="review-media-hint" role="status">
-              {REVIEW_COPY.hiResFailed} · <button type="button" onClick={() => setMediaRetry((n) => n + 1)}>{REVIEW_COPY.retry}</button>
+              {REVIEW_COPY.hiResFailed} · <Button type="link" onClick={() => setMediaRetry((n) => n + 1)}>{REVIEW_COPY.retry}</Button>
             </p>
           ) : null}
           {page?.url ? (
@@ -1177,7 +1226,7 @@ export function ReviewPage({ taskId, userId, displayName = null, canComplete = t
                     {reviewMediaError ? (
                       <>
                         {REVIEW_COPY.lowResFailed}
-                        <button type="button" className="btn-ghost" onPointerDown={(e) => e.stopPropagation()} onClick={() => setMediaRetry((n) => n + 1)}>{REVIEW_COPY.retry}</button>
+                        <Button onPointerDown={(e) => e.stopPropagation()} onClick={() => setMediaRetry((n) => n + 1)}>{REVIEW_COPY.retry}</Button>
                       </>
                     ) : "正在载入页面…"}
                   </div>
@@ -1249,9 +1298,7 @@ export function ReviewPage({ taskId, userId, displayName = null, canComplete = t
           ) : (
             <Empty
               description={
-                task?.status === "compare_failed" || task?.job_status === "failed"
-                  ? "检查中断，这一页没有图。请返回看板重新上传。"
-                  : "这一页还没有图"
+                failedJob ? REVIEW_COPY.pageMissing : REVIEW_COPY.pageNotReady
               }
               image={Empty.PRESENTED_IMAGE_SIMPLE}
               style={{ padding: 48 }}
@@ -1319,7 +1366,7 @@ export function ReviewPage({ taskId, userId, displayName = null, canComplete = t
                 {(() => {
                   const title = spotTitleParts(current.field, current.status || "项目", current.item, REVIEW_COPY.tabs[locked ? "all" : tab], posnLabel ?? "");
                   return (
-                    <strong className="review-spot-title" data-testid="review-spot-title" aria-label={title.full}>
+                    <strong className="review-spot-title" data-testid="review-spot-title" aria-label={title.full} title={title.full}>
                       {title.field ? <span className="review-spot-field" title={title.field}>{title.field}</span> : null}
                       {title.field ? <span aria-hidden="true">·</span> : null}
                       <span className="review-spot-rest">{title.rest}</span>
@@ -1423,6 +1470,7 @@ export function ReviewPage({ taskId, userId, displayName = null, canComplete = t
           ) : null}
         </div>
         <div className="review-tbar" role="toolbar" aria-label="稿件工具">
+          <div className="review-tbar-scroll">
           <button type="button" aria-label="缩小" title="缩小 −" onClick={() => zoomBy(1 / 1.25)}>−</button>
           <button type="button" aria-label="回到 100%" title="回到 100%" onClick={() => commitZoom(resetZoom())}>{Math.round(zoom.scale * 100)}%</button>
           <button type="button" aria-label="放大" title="放大 +" onClick={() => zoomBy(1.25)}>+</button>
@@ -1457,6 +1505,7 @@ export function ReviewPage({ taskId, userId, displayName = null, canComplete = t
             {reviewFullscreen ? "退出" : "全屏"}
           </button>
           {!phone ? <button type="button" aria-label="快捷键" aria-expanded={shortcutsOpen} title="快捷键" onClick={() => setShortcutsOpen((v) => !v)}>?</button> : null}
+          </div>
           {shortcutsOpen && !phone ? (
             <div className="review-keys" role="note">
               <b>{REVIEW_COPY.shortcutsTitle}</b> 读要点 → 按 <kbd>1</kbd>一致 <kbd>2</kbd>有错 <kbd>3</kbd>忽略，自动跳下一条 · <kbd>J</kbd>/<kbd>K</kbd> 上下条 · <kbd>[</kbd> 右栏 · <kbd>?</kbd> 再看

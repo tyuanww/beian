@@ -7,12 +7,27 @@ import { PUBLIC_UPLOAD_BYTES, UPLOAD_TOO_LARGE, setUploadLimitFromMe } from "../
 import {
   rejectNote,
   clampPinToView, completedAtLabel, completedByText, conclusionFor, decisionFailureText, reworkUploadBlocked, submitFailureText, type SubmitFailure, flatLayout, isTypingTarget, lockedBy, markerOutsideCorner, nextPendingAfter,
-  openHeldAfterPending, panToClearPanel, pendingTally, phonePendingLines, positionLabel, rejectRows, reviewPositionLabel, shouldShowShortcutsOnOpen, signHint, submitGate, tabIndices, thumbMarks, verdictCounts, verdictForKey,
+  hitMatchesQuery, openHeldAfterPending, panToClearPanel, pendingTally, phonePendingLines, positionLabel, rejectRows, reviewPositionLabel, shouldShowShortcutsOnOpen, showCleanBill, signHint, submitGate, tabIndices, thumbMarks, verdictCounts, verdictForKey,
 } from "./reviewFlat.js";
 
 const hit = (id: string, decision = "pending", page = 1, status = "疑点", note = ""): FieldHit => ({ id, field: id, status, decision, page, note });
 
 describe("reviewFlat", () => {
+  it("右栏搜索匹配字段、条码和批号，忽略空白", () => {
+    const row = { field: "条形码", status: "疑点", excel_value: "6901234567890", note: "批号 AB 12" };
+    assert.equal(hitMatchesQuery(row, ""), true);
+    assert.equal(hitMatchesQuery(row, "  "), true);
+    assert.equal(hitMatchesQuery(row, "条形"), true);
+    assert.equal(hitMatchesQuery(row, "6901 2345"), true);
+    assert.equal(hitMatchesQuery(row, "ab12"), true);
+    assert.equal(hitMatchesQuery(row, "品名"), false);
+  });
+  it("失败单不说已经核完", () => {
+    assert.equal(showCleanBill(true, 0, 0), false);
+    assert.equal(showCleanBill(false, 0, 0), true);
+    assert.equal(showCleanBill(false, 1, 0), false);
+    assert.equal(showCleanBill(false, 0, 1), false);
+  });
   it("断点：1440 常驻、<1440 浮层、<720 手机", () => {
     assert.equal(flatLayout(1440), "wide");
     assert.equal(flatLayout(1280), "overlay");
@@ -91,6 +106,8 @@ describe("reviewFlat", () => {
     assert.equal(decisionFailureText(new Error("x"), false), "没连上网，这条没存上");
     assert.equal(decisionFailureText(new TypeError("Failed to fetch"), true), "没连上网，这条没存上");
     assert.equal(decisionFailureText(new Error("当前状态不可审核"), true), "当前状态不可审核");
+    assert.equal(decisionFailureText(Object.assign(new Error("非法审核结论"), { code: "decision_value_invalid" }), true), "这条结论存不上");
+    assert.equal(decisionFailureText(Object.assign(new Error("字段不存在"), { code: "decision_hit_not_found" }), true), "这条已经不在清单里");
     assert.equal(decisionFailureText(Object.assign(new Error("审稿服务连不上"), { status: 0 }), true), "没连上网，这条没存上");
   });
   it("标记放框外角，贴边翻转", () => {
@@ -168,7 +185,8 @@ describe("reviewFlat", () => {
     assert.equal(submitFailureText(f(400, "complete_hits_invalid", "有 2 条审核数据状态异常，请重新对照", { count: 2 }), null, []), "有 2 条审核数据状态异常，请重新对照");
     assert.equal(submitFailureText(f(400, "complete_order_held_unconfirmed", "整单待人工确认，签字即认可"), null, []), REVIEW_COPY.orderHeldConfirm);
     assert.equal(submitFailureText(f(400, "complete_conclusion_missing", "请写下结论"), null, []), "请写下结论");
-    assert.equal(submitFailureText(f(400, "rework_status_not_allowed", "当前状态不可对红"), null, []), "当前状态不可对红");
+    assert.equal(submitFailureText(f(400, "rework_status_not_allowed", "当前状态不可对红"), null, []), "现在不能提交改稿");
+    assert.equal(submitFailureText(f(400, "rework_job_running", "对红还在排队或正在跑"), null, []), "改稿还在排队");
     // 不在共享码表里的码按没有码处理。
     assert.equal(submitFailureText(f(400, "something_else", "别的"), null, []), "没提交成功，请重试");
   });

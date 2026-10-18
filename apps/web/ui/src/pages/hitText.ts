@@ -59,11 +59,7 @@ function expectedSnippet(h: HitText): string {
 export type SpokenAsk = { lead: string; because: string; ask: string };
 
 function notLocatedLines(h: HitText): string[] {
-  return [
-    "没找到位置，请看整页",
-    "不是已经判定漏印",
-    `请对着这一整面看确认单要的「${expectedSnippet(h)}」印了没有`,
-  ];
+  return [`请对着这一整面看确认单要的「${expectedSnippet(h)}」印了没有`];
 }
 
 function hitIsLocated(h: HitText, located?: boolean): boolean {
@@ -105,7 +101,7 @@ export function spokenLines(h: HitText, field?: string, located?: boolean): stri
     return [`确认单要「${expectedSnippet(h)}」`, "这个数字没读到，请核对"];
   }
   if (fg === "二维码" || /二维码|QR/.test(name)) {
-    return ["没读到完整扫码关注引导语", "钉若在码上，看的是码不是那句话"];
+    return ["没读到完整扫码关注引导语", "标记若在码上，看的是码不是那句话"];
   }
   if (evidenceIsAccounting(h)) {
     return ["这些字没读全，请核对"];

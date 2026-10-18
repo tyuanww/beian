@@ -1,4 +1,5 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { Button } from "antd";
 import { bootOnce } from "./appBoot";
 import { api, brokenApiMessage, type Me } from "./api";
 import { setUploadLimitFromMe, resetUploadLimit } from "./uploadLimit";
@@ -361,9 +362,9 @@ export function App() {
       return (
         <AuthShell title={authFailure ? authFailure.title : "进不了这间审稿室"}>
           <p>{message}</p>
-          <a className="auth-result-retry" href={action.href}>
+          <Button type="primary" href={action.href}>
             {action.label}
-          </a>
+          </Button>
         </AuthShell>
       );
     }
@@ -399,9 +400,9 @@ export function App() {
           <section className="settings-denied" role="status">
             <h1 className="settings-title">设置</h1>
             <p>这里只有管理员能看</p>
-            <button type="button" className="auth-result-retry" onClick={() => goRoute({ view: "tasks" })}>
+            <Button type="primary" onClick={() => goRoute({ view: "tasks" })}>
               回审稿台
-            </button>
+            </Button>
           </section>
         ) : null}
         {view === "settings" && isAdmin(me) ? (

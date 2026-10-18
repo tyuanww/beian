@@ -121,8 +121,8 @@ describe("spokenAsk", () => {
   it("asks a person to look at the whole face when the box is missing", () => {
     const ask = spokenAsk({ status: "疑点", excel_value: "海葡萄", bboxes: [] }, "文案", false);
     assert.ok(ask);
-    assert.match(ask.lead, /没找到位置，请看整页/);
-    assert.match(ask.ask, /整面/);
+    assert.match(ask.lead, /整面/);
+    assert.doesNotMatch(`${ask.lead}${ask.because}${ask.ask}`, /没找到位置|漏印|钉/);
   });
 
   it("keeps legal smallprint as a doubt, not a miss", () => {
@@ -196,7 +196,7 @@ describe("impersonal reviewer copy", () => {
     assert.equal(spokenAsk({ status: "疑点", field_group: "净含量&条形码", excel_value: "30ml", bboxes: box })?.because, "毫升和条码没读全，请核对");
     assert.equal(spokenAsk({ status: "疑点", coverage: { miss: ["烟酰胺"] }, bboxes: box })?.lead, "这些字没读全，请核对");
     assert.equal(spokenAsk({ status: "疑点", bboxes: box })?.because, "这一面没读全，请核对");
-    assert.equal(spokenAsk({ status: "疑点", excel_value: "海葡萄", bboxes: [] }, "文案", false)?.lead, "没找到位置，请看整页");
+    assert.equal(spokenAsk({ status: "疑点", excel_value: "海葡萄", bboxes: [] }, "文案", false)?.lead, "请对着这一整面看确认单要的「海葡萄」印了没有");
     assert.equal(spokenAsk({ status: "疑点", doubt_bucket: "ocr_smallprint", excel_value: "FSC", bboxes: box })?.because, "这一面没读全，请核对");
     assert.deepEqual(spokenLines({ status: "疑点", evidence: "score=10", bboxes: box }), ["这些字没读全，请核对"]);
     assert.equal(spokenAsk({ status: "疑点", evidence: "稿上少了净含量", bboxes: box })?.because, "这一面没读全，请核对");

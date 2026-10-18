@@ -1,6 +1,11 @@
 /** 去掉客户页面上的实现名。不改状态值，也不改稿件原文。 */
 export function customerCopy(raw: string): string {
   return String(raw || "")
+    .replace(/FSC、认证码、星级已跳过，不进退稿/g, "森林认证、认证码和星级先跳过，不写进退稿")
+    .replace(/两种文字来源无法唯一对应，请对照稿面。?/g, "两种读法对不上，请看稿面")
+    .replace(/原稿文字已直接参与核对规则。?/g, "原稿文字已经参与核对")
+    .replace(/已核对可见稿面及文字位置，原稿文字已参与现有核对规则。?/g, "已核对稿面和文字位置")
+    .replace(/原稿文字与当前可见稿面未能可靠对应，本字段继续使用原有识别结果。?/g, "原稿文字对不上这一条，仍用原来读到的字")
     .replace(/图像识别文字（OCR）/g, "图片文字")
     .replace(/Illustrator\s*原生文字/g, "原稿文字")
     .replace(/百度\s*OCR/g, "文字识别")
@@ -25,6 +30,7 @@ export function customerCopy(raw: string): string {
     .replace(/\bPID\b/g, "")
     .replace(/文件\s*=\s*[A-Za-z]:\\[^\s，,]*/g, "")
     .replace(/[A-Za-z]:\\[^\s，,]+/g, "")
+    .replace(/(?:\/Users|\/home|\/var|\/tmp|\/private)\/[^\s，,]+/g, "")
     .replace(/\s{2,}/g, " ")
     .replace(/^[，,。.\s]+|[，,\s]+$/g, "")
     .trim();

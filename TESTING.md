@@ -75,7 +75,7 @@ Q06.6 A 的证据分层见 [runtime 收口补记](docs/designs/packaging-quality
 
 首次配置质量工具的现有命令是 `npm ci --prefix tools/quality` 和 `apps/web/backend/.venv/bin/python -m pip install -r apps/web/backend/requirements-quality.txt`，仅在对应维护范围获准后执行。已安装则复用，日常验证不重复安装。
 
-`npm run test:quality` 同时校验 `.agents/skills` 实际目录、审核清单与 `skills-lock.json` 完全一致；空锁、额外 skill、远程来源、符号链接、自动 shell 权限或绕过包装器的命令都会失败。仓库内 `antd` skill 是 vendored 权威源，不能用标准 skill restore/update 从上游覆盖；需要恢复时从受信任的 Git 提交还原并重新核验哈希。知识查询只走 `node scripts/quality/antd-readonly.mjs`：它固定已审核的 `@ant-design/cli@6.6.1`、关闭更新检查、不经 shell、只读仓库内路径，并拒绝 setup、升级、外部提交和可写迁移参数。CLI 缺失或版本不符时失败关闭，由独立、显式批准的工具维护任务处理。
+`npm run test:quality` 同时校验 `.agents/skills` 实际目录、审核清单与 `skills-lock.json` 完全一致；空锁、额外 skill、远程来源、符号链接、自动 shell 权限或绕过包装器的命令都会失败。仓库内 `antd` skill 是 vendored 权威源，不能用标准 skill restore/update 从上游覆盖；需要恢复时从受信任的 Git 提交还原并重新核验哈希。知识查询只走 `node scripts/quality/antd-readonly.mjs`：它固定已审核的 `@ant-design/cli@6.6.1`（根 `package.json` 的 devDependency，`npm install` 后优先用 `node_modules/.bin/antd`，不用 PATH 上的其他版本）、关闭更新检查、不经 shell、只读仓库内路径，并拒绝 setup、升级、外部提交和可写迁移参数。`--help` 只打印用法。CLI 缺失或版本不符时失败关闭，stderr 给出 `code` 和下一命令；升级 CLI 仍由独立、显式批准的工具维护任务处理。
 
 
 ## 统一验证入口（Mac/Linux）

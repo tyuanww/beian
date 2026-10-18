@@ -304,7 +304,7 @@ test("矢量失败自动切回 PNG 并提示高清没加载出来；两张都坏
   await expect.poll(() => image.getAttribute("src")).toBe("/synthetic/review.png");
   await expect(page.getByText("高清没加载出来")).toBeVisible();
   // F-004：工具条按下态 accent-soft 底 + accent 描边。
-  const pressed = page.locator('.review-tbar > button[aria-pressed="true"]').first();
+  const pressed = page.locator('.review-tbar button[aria-pressed="true"]').first();
   if (await pressed.count()) {
     await expect(pressed).toHaveCSS("background-color", "rgb(246, 241, 248)");
     await expect(pressed).toHaveCSS("border-top-color", "rgb(128, 88, 152)");

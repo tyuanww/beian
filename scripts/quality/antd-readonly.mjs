@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import { existsSync } from "node:fs";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -33,6 +34,21 @@ const COMMAND_VALUE_FLAGS = new Map([
 const COMMAND_BOOLEAN_FLAGS = new Map([
   ["lint", new Set(["--staged"])],
 ]);
+
+const HELP = `用法（只读，不改本机工具链）：
+  node scripts/quality/antd-readonly.mjs --help
+  node scripts/quality/antd-readonly.mjs --cli-version
+  node scripts/quality/antd-readonly.mjs info <组件> --lang zh --format json
+  node scripts/quality/antd-readonly.mjs demo <组件> <示例> --format json
+
+已审核子命令：list、info、doc、demo、token、design.md、semantic、changelog、doctor、usage、lint、migrate、env。
+CLI 必须是 @ant-design/cli@${APPROVED_ANTD_CLI_VERSION}。包装器优先用仓库根 node_modules/.bin/antd。
+拒绝 setup、upgrade、--fix 和仓库外路径。参数错误退出码 2，stderr 含 code 和下一命令。`;
+
+function repoAntdBin() {
+  const bin = resolve(REPO_ROOT, "node_modules/.bin/antd");
+  return existsSync(bin) ? bin : null;
+}
 
 function withinRepo(path) {
   const rel = relative(REPO_ROOT, resolve(REPO_ROOT, path));
@@ -90,7 +106,7 @@ function readonlyEnvironment(base = process.env) {
 
 export function runReadonlyCli(args, options = {}) {
   validateReadonlyArgs(args);
-  const bin = options.bin || "antd";
+  const bin = options.bin || repoAntdBin() || "antd";
   const env = readonlyEnvironment(options.env || process.env);
   const version = spawnSync(bin, ["-V"], {
     cwd: REPO_ROOT,
@@ -98,11 +114,21 @@ export function runReadonlyCli(args, options = {}) {
     encoding: "utf8",
     stdio: "pipe",
   });
-  if (version.error) throw new Error(`找不到已批准的 antd CLI：${version.error.message}`);
-  if (version.status !== 0) throw new Error(`antd CLI 版本探测失败（退出码 ${version.status ?? "unknown"}）`);
+  if (version.error) {
+    throw new Error([
+      `找不到已批准的 antd CLI：${version.error.message}`,
+      "code: ANTD_CLI_MISSING",
+      "下一步：在仓库根运行 npm install。包装器只用依赖里的 @ant-design/cli@6.6.1，不改 PATH 上的其他 antd。",
+    ].join("\n"));
+  }
+  if (version.status !== 0) throw new Error(`antd CLI 版本探测失败（退出码 ${version.status ?? "unknown"}）\ncode: ANTD_CLI_PROBE\n下一步：node scripts/quality/antd-readonly.mjs --help`);
   const actual = String(version.stdout || "").trim();
   if (actual !== APPROVED_ANTD_CLI_VERSION) {
-    throw new Error(`antd CLI 版本不匹配：需要 ${APPROVED_ANTD_CLI_VERSION}，实际 ${actual || "unknown"}`);
+    throw new Error([
+      `antd CLI 版本不匹配：需要 ${APPROVED_ANTD_CLI_VERSION}，实际 ${actual || "unknown"}`,
+      "code: ANTD_CLI_VERSION",
+      "下一步：在仓库根运行 npm install，让包装器使用 node_modules/.bin/antd。不要把 PATH 上的其他版本当成查询结果。升级 CLI 要单独批准。",
+    ].join("\n"));
   }
 
   const result = spawnSync(bin, args, {
@@ -116,11 +142,21 @@ export function runReadonlyCli(args, options = {}) {
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === SCRIPT_PATH) {
-  try {
-    const result = runReadonlyCli(process.argv.slice(2));
-    process.exitCode = result.status ?? 1;
-  } catch (error) {
-    console.error(error instanceof Error ? error.message : String(error));
-    process.exitCode = 2;
+  const args = process.argv.slice(2);
+  if (args.length === 0 || args[0] === "--help" || args[0] === "-h") {
+    console.log(HELP);
+  } else {
+    try {
+      const result = runReadonlyCli(args, process.env.ANTD_READONLY_BIN ? { bin: process.env.ANTD_READONLY_BIN } : {});
+      process.exitCode = result.status ?? 1;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(message);
+      if (!message.includes("code:")) {
+        console.error("code: ANTD_READONLY_ARGS");
+        console.error("下一步：node scripts/quality/antd-readonly.mjs --help");
+      }
+      process.exitCode = 2;
+    }
   }
 }

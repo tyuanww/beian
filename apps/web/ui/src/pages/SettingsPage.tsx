@@ -112,9 +112,7 @@ export function SettingsPage({
         .then((b) => {
           if (!cancelled) setBilling(b);
         })
-        .catch(() => {
-          /* ignore */
-        });
+        .catch(() => undefined);
     };
     window.addEventListener("focus", onFocus);
     return () => {
@@ -285,7 +283,7 @@ export function SettingsPage({
     try {
       sessionStorage.setItem(SETUP_RETURN, row.id);
     } catch {
-      /* ignore */
+      // 私密模式写不进 sessionStorage，向导仍要打开。
     }
     setGroup(row.group);
   }
@@ -572,9 +570,8 @@ function SetupBoard({
                 <p aria-live="polite">{msg}</p>
               </div>
               {row.kind === "wizard" && allow.probe ? (
-                <button
-                  type="button"
-                  className={st.cls === "is-bad" ? "setup-btn danger" : "setup-btn ghost"}
+                <Button
+                  danger={st.cls === "is-bad"}
                   disabled={busy}
                   aria-busy={busy}
                   onClick={() => (st.cls === "is-ok" ? onProbe(row.id) : onWizard(row))}
@@ -589,17 +586,15 @@ function SetupBoard({
                   ) : (
                     "打开向导"
                   )}
-                </button>
+                </Button>
               ) : null}
               {row.kind === "push" && allow.sendTest ? (
-                <button type="button" className="setup-btn" onClick={onPush} disabled={busy} aria-busy={busy}>
+                <Button onClick={onPush} disabled={busy} aria-busy={busy}>
                   {sending ? "发送中…" : pending ? "检查中…" : "发送测试"}
-                </button>
+                </Button>
               ) : null}
               {row.kind === "scan" ? (
-                <button
-                  type="button"
-                  className="setup-btn"
+                <Button
                   disabled={busy}
                   aria-busy={busy}
                   onClick={st.cls === "is-ok" ? () => onProbe(row.id) : onScan}
@@ -616,10 +611,10 @@ function SetupBoard({
                   ) : (
                     "需管理员"
                   )}
-                </button>
+                </Button>
               ) : null}
               {row.kind === "retry" ? (
-                <button type="button" className="setup-btn ghost" disabled={busy} aria-busy={busy} onClick={() => onProbe(row.id)}>
+                <Button disabled={busy} aria-busy={busy} onClick={() => onProbe(row.id)}>
                   {busy ? (
                     "检查中…"
                   ) : (
@@ -628,7 +623,7 @@ function SetupBoard({
                       <span className="setup-btn-short">再测</span>
                     </>
                   )}
-                </button>
+                </Button>
               ) : null}
             </div>
           );
@@ -654,9 +649,9 @@ function SetupBoard({
                 <em>{h.label}</em>
                 <code>{h.path}</code>
               </span>
-              <button type="button" className="setup-btn" onClick={() => onAdopt(h.kind, h.path)}>
+              <Button onClick={() => onAdopt(h.kind, h.path)}>
                 采用
-              </button>
+              </Button>
             </label>
           ))}
         </div>

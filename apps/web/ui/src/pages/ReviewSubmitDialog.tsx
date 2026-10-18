@@ -3,6 +3,7 @@ import { Input, Modal } from "antd";
 import { REVIEW_COPY } from "../copy/labels";
 import type { RejectRow } from "./reviewFlat";
 import { submitDialogBlocked } from "./reviewActions";
+import { customerCopy } from "./customerCopy";
 
 type Props = {
   kind: "sign" | "reject" | null;
@@ -42,7 +43,7 @@ export function ReviewSubmitDialog({ kind, rows, pending = 0, blockedText = "", 
       {reject && blocked ? <p id="review-reject-blocked" className="review-submit-error review-reject-blocked" role="status">{blockedText}</p> : null}
       <p>{reject ? REVIEW_COPY.rejectBody(rows.length) : REVIEW_COPY.signBody}</p>
       {!reject && held > 0 ? <p data-testid="review-sign-held">{REVIEW_COPY.heldLine(held)}</p> : null}
-      {!reject && fscNote ? <p data-testid="review-sign-fsc">{fscNote}</p> : null}
+      {!reject && fscNote ? <p data-testid="review-sign-fsc">{customerCopy(fscNote)}</p> : null}
       {reject ? (
         <>
           <ul className="review-reject-list" aria-label="有错清单">

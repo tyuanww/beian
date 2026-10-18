@@ -324,7 +324,7 @@ export function TasksPage({ canCreate, onCreate, onOpen, onResumeReceipt }: Prop
             onOpen={openCard}
           />
           <DeskCol title="检查失败" hint="打开查看原因。" rows={board.failed.map(toDeskCard)} onOpen={onOpen} />
-          <DeskCol title="待确认" hint="等待你确认。" rows={board.review.map(toDeskCard)} onOpen={onOpen} />
+          <DeskCol title="待确认" hint="等待确认。" rows={board.review.map(toDeskCard)} onOpen={onOpen} />
           <DeskCol title="已提交" hint="结果已保存。" rows={board.done.map(toDeskCard)} onOpen={onOpen} />
         </div>
       ) : (

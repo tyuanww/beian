@@ -1,3 +1,4 @@
+import { Button } from "antd";
 import type { PendingUploadReceipt } from "../api";
 import { uploadCanRetry, uploadPhaseLine, type UploadSnapshot } from "../uploadStore";
 import { formatBytes } from "../pages/stemName";
@@ -39,9 +40,7 @@ export function UploadProgressSlot({
         <div className="upload-progress-actions">
           <span>{pct}%</span>
           {canRetry ? (
-            <button type="button" className="upload-progress-retry" onClick={onRetry}>
-              继续上传
-            </button>
+            <Button type="primary" onClick={onRetry}>继续上传</Button>
           ) : null}
           {onDiscard ? (
             <button type="button" className="upload-progress-discard" onClick={onDiscard}>

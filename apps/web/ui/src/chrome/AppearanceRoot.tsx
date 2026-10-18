@@ -71,7 +71,7 @@ export function AppearanceRoot({ children }: { children: ReactNode }) {
 
   return (
     <AppearanceContext.Provider value={{ prefs, setPrefs, resolved, setActor }}>
-      <ConfigProvider locale={zhCN} theme={theme}>
+      <ConfigProvider locale={zhCN} theme={theme} button={{ autoInsertSpace: false }}>
         {children}
       </ConfigProvider>
     </AppearanceContext.Provider>

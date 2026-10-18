@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Alert, App } from "antd";
+import { Alert, App, Button } from "antd";
 import { api, isUploadReceiptExpired, type PendingUploadReceipt } from "../api";
 import { UploadProgressSlot } from "../chrome/UploadProgressSlot";
 import { UploadWell } from "../chrome/UploadWell";
@@ -188,7 +188,7 @@ export function NewTaskPage({ canCreate, receiptId, onCreated, onBack }: Props) 
           } else {
             await uploadStore.abandon("compare");
           }
-          message.success("已放弃这次上传，文件资源已释放。");
+          message.success("已放弃这次上传。");
           onBack();
         } catch (err) {
           message.error(err instanceof Error ? err.message : "无法放弃这次上传");
@@ -203,7 +203,7 @@ export function NewTaskPage({ canCreate, receiptId, onCreated, onBack }: Props) 
       <section className="new-form">
         <header className="page-head">
           <h1 className="page-title">新建审稿</h1>
-          <button type="button" className="btn-ghost" onClick={onBack}>返回</button>
+          <Button onClick={onBack}>返回</Button>
         </header>
         <Alert type="warning" showIcon title="当前账号只有查看权限，不能上传或新建审稿。" />
       </section>
@@ -218,17 +218,16 @@ export function NewTaskPage({ canCreate, receiptId, onCreated, onBack }: Props) 
           <p className="page-lead">上传一份表和一份 PDF。</p>
         </div>
         <div style={{ display: "flex", gap: 12 }}>
-          <button type="button" className="btn-ghost" disabled={submitting} onClick={onBack}>
+          <Button disabled={submitting} onClick={onBack}>
             返回
-          </button>
-          <button
-            type="button"
-            className="btn-primary"
+          </Button>
+          <Button
+            type="primary"
             disabled={!receipt || busy || submitting}
             onClick={() => void submit()}
           >
             {submitting ? "正在提交" : busy ? "上传中" : "开始检查"}
-          </button>
+          </Button>
         </div>
       </header>
 
@@ -312,11 +311,11 @@ export function NewTaskPage({ canCreate, receiptId, onCreated, onBack }: Props) 
         <article className="step-card">
           <b>2</b>
           <strong>自动检查</strong>
-          <p>不确定的内容会请你确认。</p>
+          <p>不确定的内容会留下来确认。</p>
         </article>
         <article className="step-card">
           <b>3</b>
-          <strong>你来确认</strong>
+          <strong>人工确认</strong>
           <p>看完疑点后提交结果。</p>
         </article>
       </div>
