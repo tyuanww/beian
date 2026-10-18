@@ -165,14 +165,30 @@ function processLiveness(pid: number | null, token: string): "missing" | "owned"
   return "unknown";
 }
 
+function closeNamesOtherPid(batch: CompressionBatchRecord): boolean {
+  const token = batch.writer.process_token;
+  const writerPid = batch.writer.pid;
+  if (!token || !/^[a-f0-9]{32}$/.test(token) || writerPid === null) return false;
+  try {
+    const path = compressionProcessClosePath(batch.id);
+    if (statSync(path).size > 2048) return false;
+    const record = JSON.parse(readFileSync(path, "utf8"));
+    return record.schema === "compression-close/1" && record.token === token && record.closed === true &&
+      Number.isInteger(record.pid) && record.pid > 0 && record.pid !== writerPid;
+  } catch {
+    return false;
+  }
+}
+
 function writerLiveness(batch: CompressionBatchRecord): "idle" | "owned" | "missing" | "unknown" {
   if (batch.writer.state === "idle") return "idle";
   if (batch.writer.token && inflight.get(batch.id) === batch.writer.token) return "owned";
   if (batch.writer.process_token) {
     if (compressionProcessClosed(batch.id, batch.writer.process_token, batch.writer.pid)) return "missing";
-    // A gone recorded pid stays missing when an older close file names a different pid.
     const live = processLiveness(batch.writer.pid, batch.writer.process_token);
-    if (live === "missing" || live === "owned") return live;
+    if (live === "owned") return "owned";
+    // A gone recorded pid stays missing only when an older close file names a different pid.
+    if (live === "missing" && closeNamesOtherPid(batch)) return "missing";
     return "unknown";
   }
   if (batch.writer.state === "spawn_unconfirmed") return "unknown";
