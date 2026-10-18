@@ -79,6 +79,76 @@ export function compressionActiveLeases(): CompressionLease[] {
   return readCompressionLeases();
 }
 
+const COMMAND_CACHE_MS = 2_000;
+const COMMAND_LOOKUP_BUDGET_MS = 2_000;
+const commandCache = new Map<number, { at: number; value: string | null }>();
+let commandLookupForTest: ((pid: number) => string | null) | null = null;
+let lookupBudgetLeft: number | null = null;
+let lookupCostForTest = 0;
+
+export function setCompressionCommandLookupForTest(next: ((pid: number) => string | null) | null): void {
+  if (process.env.VITEST !== "1") throw new Error("压缩进程命令测试钩子只能在 VITEST 使用");
+  commandLookupForTest = next;
+  commandCache.clear();
+}
+
+export function setCompressionLookupCostForTest(ms: number): void {
+  if (process.env.VITEST !== "1") throw new Error("压缩进程命令测试钩子只能在 VITEST 使用");
+  lookupCostForTest = ms;
+}
+
+function withCommandLookupBudget<T>(fn: () => T): T {
+  const previous = lookupBudgetLeft;
+  lookupBudgetLeft = COMMAND_LOOKUP_BUDGET_MS;
+  try {
+    return fn();
+  } finally {
+    lookupBudgetLeft = previous;
+  }
+}
+
+function unixCommandLine(pid: number, timeout: number): string | null {
+  try {
+    return execFileSync("ps", ["-p", String(pid), "-o", "command="], {
+      encoding: "utf8",
+      timeout,
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+  } catch {
+    return null;
+  }
+}
+
+function windowsCommandLine(pid: number, timeout: number): string | null {
+  try {
+    return execFileSync(
+      "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+      ["-NoProfile", "-NonInteractive", "-Command", `[string](Get-CimInstance Win32_Process -Filter 'ProcessId=${pid}').CommandLine`],
+      { encoding: "utf8", timeout, windowsHide: true, stdio: ["ignore", "pipe", "ignore"] },
+    );
+  } catch {
+    return null;
+  }
+}
+
+function readProcessCommand(pid: number): string | null {
+  if (commandLookupForTest) {
+    if (lookupBudgetLeft !== null && lookupBudgetLeft <= 0) return null;
+    if (lookupBudgetLeft !== null) lookupBudgetLeft -= lookupCostForTest;
+    return commandLookupForTest(pid);
+  }
+  const now = nowFn();
+  const cached = commandCache.get(pid);
+  if (cached && now - cached.at < COMMAND_CACHE_MS) return cached.value;
+  if (lookupBudgetLeft !== null && lookupBudgetLeft <= 0) return null;
+  const timeout = lookupBudgetLeft === null ? 5_000 : Math.max(1, Math.min(5_000, lookupBudgetLeft));
+  const started = Date.now();
+  const value = process.platform === "win32" ? windowsCommandLine(pid, timeout) : unixCommandLine(pid, timeout);
+  if (lookupBudgetLeft !== null) lookupBudgetLeft -= Date.now() - started;
+  commandCache.set(pid, { at: now, value });
+  return value;
+}
+
 function processLiveness(pid: number | null, token: string): "missing" | "owned" | "unknown" {
   if (!pid || pid <= 0) return "unknown";
   try {
@@ -87,18 +157,12 @@ function processLiveness(pid: number | null, token: string): "missing" | "owned"
     const code = err && typeof err === "object" && "code" in err ? String((err as { code: string }).code) : "";
     return code === "ESRCH" ? "missing" : "unknown";
   }
-  if (process.platform === "win32") return "unknown";
-  try {
-    const command = execFileSync("ps", ["-p", String(pid), "-o", "command="], {
-      encoding: "utf8",
-      timeout: 5_000,
-      stdio: ["ignore", "pipe", "ignore"],
-    });
-    if (token && command.includes("--compression-token") && command.includes(token)) return "owned";
-    return "unknown";
-  } catch {
-    return "unknown";
-  }
+  // An empty token can never match, so the drain request must not spend its lookup budget here.
+  if (!token) return "unknown";
+  const command = readProcessCommand(pid);
+  if (command == null) return "unknown";
+  if (command.includes("--compression-token") && command.includes(token)) return "owned";
+  return "unknown";
 }
 
 function writerLiveness(batch: CompressionBatchRecord): "idle" | "owned" | "missing" | "unknown" {
@@ -106,36 +170,66 @@ function writerLiveness(batch: CompressionBatchRecord): "idle" | "owned" | "miss
   if (batch.writer.token && inflight.get(batch.id) === batch.writer.token) return "owned";
   if (batch.writer.process_token) {
     if (compressionProcessClosed(batch.id, batch.writer.process_token, batch.writer.pid)) return "missing";
-    // A dead supervisor alone does not prove that its process tree stopped.
-    return processLiveness(batch.writer.pid, batch.writer.process_token) === "owned" ? "owned" : "unknown";
+    // A gone recorded pid stays missing when an older close file names a different pid.
+    const live = processLiveness(batch.writer.pid, batch.writer.process_token);
+    if (live === "missing" || live === "owned") return live;
+    return "unknown";
   }
   if (batch.writer.state === "spawn_unconfirmed") return "unknown";
   return processLiveness(batch.writer.pid, batch.writer.token);
 }
 
-export function compressionQueueSnapshot(): { running: number; queued: number; unknown: number } {
+export function compressionQueueSnapshot(): { running: number; queued: number; unknown: number; labels: string[] } {
+  return withCommandLookupBudget(() => compressionQueueSnapshotWithinBudget());
+}
+
+function compressionQueueSnapshotWithinBudget(): { running: number; queued: number; unknown: number; labels: string[] } {
   let running = 0;
   let queued = 0;
   let unknown = 0;
+  const labels: string[] = [];
   try {
     const snapshot = compressionStoreSnapshot();
     unknown += snapshot.unreadable;
+    for (const id of snapshot.unreadable_ids) labels.push(`compression:${id}:unreadable`);
+    if (snapshot.unreadable > snapshot.unreadable_ids.length) labels.push("compression:directory_unreadable");
     for (const batch of snapshot.batches) {
+      const reasons: string[] = [];
       const live = writerLiveness(batch);
-      if (live === "unknown") unknown += 1;
       if (batch.writer.state === "running" || batch.writer.state === "spawn_unconfirmed" || batch.status === "running") {
         running += 1;
-      } else if (batch.status === "queued") queued += 1;
+        reasons.push("running");
+      } else if (batch.status === "queued") {
+        queued += 1;
+        reasons.push("queued");
+      }
+      if (live === "unknown") {
+        unknown += 1;
+        reasons.push("unknown");
+      }
+      if (reasons.length) labels.push(`compression:${batch.id}:${reasons.join("+")}`);
     }
   } catch (err) {
     console.warn(`compression snapshot failed: ${err instanceof Error ? err.message : err}`);
     unknown += 1;
+    labels.push("compression:snapshot_failed");
   }
-  return { running, queued, unknown };
+  return { running, queued, unknown, labels };
 }
 
-export function compressionDownloadActivity(): { running: number; queued: number } {
-  return { running: compressionActiveLeases().length, queued: 0 };
+export function compressionDownloadActivity(): { running: number; queued: number; unknown: number; labels: string[] } {
+  try {
+    const leases = compressionActiveLeases();
+    return {
+      running: leases.length,
+      queued: 0,
+      unknown: 0,
+      labels: leases.map((lease) => `compression:${lease.batch_id}:download`),
+    };
+  } catch (err) {
+    console.warn(`compression download snapshot failed: ${err instanceof Error ? err.message : err}`);
+    return { running: 0, queued: 0, unknown: 1, labels: ["compression:leases_unreadable"] };
+  }
 }
 
 function queueAhead(batch: CompressionBatchRecord, all: CompressionBatchRecord[]): number {

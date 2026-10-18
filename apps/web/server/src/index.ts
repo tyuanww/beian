@@ -505,12 +505,13 @@ function releaseControlLease(c: Context): string {
 
 function releaseControlPayload(admission: ReturnType<typeof releaseCoordinator.snapshot>) {
   const jobs = queueSnapshot();
+  const downloads = compressionDownloadActivity();
   const primaryUploads = uploadCoordinator.snapshot();
   const reworkUploads = reworkUploadAdmission.snapshot();
   const readiness = releaseReadiness({
     admission,
-    jobs: [jobs.ocr, jobs.blender, jobs.illustrator, jobs.compression, compressionDownloadActivity()],
-    jobsUnknown: jobs.unknown,
+    jobs: [jobs.ocr, jobs.blender, jobs.illustrator, jobs.compression, { running: downloads.running, queued: downloads.queued }],
+    jobsUnknown: jobs.unknown + downloads.unknown,
     uploads: {
       active: primaryUploads.active + reworkUploads.active,
       waiting: primaryUploads.waiting + reworkUploads.waiting,
@@ -526,6 +527,7 @@ function releaseControlPayload(admission: ReturnType<typeof releaseCoordinator.s
     pid: process.pid,
     ...admission,
     ...readiness,
+    disk_blockers: [...new Set([...jobs.disk_blockers, ...downloads.labels])].sort(),
   };
 }
 

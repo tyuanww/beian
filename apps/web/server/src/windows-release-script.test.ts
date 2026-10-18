@@ -460,10 +460,20 @@ describe("windows release.ps1 contract", () => {
     assert.doesNotMatch(script, /uploads\.active/);
     assert.doesNotMatch(script, /illustrator-agent\.json/);
     assert.match(script, /function Format-ReleaseDrainFailureDetail/);
-    assert.match(script, /disk_blockers=/);
+    assert.match(script, /Format-ReleaseDrainFailureDetail \$state/);
+    assert.match(script, /Format-ReleaseDrainFailureDetail \$finalDrainState/);
+    assert.match(script, /active_compression:/);
+    const detailStart = script.indexOf("function Format-ReleaseDrainFailureDetail");
+    const detailEnd = script.indexOf("function Get-ReleaseProcessAncestors");
+    const detail = script.slice(detailStart, detailEnd);
+    const fieldCheck = detail.indexOf('Properties["disk_blockers"]');
+    const legacyScan = detail.indexOf("Get-LegacyOfflineBlockers");
+    assert.ok(fieldCheck > 0 && legacyScan > fieldCheck);
+    assert.match(detail, /disk_blockers=none/);
+    assert.match(detail, /disk_blockers=list_failed/);
+    assert.doesNotMatch(detail, /disk_blockers=absent/);
     const readyGate = script.indexOf("if ($state.ready -eq $true)");
-    const detail = script.indexOf("function Format-ReleaseDrainFailureDetail");
-    assert.ok(readyGate > 0 && detail > 0 && detail < readyGate);
+    assert.ok(readyGate > 0 && detailStart > 0 && detailStart < readyGate);
   });
 
   it("proves the installed runtime can cold-start offline before stopping", () => {

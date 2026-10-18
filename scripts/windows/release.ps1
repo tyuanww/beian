@@ -1321,7 +1321,15 @@ function Test-DataDirInsideRepo([string]$DataDir, [string]$RepoRoot) {
   return $d.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)
 }
 
-function Format-ReleaseDrainFailureDetail {
+function Format-ReleaseDrainFailureDetail([object]$State) {
+  if ($null -ne $State -and $null -ne $State.PSObject.Properties["disk_blockers"]) {
+    $listed = @($State.disk_blockers | ForEach-Object { [string]$_ } | Where-Object { $_ })
+    if ($listed.Count -eq 0) { return "disk_blockers=none" }
+    $shown = @($listed | Select-Object -First 30)
+    $suffix = ""
+    if ($listed.Count -gt $shown.Count) { $suffix = ",truncated=$($listed.Count)" }
+    return "disk_blockers=$($shown -join ',')$suffix"
+  }
   try {
     $listed = @(Get-LegacyOfflineBlockers)
     if ($listed.Count -eq 0) { return "disk_blockers=none" }
@@ -1960,12 +1968,12 @@ try {
       Start-Sleep -Milliseconds 250
     }
     if (-not $drained) {
-      throw "release drain 等待超时，blocker_codes=$($lastBlockers -join ','),$(Format-ReleaseDrainFailureDetail)"
+      throw "release drain 等待超时，blocker_codes=$($lastBlockers -join ','),$(Format-ReleaseDrainFailureDetail $state)"
     }
     # 最后续租一次，给 Stop-Service 留出完整租约窗口；业务是否可停由 Hono 聚合。
     $finalDrainState = Invoke-ReleaseControl "Get" $drain.Control $drain.LeaseId
     if ($finalDrainState.ready -ne $true -or [string]$finalDrainState.mode -ne "lease") {
-      throw "release drain 最终复核失败，blocker_codes=$(@($finalDrainState.blocker_codes) -join ','),$(Format-ReleaseDrainFailureDetail)"
+      throw "release drain 最终复核失败，blocker_codes=$(@($finalDrainState.blocker_codes) -join ','),$(Format-ReleaseDrainFailureDetail $finalDrainState)"
     }
     Write-Host "release drain ready: all new business writes are blocked"
   } else {
