@@ -439,6 +439,13 @@ export function submitFailureText(
   return REVIEW_COPY.submitFailed;
 }
 
+/** 当前行相对滚动容器的视口位移。容器不是 offsetParent 时不能用 offsetTop。 */
+export function dockScrollDelta(rowTop: number, rowBottom: number, viewTop: number, viewBottom: number): number {
+  if (rowTop < viewTop) return rowTop - viewTop;
+  if (rowBottom > viewBottom) return rowBottom - viewBottom;
+  return 0;
+}
+
 /** 右栏搜索。空查询匹配全部。比较时去掉空白，条码和批号中间的空格不影响。 */
 export function hitMatchesQuery(
   hit: { field?: string; status?: string; excel?: string; excel_value?: string; pdf?: string; found?: string; note?: string; page?: number | string },

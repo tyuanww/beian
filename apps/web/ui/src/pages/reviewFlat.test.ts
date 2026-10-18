@@ -7,12 +7,17 @@ import { PUBLIC_UPLOAD_BYTES, UPLOAD_TOO_LARGE, setUploadLimitFromMe } from "../
 import {
   rejectNote,
   clampPinToView, completedAtLabel, completedByText, conclusionFor, decisionFailureText, reworkUploadBlocked, submitFailureText, type SubmitFailure, flatLayout, isTypingTarget, lockedBy, markerOutsideCorner, nextPendingAfter,
-  hitMatchesQuery, openHeldAfterPending, panToClearPanel, pendingTally, phonePendingLines, positionLabel, rejectRows, reviewPositionLabel, shouldShowShortcutsOnOpen, showCleanBill, signHint, submitGate, tabIndices, thumbMarks, verdictCounts, verdictForKey,
+  dockScrollDelta, hitMatchesQuery, openHeldAfterPending, panToClearPanel, pendingTally, phonePendingLines, positionLabel, rejectRows, reviewPositionLabel, shouldShowShortcutsOnOpen, showCleanBill, signHint, submitGate, tabIndices, thumbMarks, verdictCounts, verdictForKey,
 } from "./reviewFlat.js";
 
 const hit = (id: string, decision = "pending", page = 1, status = "疑点", note = ""): FieldHit => ({ id, field: id, status, decision, page, note });
 
 describe("reviewFlat", () => {
+  it("当前行用视口坐标滚进右栏", () => {
+    assert.equal(dockScrollDelta(10, 30, 40, 100), -30);
+    assert.equal(dockScrollDelta(90, 130, 40, 100), 30);
+    assert.equal(dockScrollDelta(50, 80, 40, 100), 0);
+  });
   it("右栏搜索匹配字段、条码和批号，忽略空白", () => {
     const row = { field: "条形码", status: "疑点", excel_value: "6901234567890", note: "批号 AB 12" };
     assert.equal(hitMatchesQuery(row, ""), true);
