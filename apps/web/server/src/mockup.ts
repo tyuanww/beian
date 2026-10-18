@@ -479,11 +479,12 @@ function hasValidMockupJobState(job: MockupJob): boolean {
  * 发版闸门必须直接核对磁盘，不能让内存 cache 掩盖半写或损坏的 job.json。
  * 业务列表仍只返回可解析记录；不可读数量由 jobs 模块变成 jobs_unknown。
  */
-export function mockupStoreSnapshot(): { jobs: MockupJob[]; unreadable: number } {
+export function mockupStoreSnapshot(): { jobs: MockupJob[]; unreadable: number; unreadable_ids: string[] } {
   const root = mockupRoot();
   const out: MockupJob[] = [];
   let unreadable = 0;
-  if (!existsSync(root)) return { jobs: out, unreadable };
+  const unreadable_ids: string[] = [];
+  if (!existsSync(root)) return { jobs: out, unreadable, unreadable_ids };
   for (const name of readdirSync(root, { withFileTypes: true })) {
     if (!name.isDirectory()) continue;
     const path = jobPath(name.name, false);
@@ -504,9 +505,10 @@ export function mockupStoreSnapshot(): { jobs: MockupJob[]; unreadable: number }
     } catch {
       cache.delete(name.name);
       unreadable += 1;
+      unreadable_ids.push(name.name);
     }
   }
-  return { jobs: out, unreadable };
+  return { jobs: out, unreadable, unreadable_ids };
 }
 
 export function listJobs(): MockupJob[] {

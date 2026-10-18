@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { request as httpRequest, type IncomingMessage, type Server } from "node:http";
 import { dirname, join } from "node:path";
 import { after, before, describe, it } from "node:test";
@@ -208,13 +208,81 @@ describe("release drain http", () => {
       method: "POST",
       headers: controlHeaders(),
     });
-    const body = (await entered.json()) as { ready: boolean; blocker_codes: string[] };
+    const body = (await entered.json()) as { ready: boolean; blocker_codes: string[]; disk_blockers: string[] };
     assert.equal(body.ready, false);
     assert.ok(body.blocker_codes.includes("jobs_unknown"));
+    assert.ok(body.disk_blockers.includes("task:ee55ee55ee55:unreadable"));
     rmSync(broken, { force: true });
     const inspected = await app.request("/api/internal/release/drain", { headers: controlHeaders() });
-    assert.equal(((await inspected.json()) as { ready: boolean }).ready, true);
+    const cleared = (await inspected.json()) as { ready: boolean; disk_blockers: string[] };
+    assert.equal(cleared.ready, true);
+    assert.deepEqual(cleared.disk_blockers, []);
     await app.request("/api/internal/release/drain", { method: "DELETE", headers: controlHeaders() });
+  });
+
+  it("names a live compression download without treating the lease as idle", async () => {
+    const { removeCompressionLease, writeCompressionLease } = await import("./compressionStore.js");
+    const batchId = "c0ffee0c0ffe";
+    const token = "ab".repeat(16);
+    writeCompressionLease({
+      token,
+      owner_id: "ou_release_http",
+      batch_id: batchId,
+      started_at: new Date().toISOString(),
+      progress_at: new Date().toISOString(),
+      pid: process.pid,
+    });
+    try {
+      const entered = await app.request("/api/internal/release/drain", {
+        method: "POST",
+        headers: controlHeaders(),
+      });
+      const body = (await entered.json()) as { ready: boolean; blocker_codes: string[]; disk_blockers: string[] };
+      assert.equal(body.ready, false);
+      assert.ok(body.blocker_codes.includes("jobs_active"));
+      assert.ok(body.disk_blockers.includes(`compression:${batchId}:download`));
+    } finally {
+      await app.request("/api/internal/release/drain", { method: "DELETE", headers: controlHeaders() });
+      removeCompressionLease(batchId, token);
+    }
+  });
+
+  it("names an unreadable compression directory", async () => {
+    const root = join(DATA_DIR, "compressions");
+    mkdirSync(root, { recursive: true });
+    chmodSync(root, 0);
+    try {
+      const entered = await app.request("/api/internal/release/drain", {
+        method: "POST",
+        headers: controlHeaders(),
+      });
+      const body = (await entered.json()) as { ready: boolean; blocker_codes: string[]; disk_blockers: string[] };
+      assert.equal(body.ready, false);
+      assert.ok(body.blocker_codes.includes("jobs_unknown"));
+      assert.ok(body.disk_blockers.includes("compression:directory_unreadable"));
+    } finally {
+      chmodSync(root, 0o755);
+      await app.request("/api/internal/release/drain", { method: "DELETE", headers: controlHeaders() });
+    }
+  });
+
+  it("names a native illustrator slot by task id", async () => {
+    const { resetJobsTestHooks, setJobsLiveForTest } = await import("./jobs.js");
+    setJobsLiveForTest("illustrator", "native:abcdefabcdef");
+    try {
+      const entered = await app.request("/api/internal/release/drain", {
+        method: "POST",
+        headers: controlHeaders(),
+      });
+      const body = (await entered.json()) as { ready: boolean; blocker_codes: string[]; disk_blockers: string[] };
+      assert.equal(body.ready, false);
+      assert.ok(body.blocker_codes.includes("jobs_active"));
+      assert.ok(body.disk_blockers.includes("task:abcdefabcdef:illustrator:live"));
+      assert.equal(body.disk_blockers.includes("slot:native:abcdefabcdef:illustrator:live"), false);
+    } finally {
+      resetJobsTestHooks();
+      await app.request("/api/internal/release/drain", { method: "DELETE", headers: controlHeaders() });
+    }
   });
 
   it("authenticates control, blocks business APIs with 503, and keeps health available", async () => {
@@ -240,6 +308,7 @@ describe("release drain http", () => {
     assert.equal(enteredBody.active, 0);
     assert.equal(enteredBody.ready, true);
     assert.deepEqual(enteredBody.blocker_codes, []);
+    assert.deepEqual(enteredBody.disk_blockers, []);
     assert.equal(enteredBody.lease_id, controlHeaders()["x-beian-release-lease"]);
     assert.equal(enteredBody.mode, "lease");
     assert.equal(typeof enteredBody.expires_at, "string");

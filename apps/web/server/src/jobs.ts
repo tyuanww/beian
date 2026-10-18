@@ -341,43 +341,80 @@ export function notificationSnapshot(): { active: number } {
   return { active: activeNotifications };
 }
 
+export function sortDiskBlockers(labels: string[]): string[] {
+  const rank = (label: string) => /unreadable|unknown|snapshot_failed/.test(label) ? 0 : 1;
+  return [...new Set(labels)].sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
+}
+
 export function queueSnapshot(): {
   ocr: { running: number; queued: number };
   blender: { running: number; queued: number };
   illustrator: { running: number; queued: number };
   compression: { running: number; queued: number };
   unknown: number;
+  disk_blockers: string[];
 } {
   const taskStore = taskStoreSnapshot();
   const mockupStore = mockupStoreSnapshot();
   const compression = compressionQueueSnapshot();
   const tasks = taskStore.tasks;
   const mocks = mockupStore.jobs;
-  const ocrQueued = tasks.filter((t) => isOcr(t.job_kind) && t.job_status === "queued" && !nativeBlocksOcr(t)).length;
-  const ocrRunning = tasks.filter((t) => isOcr(t.job_kind) && t.job_status === "running").length;
+  const ocrQueuedTasks = tasks.filter((t) => isOcr(t.job_kind) && t.job_status === "queued" && !nativeBlocksOcr(t));
+  const ocrRunningTasks = tasks.filter((t) => isOcr(t.job_kind) && t.job_status === "running");
   const ai = mocks.filter((j) => needsIllustrator(j));
   const rest = mocks.filter((j) => !needsIllustrator(j));
-  const bQueued =
-    rest.filter((j) => j.job_status === "queued").length +
-    mocks.filter((j) => j.status === "done" && j.render_mutation?.status === "queued").length +
-    mocks.filter((j) => j.print_faces_request?.status === "queued").length +
-    mocks.filter((j) => j.unfolded_print_request?.status === "queued" && j.unfolded_print_request.mode === "publish_existing").length;
-  const bRunning = rest.filter((j) => j.job_status === "running" && j.job_stage !== "illustrator").length +
-    mocks.filter((j) => j.print_faces_request?.status === "running").length +
-    mocks.filter((j) => j.unfolded_print_request?.status === "running" && j.unfolded_print_request.mode === "publish_existing").length;
-  const nativeQueued = mocks.filter((j) => j.unfolded_print_request?.status === "queued" && j.unfolded_print_request.mode === "native_export").length;
-  const nativeRunning = mocks.filter((j) => j.unfolded_print_request?.status === "running" && j.unfolded_print_request.mode === "native_export").length;
+  const blenderQueued = [
+    ...rest.filter((j) => j.job_status === "queued"),
+    ...mocks.filter((j) => j.status === "done" && j.render_mutation?.status === "queued"),
+    ...mocks.filter((j) => j.print_faces_request?.status === "queued"),
+    ...mocks.filter((j) => j.unfolded_print_request?.status === "queued" && j.unfolded_print_request.mode === "publish_existing"),
+  ];
+  const blenderRunning = [
+    ...rest.filter((j) => j.job_status === "running" && j.job_stage !== "illustrator"),
+    ...mocks.filter((j) => j.print_faces_request?.status === "running"),
+    ...mocks.filter((j) => j.unfolded_print_request?.status === "running" && j.unfolded_print_request.mode === "publish_existing"),
+  ];
+  const nativeQueued = mocks.filter((j) => j.unfolded_print_request?.status === "queued" && j.unfolded_print_request.mode === "native_export");
+  const nativeRunning = mocks.filter((j) => j.unfolded_print_request?.status === "running" && j.unfolded_print_request.mode === "native_export");
+  const illustratorRunning = ai.filter((j) => j.job_status === "running");
+  const illustratorQueued = ai.filter((j) => j.job_status === "queued");
+  const nativeText = nativeQueue();
+  const labels = [
+    ...compression.labels,
+    ...taskStore.unreadable_ids.map((id) => `task:${id}:unreadable`),
+    ...mockupStore.unreadable_ids.map((id) => `mockup:${id}:unreadable`),
+    ...ocrQueuedTasks.map((task) => `task:${task.id}:ocr:queued`),
+    ...ocrRunningTasks.map((task) => `task:${task.id}:ocr:running`),
+    ...blenderQueued.map((job) => `mockup:${job.id}:blender:queued`),
+    ...blenderRunning.map((job) => `mockup:${job.id}:blender:running`),
+    ...illustratorQueued.map((job) => `mockup:${job.id}:illustrator:queued`),
+    ...illustratorRunning.map((job) => `mockup:${job.id}:illustrator:running`),
+    ...nativeQueued.map((job) => `mockup:${job.id}:unfolded:queued`),
+    ...nativeRunning.map((job) => `mockup:${job.id}:unfolded:running`),
+    ...nativeText.queued.map((task) => `task:${task.id}:native:queued`),
+    ...nativeText.running.map((task) => `task:${task.id}:native:running`),
+  ];
+  if (live.ocr && !ocrRunningTasks.some((task) => task.id === live.ocr)) labels.push(`task:${live.ocr}:ocr:live`);
+  if (live.blender && !blenderRunning.some((job) => job.id === live.blender)) labels.push(`mockup:${live.blender}:blender:live`);
+  if (live.illustrator) {
+    const slotId = live.illustrator.startsWith("native:") ? live.illustrator.slice("native:".length) : live.illustrator;
+    const named = illustratorRunning.some((job) => job.id === slotId)
+      || nativeRunning.some((job) => job.id === slotId)
+      || nativeText.running.some((task) => task.id === slotId);
+    if (slotId && !named) labels.push(`task:${slotId}:illustrator:live`);
+  }
   return {
     // Disk state is durable; live slots close the short window before a worker
     // PID/status update is persisted and keep corrupted active records fail-closed.
-    ocr: { running: Math.max(ocrRunning, live.ocr ? 1 : 0), queued: ocrQueued },
-    blender: { running: Math.max(bRunning, live.blender ? 1 : 0), queued: bQueued },
+    ocr: { running: Math.max(ocrRunningTasks.length, live.ocr ? 1 : 0), queued: ocrQueuedTasks.length },
+    blender: { running: Math.max(blenderRunning.length, live.blender ? 1 : 0), queued: blenderQueued.length },
     illustrator: {
-      running: Math.max(ai.filter((j) => j.job_status === "running").length + nativeRunning + nativeQueue().running.length, live.illustrator ? 1 : 0),
-      queued: ai.filter((j) => j.job_status === "queued").length + nativeQueued + nativeQueue().queued.length,
+      running: Math.max(illustratorRunning.length + nativeRunning.length + nativeText.running.length, live.illustrator ? 1 : 0),
+      queued: illustratorQueued.length + nativeQueued.length + nativeText.queued.length,
     },
     compression: { running: compression.running, queued: compression.queued },
     unknown: taskStore.unreadable + mockupStore.unreadable + compression.unknown,
+    disk_blockers: sortDiskBlockers(labels),
   };
 }
 

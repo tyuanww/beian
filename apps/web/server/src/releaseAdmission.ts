@@ -46,8 +46,10 @@ type ReleaseReadinessInput = {
 };
 
 /**
- * 把队列、上传和桌面代理的隐藏知识收在服务端；部署脚本只消费稳定的
- * ready/blocker_codes 合同，不理解作业种类、磁盘目录或心跳格式。
+ * 把队列、上传和桌面代理的隐藏知识收在服务端。部署脚本只消费
+ * ready、blocker_codes，以及失败日志里的 disk_blockers。
+ * 回包带有这份名单时脚本只转发。回包没有该字段时，脚本改用自己的旧列举。
+ * 它不理解作业种类、磁盘目录或心跳格式，也不用这份名单决定能否停服务。
  */
 export function releaseReadiness(input: ReleaseReadinessInput): ReleaseReadiness {
   const blockers: string[] = [];

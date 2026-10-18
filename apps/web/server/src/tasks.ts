@@ -245,14 +245,15 @@ function isLegacyInterruptedTask(task: Task): boolean {
     && task.job_pid === undefined;
 }
 
-function readTaskStore(allowLegacyInterrupted: boolean): { tasks: Task[]; unreadable: number } {
+function readTaskStore(allowLegacyInterrupted: boolean): { tasks: Task[]; unreadable: number; unreadable_ids: string[] } {
   const items: Task[] = [];
   let unreadable = 0;
+  const unreadable_ids: string[] = [];
   for (const name of readdirSync(tasksDir())) {
     if (!name.endsWith(".json")) continue;
+    const expectedId = name.slice(0, -".json".length);
     try {
       const task = JSON.parse(readFileSync(join(tasksDir(), name), "utf8")) as Task;
-      const expectedId = name.slice(0, -".json".length);
       if (
         !task
         || typeof task !== "object"
@@ -266,12 +267,13 @@ function readTaskStore(allowLegacyInterrupted: boolean): { tasks: Task[]; unread
       items.push(task);
     } catch {
       unreadable += 1;
+      unreadable_ids.push(expectedId);
     }
   }
-  return { tasks: items, unreadable };
+  return { tasks: items, unreadable, unreadable_ids };
 }
 
-export function taskStoreSnapshot(): { tasks: Task[]; unreadable: number } {
+export function taskStoreSnapshot(): { tasks: Task[]; unreadable: number; unreadable_ids: string[] } {
   return readTaskStore(false);
 }
 

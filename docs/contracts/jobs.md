@@ -82,7 +82,7 @@ UI 等待：`shouldShowWaitCard`（`queued` | `running` | `comparing`；`done`/`
 
 `POST /api/mockups/:id/unfolded-print` 无请求体，沿 create 与管理该单权限；200 复用完成结果，202 返回持久 queued/running，409 使用顶层 message/reason（busy 仅顶层），不创建失败忙请求。发布已有可信 PDF 与原生补导出都计入排队快照/drain；原生任务与打样共用 Illustrator 槽。源稿或代际变化不能发布旧结果。running + close_unconfirmed 保持围栏，重试不得再开第二个 native。启动恢复沿既有归属与关稿证据，不把结果 JSON 当作退出证明。
 
-压缩上传使用 purpose=compression、asset1–asset20，现有分片/回执通道；总量 100MiB。任务创建复用 owner+receipt 幂等，逐文件持久状态，重试使用 expected_revision 和 file_ids，已成功文件不重压。queueSnapshot 独立计入 compression；离页不取消已受理任务。未知 output_bytes 保持 null。
+压缩上传使用 purpose=compression、asset1–asset20，现有分片/回执通道；总量 100MiB。任务创建复用 owner+receipt 幂等，逐文件持久状态，重试使用 expected_revision 和 file_ids，已成功文件不重压。queueSnapshot 独立计入 compression；离页不取消已受理任务。未知 output_bytes 保持 null。记录的写入器 PID 已经消失时按已退出恢复，旧 `executor-close.json` 写着另一个 PID 也不把这次退出留成未知。命令行对不上压缩令牌，或查不到命令行时，保持未知，不重入队。空令牌不查命令行。一次排空快照里的命令查询共用 2 秒，查不完保持未知。下载租约、租约目录读失败和压缩目录读失败都写入 `disk_blockers`。名单里说明未知或不可读的名字排在前面，超时日志只留 30 条时也不会先丢掉它们。旧进程没有这份字段时，脚本的旧列举同样写出仍有效的压缩下载租约。
 
 压缩工具须先证明可用的进程容器再领任务：Windows 复用有归属的 Job Object（聚合 commit 上限并采样 RSS），Linux 使用获授权的 cgroup v2；不能用 macOS RLIMIT 或一个 probe 标签冒充整树内存限制。所有取消等待归属子树退出，stdout/stderr、时间、候选/尝试磁盘都有边界。初值、具体执行器及许可记录随 compression 模块维护；Windows RSS/磁盘监控的现场行为仍须单独取证，不由 Mac 单测证明。
 

@@ -16,6 +16,7 @@ const {
   notificationSnapshot,
   publicTask,
   queueSnapshot,
+  sortDiskBlockers,
   reclaimOnBoot,
   resetJobsTestHooks,
   retryMockup,
@@ -2380,5 +2381,17 @@ describe("glb webp variant: retry entry", () => {
     } finally {
       resetJobsTestHooks();
     }
+  });
+});
+
+describe("disk blocker order", () => {
+  it("keeps unreadable names ahead of the thirty-name log cap", () => {
+    const labels = [
+      ...Array.from({ length: 31 }, (_, index) => `compression:${index.toString(16).padStart(12, "0")}:running`),
+      "task:abcdefabcdef:unreadable",
+    ];
+    const ordered = sortDiskBlockers(labels);
+    assert.equal(ordered[0], "task:abcdefabcdef:unreadable");
+    assert.equal(ordered.slice(0, 30).includes("task:abcdefabcdef:unreadable"), true);
   });
 });
