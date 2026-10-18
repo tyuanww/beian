@@ -1470,6 +1470,7 @@ export function ReviewPage({ taskId, userId, displayName = null, canComplete = t
           ) : null}
         </div>
         <div className="review-tbar" role="toolbar" aria-label="稿件工具">
+          <div className="review-tbar-scroll">
           <button type="button" aria-label="缩小" title="缩小 −" onClick={() => zoomBy(1 / 1.25)}>−</button>
           <button type="button" aria-label="回到 100%" title="回到 100%" onClick={() => commitZoom(resetZoom())}>{Math.round(zoom.scale * 100)}%</button>
           <button type="button" aria-label="放大" title="放大 +" onClick={() => zoomBy(1.25)}>+</button>
@@ -1504,6 +1505,7 @@ export function ReviewPage({ taskId, userId, displayName = null, canComplete = t
             {reviewFullscreen ? "退出" : "全屏"}
           </button>
           {!phone ? <button type="button" aria-label="快捷键" aria-expanded={shortcutsOpen} title="快捷键" onClick={() => setShortcutsOpen((v) => !v)}>?</button> : null}
+          </div>
           {shortcutsOpen && !phone ? (
             <div className="review-keys" role="note">
               <b>{REVIEW_COPY.shortcutsTitle}</b> 读要点 → 按 <kbd>1</kbd>一致 <kbd>2</kbd>有错 <kbd>3</kbd>忽略，自动跳下一条 · <kbd>J</kbd>/<kbd>K</kbd> 上下条 · <kbd>[</kbd> 右栏 · <kbd>?</kbd> 再看

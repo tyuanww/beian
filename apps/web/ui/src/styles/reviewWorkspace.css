@@ -43,11 +43,12 @@ html[data-theme="dark"] .review-thumbs { background: #1f1a24; }
 .review-held-title { padding: 8px 16px 0; color: var(--muted); font-size: 13px; }
 .review-ccol > .canvas { flex: 1; min-height: 0; border: 0; border-radius: 0; background: var(--stage); }
 .review-ccol .canvas-view { min-height: 0; justify-content: center; }
-.review-tbar { flex: none; min-height: 52px; display: flex; align-items: center; gap: 4px; padding: 4px 16px; border-top: 1px solid var(--line); position: relative; flex-wrap: nowrap; overflow-x: auto; }
-.review-tbar > button { border: 1px solid transparent; background: none; border-radius: 10px; padding: 0 8px; font-size: 14px; cursor: pointer; color: var(--ink); }
-.review-tbar > button:hover { border-color: var(--line); }
+.review-tbar { flex: none; min-height: 52px; display: flex; align-items: center; gap: 4px; padding: 4px 16px; border-top: 1px solid var(--line); position: relative; flex-wrap: nowrap; }
+.review-tbar-scroll { display: flex; align-items: center; gap: 4px; min-width: 0; flex: 1; overflow-x: auto; flex-wrap: nowrap; }
+.review-tbar-scroll > button { border: 1px solid transparent; background: none; border-radius: 10px; padding: 0 8px; font-size: 14px; cursor: pointer; color: var(--ink); }
+.review-tbar-scroll > button:hover { border-color: var(--line); }
 /* 设计哥 F-004：按下态 = accent-soft 底 + accent 字 + accent 描边，和 hover 分开。 */
-.review-tbar > button[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
+.review-tbar-scroll > button[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
 .review-keys { position: absolute; bottom: 100%; left: 16px; right: 16px; margin-bottom: 8px; padding: 8px 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--stage); font-size: 14px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; z-index: 4; }
 .review-keys kbd, .review-verdicts kbd { font: 13px/1 ui-monospace, monospace; border: 1px solid var(--line); border-radius: 4px; padding: 2px 4px; }
 .review-keys button { margin-left: auto; border: 0; background: none; color: var(--accent); cursor: pointer; }
