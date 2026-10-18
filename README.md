@@ -67,7 +67,7 @@
 ./scripts/dev-start.sh
 ```
 
-第一次打开按 [本地开发](docs/howto-dev-start.md)。5173 被占用就停，不要再开一个入口。提缺陷见 [CONTRIBUTING.md](CONTRIBUTING.md)。未发布的界面变化写在 [CHANGELOG.md](CHANGELOG.md) 的 Unreleased。
+第一次打开按 [本地开发](docs/howto-dev-start.md)。5173 被占用就停，不要再开一个入口。提缺陷见 [CONTRIBUTING.md](CONTRIBUTING.md)。
 
 - 产品 / 验收：http://127.0.0.1:8787/ （先 `cd apps/web/ui && npm run build`）
 - 开发 UI：http://127.0.0.1:5173/ （`npm run dev:ui`；Vite 听本机网卡，`/api` 反代到 8787，端口占用即失败）
