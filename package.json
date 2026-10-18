@@ -21,6 +21,9 @@
   "engines": {
     "node": ">=20"
   },
+  "devDependencies": {
+    "@ant-design/cli": "6.6.1"
+  },
   "overrides": {
     "sharp": "0.34.4"
   },
