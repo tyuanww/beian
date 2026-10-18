@@ -1331,7 +1331,11 @@ function Format-ReleaseDrainFailureDetail([object]$State) {
     return "disk_blockers=$($shown -join ',')$suffix"
   }
   try {
-    $listed = @(Get-LegacyOfflineBlockers)
+    $serverPid = 0
+    if ($null -ne $State -and $null -ne $State.PSObject.Properties["pid"]) {
+      try { $serverPid = [int]$State.pid } catch { $serverPid = 0 }
+    }
+    $listed = @(Get-LegacyOfflineBlockers -ServerPid $serverPid)
     if ($listed.Count -eq 0) { return "disk_blockers=none" }
     $shown = @($listed | Select-Object -First 30)
     $suffix = ""
@@ -1356,7 +1360,32 @@ function Get-ReleaseProcessAncestors {
   return $found
 }
 
+function Sort-ReleaseBlockerNames([string[]]$Names) {
+  return @($Names | Sort-Object @{ Expression = { if ([string]$_ -match 'unreadable|unknown|snapshot_failed') { 0 } else { 1 } } }, { [string]$_ })
+}
+
+function Test-CompressionDownloadLeaseActive([object]$Lease, [int]$ServerPid) {
+  $leasePid = 0
+  try { $leasePid = [int]$Lease.pid } catch { return $false }
+  if ($leasePid -le 0) { return $false }
+  $fresh = $false
+  try {
+    $now = [DateTime]::UtcNow
+    $started = [DateTimeOffset]::Parse([string]$Lease.started_at).UtcDateTime
+    $progress = [DateTimeOffset]::Parse([string]$Lease.progress_at).UtcDateTime
+    $idle = ($now - $progress).TotalMilliseconds -gt 120000
+    $expired = ($now - $started).TotalMilliseconds -gt 900000
+    $fresh = -not $idle -and -not $expired
+  } catch {
+    $fresh = $false
+  }
+  if ($ServerPid -gt 0 -and $leasePid -eq $ServerPid) { return $fresh }
+  if ($fresh) { return $true }
+  return $null -ne (Get-Process -Id $leasePid -ErrorAction SilentlyContinue)
+}
+
 function Get-LegacyOfflineBlockers {
+  param([int]$ServerPid = 0)
   $blockers = New-Object 'System.Collections.Generic.List[string]'
   $activeJobStates = @("queued", "running", "comparing")
   $jobFiles = New-Object 'System.Collections.Generic.List[string]'
@@ -1422,6 +1451,23 @@ function Get-LegacyOfflineBlockers {
       }
     }
   }
+  $downloadLeasesDir = Join-Path $compressionsDir "leases"
+  if (Test-Path -LiteralPath $downloadLeasesDir -PathType Container) {
+    foreach ($batchDir in @(Get-ChildItem -LiteralPath $downloadLeasesDir -Directory -ErrorAction Stop)) {
+      if ($batchDir.Name -notmatch '^[0-9a-f]{12}$') { continue }
+      foreach ($leaseFile in @(Get-ChildItem -LiteralPath $batchDir.FullName -Filter "*.json" -File -ErrorAction Stop)) {
+        try {
+          $lease = [System.IO.File]::ReadAllText($leaseFile.FullName, $Utf8NoBom) | ConvertFrom-Json
+        } catch {
+          [void]$blockers.Add("unreadable_compression_lease:" + $batchDir.Name)
+          continue
+        }
+        if (Test-CompressionDownloadLeaseActive $lease $ServerPid) {
+          [void]$blockers.Add("compression:$($batchDir.Name):download")
+        }
+      }
+    }
+  }
 
   $leaseCutoff = [DateTime]::UtcNow.AddMinutes(-2)
   $sessionsDir = Join-Path $env:WB_DATA_DIR "uploads\sessions"
@@ -1462,7 +1508,7 @@ function Get-LegacyOfflineBlockers {
       [void]$blockers.Add("active_process:${processPid}:${name}")
     }
   }
-  return @($blockers | Sort-Object -Unique)
+  return @(Sort-ReleaseBlockerNames @($blockers | Select-Object -Unique))
 }
 
 function Assert-LegacyOfflineIdle {

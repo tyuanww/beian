@@ -472,6 +472,9 @@ describe("windows release.ps1 contract", () => {
     assert.match(detail, /disk_blockers=none/);
     assert.match(detail, /disk_blockers=list_failed/);
     assert.doesNotMatch(detail, /disk_blockers=absent/);
+    assert.match(script, /Join-Path \$compressionsDir "leases"/);
+    assert.match(script, /compression:\$\(\$batchDir\.Name\):download/);
+    assert.match(script, /unreadable\|unknown\|snapshot_failed/);
     const readyGate = script.indexOf("if ($state.ready -eq $true)");
     assert.ok(readyGate > 0 && detailStart > 0 && detailStart < readyGate);
   });

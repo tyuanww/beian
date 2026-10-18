@@ -46,6 +46,7 @@ import {
   publicTask,
   compressionDownloadActivity,
   queueSnapshot,
+  sortDiskBlockers,
   reclaimOnBoot,
   relightMockupStudio,
   readRenderGenerationHistory,
@@ -527,7 +528,7 @@ function releaseControlPayload(admission: ReturnType<typeof releaseCoordinator.s
     pid: process.pid,
     ...admission,
     ...readiness,
-    disk_blockers: [...new Set([...jobs.disk_blockers, ...downloads.labels])].sort(),
+    disk_blockers: sortDiskBlockers([...jobs.disk_blockers, ...downloads.labels]),
   };
 }
 

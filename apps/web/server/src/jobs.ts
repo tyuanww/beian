@@ -341,6 +341,11 @@ export function notificationSnapshot(): { active: number } {
   return { active: activeNotifications };
 }
 
+export function sortDiskBlockers(labels: string[]): string[] {
+  const rank = (label: string) => /unreadable|unknown|snapshot_failed/.test(label) ? 0 : 1;
+  return [...new Set(labels)].sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
+}
+
 export function queueSnapshot(): {
   ocr: { running: number; queued: number };
   blender: { running: number; queued: number };
@@ -409,7 +414,7 @@ export function queueSnapshot(): {
     },
     compression: { running: compression.running, queued: compression.queued },
     unknown: taskStore.unreadable + mockupStore.unreadable + compression.unknown,
-    disk_blockers: [...new Set(labels)].sort(),
+    disk_blockers: sortDiskBlockers(labels),
   };
 }
 
