@@ -1321,6 +1321,19 @@ function Test-DataDirInsideRepo([string]$DataDir, [string]$RepoRoot) {
   return $d.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)
 }
 
+function Format-ReleaseDrainFailureDetail {
+  try {
+    $listed = @(Get-LegacyOfflineBlockers)
+    if ($listed.Count -eq 0) { return "disk_blockers=none" }
+    $shown = @($listed | Select-Object -First 30)
+    $suffix = ""
+    if ($listed.Count -gt $shown.Count) { $suffix = ",truncated=$($listed.Count)" }
+    return "disk_blockers=$($shown -join ',')$suffix"
+  } catch {
+    return "disk_blockers=list_failed"
+  }
+}
+
 function Get-ReleaseProcessAncestors {
   $found = @()
   $nextPid = $ReleaseProcessPid
@@ -1361,10 +1374,44 @@ function Get-LegacyOfflineBlockers {
     }
     $jobState = [string]$job.job_status
     $status = [string]$job.status
+    $jobId = [string]$job.id
+    if (-not $jobId) { $jobId = [System.IO.Path]::GetFileNameWithoutExtension($path) }
     if ($activeJobStates -contains $jobState -or $activeJobStates -contains $status) {
-      $jobId = [string]$job.id
-      if (-not $jobId) { $jobId = [System.IO.Path]::GetFileNameWithoutExtension($path) }
       [void]$blockers.Add("active_job:${jobId}:${jobState}:${status}")
+    }
+    foreach ($nested in @(
+      @{ Name = "repair"; Value = $job.print_faces_request },
+      @{ Name = "unfolded"; Value = $job.unfolded_print_request },
+      @{ Name = "native"; Value = $job.native_text_request }
+    )) {
+      if (-not $nested.Value) { continue }
+      $nestedStatus = [string]$nested.Value.status
+      if (@("queued", "running") -contains $nestedStatus) {
+        [void]$blockers.Add("active_$($nested.Name):${jobId}:${nestedStatus}")
+      }
+    }
+  }
+  $compressionsDir = Join-Path $env:WB_DATA_DIR "compressions"
+  if (Test-Path -LiteralPath $compressionsDir -PathType Container) {
+    foreach ($dir in @(Get-ChildItem -LiteralPath $compressionsDir -Directory -ErrorAction Stop)) {
+      if ($dir.Name -notmatch '^[0-9a-f]{12}$') { continue }
+      if (Test-Path -LiteralPath (Join-Path $dir.FullName "tombstone.json") -PathType Leaf) { continue }
+      $batchPath = Join-Path $dir.FullName "batch.json"
+      if (-not (Test-Path -LiteralPath $batchPath -PathType Leaf)) { continue }
+      try {
+        $batch = [System.IO.File]::ReadAllText($batchPath, $Utf8NoBom) | ConvertFrom-Json
+      } catch {
+        [void]$blockers.Add("unreadable_compression:" + $dir.Name)
+        continue
+      }
+      $batchStatus = [string]$batch.status
+      $writerState = ""
+      if ($batch.writer) { $writerState = [string]$batch.writer.state }
+      if (@("queued", "running") -contains $batchStatus) {
+        [void]$blockers.Add("active_compression:$($dir.Name):${batchStatus}:${writerState}")
+      } elseif ($writerState -and $writerState -ne "idle") {
+        [void]$blockers.Add("compression_writer:$($dir.Name):${writerState}")
+      }
     }
   }
 
@@ -1913,12 +1960,12 @@ try {
       Start-Sleep -Milliseconds 250
     }
     if (-not $drained) {
-      throw "release drain 等待超时，blocker_codes=$($lastBlockers -join ',')"
+      throw "release drain 等待超时，blocker_codes=$($lastBlockers -join ','),$(Format-ReleaseDrainFailureDetail)"
     }
     # 最后续租一次，给 Stop-Service 留出完整租约窗口；业务是否可停由 Hono 聚合。
     $finalDrainState = Invoke-ReleaseControl "Get" $drain.Control $drain.LeaseId
     if ($finalDrainState.ready -ne $true -or [string]$finalDrainState.mode -ne "lease") {
-      throw "release drain 最终复核失败，blocker_codes=$(@($finalDrainState.blocker_codes) -join ',')"
+      throw "release drain 最终复核失败，blocker_codes=$(@($finalDrainState.blocker_codes) -join ','),$(Format-ReleaseDrainFailureDetail)"
     }
     Write-Host "release drain ready: all new business writes are blocked"
   } else {

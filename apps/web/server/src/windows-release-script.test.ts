@@ -459,6 +459,11 @@ describe("windows release.ps1 contract", () => {
     assert.doesNotMatch(script, /HealthObj\.jobs/);
     assert.doesNotMatch(script, /uploads\.active/);
     assert.doesNotMatch(script, /illustrator-agent\.json/);
+    assert.match(script, /function Format-ReleaseDrainFailureDetail/);
+    assert.match(script, /disk_blockers=/);
+    const readyGate = script.indexOf("if ($state.ready -eq $true)");
+    const detail = script.indexOf("function Format-ReleaseDrainFailureDetail");
+    assert.ok(readyGate > 0 && detail > 0 && detail < readyGate);
   });
 
   it("proves the installed runtime can cold-start offline before stopping", () => {
