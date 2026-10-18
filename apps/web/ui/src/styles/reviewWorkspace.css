@@ -9,6 +9,10 @@ html[data-theme="dark"] .shell.is-review-flat .sidebar, html[data-theme="dark"] 
 .review-flat-page { display: flex; flex-direction: column; height: 100%; min-height: 0; font-size: max(13px, 1em); }
 .review-flat-page :focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
 .review-flat-page button { min-height: 44px; min-width: 44px; }
+/* 钉是稿面上的 28px 标记，不跟工具按钮一起撑到 44，避免盖住邻行。 */
+.review-flat-page button.pin { min-width: 0; min-height: 0; }
+/* 输入框里的清除钮不是工具按钮。44px 会把它撑得比输入框还高。 */
+.review-flat-page button.ant-input-clear-icon { min-width: 0; min-height: 0; }
 .review-top { display: flex; align-items: center; gap: 8px; padding: 0 16px; min-height: 60px; border-bottom: 1px solid var(--line); flex: none; position: sticky; top: 0; z-index: 5; background: var(--stage); }
 .review-crumb { border: 0; background: none; color: var(--muted); font-size: 14px; cursor: pointer; padding: 0 4px; }
 .review-title { margin: 0; font-size: 20px; font-weight: 650; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 40vw; }
@@ -18,9 +22,9 @@ html[data-theme="dark"] .shell.is-review-flat .sidebar, html[data-theme="dark"] 
 .review-posn b { min-width: 48px; text-align: center; font-variant-numeric: tabular-nums; font-size: 14px; }
 .review-grow { flex: 1; }
 .review-signhint { color: var(--muted); font-size: 14px; }
-/* 禁用的「签字」「退回」一套样式：--accent-mist 底 + --muted 字 + --line 描边；
-   覆盖 app.css `.btn-primary:disabled { opacity: .55 }`，不再整体半透明（对比度 ≥4.5）。 */
-.review-flat-page .review-sign:disabled, .review-flat-page .review-reject:disabled { opacity: 1; background: var(--accent-mist); color: var(--muted); border: 1px solid var(--line); cursor: not-allowed; box-shadow: none; }
+/* 禁用的「签字」「退回」保持雾底、灰字、描边。选择器比 antd 的 .ant-btn:disabled 更具体，避免整颗变淡。 */
+.review-flat-page button.review-sign.ant-btn:disabled,
+.review-flat-page button.review-reject.ant-btn:disabled { opacity: 1; background: var(--accent-mist); color: var(--muted); border: 1px solid var(--line); cursor: not-allowed; box-shadow: none; }
 .review-lock, .review-flat-page > .ant-alert { margin: 8px 16px 0; }
 
 .review-workspace.review-flat { display: grid; flex: 1; min-height: 0; position: relative; gap: 0; height: auto; }
@@ -93,16 +97,6 @@ html[data-theme="dark"] .review-thumbs { background: #1f1a24; }
   box-shadow: 0 max(0.5px, calc(2px / var(--spot-zoom, 1))) 0 0 var(--warn);
 }
 .review-workspace .hit-box[data-spot-frame] { pointer-events: auto; cursor: pointer; }
-.review-workspace .hit-box.hit-range::before,
-.review-workspace .hit-box[data-spot-frame]::before {
-  content: "";
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: 50%;
-  height: 44px;
-  transform: translateY(-50%);
-}
 .review-spot-card {
   position: absolute;
   z-index: 7;
@@ -250,7 +244,7 @@ html[data-theme="dark"] .review-miss { color: #F2B44C; background: #43332E; }
 .review-actions { display: inline-flex; align-items: center; gap: 8px; }
 @media (max-width: 719px) {
   .shell.is-review-flat .sidebar { display: none; }
-  .review-flat-page.is-phone { padding-bottom: calc(216px + env(safe-area-inset-bottom, 0px)); }
+  .review-flat-page.is-phone { padding-bottom: calc(var(--review-phone-actions, 76px) + 52px + env(safe-area-inset-bottom, 0px)); }
   .review-bottom-nav { position: fixed; left: 0; right: 0; bottom: 0; z-index: 21; display: flex; padding: 0 8px env(safe-area-inset-bottom, 0px); background: var(--stage); border-top: 1px solid var(--line); }
   .review-bottom-nav button { flex: 1; min-height: 52px; border: 0; background: none; font-size: 14px; color: var(--muted); cursor: pointer; }
   .review-bottom-nav button[aria-current="page"] { color: var(--accent); font-weight: 600; }

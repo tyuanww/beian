@@ -13,6 +13,8 @@ import {
 } from "../jobHandoff";
 import { UploadProgressSlot } from "../chrome/UploadProgressSlot";
 import { UploadWell } from "../chrome/UploadWell";
+import { useAppearance } from "../chrome/AppearanceRoot";
+import { buildTheme } from "../theme";
 import { WaitCard } from "../chrome/WaitCard";
 import { mockupFailReason, mockupFailTag } from "./mockupError";
 import { AdminRotateFront, StructureConfirmPanel } from "./StructureConfirmPanel";
@@ -155,6 +157,11 @@ export function MockupDesk({
   onCompose?: () => void;
   onResumeReceipt: (receipt: string) => void;
 }) {
+  const { prefs } = useAppearance();
+  const lightTheme = useMemo(
+    () => ({ ...buildTheme("light", prefs.fontPx), algorithm: antdTheme.defaultAlgorithm }),
+    [prefs.fontPx],
+  );
   let content: ReactNode;
   if (openId) {
     content = (
@@ -179,16 +186,8 @@ export function MockupDesk({
       />
     );
   }
-  return (
-    <ConfigProvider
-      theme={{
-        algorithm: antdTheme.defaultAlgorithm,
-        token: { colorPrimary: "#805898", colorText: "#1c1a1f", colorBgBase: "#ffffff" },
-      }}
-    >
-      {content}
-    </ConfigProvider>
-  );
+  // 打样主区在深色外观下仍是白底。只改几个 token 时，按钮底会留在外层的深色上。
+  return <ConfigProvider theme={lightTheme}>{content}</ConfigProvider>;
 }
 
 function toMockCard(row: MockupJob): DeskCardRow {
@@ -696,7 +695,7 @@ export function MockupNewPage({
       <section className="new-form mockup-desk">
         <header className="page-head">
           <h1 className="page-title">新建打样</h1>
-          <button type="button" className="btn-ghost" onClick={onBack}>返回</button>
+          <Button onClick={onBack}>返回</Button>
         </header>
         <Alert type="warning" showIcon title="当前账号只有查看权限，不能上传或新建打样。" />
       </section>
@@ -711,17 +710,16 @@ export function MockupNewPage({
           <p className="page-lead">上传平面稿，生成立体图。</p>
         </div>
         <div style={{ display: "flex", gap: 12 }}>
-          <button type="button" className="btn-ghost" disabled={submitting} onClick={onBack}>
+          <Button disabled={submitting} onClick={onBack}>
             返回
-          </button>
-          <button
-            type="button"
-            className="btn-primary"
+          </Button>
+          <Button
+            type="primary"
             disabled={!receipt || busy || submitting}
             onClick={() => void run()}
           >
             {submitting ? "正在提交" : busy ? "上传中" : "开始生成"}
-          </button>
+          </Button>
         </div>
       </header>
       <div className="new-meta">
@@ -955,9 +953,9 @@ export function MockupJobPage({
       <section>
         <header className="page-head">
           <h1 className="page-title">打样结果</h1>
-          <button type="button" className="btn-ghost" onClick={onBack}>
+          <Button onClick={onBack}>
             返回 3D 打样
-          </button>
+          </Button>
         </header>
         <Alert type="error" showIcon title={error} />
       </section>
@@ -969,9 +967,9 @@ export function MockupJobPage({
       <section>
         <header className="page-head">
           <h1 className="page-title">打样结果</h1>
-          <button type="button" className="btn-ghost" onClick={onBack}>
+          <Button onClick={onBack}>
             返回 3D 打样
-          </button>
+          </Button>
         </header>
         <div className="desk-empty">
           <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="打开打样结果…" />
@@ -990,13 +988,13 @@ export function MockupJobPage({
           </div>
           <div className="mockup-sheet-head-actions">
             {canCreate ? (
-              <button type="button" className="btn-ghost" disabled={retrying} onClick={() => void retry()}>
+              <Button disabled={retrying} onClick={() => void retry()}>
                 {retrying ? "正在重试…" : "重试"}
-              </button>
+              </Button>
             ) : null}
-            <button type="button" className="btn-ghost" onClick={onBack}>
+            <Button onClick={onBack}>
               返回 3D 打样
-            </button>
+            </Button>
           </div>
         </header>
         <WaitCard
@@ -1026,9 +1024,9 @@ export function MockupJobPage({
                   : `${structureStatusLabel(job) || "这份稿现在无法生成"}。`}
             </p>
           </div>
-          <button type="button" className="btn-ghost" onClick={onBack}>
+          <Button onClick={onBack}>
             返回 3D 打样
-          </button>
+          </Button>
         </header>
         <StructureConfirmPanel
           key={job.id}
@@ -1068,41 +1066,38 @@ export function MockupJobPage({
           <p className="page-lead">上面看立体效果，下面看印刷文字。</p>
         </div>
         <div className="mockup-sheet-head-actions">
-          <button
-            type="button"
-            className="btn-ghost"
+          <Button
             aria-expanded={lightsOpen}
             aria-controls="mockup-studio-lights"
             onClick={() => setLightsOpen((open) => !open)}
           >
             {lightsOpen ? "收起调灯" : "调灯"}
-          </button>
+          </Button>
           {canCreate && job.status === "failed" ? (
-            <button type="button" className="btn-ghost" disabled={retrying} onClick={() => void retry()}>
+            <Button disabled={retrying} onClick={() => void retry()}>
               {retrying ? "正在重试…" : "重试"}
-            </button>
+            </Button>
           ) : null}
           {job.render_generation_capabilities?.history.allowed ? (
-            <button type="button" className="btn-ghost" aria-expanded={versionsOpen} aria-controls="mockup-render-versions" onClick={()=>setVersionsOpen(value=>!value)}>
+            <Button aria-expanded={versionsOpen} aria-controls="mockup-render-versions" onClick={()=>setVersionsOpen(value=>!value)}>
               {versionsOpen ? "收起版本" : "出图版本"}
-            </button>
+            </Button>
           ) : null}
-          <button type="button" className="btn-ghost" onClick={onBack}>
+          <Button onClick={onBack}>
             返回 3D 打样
-          </button>
+          </Button>
           {grounded ? null : hasPpt ? (
-            <a
-              className="btn-ghost"
+            <Button
               href={fileHref(job.id, "ppt", true)}
               download
               onClick={() => notice(downloadHudLine("PPT"))}
             >
               下载演示稿
-            </a>
+            </Button>
           ) : grounded ? null : (
-            <button type="button" className="btn-ghost" onClick={() => notice(missingPptHud())}>
+            <Button onClick={() => notice(missingPptHud())}>
               下载演示稿
-            </button>
+            </Button>
           )}
         </div>
       </header>
@@ -1153,15 +1148,13 @@ export function MockupJobPage({
               : repairing ? "正在提交生成请求" : job.print_faces_repair?.error || printAlertCopy}
           </p>
           {canRepairPrint && canCreate ? (
-            <button
-              type="button"
-              className="btn-ghost"
+            <Button
               disabled={repairing || repairPending}
               aria-busy={repairing || repairPending || undefined}
               onClick={() => void repairPrintFaces()}
             >
               {repairing || repairPending ? "正在生成印刷面" : "生成印刷面"}
-            </button>
+            </Button>
           ) : null}
         </div>
       ) : null}

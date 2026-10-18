@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef } from "react";
-import { Input, Tag } from "antd";
+import { Button, Input, Tag } from "antd";
 import { REVIEW_COPY } from "../copy/labels";
 import type { Decision, FieldHit, TaskDetail } from "../api";
 import { nativeTaskNote } from "./nativeTextEvidence";
@@ -174,7 +174,7 @@ export function ReviewDockPanel({
       {showProgress ? (
         <div className="review-pfoot">
           <span aria-live="polite">{REVIEW_COPY.footer(counts.pending, progress.pageLeft)}</span>
-          <button type="button" className="btn-ghost" onClick={onCopy}>复制修改清单</button>
+          <Button onClick={onCopy}>复制修改清单</Button>
         </div>
       ) : null}
       {reworkCheck?.length ? (

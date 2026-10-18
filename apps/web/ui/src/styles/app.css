@@ -705,37 +705,6 @@ html[data-theme="dark"] .workspace {
   line-height: 1.5;
 }
 
-.btn-primary {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 40px;
-  padding: 0 18px;
-  border: 0;
-  border-radius: 20px;
-  background: var(--accent);
-  color: #fff;
-  font-size: 16px;
-  font-weight: 500;
-}
-
-.btn-primary:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
-}
-
-.btn-ghost {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 40px;
-  padding: 0 14px;
-  border: 1px solid var(--line);
-  border-radius: 20px;
-  background: var(--surface);
-  color: var(--ink);
-}
-
 .glass-pane {
   background: var(--surface);
   border: 1px solid var(--line);
@@ -773,19 +742,6 @@ html[data-theme="dark"] .workspace {
 .auth-result p {
   margin: 0;
   max-width: 360px;
-}
-
-.auth-result-retry {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 40px;
-  padding: 0 16px;
-  border-radius: 20px;
-  background: var(--accent);
-  color: #fff;
-  text-decoration: none;
-  font-weight: 500;
 }
 
 .desk-head {
@@ -1201,35 +1157,6 @@ html[data-theme="dark"] .workspace {
     display: none;
   }
 }
-.setup-btn {
-  height: 36px;
-  padding: 0 12px;
-  border-radius: 18px;
-  border: 1px solid var(--line);
-  background: var(--surface);
-  color: var(--ink);
-  font-size: 14px;
-  font-weight: 500;
-  cursor: pointer;
-}
-.setup-btn:disabled {
-  opacity: 0.55;
-  cursor: wait;
-}
-.setup-btn:focus-visible {
-  outline: 2px solid var(--focus);
-  outline-offset: 2px;
-}
-.setup-btn.ghost {
-  background: var(--surface);
-  border-color: var(--line);
-  color: var(--ink);
-}
-.setup-btn.danger {
-  background: color-mix(in srgb, var(--danger) 10%, var(--surface));
-  border-color: transparent;
-  color: var(--danger);
-}
 .setup-btn-short {
   display: none;
 }
@@ -1406,12 +1333,10 @@ html[data-theme="dark"] .workspace {
     padding: 10px 12px;
     gap: 8px;
   }
-  .setup-row .setup-btn {
+  .setup-row .ant-btn {
     justify-self: end;
     min-height: 44px;
     height: 44px;
-    border-radius: 22px;
-    padding: 0 10px;
     white-space: nowrap;
   }
   .setup-btn-full {
@@ -1452,11 +1377,6 @@ html[data-theme="dark"] .workspace {
   align-items: flex-start;
   gap: 16px;
   padding: 32px 0;
-}
-
-.settings-denied .auth-result-retry {
-  border: 0;
-  cursor: pointer;
 }
 
 .settings-page {
@@ -1874,18 +1794,6 @@ html[data-theme="dark"] .apple-slider::-moz-range-thumb {
   border-radius: 14px;
   color: var(--danger);
   background: var(--surface);
-  font: inherit;
-  font-size: 13px;
-  cursor: pointer;
-}
-
-.upload-progress-retry {
-  min-height: 44px;
-  padding: 0 14px;
-  border: 0;
-  border-radius: 14px;
-  color: #fff;
-  background: var(--accent);
   font: inherit;
   font-size: 13px;
   cursor: pointer;
@@ -2622,15 +2530,6 @@ html[data-theme="dark"] .history-bulkbar {
   text-align: center;
   padding: 0;
   cursor: pointer;
-}
-.pin::before {
-  content: "";
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  width: 44px;
-  height: 44px;
-  transform: translate(-50%, -50%);
 }
 
 .pin:hover,
@@ -3496,7 +3395,7 @@ html[data-theme="dark"] .notes.is-float {
   line-height: 1.45;
 }
 
-.mockup-print-alert .btn-ghost {
+.mockup-print-alert .ant-btn {
   min-height: 44px;
 }
 
