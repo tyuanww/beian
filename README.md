@@ -67,6 +67,8 @@
 ./scripts/dev-start.sh
 ```
 
+第一次打开按 [本地开发](docs/howto-dev-start.md)。5173 被占用就停，不要再开一个入口。提缺陷见 [CONTRIBUTING.md](CONTRIBUTING.md)。未发布的界面变化写在 [CHANGELOG.md](CHANGELOG.md) 的 Unreleased。
+
 - 产品 / 验收：http://127.0.0.1:8787/ （先 `cd apps/web/ui && npm run build`）
 - 开发 UI：http://127.0.0.1:5173/ （`npm run dev:ui`；Vite 听本机网卡，`/api` 反代到 8787，端口占用即失败）
 - 台地址：`/reviewup` 审稿台、`/reviewup/new` 审稿工作台、`/review/:id` 核对页、`/mockup` 3D 打样、`/mockup/new` 打样工作台、`/mockup/:id` 打样单、`/history`、`/settings`。旧 `/` `/new` `/review` 会转到新地址。后退换台。

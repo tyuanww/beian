@@ -1,0 +1,33 @@
+name: 缺陷
+description: 本机或开发页上对不上的行为
+title: "[缺陷] "
+labels: []
+body:
+  - type: input
+    id: version
+    attributes:
+      label: 版本
+      description: 侧栏版本号，或仓库根 VERSION 文件里的字符串。
+      placeholder: 0.31.1.26
+    validations:
+      required: true
+  - type: textarea
+    id: command
+    attributes:
+      label: 你跑的命令或打开的地址
+      description: 原样贴命令、退出码。页面问题写地址，例如 http://127.0.0.1:5173/reviewup
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期望
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: 实际
+      description: 贴 stderr 里的 code 和「下一步」。不要贴密钥、稿件或 settings.secrets.json。
+    validations:
+      required: true
