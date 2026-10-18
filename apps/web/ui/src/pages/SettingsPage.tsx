@@ -112,9 +112,7 @@ export function SettingsPage({
         .then((b) => {
           if (!cancelled) setBilling(b);
         })
-        .catch(() => {
-          /* ignore */
-        });
+        .catch(() => undefined);
     };
     window.addEventListener("focus", onFocus);
     return () => {
@@ -285,7 +283,7 @@ export function SettingsPage({
     try {
       sessionStorage.setItem(SETUP_RETURN, row.id);
     } catch {
-      /* ignore */
+      // 私密模式写不进 sessionStorage，向导仍要打开。
     }
     setGroup(row.group);
   }
