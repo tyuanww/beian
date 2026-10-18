@@ -243,7 +243,7 @@ export function lockedBy(task: DoneTask | null, me: string | null, now: Date = n
 }
 
 /** 带码的审稿拦截，给审稿员看的句子。没有对应句就返回 null，调用处再用服务端原文。 */
-export function reviewerCodeText(code: string): string | null {
+function reviewerCodeText(code: string): string | null {
   if (code === "decision_value_invalid") return REVIEW_COPY.decisionInvalid;
   if (code === "decision_hit_not_found") return REVIEW_COPY.decisionMissing;
   if (code === "decision_status_not_reviewable") return REVIEW_COPY.decisionNotReviewable;
