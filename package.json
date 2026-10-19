@@ -25,7 +25,8 @@
     "@ant-design/cli": "6.6.1"
   },
   "overrides": {
-    "sharp": "0.34.4"
+    "sharp": "0.34.4",
+    "three": "0.182.0"
   },
   "version": "0.31.1"
 }

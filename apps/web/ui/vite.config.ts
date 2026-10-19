@@ -4,6 +4,7 @@ import { API_DOWN_LOCAL } from "./src/apiHint";
 
 export default defineConfig({
   plugins: [react()],
+  resolve: { dedupe: ["three"] },
   server: {
     host: true,
     port: 5173,

@@ -1351,14 +1351,20 @@ describe("review http", () => {
     });
     const pagesDir = join(process.env.WB_DATA_DIR as string, "uploads", tid, "pages");
     mkdirSync(pagesDir, { recursive: true });
-    writeFileSync(join(pagesDir, "page_01.svg"), '<svg xmlns="http://www.w3.org/2000/svg"/>', "utf8");
-
+    const svg = '<svg xmlns="http://www.w3.org/2000/svg"/>';
+    writeFileSync(join(pagesDir, "page_01.svg"), svg, "utf8");
     const res = await app.request(`/api/tasks/${tid}/pages/page_01.svg`, { headers: authHeader() });
 
     assert.equal(res.status, 200);
     assert.match(res.headers.get("content-type") || "", /^image\/svg\+xml/);
+    assert.equal(res.headers.get("content-length"), String(Buffer.byteLength(svg)));
     assert.equal(res.headers.get("x-content-type-options"), "nosniff");
     assert.match(res.headers.get("content-security-policy") || "", /default-src 'none'/);
+    assert.equal(await res.text(), svg);
+    const head = await app.request(`/api/tasks/${tid}/pages/page_01.svg`, { method: "HEAD", headers: authHeader() });
+    assert.equal(head.status, 200);
+    assert.equal(head.headers.get("content-length"), String(Buffer.byteLength(svg)));
+    assert.equal(await head.text(), "");
   });
 
   it("serves side SVG review pages with the same locked content policy", async () => {
@@ -1371,14 +1377,71 @@ describe("review http", () => {
     });
     const sideDir = join(process.env.WB_DATA_DIR as string, "uploads", tid, "pages", "b");
     mkdirSync(sideDir, { recursive: true });
-    writeFileSync(join(sideDir, "page_01.svg"), '<svg xmlns="http://www.w3.org/2000/svg"/>', "utf8");
+    const svg = '<svg xmlns="http://www.w3.org/2000/svg"/>';
+    writeFileSync(join(sideDir, "page_01.svg"), svg, "utf8");
 
     const res = await app.request(`/api/tasks/${tid}/pages/b/page_01.svg`, { headers: authHeader() });
 
     assert.equal(res.status, 200);
     assert.match(res.headers.get("content-type") || "", /^image\/svg\+xml/);
+    assert.equal(res.headers.get("content-length"), String(Buffer.byteLength(svg)));
     assert.equal(res.headers.get("x-content-type-options"), "nosniff");
     assert.match(res.headers.get("content-security-policy") || "", /default-src 'none'/);
+    assert.equal(await res.text(), svg);
+  });
+
+  it("serves a review PNG with the file length and the same bytes", async () => {
+    const tid = seed({
+      id: "161616161619",
+      title: "高清核对页",
+      product_name: "高清核对页",
+      type: "excel_pdf",
+      status: "pending_review",
+    });
+    const pagesDir = join(process.env.WB_DATA_DIR as string, "uploads", tid, "pages");
+    mkdirSync(pagesDir, { recursive: true });
+    const png = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 1, 2, 3, 4]);
+    writeFileSync(join(pagesDir, "page_01.png"), png);
+    const res = await app.request(`/api/tasks/${tid}/pages/page_01.png`, { headers: authHeader() });
+    assert.equal(res.status, 200);
+    assert.match(res.headers.get("content-type") || "", /^image\/png/);
+    assert.equal(res.headers.get("content-length"), String(png.length));
+    assert.deepEqual(Buffer.from(await res.arrayBuffer()), png);
+  });
+
+  // Value: protects=an empty review page returns content-length 0 and an empty body; fails_when=the size===0 guard is removed and the empty GET tries to stream end -1; why_new=SVG HEAD covers HEAD only; PNG and SVG byte tests use non-empty files; seam=none; no_claim=does not prove image decoding, only the HTTP response
+  it("serves an empty review page with content-length 0 and an empty body", async () => {
+    const tid = seed({
+      id: "161616161620",
+      title: "空核对页",
+      product_name: "空核对页",
+      type: "excel_pdf",
+      status: "pending_review",
+    });
+    const pagesDir = join(process.env.WB_DATA_DIR as string, "uploads", tid, "pages");
+    mkdirSync(pagesDir, { recursive: true });
+    writeFileSync(join(pagesDir, "page_01.png"), Buffer.alloc(0));
+    const res = await app.request(`/api/tasks/${tid}/pages/page_01.png`, { headers: authHeader() });
+    assert.equal(res.status, 200);
+    assert.match(res.headers.get("content-type") || "", /^image\/png/);
+    assert.equal(res.headers.get("content-length"), "0");
+    assert.equal(Buffer.from(await res.arrayBuffer()).length, 0);
+  });
+
+  // Value: protects=a directory at a review page path returns 404; fails_when=the isFile guard is removed and the directory is opened as a stream; why_new=page tests only write regular files, so this would surface as a 500; seam=none; no_claim=does not prove uploads reject directories
+  it("returns 404 when a review page path is a directory", async () => {
+    const tid = seed({
+      id: "161616161621",
+      title: "目录核对页",
+      product_name: "目录核对页",
+      type: "excel_pdf",
+      status: "pending_review",
+    });
+    const pagesDir = join(process.env.WB_DATA_DIR as string, "uploads", tid, "pages");
+    mkdirSync(join(pagesDir, "page_02.png"), { recursive: true });
+    const res = await app.request(`/api/tasks/${tid}/pages/page_02.png`, { headers: authHeader() });
+    assert.equal(res.status, 404);
+    assert.equal(((await res.json()) as { detail?: string }).detail, "没有这一页");
   });
 
   it("rework is owner-scoped for reviewers", async () => {

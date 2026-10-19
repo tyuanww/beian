@@ -35,6 +35,16 @@ import {
 import { createHash, createHmac, randomBytes as cryptoRandomBytes, timingSafeEqual } from "node:crypto";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { RenderLifecycle } from "./renderGenerationBudget.js";
+import {
+  forgetVirtualSnap,
+  isPresentVirtualRow,
+  readVirtualSnap,
+  rememberVirtualSnap,
+  virtualSnapDigestFiles,
+  virtualStatsHold,
+  type VirtualSnap,
+  type VirtualSnapRow,
+} from "./virtualLegacySnapshot.js";
 
 const RENDER_GENERATION_SCHEMA = "render-generation/1";
 const RENDER_GENERATION_INDEX_SCHEMA = "render-generation-index/1";
@@ -1344,44 +1354,74 @@ export function openRenderGenerationStore(opts: RenderGenerationStoreOptions): R
     return faces;
   }
 
-  function legacySnapshot() {
+  function buildLegacySnapshot(): VirtualSnap {
     const sources = discoverSources();
-    const rows = [...ALLOWED_KEYS].sort().map((key) => {
+    const rows: VirtualSnapRow[] = [...ALLOWED_KEYS].sort().map((key): VirtualSnapRow => {
       const src = sources.find((item) => item.key === key);
       if (!src) {
         if ((REQUIRED_KEYS as readonly string[]).includes(key)) throw invalid("缺少必需输出，无法计算虚拟当前代", `missing_${key}`, "补齐产品 PNG 和 GLB");
-        return {key,missing:true};
+        return { key, missing: true };
       }
       const meta = assertExistingInside(src.path);
-      const held = holdAndHash(meta.path,key,(REQUIRED_KEYS as readonly string[]).includes(key));
-      try { return {key, sha256:held.sha256, bytes:held.bytes, path:meta.path}; } finally { held.close(); }
+      const held = holdAndHash(meta.path, key, (REQUIRED_KEYS as readonly string[]).includes(key));
+      try {
+        const st = fstatSync(held.fd);
+        return { key, sha256: held.sha256, bytes: held.bytes, path: meta.path,
+          stat: { ino: st.ino, dev: st.dev, size: st.size, mtimeMs: st.mtimeMs, nlink: st.nlink } };
+      } finally { held.close(); }
     });
-    const digest = sha256Text(JSON.stringify({schema:"legacy-current/2",jobId,
-      files:rows.map(({path: _path,...identity}) => identity)}));
-    return {id:`legacy-current-v2-${digest}`, rows};
+    const digest = sha256Text(JSON.stringify({ schema: "legacy-current/2", jobId, files: virtualSnapDigestFiles(rows) }));
+    const snap = { id: `legacy-current-v2-${digest}`, rows };
+    rememberVirtualSnap(jobRoot, snap);
+    return snap;
+  }
+
+  function cachedVirtualStatsHold(snap: VirtualSnap): boolean {
+    let sources: Array<{ key: string; path: string }>;
+    try { sources = discoverSources(); } catch { return false; }
+    return virtualStatsHold(snap, sources, (path) => {
+      try { return lstatSync(path); } catch { return null; }
+    });
+  }
+
+  function legacySnapshot(): VirtualSnap {
+    const cached = readVirtualSnap(jobRoot);
+    if (cached && cachedVirtualStatsHold(cached)) return cached;
+    forgetVirtualSnap(jobRoot);
+    return buildLegacySnapshot();
   }
 
   function virtualLegacyCurrentId(): string { return legacySnapshot().id; }
 
-  function openFile(generationId: string, key: string): HeldGenerationFile {
-    assertSafeId(generationId,"generation_id");
-    if (!ALLOWED_KEYS.has(key)) throw invalid("本代没有这张图","generation_missing","只读取本代公开资源");
-    let row;
-    if (VIRTUAL_ID_RE.test(generationId)) {
-      const snapshot = legacySnapshot();
-      if (snapshot.id !== generationId) throw stale("legacy_identity_changed");
-      row = snapshot.rows.find(item => item.key === key && item.path);
-    } else {
-      const manifest = loadVerifiedManifest(generationId);
-      const found = manifest.files.find(item => item.key === key);
-      row = found ? {...found,path:resolve(readyDir(generationId),found.rel)} : undefined;
-    }
-    if (!row?.path) throw invalid("本代没有这张图","generation_missing","只读取本代公开资源");
-    const held = holdAndHash(row.path,key);
+  function openVirtualFile(generationId: string, key: string): HeldGenerationFile {
+    const snapshot = legacySnapshot();
+    if (snapshot.id !== generationId) throw stale("legacy_identity_changed");
+    const row = snapshot.rows.find((item) => item.key === key && isPresentVirtualRow(item));
+    if (!row || !isPresentVirtualRow(row)) throw invalid("本代没有这张图", "generation_missing", "只读取本代公开资源");
+    const held = holdAndHash(row.path, key);
     if (held.sha256 !== row.sha256 || held.bytes !== row.bytes) {
-      held.close(); throw stale("file_identity_changed");
+      held.close();
+      throw stale("file_identity_changed");
     }
     return held;
+  }
+
+  function openSealedFile(generationId: string, key: string): HeldGenerationFile {
+    const manifest = loadManifestForServe(generationId);
+    const found = manifest.files.find((item) => item.key === key);
+    if (!found) throw invalid("本代没有这张图", "generation_missing", "只读取本代公开资源");
+    const held = holdAndHash(resolve(readyDir(generationId), found.rel.split("/").join(sep)), key);
+    if (held.sha256 !== found.sha256 || held.bytes !== found.bytes) {
+      held.close();
+      throw invalid("输出内容与清单不一致", `hash_mismatch_${key}`, "保留当前代");
+    }
+    return held;
+  }
+
+  function openFile(generationId: string, key: string): HeldGenerationFile {
+    assertSafeId(generationId, "generation_id");
+    if (!ALLOWED_KEYS.has(key)) throw invalid("本代没有这张图", "generation_missing", "只读取本代公开资源");
+    return VIRTUAL_ID_RE.test(generationId) ? openVirtualFile(generationId, key) : openSealedFile(generationId, key);
   }
 
   function assertPointer(id: string | null): void {
@@ -1545,7 +1585,7 @@ export function openRenderGenerationStore(opts: RenderGenerationStoreOptions): R
     appendFileExclusive(path,line);
   }
 
-  function loadVerifiedManifest(id: string): Manifest {
+  function readReadyManifest(id: string): { dir: string; manifest: Manifest } {
     assertSafeId(id, "generation_id");
     if (!isGenerationId(id)) throw invalid("代际 id 非法", "generation_id", "只使用服务端公开的代际 id");
     if (peekGenDir() === "missing") throw invalid("代际不存在", "generation_missing", "保留当前代");
@@ -1559,36 +1599,64 @@ export function openRenderGenerationStore(opts: RenderGenerationStoreOptions): R
     const manifestMeta = assertExistingInside(manifestPath);
     let parsedJson: unknown;
     try {
-      parsedJson = JSON.parse(readBoundedMetadata(manifestMeta.path,1024*1024,"manifest_budget").toString("utf8"));
+      parsedJson = JSON.parse(readBoundedMetadata(manifestMeta.path, 1024 * 1024, "manifest_budget").toString("utf8"));
     } catch {
       throw invalid("代际清单无法解析", "manifest_json", "保留当前代");
     }
-    const parsed = parseManifest(parsedJson);
-    if (parsed.generation_id !== id) throw invalid("代际 id 与目录不一致", "id_dir_mismatch", "保留当前代");
+    const manifest = parseManifest(parsedJson);
+    if (manifest.generation_id !== id) throw invalid("代际 id 与目录不一致", "id_dir_mismatch", "保留当前代");
+    return { dir, manifest };
+  }
+
+  function visitManifestFiles(dir: string, manifest: Manifest, visit: (meta: { path: string; size: number }, row: FileRow) => void): void {
     const seenInodes = new Set<string>();
-    for (const row of parsed.files) {
-      const filePath = join(dir, row.rel.split("/").join(sep));
-      const meta = assertExistingInside(filePath);
+    for (const row of manifest.files) {
+      const meta = assertExistingInside(join(dir, row.rel.split("/").join(sep)));
       if (basename(meta.path) !== row.name) throw invalid("输出文件名不一致", `file_name_${row.key}`, "保留当前代");
       if (seenInodes.has(meta.ino)) throw invalid("输出 inode 重复", `file_inode_${row.key}`, "保留当前代");
       seenInodes.add(meta.ino);
-      const hashed = hashAndValidate(meta.path, row.key);
-      if (hashed.sha256 !== row.sha256 || hashed.bytes !== row.bytes) {
-        throw invalid("输出内容与清单不一致", `hash_mismatch_${row.key}`, "保留当前代");
-      }
+      visit(meta, row);
     }
+  }
+
+  function assertManifestAccounts(manifest: Manifest): void {
     // 历史读取只核 ready 输出与清单内记录的六面 SHA；不把当前共享 assets 当历史有效性条件。
     const fp = contentFingerprint(
-      parsed.files.map((f) => ({ key: f.key, sha256: f.sha256 })),
-      Object.fromEntries(FACES.map((face) => [face, parsed.faces[face].sha256])),
+      manifest.files.map((f) => ({ key: f.key, sha256: f.sha256 })),
+      Object.fromEntries(FACES.map((face) => [face, manifest.faces[face].sha256])),
     );
-    if (fp !== parsed.quality.content_fingerprint) {
+    if (fp !== manifest.quality.content_fingerprint) {
       throw invalid("内容指纹失效", "content_fingerprint", "保留当前代");
     }
-    if (parsed.total_bytes !== parsed.files.reduce((sum, f) => sum + f.bytes, 0)) {
+    if (manifest.total_bytes !== manifest.files.reduce((sum, f) => sum + f.bytes, 0)) {
       throw invalid("总字节与文件表不一致", "total_bytes", "保留当前代");
     }
-    return parsed;
+  }
+
+  function verifySealedBytes(meta: { path: string }, row: FileRow): void {
+    const hashed = hashAndValidate(meta.path, row.key);
+    if (hashed.sha256 !== row.sha256 || hashed.bytes !== row.bytes) {
+      throw invalid("输出内容与清单不一致", `hash_mismatch_${row.key}`, "保留当前代");
+    }
+  }
+
+  function verifySiblingStat(meta: { path: string; size: number }, row: FileRow): void {
+    if (meta.size !== row.bytes) throw invalid("输出体积非法", `${row.key}:size`, "检查文件大小");
+    if (lstatSync(meta.path).nlink !== 1) throw invalid("拒绝 hardlink 外部写入", "hardlink", "输出不能 hardlink 到外部");
+  }
+
+  function loadVerifiedManifest(id: string): Manifest {
+    const { dir, manifest } = readReadyManifest(id);
+    visitManifestFiles(dir, manifest, verifySealedBytes);
+    assertManifestAccounts(manifest);
+    return manifest;
+  }
+
+  function loadManifestForServe(id: string): Manifest {
+    const { dir, manifest } = readReadyManifest(id);
+    visitManifestFiles(dir, manifest, verifySiblingStat);
+    assertManifestAccounts(manifest);
+    return manifest;
   }
 
   // 贴图变化后旧代仍可查看/激活；用该代继续重渲必须单独证明当前六面仍与源代绑定一致。

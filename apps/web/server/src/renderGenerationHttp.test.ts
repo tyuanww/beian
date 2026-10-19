@@ -404,8 +404,13 @@ it("RF-04 ready reads are immutable, ETag works, downloads return bytes, corrupt
   const afterCancel=await request(url); assert.deepEqual(Buffer.from(await afterCancel.arrayBuffer()),png());
   const current=readMockupFromDisk(f.id)!; const path=current.files.find(row=>row.key === "white_a")!.path!;
   renameSync(path,path+".old"); writeFileSync(path,png(55));
-  const corrupt=await request(`/api/mockups/${f.id}/files/glb?generation_id=${id}`);
+  const sibling=await request(`/api/mockups/${f.id}/files/glb?generation_id=${id}`);
+  assert.equal(sibling.status,200); assert.deepEqual(Buffer.from(await sibling.arrayBuffer()),glb());
+  const corrupt=await request(`/api/mockups/${f.id}/files/white_a?generation_id=${id}`);
   assert.equal(corrupt.status,409); assert.equal((await corrupt.json()).reason,"generation_corrupt");
+  writeFileSync(path,Buffer.alloc(0));
+  const sized=await request(`/api/mockups/${f.id}/files/glb?generation_id=${id}`);
+  assert.equal(sized.status,409); assert.equal((await sized.json()).reason,"generation_corrupt");
 });
 
 it("RF-04 old in-place work cannot mint a root snapshot, and query/cross-job failures are bounded", async () => {
