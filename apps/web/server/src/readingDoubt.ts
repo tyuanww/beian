@@ -1,7 +1,8 @@
 /**
  * 「认字存疑」：条目粗状态可能写「一致」，但结构化字段说明稿上还有字没读全，要人下结论才能签字。
- * 前后端共用。本文件不 import 任何东西（同 `feishuLoginError.ts`），前端
- * `apps/web/ui/src/pages/reviewEvidence.ts` 的 `isReviewIssue` 直接引用；服务端 `tasks.ts` 的 `hitNeedsDecision` 在没下结论时调用。
+ * 前后端共用。本文件不 import 任何东西（同 `feishuLoginError.ts`）。
+ * `hasReadingDoubt` 给定稿拦截；`isFlaggedReviewHit` 给 `hitText.ts`。
+ * 核对页是否算疑点在 `reviewIssue.ts` 的 `isReviewIssue`，不在本文件。
  *
  * 只看结构化字段，不看说明文字（`evidence` / `note`）：
  * - `coverage.miss` 里有非空词：任何状态都算存疑；
@@ -31,7 +32,7 @@ function hasNonBlank(list: unknown): boolean {
 }
 
 /** 条目已被标记要人看：结论是有错，或状态在 `FLAGGED_STATUSES` 里（按状态值，不按说明文字）。 */
-function isFlaggedReviewHit(hit: ReadingDoubtHit): boolean {
+export function isFlaggedReviewHit(hit: ReadingDoubtHit): boolean {
   return hit.decision === "issue" || FLAGGED_STATUSES.includes(String(hit.status || ""));
 }
 

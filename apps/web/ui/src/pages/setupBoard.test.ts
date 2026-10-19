@@ -51,9 +51,10 @@ describe("setupBoard copy", () => {
     assert.deepEqual(statusWord({ pending: true }), { cls: "is-wait", text: "检查中" });
     assert.deepEqual(statusWord({ pending: true }, "send"), { cls: "is-wait", text: "发送中" });
     assert.equal(statusWord({ id: "x", ok: true, message: "模型列表已返回" }).text, "正常");
-    assert.equal(statusWord({ id: "minimax", ok: true, message: "未启用（不影响主流程）" }).text, "未启用");
+    assert.equal(statusWord({ id: "minimax", ok: true, message: "未启用（不影响主流程）", code: "disabled" }).text, "未启用");
     assert.equal(statusWord({ id: "x", ok: false, message: "Key 无效" }).text, "待处理");
-    assert.equal(statusWord({ id: "x", ok: false, message: "12 秒超时" }).text, "超时");
+    assert.equal(statusWord({ id: "x", ok: false, message: "12 秒超时", code: "timeout" }).text, "超时");
+    assert.equal(statusWord({ id: "x", ok: false, message: "12 秒超时" }).text, "待处理");
     assert.notEqual(statusWord({ id: "x", ok: false, message: "不通" }).text, "不通");
   });
 
@@ -108,6 +109,12 @@ describe("setupBoard copy", () => {
       { id: "minimax", ok: true, message: "未启用" },
     );
     assert.match(String(mini), /未启用/);
+    const miniCode = foldCatalogReason(
+      "MiniMax（可选）",
+      [],
+      { id: "minimax", ok: true, message: "未启用（不影响主对照）", code: "disabled" },
+    );
+    assert.match(String(miniCode), /未启用/);
     const push = foldCatalogReason("飞书推送", [], undefined);
     assert.match(String(push), /测试消息/);
     assert.equal(

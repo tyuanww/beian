@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { whichLark } from "./larkBin.js";
-import { httpsJson } from "./outbound.js";
+import { httpsJson, timeoutFields } from "./outbound.js";
 import { getSetting, publicBase } from "./settings.js";
 
 type TaskLike = {
@@ -40,10 +40,10 @@ function feishuErr(json: unknown): string {
 async function sendViaApp(
   openId: string,
   text: string,
-): Promise<{ ok: boolean; reason?: string }> {
+): Promise<{ ok: boolean; reason?: string; code?: "feishu_credentials" | "timeout" }> {
   const appId = getSetting("FEISHU_APP_ID").trim();
   const secret = getSetting("FEISHU_APP_SECRET").trim();
-  if (!appId || !secret) return { ok: false, reason: "还没填飞书 App ID 或 Secret" };
+  if (!appId || !secret) return { ok: false, reason: "还没填飞书 App ID 或 Secret", code: "feishu_credentials" as const };
   let token = "";
   try {
     const tok = await httpsJson("https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal", {
@@ -57,7 +57,7 @@ async function sendViaApp(
     }
     token = body.tenant_access_token;
   } catch (err) {
-    return { ok: false, reason: err instanceof Error ? err.message : "连不上飞书拿 token" };
+    return { ok: false, reason: err instanceof Error ? err.message : "连不上飞书拿 token", ...timeoutFields(err) };
   }
   try {
     const sent = await httpsJson("https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=open_id", {
@@ -79,7 +79,7 @@ async function sendViaApp(
     }
     return { ok: false, reason: feishuErr(sent.json) };
   } catch (err) {
-    return { ok: false, reason: err instanceof Error ? err.message : "连不上飞书发消息" };
+    return { ok: false, reason: err instanceof Error ? err.message : "连不上飞书发消息", ...timeoutFields(err) };
   }
 }
 
@@ -143,7 +143,7 @@ export function createTextSender(transports: NotifyTransports) {
     text: string,
     to?: string,
     opts: TextSendOptions = {},
-  ): Promise<{ ok: boolean; skipped?: boolean; reason?: string; via?: "cli" | "app" }> {
+  ): Promise<{ ok: boolean; skipped?: boolean; reason?: string; via?: "cli" | "app"; code?: "feishu_credentials" | "timeout" }> {
     if (!opts.force && !/^(1|true|yes|on)$/i.test(getSetting("FEISHU_ENABLED"))) {
       return { ok: false, skipped: true, reason: "FEISHU_ENABLED=false" };
     }
@@ -156,11 +156,13 @@ export function createTextSender(transports: NotifyTransports) {
       if (cli.ok) return { ok: true, via: "cli" };
       const app = await transports.sendApp(openId, body);
       if (app.ok) return { ok: true, via: "app" };
-      return { ok: false, reason: cli.reason || app.reason };
+      if (app.code) return { ok: false, reason: app.reason || cli.reason || "发送失败", code: app.code };
+      if (cli.reason) return { ok: false, reason: cli.reason };
+      return { ok: false, reason: app.reason };
     }
     const app = await transports.sendApp(openId, body);
     if (app.ok) return { ok: true, via: "app" };
-    return { ok: false, reason: app.reason || "本机没有 lark-cli，用飞书应用发也失败了" };
+    return { ok: false, reason: app.reason || "本机没有 lark-cli，用飞书应用发也失败了", ...(app.code ? { code: app.code } : {}) };
   };
 }
 
@@ -174,7 +176,7 @@ export function sendText(
   text: string,
   to?: string,
   opts: TextSendOptions = {},
-): Promise<{ ok: boolean; skipped?: boolean; reason?: string; via?: "cli" | "app" }> {
+): Promise<{ ok: boolean; skipped?: boolean; reason?: string; via?: "cli" | "app"; code?: "feishu_credentials" | "timeout" }> {
   // 所有 L0 都共享这条生产出口；在这里失败关闭，避免任一 HTTP 测试因本机
   // 恰好存在飞书配置而把合成审核消息发给真人。
   if (process.env.VITEST === "1") {

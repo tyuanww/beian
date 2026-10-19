@@ -92,7 +92,7 @@ test('桌墙显示资源保持原始下载并可复位，离页释放 blob', asy
 test('默认与原始 GLB 都失败时显示效果图和说明，保留原始下载',async ({page}) => {
   const urls: string[] = [];page.on('request',r=>{if(r.url().includes('/files/glb')&&!r.url().includes('download=1'))urls.push(r.url());});
   await serve(page,true,false,'webp',{versions:true});await page.goto(`/mockup/${ID}`);
-  await expect(page.getByRole('status').filter({hasText:'这台设备显示不了 3D'})).toHaveText('这台设备显示不了 3D，已换成效果图');
+  await expect(page.getByRole('status').filter({hasText:'3D 没加载出来'})).toHaveText('3D 没加载出来，请重新打开此单');
   await expect(page.locator('.mockup-sheet-glb .mockup-glb-poster')).toBeVisible();
   await expect(page.locator('model-viewer')).toHaveCount(0);
   await expect(page.getByRole('alert')).toHaveCount(0);
@@ -128,7 +128,7 @@ test('已加载显示场景报错立即释放blob',async({page})=>{
   await loaded(page);
   const retried=await page.locator('model-viewer').getAttribute('src');expect(retried).toMatch(/^blob:/);expect(retried).not.toBe(sceneUrl);
   await page.locator('model-viewer').dispatchEvent('error');
-  await expect(page.getByRole('status').filter({hasText:'这台设备显示不了 3D'})).toBeVisible();
+  await expect(page.getByRole('status').filter({hasText:'3D 没加载出来'})).toHaveText('3D 没加载出来，请重新打开此单');
   await expect.poll(()=>page.evaluate(url=>(window as any).__blobAudit.revoked.includes(url),retried)).toBe(true);
 });
 
@@ -216,7 +216,7 @@ async function denyWebp(page: Page) {
 test('开关关着（无版本字段）GLB 失败：只拉默认地址一次，不带 v 也不退原始，显示效果图和说明',async({page})=>{
   const urls: string[] = [];page.on('request',r=>{if(r.url().includes('/files/glb')&&!r.url().includes('download=1'))urls.push(r.url());});
   await serve(page,true);await page.goto(`/mockup/${ID}`);
-  await expect(page.getByRole('status').filter({hasText:'这台设备显示不了 3D'})).toBeVisible();
+  await expect(page.getByRole('status').filter({hasText:'3D 没加载出来'})).toHaveText('3D 没加载出来，请重新打开此单');
   expect(urls.length).toBeGreaterThan(0);
   for (const u of urls) { expect(u).not.toContain('variant=original'); expect(new URL(u).searchParams.has('v')).toBe(false); }
 });
@@ -227,6 +227,14 @@ test('开关关着（无版本字段）且本机解码不了 WebP 贴图：照�
   await expect(page.getByRole('status').filter({hasText:'这台设备显示不了 3D'})).toHaveText('这台设备显示不了 3D，已换成效果图');
   await expect(page.locator('model-viewer')).toHaveCount(0);
   await page.waitForTimeout(500);expect(glbRequests).toBe(0);
+});
+
+test('不能解码 WebP 且默认与原始都失败时仍显示 WebP 降级说明', async ({ page }) => {
+  await denyWebp(page);
+  await serve(page, true, false, 'webp', { versions: true });
+  await page.goto(`/mockup/${ID}`);
+  await expect(page.getByRole('status').filter({ hasText: '这台设备显示不了 3D' })).toHaveText('这台设备显示不了 3D，已换成效果图');
+  await expect(page.locator('model-viewer')).toHaveCount(0);
 });
 
 test('WebP 贴图在不能解码的设备上直接拉原始 GLB，不先拉默认地址',async({page})=>{

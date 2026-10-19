@@ -881,7 +881,7 @@ export type BillingView = {
   totals: Record<string, { count: number; units: number }>;
 };
 
-export type ProbeResult = { id: string; ok: boolean; message: string };
+export type ProbeResult = { id: string; ok: boolean; message: string; code?: "disabled" | "timeout" | "feishu_credentials" };
 
 type RenderCapability = {allowed:boolean;reason?:string};
 export type RenderMutation = {id:string;mode:"legacy_relight" | "upgrade";status:"queued" | "running" | "succeeded" | "failed";stage?:string;error?:string};

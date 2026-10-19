@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  GLB_TEXTURE_FORMAT_FIELD, GLB_WEBP_UNSUPPORTED_TEXT, createWebpSupport, glbTextureFormat, glbTextureGate, probeWebpDecode, webpProbeBlob,
+  GLB_LOAD_FAILED_TEXT, GLB_TEXTURE_FORMAT_FIELD, GLB_WEBP_UNSUPPORTED_TEXT, createWebpSupport, glbTextureFormat, glbTextureGate, probeWebpDecode, webpProbeBlob,
   type WebpDecoder,
 } from "./mockupGlbTexture";
 
@@ -81,5 +81,6 @@ test("每个会话只探测一次", async () => {
 
 test("降级说明为定稿文案且不含禁用词", () => {
   assert.equal(GLB_WEBP_UNSUPPORTED_TEXT, "这台设备显示不了 3D，已换成效果图");
+  assert.equal(GLB_LOAD_FAILED_TEXT, "3D 没加载出来，请重新打开此单");
   for (const banned of ["已过审", "已发送", "AI 已确认", "AI 已过审", "Generating"]) assert.ok(!GLB_WEBP_UNSUPPORTED_TEXT.includes(banned));
 });

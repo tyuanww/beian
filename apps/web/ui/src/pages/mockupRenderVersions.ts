@@ -38,7 +38,7 @@ export function savePendingRenderRequest(jobId:string,pending:PendingRenderReque
 }
 
 const PLAIN={
-  viewOnly:"你的账号只能查看。",
+  viewOnly:"这个账号只能查看。",
   busy:"正在处理，稍等一下再试。",
   unavailable:"这个功能暂时用不了。",
   changed:"内容有变化，请刷新后再试。",

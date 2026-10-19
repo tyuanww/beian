@@ -1,6 +1,39 @@
+const PATH_HARD_STOP = new Set(["\n", "，", ","]);
+const PATH_SOFT = new Set([" ", "\t", "\u3000", "\u00A0", "。", "；", ";"]);
+
+function pathContinues(text: string, boundaryAt: number, consumed: string): boolean {
+  const segment = text.slice(boundaryAt + 1).split(/[\s\n，,。；;\u3000\u00A0]/)[0] ?? "";
+  if (/[\\/]/.test(segment)) return true;
+  if (/\.[A-Za-z0-9]{1,8}$/.test(consumed)) return false;
+  return /\.[A-Za-z0-9]{1,8}$/.test(segment);
+}
+
+function consumePath(text: string, pathStart: number, from: number): number {
+  let i = from;
+  while (i < text.length && !PATH_HARD_STOP.has(text[i])) {
+    if (PATH_SOFT.has(text[i]) && !pathContinues(text, i, text.slice(pathStart, i))) break;
+    i += 1;
+  }
+  return i;
+}
+
+/** 本地路径可以含空格和汉字。后面不再像路径的词留下来。 */
+function stripLocalPaths(input: string): string {
+  const re = /(?:文件\s*=\s*)?(?:(?<![A-Za-z0-9])[A-Za-z]:[\\/]|\\\\|(?:\/Users|\/home|\/var|\/tmp|\/private)\/)/g;
+  let out = "";
+  let last = 0;
+  for (const match of input.matchAll(re)) {
+    const index = match.index ?? 0;
+    if (index < last) continue;
+    out += input.slice(last, index);
+    last = consumePath(input, index, index + match[0].length);
+  }
+  return out + input.slice(last);
+}
+
 /** 去掉客户页面上的实现名。不改状态值，也不改稿件原文。 */
 export function customerCopy(raw: string): string {
-  return String(raw || "")
+  return stripLocalPaths(String(raw || ""))
     .replace(/FSC、认证码、星级已跳过，不进退稿/g, "森林认证、认证码和星级先跳过，不写进退稿")
     .replace(/两种文字来源无法唯一对应，请对照稿面。?/g, "两种读法对不上，请看稿面")
     .replace(/原稿文字已直接参与核对规则。?/g, "原稿文字已经参与核对")
@@ -28,10 +61,8 @@ export function customerCopy(raw: string): string {
     .replace(/open_id/gi, "")
     .replace(/宿主/g, "")
     .replace(/\bPID\b/g, "")
-    .replace(/文件\s*=\s*[A-Za-z]:\\[^\s，,]*/g, "")
-    .replace(/[A-Za-z]:\\[^\s，,]+/g, "")
-    .replace(/(?:\/Users|\/home|\/var|\/tmp|\/private)\/[^\s，,]+/g, "")
     .replace(/\s{2,}/g, " ")
+    .replace(/ +([，,。；;])/g, "$1")
     .replace(/^[，,。.\s]+|[，,\s]+$/g, "")
     .trim();
 }

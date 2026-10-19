@@ -57,6 +57,11 @@ describe("renderReasonCopy", () => {
     }
   });
 
+  it("permission_denied says this account can only look", () => {
+    assert.equal(renderReasonCopy("permission_denied").plain, "这个账号只能查看。");
+    assert.equal(renderCapabilityCopy("permission_denied"), "此账号只能查看出图版本");
+  });
+
   it("falls back to a plain sentence for unknown reasons", () => {
     assert.equal(renderReasonCopy("nope").plain, "暂时用不了，稍后再试。");
     assert.equal(renderReasonCopy(undefined).detail, "暂不可用，请稍后再试");

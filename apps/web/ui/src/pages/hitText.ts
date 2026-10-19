@@ -1,5 +1,6 @@
 import { customerCopy } from "./customerCopy";
 import { hitTextOf, type HitTextProjection } from "../../../server/src/hitText.ts";
+import { isFlaggedReviewHit } from "../../../server/src/readingDoubt.ts";
 
 /** pdfText() 什么都没读到时的返回值；reviewEvidence 用它做判断，改字只改这里。 */
 export const NOT_READ = "没读到";
@@ -71,10 +72,6 @@ function hitIsLocated(h: HitText, located?: boolean): boolean {
   return true;
 }
 
-function isFlaggedReviewHit(h: HitText): boolean {
-  return h.decision === "issue" || /待人工|不清|疑|缺|误/.test(h.status || "");
-}
-
 export function humanMissLines(h: HitText): string[] {
   return textOf(h).miss;
 }
@@ -136,7 +133,7 @@ export function spokenAsk(h: HitText, field?: string, located?: boolean): Spoken
   if (ev) {
     return { lead: customerCopy(ev).slice(0, 80), because: "这一面没读全，请核对", ask: "" };
   }
-  return { lead: "这条请核对", because: "这一面没读全，请核对", ask: "" };
+  return { lead: "这条请核对", because: "", ask: "" };
 }
 
 /** 当前项目顶栏。一致且没有未读内容时返回空。 */
