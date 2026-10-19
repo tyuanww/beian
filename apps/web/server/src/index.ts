@@ -182,7 +182,7 @@ type NodeBindings = HttpBindings | Http2Bindings;
 type Env = { Bindings: NodeBindings; Variables: { session: Session } };
 
 const app = new Hono<Env>();
-const VERSION = "0.31.1.27";
+const VERSION = "0.31.1.28";
 
 const STRUCTURE_INPUT_BODY_BYTES = 16 * 1024;
 
