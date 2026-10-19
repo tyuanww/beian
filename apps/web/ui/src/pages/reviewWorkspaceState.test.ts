@@ -1,33 +1,13 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { issueNavigation, readReviewSession, readSidebar, reviewSessionKey, sidebarWidth, writeReviewSession, writeSidebar } from "./reviewWorkspaceState.js";
+import { issueNavigation, readReviewSession, reviewSessionKey, writeReviewSession } from "./reviewWorkspaceState.js";
 
 function storage() {
   const values = new Map<string, string>();
   return { values, getItem: (key: string) => values.get(key) ?? null, setItem: (key: string, value: string) => { values.set(key, value); } };
 }
 
-describe("fixed review sidebar", () => {
-  it("keeps the canvas usable without overwriting the preferred desktop width", () => {
-    const store = storage();
-    store.setItem("wb_review_dock_size_v2", '{"w":900}');
-    assert.deepEqual(readSidebar(store, "a"), { width: 448, open: true });
-    writeSidebar(store, "a", { width: 560, open: false });
-    assert.equal(sidebarWidth(readSidebar(store, "a").width, 808), 320);
-    assert.deepEqual(readSidebar(store, "a"), { width: 560, open: false });
-    assert.deepEqual(readSidebar(store, "b"), { width: 448, open: true });
-    assert.equal(sidebarWidth(Number.NaN, 1500), 448);
-    assert.equal(sidebarWidth(9999, 1500), 560);
-    assert.equal(sidebarWidth(-1, 1500), 320);
-  });
-  it("handles corrupt/denied storage and does not persist unidentified users", () => {
-    const store = storage();
-    writeSidebar(store, null, { width: 500, open: false });
-    assert.equal(store.values.size, 0);
-    assert.equal(readSidebar({ getItem() { throw new Error("denied"); }, setItem() {} }, "a").width, 448);
-    store.setItem("wb_review_sidebar_v1:a", "{");
-    assert.equal(readSidebar(store, "a").width, 448);
-  });
+describe("review session", () => {
   it("isolates drafts by identity, task and artwork version", () => {
     const store = storage();
     const key = reviewSessionKey("a", "task", false);

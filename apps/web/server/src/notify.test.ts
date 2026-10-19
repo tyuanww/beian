@@ -96,6 +96,31 @@ describe("sendText", () => {
     assert.deepEqual(calls, { cli: 1, app: 0 });
   });
 
+  // Value: protects=app routing code stays with the app reason when CLI also failed; fails_when=CLI reason drops app.code; why_new=production CLI failures always have a reason; seam=none; no_claim=does not call Feishu
+  it("keeps the app code when CLI fails and the app fallback has a code", async () => {
+    const sender = createTextSender({
+      findCli: () => "/test/lark-cli",
+      sendCli: async () => ({ ok: false, reason: "cli failed first" }),
+      sendApp: async () => ({ ok: false, reason: "app failed", code: "feishu_credentials" }),
+    });
+    saveSettings({ FEISHU_ENABLED: "true", FEISHU_OPEN_ID: "ou_cli_only" });
+    assert.deepEqual(await sender("hi"), {
+      ok: false,
+      reason: "app failed",
+      code: "feishu_credentials",
+    });
+  });
+
+  it("keeps the CLI reason when the app fallback has no code", async () => {
+    const sender = createTextSender({
+      findCli: () => "/test/lark-cli",
+      sendCli: async () => ({ ok: false, reason: "cli failed first" }),
+      sendApp: async () => ({ ok: false, reason: "app failed" }),
+    });
+    saveSettings({ FEISHU_ENABLED: "true", FEISHU_OPEN_ID: "ou_cli_plain" });
+    assert.deepEqual(await sender("hi"), { ok: false, reason: "cli failed first" });
+  });
+
   it("falls back from an injected CLI failure to the injected app", async () => {
     const calls = { cli: 0, app: 0 };
     const sender = createTextSender({
@@ -112,6 +137,36 @@ describe("sendText", () => {
     saveSettings({ FEISHU_ENABLED: "true", FEISHU_OPEN_ID: "ou_app" });
     assert.deepEqual(await sender("hi"), { ok: true, via: "app" });
     assert.deepEqual(calls, { cli: 1, app: 1 });
+  });
+
+  // Value: protects=no-cli app failure keeps app.code; fails_when=the no-cli return drops code; why_new=CLI-present tests do not take findCli null; seam=none; no_claim=does not call Feishu
+  it("returns app code when this machine has no lark-cli", async () => {
+    const sender = createTextSender({
+      findCli: () => null,
+      sendCli: async () => ({ ok: false, reason: "unused" }),
+      sendApp: async () => ({ ok: false, reason: "还没填飞书 App ID 或 Secret", code: "feishu_credentials" }),
+    });
+    saveSettings({ FEISHU_ENABLED: "true", FEISHU_OPEN_ID: "ou_no_cli" });
+    assert.deepEqual(await sender("hi"), {
+      ok: false,
+      reason: "还没填飞书 App ID 或 Secret",
+      code: "feishu_credentials",
+    });
+  });
+
+  // Value: protects=notify exposes app.code when CLI fails without reason; fails_when=app branch drops code spread; why_new=CLI-only failure test above; seam=none; no_claim=none beyond protects
+  it("returns app code when CLI fails without a reason", async () => {
+    const sender = createTextSender({
+      findCli: () => "/test/lark-cli",
+      sendCli: async () => ({ ok: false }),
+      sendApp: async () => ({ ok: false, reason: "还没填飞书 App ID 或 Secret", code: "feishu_credentials" }),
+    });
+    saveSettings({ FEISHU_ENABLED: "true", FEISHU_OPEN_ID: "ou_app_code" });
+    assert.deepEqual(await sender("hi"), {
+      ok: false,
+      reason: "还没填飞书 App ID 或 Secret",
+      code: "feishu_credentials",
+    });
   });
 });
 

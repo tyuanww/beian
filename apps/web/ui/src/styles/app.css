@@ -525,7 +525,7 @@ html[data-theme="dark"] .side-item.is-on .side-icon {
 .sidebar-version {
   display: block;
   color: var(--muted);
-  font-size: 11px;
+  font-size: 13px;
   line-height: 1.2;
   letter-spacing: 0.02em;
   white-space: nowrap;

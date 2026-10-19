@@ -128,11 +128,9 @@ export function statusWord(
 ): { cls: string; text: string } {
   if (!r) return { cls: "is-idle", text: "未检查" };
   if ("pending" in r) return { cls: "is-wait", text: mode === "send" ? "发送中" : "检查中" };
-  // error-text-match-allow -- 待后端错误码，第 5 批清，见 TODOS.md「前端按报错文案判断状态」
-  if (r.ok && /未启用/.test(r.message)) return { cls: "is-ok", text: "未启用" };
+  if (r.ok && r.code === "disabled") return { cls: "is-ok", text: "未启用" };
   if (r.ok) return { cls: "is-ok", text: "正常" };
-  // error-text-match-allow -- 待后端错误码，第 5 批清，见 TODOS.md「前端按报错文案判断状态」
-  if (/超时/.test(r.message)) return { cls: "is-wait", text: "超时" };
+  if (r.code === "timeout") return { cls: "is-wait", text: "超时" };
   return { cls: "is-bad", text: "待处理" };
 }
 
@@ -176,8 +174,7 @@ export function foldCatalogReason(
   if (group === "MiniMax（可选）") {
     const enabled = fields.find((f) => f.key === "MINIMAX_ENABLED");
     const key = fields.find((f) => f.key === "MINIMAX_API_KEY");
-    // error-text-match-allow -- 待后端错误码，第 5 批清，见 TODOS.md「前端按报错文案判断状态」
-    if (enabled?.value === "false" || (probe && !("pending" in probe) && /未启用/.test(probe.message))) {
+    if (enabled?.value === "false" || (probe && !("pending" in probe) && probe.code === "disabled")) {
       return "AI 复核未启用。密钥已收起。";
     }
     if (key?.set || probeOk) {

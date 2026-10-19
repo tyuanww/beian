@@ -4,7 +4,7 @@ import { join, resolve } from "node:path";
 import { DATA_DIR, PYTHON_APP } from "./config.js";
 import { readIllustratorAgentStatus } from "./illustratorAgent.js";
 import { whichLark } from "./larkBin.js";
-import { httpsJson } from "./outbound.js";
+import { httpsJson, timeoutFields } from "./outbound.js";
 
 export type FieldKind = "text" | "secret" | "toggle" | "path";
 
@@ -475,7 +475,7 @@ function fieldView(f: SettingField, val: string) {
   };
 }
 
-export type ProbeResult = { id: string; ok: boolean; message: string };
+export type ProbeResult = { id: string; ok: boolean; message: string; code?: "disabled" | "timeout" | "feishu_credentials" };
 
 function redact(msg: string): string {
   let out = msg;
@@ -515,7 +515,7 @@ async function probeFeishu(): Promise<ProbeResult> {
   const id = "feishu";
   const appId = getSetting("FEISHU_APP_ID");
   const secret = getSetting("FEISHU_APP_SECRET");
-  if (!appId || !secret) return { id, ok: false, message: "还没填 App ID 或 Secret" };
+  if (!appId || !secret) return { id, ok: false, message: "还没填 App ID 或 Secret", code: "feishu_credentials" };
   try {
     const res = await httpsJson("https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal", {
       method: "POST",
@@ -526,7 +526,7 @@ async function probeFeishu(): Promise<ProbeResult> {
     if (json.code === 0) return { id, ok: true, message: "应用凭证有效" };
     return { id, ok: false, message: redact(json.msg || `飞书返回 ${json.code ?? res.status}`) };
   } catch (err) {
-    return { id, ok: false, message: redact(err instanceof Error ? err.message : "连不上飞书") };
+    return { id, ok: false, message: redact(err instanceof Error ? err.message : "连不上飞书"), ...timeoutFields(err) };
   }
 }
 
@@ -600,7 +600,8 @@ async function probeMinimax(): Promise<ProbeResult> {
   const id = "minimax";
   const key = getSetting("MINIMAX_API_KEY");
   if (!/^(1|true|yes|on)$/i.test(getSetting("MINIMAX_ENABLED"))) {
-    return { id, ok: true, message: key ? "已填 Key，语义复核未开" : "未启用（不影响主对照）" };
+    if (!key) return { id, ok: true, message: "未启用（不影响主对照）", code: "disabled" };
+    return { id, ok: true, message: "已填 Key，语义复核未开" };
   }
   if (!key) return { id, ok: false, message: "已启用但还没填 API Key" };
   const urls = ["https://api.minimaxi.com/v1/models", "https://api.minimax.io/v1/models"];

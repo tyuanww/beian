@@ -9,6 +9,7 @@ export default defineConfig({
     port: 5173,
     strictPort: true,
     proxy: {
+      "/favicon.ico": { target: "http://127.0.0.1:8787", changeOrigin: true },
       "/api": {
         target: "http://127.0.0.1:8787",
         changeOrigin: true,

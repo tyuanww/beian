@@ -4,6 +4,12 @@ import { trustPublicCas } from "./certs.js";
 
 trustPublicCas();
 
+export function timeoutFields(err: unknown): { code: "timeout" } | Record<string, never> {
+  return err && typeof err === "object" && "code" in err && (err as { code?: unknown }).code === "timeout"
+    ? { code: "timeout" }
+    : {};
+}
+
 /** 直连 HTTPS，不走 HTTP_PROXY。本机 Clash 会给 fetch 塞自签证书。 */
 export function httpsJson(
   url: string,
@@ -40,8 +46,7 @@ export function httpsJson(
       },
     );
     req.on("timeout", () => {
-      req.destroy();
-      reject(new Error("连接飞书超时"));
+      req.destroy(Object.assign(new Error("连接飞书超时"), { code: "timeout" }));
     });
     req.on("error", reject);
     if (opts.body) req.write(opts.body);

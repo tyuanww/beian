@@ -1216,7 +1216,7 @@ export function ReviewPage({ taskId, userId, displayName = null, canComplete = t
                     src={reviewMedia.url}
                     alt=""
                     decoding="sync"
-                    fetchPriority="high"
+                    ref={(node) => { node?.setAttribute("fetchpriority", "high"); }}
                     draggable={false}
                     onDragStart={(e) => e.preventDefault()}
                     onError={() => recoverDisplayedReviewMedia(reviewMedia)}

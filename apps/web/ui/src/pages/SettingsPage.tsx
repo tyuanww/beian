@@ -206,8 +206,7 @@ export function SettingsPage({
         }
       } else {
         message.error(r.message);
-        // error-text-match-allow -- 待后端错误码，第 5 批清，见 TODOS.md「前端按报错文案判断状态」
-        if (/App ID|Secret|凭证/.test(r.message)) setGroup("飞书登录");
+        if (r.code === "feishu_credentials") setGroup("飞书登录");
       }
     } finally {
       hide();

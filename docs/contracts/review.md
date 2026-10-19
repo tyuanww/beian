@@ -69,7 +69,7 @@
 
 审稿任务 JSON 落盘走 `tasks.ts` 的 `replaceFile`：POSIX rename 原子替换；Windows 上 rename 遇 EEXIST / EPERM / EACCES 只重试（最多 8 次、间隔递增），最终失败抛错，绝不 `copyFile` 覆盖。
 
-任务详情返回的每条 `hits` / `hits_v2` 带读时投影字段 `hit_text`（`apps/web/server/src/hitText.ts`，加码 §5；不落盘；先做 `legacyCopy` 旧句替换再投影）：`{ v: 1, miss: string[], accounting: string[], evidence: string | null, observed: string | null, located: boolean }`。`miss` 是 `coverage.miss` 去掉空白和核算说明后的人话漏读词；`accounting` 是核算说明（`score=`、覆盖偏低等）；`evidence` 是人话说明（空或核算说明时为 null）；`observed` 取 `pdf` / `found`，否则 `coverage.hit` 用空格拼接；`located` 为有 `bboxes` 或 `qrcode_boxes`。前端 `pages/hitText.ts` 优先读这把键，旧接口没有时用同一份共享投影现算。
+任务详情返回的每条 `hits` / `hits_v2` 带读时投影字段 `hit_text`（`apps/web/server/src/hitText.ts`，加码 §5；不落盘；先做 `legacyCopy` 旧句替换再投影）：`{ v: 1, miss: string[], accounting: string[], evidence: string | null, observed: string | null, located: boolean }`。`miss` 是 `coverage.miss` 去掉空白和核算说明后的人话漏读词；`accounting` 是核算说明（`score=`、覆盖偏低等）；`evidence` 是人话说明（空或核算说明时为 null）；`observed` 取 `pdf` / `found`，否则 `coverage.hit` 用空格拼接；`located` 为有 `bboxes` 或 `qrcode_boxes`。前端 `pages/hitText.ts` 优先读这把键，旧接口没有时用同一份共享投影现算；展示前经 `customerCopy.ts` 的 `stripLocalPaths` 去掉稿面可见的本地路径（含路径里带空格），与服务端 `pathRedact` 互补。疑点是否「已标记要人看」前后端共用 `readingDoubt.ts` 的 `isFlaggedReviewHit`（按 `decision` / `status`，不按说明文字正则）。已标记但无 evidence 时核对要点只出 lead「这条请核对」，`because` 留空（只读/view-only 展示，不重复「这一面没读全」）。
 
 面向审稿员的认字类报错：预检失败仍统一为「认字出了问题，请联系管理员」（`labels.ts` 的 `ocrFailed`）；作业失败经 `reviewErrorCopy` 按 `job_error_code === "ocr_failed"` 选句（有按钮 / 没按钮两句，见下面失败单那段），不露组件名、路径或堆栈。
 

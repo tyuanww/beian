@@ -2,40 +2,11 @@ import type { FieldHit } from "../api";
 import { isPendingDecision } from "./reviewNav";
 import { partitionReviewHits } from "./reviewEvidence";
 
-const SIDEBAR_DEFAULT = 448;
-const SIDEBAR_MIN = 320;
-const SIDEBAR_MAX = 560;
-
-export type SidebarPreference = { width: number; open: boolean };
 export type ReviewSession = { activeId?: string; drafts: Record<string, string> };
 type Store = Pick<Storage, "getItem" | "setItem"> | null;
 
 export function reviewStorage(): Store {
   try { return typeof localStorage === "undefined" ? null : localStorage; } catch { return null; }
-}
-
-export function sidebarWidth(preferred: number, room: number): number {
-  const safe = Number.isFinite(preferred) ? preferred : SIDEBAR_DEFAULT;
-  return Math.min(Math.max(SIDEBAR_MIN, Math.min(SIDEBAR_MAX, room - 488)), Math.max(SIDEBAR_MIN, safe));
-}
-
-function preferenceKey(user: string | null): string | null {
-  return user ? `wb_review_sidebar_v1:${encodeURIComponent(user)}` : null;
-}
-
-export function readSidebar(store: Store, user: string | null): SidebarPreference {
-  try {
-    const key = preferenceKey(user);
-    const raw = key ? JSON.parse(store?.getItem(key) || "null") : null;
-    return { width: sidebarWidth(typeof raw?.width === "number" ? raw.width : SIDEBAR_DEFAULT, 2000), open: raw?.open !== false };
-  } catch { return { width: SIDEBAR_DEFAULT, open: true }; }
-}
-
-export function writeSidebar(store: Store, user: string | null, value: SidebarPreference): void {
-  try {
-    const key = preferenceKey(user);
-    if (key) store?.setItem(key, JSON.stringify({ width: sidebarWidth(value.width, 2000), open: value.open }));
-  } catch { /* Storage may be unavailable; in-memory interaction still works. */ }
 }
 
 export function reviewSessionKey(user: string | null, task: string | null, version: boolean): string | null {

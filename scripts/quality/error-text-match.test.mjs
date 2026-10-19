@@ -6,14 +6,12 @@ import { ALLOW_MARKER, allowedLinesByFile, scanRepo, scanSource } from "./error-
  * 「按报错文案判断状态」的存量例外基线：只减不增。
  * 清掉一处就把对应数字减 1（为 0 就删掉这一行）；任何新增或调大都会让本测试失败。
  * 批次 4 指派时已知三处：App.tsx 已于第 5 批改按 feishu_error 码清掉；reviewErrorCopy 已于加码改按 job_error_code（ocr_failed 等）清掉；hitText 已于加码改读服务端 hit_text 清掉；
- * SettingsPage / setupBoard 是本检查首次扫描新发现的存量，同样只减不增。
  * setupBoard.ts 中 probeErrorMessage 那 1 行是永久例外：认浏览器 fetch 自己抛的报错，后端给不了码；同样不作先例。
  */
 const ALLOWED = Object.freeze({
-  "apps/web/ui/src/pages/SettingsPage.tsx": 1,
-  "apps/web/ui/src/pages/setupBoard.ts": 4,
+  "apps/web/ui/src/pages/setupBoard.ts": 1,
 });
-const MAX_TOTAL = 5;
+const MAX_TOTAL = 1;
 
 test("新的 err.message.includes(...) 会被拦下", () => {
   const hits = scanSource('export function f(err: Error) { if (err.message.includes("x")) return 1; return 0; }');

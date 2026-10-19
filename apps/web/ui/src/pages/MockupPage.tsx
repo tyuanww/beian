@@ -800,12 +800,15 @@ export function MockupJobPage({
   useEffect(()=>()=>releaseStudioGeneration(jobId,generation),[jobId,generation]);
   useEffect(()=>{fullUpgradeHud.current="";},[generation]);
 
-  function refreshSource() {
+  function refreshSource(options?: { quiet?: boolean }) {
     if (sourceErrorGeneration.current === generation) return;
     sourceErrorGeneration.current=generation;
     void api.refreshMockup(jobId).then(next=>{
-      if (alive.current && visibleGeneration.current === generation) { setJob(next);notice(next.current_render_generation_id !== generation ? "当前版本已变化，已刷新图片" : "版本图片暂时读不到，请重新打开此单"); }
-    }).catch(()=>{if(alive.current && visibleGeneration.current === generation)notice("版本图片暂时读不到，未改动当前版本");});
+      if (!alive.current || visibleGeneration.current !== generation) return;
+      setJob(next);
+      if (options?.quiet && next.current_render_generation_id === generation) return;
+      notice(next.current_render_generation_id !== generation ? "当前版本已变化，已刷新图片" : "版本图片暂时读不到，请重新打开此单");
+    }).catch(()=>{if(alive.current && visibleGeneration.current === generation && !options?.quiet)notice("版本图片暂时读不到，未改动当前版本");});
   }
 
   function notice(text: string, source: HudNoticeSource = "auto") {
@@ -1261,7 +1264,7 @@ export function MockupJobPage({
             jobId={job.id}
             files={job.files}
             generation={generation}
-            onSourceError={refreshSource}
+            onSourceError={() => refreshSource({ quiet: true })}
             boxRef={glbBox}
             backgroundLight={backgroundLight}
             productLight={productLight}

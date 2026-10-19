@@ -6,7 +6,7 @@ import { DEFAULT_GLB_VIEW, glbCameraDistances } from "./mockupGlbCamera";
 import { GLB_LOADING_TEXT, GLB_PREPARING_TEXT, type GlbProgress, glbInteractive, glbTotalKnown, glbViewerProgress, glbStatusText, readGlbWithProgress } from "./mockupGlbProgress";
 import { GLB_ENVIRONMENT, glbViewerExposure, glbRoomEmission } from "./mockupGlbLighting";
 import { type BackdropPreset, studioBackdrop } from "./mockupStudio";
-import { GLB_WEBP_UNSUPPORTED_TEXT, glbTextureGate, webpSupport } from "./mockupGlbTexture";
+import { GLB_LOAD_FAILED_TEXT, GLB_WEBP_UNSUPPORTED_TEXT, glbTextureGate, webpSupport } from "./mockupGlbTexture";
 import { type GlbVersionInfo, glbAttempts, whenIdle } from "./mockupGlbSource";
 
 type Bounds = { center: number[]; sphereRadius: number };
@@ -23,7 +23,8 @@ type SceneProps = Omit<ViewerProps, "onSourceError"> & { onFail: () => void };
 /**
  * 加载顺序：贴图是 WebP 而本机解码不了 → 直接拉原始 GLB；否则先默认地址（可能是 WebP 版），
  * 下载失败、贴图解码失败或 model-viewer 报错时自动改拉原始一次，文字始终是「正在加载 3D」，不另提示。
- * 原始也失败才显示效果图 +「这台设备显示不了 3D，已换成效果图」。
+ * 本机解得了 WebP、两次地址都失败，写「3D 没加载出来，请重新打开此单」。
+ * 本机解不了 WebP 时，没有两个版本就不请求模型。有两个版本则只拉原始。这条路径失败仍写「这台设备显示不了 3D，已换成效果图」。
  */
 export function MockupGlbViewer({ textureFormat, originalSource, versions, onSourceError, ...props }: ViewerProps & { textureFormat?: string; originalSource: string; versions: GlbVersionInfo }) {
   const [webp, setWebp] = useState<boolean | null>(() => webpSupport.known());
@@ -42,24 +43,25 @@ export function MockupGlbViewer({ textureFormat, originalSource, versions, onSou
   errorRef.current = onSourceError;
   const exhausted = attempts !== null && count >= attempts.length;
   const tried = Boolean(attempts?.length);
+  const failureText = gate === "fallback" ? GLB_WEBP_UNSUPPORTED_TEXT : GLB_LOAD_FAILED_TEXT;
   // 真拉过且都失败才通知外层刷新版本；本机解码不了 WebP 而直接降级时不算失败。
   useEffect(() => { if (exhausted && tried) errorRef.current(); }, [exhausted, tried, plan]);
   // 先只放效果图，浏览器空闲时才开始在后台拉 GLB。
   const [idle, setIdle] = useState(false);
   useEffect(() => whenIdle(() => setIdle(true)), []);
   const source = attempts?.[count];
-  if (!source || !idle) return <GlbPosterOnly poster={props.poster} note={exhausted} loading={!exhausted} />;
+  if (!source || !idle) return <GlbPosterOnly poster={props.poster} note={exhausted ? failureText : null} loading={!exhausted} />;
   return <GlbScene key={source} {...props} source={source}
     onFail={() => setFailed((prev) => ({ plan, count: (prev.plan === plan ? prev.count : 0) + 1 }))} />;
 }
 
-function GlbPosterOnly({ poster, note, loading }: { poster?: string; note: boolean; loading: boolean }) {
+function GlbPosterOnly({ poster, note, loading }: { poster?: string; note: string | null; loading: boolean }) {
   const [posterFailed, setPosterFailed] = useState<string | null>(null);
   return <>
     {poster && posterFailed !== poster
       ? <img className="mockup-glb-poster" src={poster} alt="" aria-hidden="true" onError={() => setPosterFailed(poster)} />
       : <div className="mockup-glb-poster mockup-glb-skeleton" aria-hidden="true" />}
-    {note && <p role="status" className="mockup-glb-message mockup-glb-progress">{GLB_WEBP_UNSUPPORTED_TEXT}</p>}
+    {note && <p role="status" className="mockup-glb-message mockup-glb-progress">{note}</p>}
     {loading && <div className="mockup-glb-message mockup-glb-progress">
       <span className="mockup-glb-progress-visual" aria-hidden="true"><span>{GLB_LOADING_TEXT}</span></span>
       <span role="status" className="sr-only">{GLB_LOADING_TEXT}</span>

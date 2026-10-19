@@ -46,8 +46,17 @@ describe("settings mask", () => {
   it("minimax disabled copy is not an isolated 通", async () => {
     saveSettings({ MINIMAX_ENABLED: "false", MINIMAX_API_KEY: "" });
     const r = await runProbe("minimax");
+    assert.equal(r.code, "disabled");
     assert.equal(r.message.trim() === "通" || r.message.trim() === "不通", false);
     assert.match(r.message, /未启用|模型列表|Key/);
+  });
+
+  // Value: protects=feishu probe returns feishu_credentials without credentials; fails_when=probeFeishu omits code field; why_new=message-only minimax test; seam=none; no_claim=none beyond protects
+  it("feishu probe reports feishu_credentials when credentials missing", async () => {
+    saveSettings({ FEISHU_APP_ID: "", FEISHU_APP_SECRET: "" });
+    const r = await runProbe("feishu");
+    assert.equal(r.ok, false);
+    assert.equal(r.code, "feishu_credentials");
   });
 
   it("adminOnly keys include blender and illustrator", async () => {

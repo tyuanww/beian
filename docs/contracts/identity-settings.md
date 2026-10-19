@@ -18,6 +18,7 @@ MiniMax 未开语义复核是「未用」，不是「可用」；探测是 `GET 
 
 - `GET /api/settings`：管理员返回不变。非管理员（reviewer / viewer）每个字段保留元数据 `key`、`label`、`kind`、`help`、`restart`、`adminOnly` 和 `set`；除 `kind: "toggle"`（`WB_PUBLIC`、`WB_DEV_DISPLAY_LOGIN`、`FEISHU_ENABLED`、`MINIMAX_ENABLED`）与 `WB_MAX_UPLOAD_MB` 外，`value`、`last4` 两个键整体省略，不返回空串或 null。`derived` 只剩 `tenant_key_filled`（去掉 `redirect_uri`、`python`）；`health.mockup.detail` 在已配置时改为「已配置 Blender」，不含路径，其余 `health` 项原样。队列等其余顶层字段不变。
 - `POST /api/settings/probe`（含飞书「发一条测试」`lark_send`）、`GET /api/settings/billing`、`POST /api/settings/billing/refresh`：非管理员 403。`POST /api/settings` 原本即仅管理员，返回的视图按管理员口径。
+- `POST /api/settings/probe` 与 `lark_send` 失败时 JSON 可带稳定 `code`，供设置页和开工板判断，不靠匹配 `message`：`feishu_credentials`（还没填 App ID / Secret）、`timeout`（连飞书超时）；MiniMax 探测在开关关且没填 Key 时 `ok: true` 且 `code: "disabled"`。设置页凭证失败时 `code === "feishu_credentials"` 才自动展开「飞书登录」分组；开工板用 `disabled` / `timeout` 显示「未启用」/「超时」。
 - 已接受的低风险：非管理员仍能从 `set` 看出哪些密钥/字段已填，看不到值和末四位。
 - 有意的行为变化：reviewer 不能再自己点飞书「发一条测试」，只能由管理员测。
 - 任务报错按角色脱敏（`apps/web/server/src/pathRedact.ts` 的 `redactLocalPaths`）：

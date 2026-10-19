@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import https from "node:https";
 import { afterEach, describe, it, mock } from "node:test";
-import { httpsJson } from "./outbound.js";
+import { httpsJson, timeoutFields } from "./outbound.js";
 
 type ReqOpts = {
   hostname?: string;
@@ -36,6 +36,15 @@ function mockHttpsJson(status: number, json: unknown): ReqOpts[] {
   });
   return seen;
 }
+
+describe("timeoutFields", () => {
+  // Value: protects=timeoutFields maps httpsJson timeout to probe code; fails_when=timeout tag removed from err; why_new=httpsJson test does not assert timeout shape; seam=none; no_claim=none beyond protects
+  it("tags outbound timeout errors only", () => {
+    assert.deepEqual(timeoutFields(Object.assign(new Error("连接飞书超时"), { code: "timeout" })), { code: "timeout" });
+    assert.deepEqual(timeoutFields(new Error("other")), {});
+    assert.deepEqual(timeoutFields(null), {});
+  });
+});
 
 describe("httpsJson", () => {
   afterEach(() => {

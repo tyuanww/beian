@@ -1,4 +1,5 @@
 import { cleanupStaleGlbWebpTemps } from "./glbWebp.js";
+import { ifNoneMatchSatisfied } from "./httpValidators.js";
 import { cleanupGlbWebpVariantsOnBoot, glbWebpVariantEnabled, glbVersionOf, openGlbForServe, openGlbOriginalForServe } from "./glbWebpVariant.js";
 import {
   closeSync,
@@ -181,7 +182,7 @@ type NodeBindings = HttpBindings | Http2Bindings;
 type Env = { Bindings: NodeBindings; Variables: { session: Session } };
 
 const app = new Hono<Env>();
-const VERSION = "0.31.1.26";
+const VERSION = "0.31.1.27";
 
 const STRUCTURE_INPUT_BODY_BYTES = 16 * 1024;
 
@@ -310,7 +311,7 @@ function generationFileResponse(c: Context, file: HeldGenerationFile): Response 
   const download = c.req.query("download") === "1";
   const headers = {ETag:`"sha256-${file.sha256}"`,"Cache-Control":download ? "private, no-store" : "private, no-cache",
     "X-Content-Type-Options":"nosniff"};
-  if (!download && c.req.header("if-none-match") === headers.ETag) { file.close(); return new Response(null,{status:304,headers}); }
+  if (!download && ifNoneMatchSatisfied(c.req.header("if-none-match"), headers.ETag)) { file.close(); return new Response(null,{status:304,headers}); }
   const ascii = file.name.replace(/[^\x20-\x7E]/g,"_").replace(/"/g,"");
   try {
     const responseHeaders = {...headers,
@@ -385,7 +386,7 @@ function glbVariantResponse(c: Context, jobId: string, path: string, name: strin
     "Cache-Control": immutable ? "private, max-age=31536000, immutable" : "private, no-cache",
     "X-Content-Type-Options": "nosniff",
   };
-  if (c.req.header("if-none-match") === etag) {
+  if (ifNoneMatchSatisfied(c.req.header("if-none-match"), etag)) {
     closeSync(opened.fd);
     return new Response(null, { status: 304, headers });
   }
@@ -1476,7 +1477,7 @@ app.post("/api/settings/probe", async (c) => {
         message: `已用${via}发给当前登录 ${s.display_name || to.slice(0, 8)}`,
       });
     }
-    return c.json({ id: "lark", ok: false, message: r.reason || "发送失败" });
+    return c.json({ id: "lark", ok: false, message: r.reason || "发送失败", ...(r.code ? { code: r.code } : {}) });
   }
   return c.json(await runProbe(id));
 });
@@ -1671,7 +1672,7 @@ app.get("/api/mockups/:id/files/:key", (c) => {
     forceAttach || !(type.startsWith("image/") || type.startsWith("model/") || key === "unfolded_print") ? "attachment" : "inline";
   const etag = fileEtag(f.path);
   const cacheControl = forceAttach ? "private, no-store" : "private, no-cache";
-  if (!forceAttach && c.req.header("if-none-match") === etag) {
+  if (!forceAttach && ifNoneMatchSatisfied(c.req.header("if-none-match"), etag)) {
     return new Response(null, {
       status: 304,
       headers: {
@@ -1711,7 +1712,7 @@ app.get("/api/mockups/:id/structure-preview", (c) => {
     throw new HTTPException(404, { message: "结构原稿预览还没有" });
   }
   const etag = fileEtag(path);
-  if (c.req.header("if-none-match") === etag) {
+  if (ifNoneMatchSatisfied(c.req.header("if-none-match"), etag)) {
     return new Response(null, {
       status: 304,
       headers: { ETag: etag, "Cache-Control": "private, no-cache", "X-Content-Type-Options": "nosniff" },
@@ -1737,7 +1738,7 @@ app.get("/api/mockups/:id/structure-input-preview", (c) => {
     throw new HTTPException(404, { message: "结构层原稿预览还没有" });
   }
   const etag = fileEtag(path);
-  if (c.req.header("if-none-match") === etag) {
+  if (ifNoneMatchSatisfied(c.req.header("if-none-match"), etag)) {
     return new Response(null, {
       status: 304,
       headers: { ETag: etag, "Cache-Control": "private, no-cache", "X-Content-Type-Options": "nosniff" },
@@ -1863,8 +1864,10 @@ if (process.env.VITEST !== "1") {
   try {
     const staleGlbTemps = cleanupStaleGlbWebpTemps(join(DATA_DIR, "mockups"));
     if (staleGlbTemps) console.info(`removed ${staleGlbTemps} stale glb webp temp file(s)`);
-    const staleVariants = cleanupGlbWebpVariantsOnBoot(join(DATA_DIR, "mockups"));
-    if (staleVariants) console.info(`removed ${staleVariants} stale glb webp variant file(s)`);
+    if (glbWebpVariantEnabled()) {
+      const staleVariants = cleanupGlbWebpVariantsOnBoot(join(DATA_DIR, "mockups"));
+      if (staleVariants) console.info(`removed ${staleVariants} stale glb webp variant file(s)`);
+    }
   } catch (err) {
     console.warn("glb webp temp cleanup failed:", err instanceof Error ? err.message : err);
   }
