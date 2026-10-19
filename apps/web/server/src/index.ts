@@ -182,7 +182,7 @@ type NodeBindings = HttpBindings | Http2Bindings;
 type Env = { Bindings: NodeBindings; Variables: { session: Session } };
 
 const app = new Hono<Env>();
-const VERSION = "0.31.1.27";
+const VERSION = "0.31.1.28";
 
 const STRUCTURE_INPUT_BODY_BYTES = 16 * 1024;
 
@@ -371,6 +371,18 @@ function fileEtag(path: string): string {
   return `W/"${st.size.toString(16)}-${Math.trunc(st.mtimeMs).toString(16)}"`;
 }
 
+function responseFromOpenedFile(c: Context, fd: number, size: number, headers: Record<string, string>): Response {
+  const withLength = { ...headers, "Content-Length": String(size) };
+  if (size === 0 || c.req.raw.method === "HEAD") {
+    closeSync(fd);
+    return new Response(null, { headers: withLength });
+  }
+  return new Response(
+    Readable.toWeb(createReadStream("", { fd, autoClose: true, start: 0, end: size - 1 })) as ReadableStream,
+    { headers: withLength },
+  );
+}
+
 /**
  * 旧打样 GLB（开关打开、非下载、非代际托管单）。默认端点返回校验通过的 WebP 旁路，核不过用已打开的原件 fd；
  * ?variant=original 总是原件。核验、hash 和输出用同一个 fd。
@@ -391,17 +403,10 @@ function glbVariantResponse(c: Context, jobId: string, path: string, name: strin
     return new Response(null, { status: 304, headers });
   }
   const ascii = name.replace(/[^\x20-\x7E]/g, "_").replace(/"/g, "");
-  const size = opened.bytes;
-  const body = size === 0 || c.req.raw.method === "HEAD"
-    ? (closeSync(opened.fd), null)
-    : (Readable.toWeb(createReadStream("", { fd: opened.fd, autoClose: true, start: 0, end: size - 1 })) as ReadableStream);
-  return new Response(body, {
-    headers: {
-      ...headers,
-      "Content-Type": "model/gltf-binary",
-      "Content-Length": String(size),
-      "Content-Disposition": `inline; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(name)}`,
-    },
+  return responseFromOpenedFile(c, opened.fd, opened.bytes, {
+    ...headers,
+    "Content-Type": "model/gltf-binary",
+    "Content-Disposition": `inline; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(name)}`,
   });
 }
 
@@ -1366,6 +1371,26 @@ app.post(
   },
 );
 
+function reviewPageFileResponse(c: Context, path: string, svg: boolean): Response {
+  const fd = openSync(path, "r");
+  let size = 0;
+  try {
+    const st = fstatSync(fd);
+    if (!st.isFile()) throw new HTTPException(404, { message: "没有这一页" });
+    size = st.size;
+  } catch (error) {
+    try { closeSync(fd); } catch { /* already closed */ }
+    throw error;
+  }
+  return responseFromOpenedFile(c, fd, size, svg
+    ? {
+        "Content-Type": "image/svg+xml; charset=utf-8",
+        "Content-Security-Policy": "default-src 'none'; img-src data:; style-src 'unsafe-inline'",
+        "X-Content-Type-Options": "nosniff",
+      }
+    : { "Content-Type": "image/png", "X-Content-Type-Options": "nosniff" });
+}
+
 app.get("/api/tasks/:tid/pages/:name", (c) => {
   const s = need(c, "read");
   const tid = assertTid(c.req.param("tid"));
@@ -1374,16 +1399,7 @@ app.get("/api/tasks/:tid/pages/:name", (c) => {
   if (!/^page_\d{2}\.(?:png|svg)$/.test(name)) throw new HTTPException(400, { message: "非法页名" });
   const p = join(DATA_DIR, "uploads", tid, "pages", name);
   if (!existsSync(p)) throw new HTTPException(404, { message: "没有这一页" });
-  const svg = name.endsWith(".svg");
-  return new Response(readFileSync(p), {
-    headers: svg
-      ? {
-          "Content-Type": "image/svg+xml; charset=utf-8",
-          "Content-Security-Policy": "default-src 'none'; img-src data:; style-src 'unsafe-inline'",
-          "X-Content-Type-Options": "nosniff",
-        }
-      : { "Content-Type": "image/png", "X-Content-Type-Options": "nosniff" },
-  });
+  return reviewPageFileResponse(c, p, name.endsWith(".svg"));
 });
 
 app.get("/api/tasks/:tid/pages/:side/:name", (c) => {
@@ -1397,16 +1413,7 @@ app.get("/api/tasks/:tid/pages/:side/:name", (c) => {
   }
   const p = join(DATA_DIR, "uploads", tid, "pages", side, name);
   if (!existsSync(p)) throw new HTTPException(404, { message: "没有这一页" });
-  const svg = name.endsWith(".svg");
-  return new Response(readFileSync(p), {
-    headers: svg
-      ? {
-          "Content-Type": "image/svg+xml; charset=utf-8",
-          "Content-Security-Policy": "default-src 'none'; img-src data:; style-src 'unsafe-inline'",
-          "X-Content-Type-Options": "nosniff",
-        }
-      : { "Content-Type": "image/png", "X-Content-Type-Options": "nosniff" },
-  });
+  return reviewPageFileResponse(c, p, name.endsWith(".svg"));
 });
 
 app.get("/api/settings", (c) => {
@@ -1687,19 +1694,12 @@ app.get("/api/mockups/:id/files/:key", (c) => {
   const fd = openSync(f.path, "r");
   let size: number;
   try { size = fstatSync(fd).size; } catch (error) { closeSync(fd); throw error; }
-  // Hono runs HEAD through GET and drops the body; never leave the descriptor open.
-  const body = size === 0 || c.req.raw.method === "HEAD"
-    ? (closeSync(fd), null)
-    : (Readable.toWeb(createReadStream("", { fd, autoClose: true, start: 0, end: size - 1 })) as ReadableStream);
-  return new Response(body, {
-    headers: {
-      "Content-Type": type,
-      "Content-Length": String(size),
-      "X-Content-Type-Options": "nosniff",
-      ETag: etag,
-      "Cache-Control": cacheControl,
-      "Content-Disposition": `${disposition}; filename="${ascii}"; filename*=UTF-8''${encoded}`,
-    },
+  return responseFromOpenedFile(c, fd, size, {
+    "Content-Type": type,
+    "X-Content-Type-Options": "nosniff",
+    ETag: etag,
+    "Cache-Control": cacheControl,
+    "Content-Disposition": `${disposition}; filename="${ascii}"; filename*=UTF-8''${encoded}`,
   });
 });
 

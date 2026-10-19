@@ -12,6 +12,8 @@ import {
   realpathSync,
   symlinkSync,
   unlinkSync,
+  chmodSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs";
 import { createHash } from "node:crypto";
@@ -418,9 +420,82 @@ describe("renderGenerations", () => {
     const path = g0.patch.files.find(row => row.key === "white_a")!.path;
     renameSync(path,path+".old"); writeFileSync(path,syntheticPng(1,1,1));
     try { assert.deepEqual(readFileSync(file.fd),job.whiteA); } finally { file.close(); file.close(); }
-    assert.throws(() => store.openFile(g0.generation_id,"glb"));
+    const glb = store.openFile(g0.generation_id,"glb");
+    try { assert.deepEqual(readFileSync(glb.fd), job.glb); } finally { glb.close(); }
+    assert.throws(() => store.openFile(g0.generation_id,"white_a"), /输出内容与清单不一致/);
     assert.throws(() => store.openFile("legacy-current-deadbeef","white_a"), /当前代已变化/);
     assert.throws(() => store.openFile(g0.generation_id,"read_front"));
+  });
+
+  it("RF-04 a cached read stats siblings and hashes only the requested file", () => {
+    const job = seedJob(); const store = openStore(job);
+    const id = store.virtualLegacyCurrentId();
+    chmodSync(job.files.glb, 0);
+    try {
+      const file = store.openFile(id, "white_a");
+      try { assert.equal(file.bytes, job.whiteA.length); } finally { file.close(); }
+    } finally { chmodSync(job.files.glb, 0o644); }
+    const ready = importG0(openStore(job));
+    const sealedGlb = ready.patch.files.find(row => row.key === "glb")!.path;
+    chmodSync(sealedGlb, 0);
+    try {
+      const file = store.openFile(ready.generation_id, "white_a");
+      try { assert.equal(file.bytes, job.whiteA.length); } finally { file.close(); }
+    } finally { chmodSync(sealedGlb, 0o644); }
+  });
+
+  // Value: protects=stat-stable virtual byte swap: requested key is stale, another key still opens; fails_when=the requested hash compare is removed, or the sibling swap fails the other key; why_new=the chmod test does not change bytes; identity tests change mtime and rebuild the id; seam=none; no_claim=does not cover sealed reads or mtime-changing writes
+  it("RF-04 a stat-stable virtual swap rejects the requested file and still serves another key", () => {
+    const job = seedJob();
+    const store = openStore(job);
+    const stamp = new Date(1_700_000_000_000);
+    utimesSync(job.files.white_a, stamp, stamp);
+    const id = store.virtualLegacyCurrentId();
+    const swapped = syntheticPng(0, 0, 7);
+    assert.equal(swapped.length, job.whiteA.length);
+    assert.equal(swapped.equals(job.whiteA), false);
+    writeFileSync(job.files.white_a, swapped);
+    utimesSync(job.files.white_a, stamp, stamp);
+    assert.equal(lstatSync(job.files.white_a).mtimeMs, stamp.getTime());
+    assert.equal(lstatSync(job.files.white_a).size, job.whiteA.length);
+    const glb = store.openFile(id, "glb");
+    try { assert.deepEqual(readFileSync(glb.fd), job.glb); } finally { glb.close(); }
+    assert.throws(() => store.openFile(id, "white_a"), (err: unknown) => {
+      assert.equal((err as { cause?: string }).cause, "file_identity_changed");
+      return true;
+    });
+  });
+
+  // Value: protects=a virtual read fails when a sibling size changes even if mtime is restored; fails_when=the cached stat compare stops checking size and reuses the snapshot; why_new=empty-file tests also change mtime, so dropping only the size compare would still pass; seam=none; no_claim=sealed empty siblings are already rejected by the ready-output tests
+  it("RF-04 a cached virtual read fails when a sibling size changes but mtime does not", () => {
+    const job = seedJob();
+    const store = openStore(job);
+    const stamp = new Date(1_700_000_000_000);
+    utimesSync(job.files.glb, stamp, stamp);
+    const id = store.virtualLegacyCurrentId();
+    writeFileSync(job.files.glb, Buffer.alloc(0));
+    utimesSync(job.files.glb, stamp, stamp);
+    assert.equal(lstatSync(job.files.glb).mtimeMs, stamp.getTime());
+    assert.equal(lstatSync(job.files.glb).size, 0);
+    assert.throws(() => store.openFile(id, "white_a"), /输出体积非法/);
+  });
+
+  // Value: protects=a hardlinked sibling fails opening a different key on virtual and sealed reads; fails_when=the virtual nlink compare or the sealed serve nlink check is removed; why_new=chmod and size tests leave nlink at 1; seal-time hardlink tests never serve a ready file; seam=none; no_claim=the extra link is only there to raise nlink; its bytes are not the assertion
+  it("RF-04 a hardlinked sibling fails a cached virtual read and a sealed read", () => {
+    const job = seedJob();
+    const store = openStore(job);
+    const id = store.virtualLegacyCurrentId();
+    const link = join(job.root, "sibling-link.bin");
+    linkSync(job.files.glb, link);
+    assert.equal(lstatSync(job.files.glb).nlink, 2);
+    assert.throws(() => store.openFile(id, "white_a"), /读取身份变化/);
+    unlinkSync(link);
+
+    const ready = importG0(store);
+    const sealedGlb = ready.patch.files.find(row => row.key === "glb")!.path;
+    linkSync(sealedGlb, link);
+    assert.equal(lstatSync(sealedGlb).nlink, 2);
+    assert.throws(() => store.openFile(ready.generation_id, "white_a"), /拒绝 hardlink/);
   });
 
   it("RF-04 index is bounded on read and append without damaging current artifacts", () => {
