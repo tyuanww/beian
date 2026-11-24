@@ -46,6 +46,7 @@ from render_contract import (  # noqa: E402
     canonical_sha256,
     material_runtime_from_job,
     persistable_plan_from_bound_job,
+    renderer_face_assets,
     render_plan_for_new_job,
     render_plan_for_resolved_job,
     validate_job_asset_contract,
@@ -98,6 +99,7 @@ READY_MANIFEST_NAME = "generation.json"
 _SHA256 = re.compile(r"^sha256:[0-9a-f]{64}$")
 REQUIRED_STILL_KEYS = ("front_right", "back_left", "glb")
 REQUIRED_CARD_KEYS = ("front_right_card", "back_left_card")
+DEBOSS_ASSET_KEYS = ("deboss_normals", "deboss_face_assets")
 
 
 def _quality_sampling(sampling: Mapping[str, Any] | None) -> dict[str, Any] | None:
@@ -720,7 +722,7 @@ def verify_source_bindings(
     job: dict[str, Any],
     expected_source_sha256: str,
     expected_asset_sha256: Mapping[str, str],
-) -> dict[str, str]:
+) -> dict[str, dict[str, str]]:
     actual_source = _sha256_bytes(raw)
     if actual_source != expected_source_sha256:
         _fail(
@@ -748,7 +750,24 @@ def verify_source_bindings(
                 cause=f"asset_sha_{face}",
                 fix="缺失或篡改的资产在启动前拒绝",
             )
-    return actual_assets
+    return {"assets": actual_assets, **_verify_deboss_asset_bindings(job)}
+
+
+def _verify_deboss_asset_bindings(job: Mapping[str, Any]) -> dict[str, dict[str, str]]:
+    hashes: dict[str, dict[str, str]] = {}
+    for key in DEBOSS_ASSET_KEYS:
+        if key not in job:
+            continue
+        hashes[key] = {}
+        for face, raw in job[key].items():
+            path = Path(raw)
+            digest = _sha256_file(path)
+            # RF-02 checks the filename pattern; bind a full digest for copying
+            # and output verification even when the name uses a digest prefix.
+            if not digest.removeprefix("sha256:").startswith(path.stem.rsplit("-", 1)[-1]):
+                _fail("激凹贴图内容和文件名不一致", cause=f"asset_sha_{key}.{face}")
+            hashes[key][face] = digest
+    return hashes
 
 
 def _check_asset_pixel_budget(path: Path) -> tuple[int, int]:
@@ -797,8 +816,6 @@ def verify_source_sampling(
             width, height = _check_asset_pixel_budget(path)
             total_pixels += width * height
             total_bytes += path.stat().st_size
-            if total_pixels > MAX_SOURCE_PIXELS or total_bytes > MAX_SOURCE_BYTES:
-                _fail("六面源资产总量超过候选预算", cause="source_aggregate_budget")
             if (width < required[0] or height < required[1]
                     or width * height > sampling["maximum_face_pixels"]
                     or _sha256_file(path) != asset_hashes[face]):
@@ -809,6 +826,14 @@ def verify_source_sampling(
                           "target_pixels_per_mm": target, "required_size_px": required,
                           "projected_min_ppm": projection.get("projected_min_ppm"),
                           "projected_max_ppm": projection.get("projected_max_ppm")}
+        for key in DEBOSS_ASSET_KEYS:
+            for raw in job.get(key, {}).values():
+                path = Path(raw)
+                width, height = _check_asset_pixel_budget(path)
+                total_pixels += width * height
+                total_bytes += path.stat().st_size
+        if total_pixels > MAX_SOURCE_PIXELS or total_bytes > MAX_SOURCE_BYTES:
+            _fail("源贴图总量超过候选预算", cause="source_aggregate_budget")
     except (OSError, ValueError, KeyError, TypeError, OverflowError) as error:
         raise RenderGenerationError(
             "源印刷面未达到合同采样要求", cause="source_sampling_quality",
@@ -961,11 +986,8 @@ def assert_candidate_isolated(
     _assert_trusted_ancestors(parent, roots, must_exist=True)
     _assert_trusted_ancestors(dest, roots, must_exist=False)
     reserved = [_source_resolved_path(root)]
-    assets = source_job.get("assets") if isinstance(source_job.get("assets"), Mapping) else {}
-    for face in SEMANTIC_FACES:
-        raw = assets.get(face)
-        if str(raw or "").strip():
-            reserved.append(Path(str(raw)))
+    for key in ("assets", *DEBOSS_ASSET_KEYS):
+        reserved.extend(Path(raw) for raw in source_job.get(key, {}).values())
     outputs = source_job.get("outputs") if isinstance(source_job.get("outputs"), Mapping) else {}
     for raw in outputs.values():
         if str(raw or "").strip():
@@ -1006,8 +1028,8 @@ def apply_plan_to_job(job: dict[str, Any], plan: Mapping[str, Any]) -> None:
 def copy_candidate_assets(
     source_job: Mapping[str, Any],
     candidate_dir: Path,
-    expected_asset_sha256: Mapping[str, str],
-) -> dict[str, str]:
+    asset_hashes: Mapping[str, Mapping[str, str]],
+) -> dict[str, dict[str, str]]:
     """Bind Blender to verified private bytes, not mutable source paths.
 
     Copy and hash the same byte stream; re-read the completed destination so
@@ -1017,41 +1039,47 @@ def copy_candidate_assets(
 
     assets_dir = candidate_dir / "assets"
     assets_dir.mkdir(mode=0o700)
-    copied: dict[str, str] = {}
-    for face in SEMANTIC_FACES:
-        source_path = Path(str(source_job["assets"][face]))
-        before = source_path.lstat()
-        if not _is_reg(before):
-            _fail("候选贴图源不是普通文件", cause=f"asset_snapshot_{face}")
-        if before.st_size > MAX_FILE_BYTES:
-            _fail("候选贴图超过文件预算", cause="file_budget")
-        dest = assets_dir / f"panel_{face}.png"
-        digest = hashlib.sha256()
-        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0)
-        with os.fdopen(os.open(source_path, flags), "rb") as source:
-            opened = os.fstat(source.fileno())
-            if not _is_reg(opened) or (before.st_dev, before.st_ino) != (
-                opened.st_dev, opened.st_ino
-            ):
-                _fail("复制前源贴图身份已变化", cause=f"asset_snapshot_{face}")
-            with dest.open("xb") as target:
-                total = 0
-                while chunk := source.read(1024 * 1024):
-                    _check_deadline()
-                    total += len(chunk)
-                    if total > MAX_FILE_BYTES:
-                        _fail("候选贴图超过文件预算", cause="file_budget")
-                    target.write(chunk)
-                    digest.update(chunk)
-        expected = expected_asset_sha256[face]
-        if "sha256:" + digest.hexdigest() != expected or _sha256_file(dest) != expected:
-            _fail(
-                "候选贴图字节与期望不一致",
-                cause=f"asset_snapshot_{face}",
-                fix="源贴图变化或复制失败，拒绝启动；重新读取源身份后创建新候选",
-            )
-        copied[face] = str(dest)
+    copied: dict[str, dict[str, str]] = {}
+    for key, hashes in asset_hashes.items():
+        copied[key] = {}
+        for face, expected in hashes.items():
+            source_path = Path(source_job[key][face])
+            dest = assets_dir / source_path.name
+            label = face if key == "assets" else f"{key}.{face}"
+            _copy_candidate_asset(source_path, dest, expected, cause=f"asset_snapshot_{label}")
+            copied[key][face] = str(dest)
     return copied
+
+
+def _copy_candidate_asset(source_path: Path, dest: Path, expected: str, *, cause: str) -> None:
+    before = source_path.lstat()
+    if not _is_reg(before):
+        _fail("候选贴图源不是普通文件", cause=cause)
+    if before.st_size > MAX_FILE_BYTES:
+        _fail("候选贴图超过文件预算", cause="file_budget")
+    digest = hashlib.sha256()
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0)
+    with os.fdopen(os.open(source_path, flags), "rb") as source:
+        opened = os.fstat(source.fileno())
+        if not _is_reg(opened) or (before.st_dev, before.st_ino) != (
+            opened.st_dev, opened.st_ino
+        ):
+            _fail("复制前源贴图身份已变化", cause=cause)
+        with dest.open("xb") as target:
+            total = 0
+            while chunk := source.read(1024 * 1024):
+                _check_deadline()
+                total += len(chunk)
+                if total > MAX_FILE_BYTES:
+                    _fail("候选贴图超过文件预算", cause="file_budget")
+                target.write(chunk)
+                digest.update(chunk)
+    if "sha256:" + digest.hexdigest() != expected or _sha256_file(dest) != expected:
+        _fail(
+            "候选贴图字节与期望不一致",
+            cause=cause,
+            fix="源贴图变化或复制失败，拒绝启动；重新读取源身份后创建新候选",
+        )
 
 
 def prepare_candidate_job(
@@ -1060,12 +1088,10 @@ def prepare_candidate_job(
     plan: Mapping[str, Any],
     candidate_dir: Path,
     studio_adjustment: Mapping[str, float] | None,
-    expected_asset_sha256: Mapping[str, str],
+    asset_hashes: Mapping[str, Mapping[str, str]],
 ) -> dict[str, Any]:
     remapped = packaging_pipeline.remap_job_outputs_to_candidate(source_job, candidate_dir)
-    remapped["assets"] = copy_candidate_assets(
-        source_job, candidate_dir, expected_asset_sha256
-    )
+    remapped.update(copy_candidate_assets(source_job, candidate_dir, asset_hashes))
     apply_plan_to_job(remapped, plan)
     if studio_adjustment is not None:
         remapped["studio_adjustment"] = dict(studio_adjustment)
@@ -1296,11 +1322,11 @@ def _result_base(
 
 def _refresh_source(
     request: Mapping[str, Any],
-) -> tuple[bytes, dict[str, Any], Path, dict[str, Any], dict[str, str], dict[str, Any]]:
+) -> tuple[bytes, dict[str, Any], Path, dict[str, Any], dict[str, dict[str, str]], dict[str, Any]]:
     job_root = request["job_root"]
     raw, parsed, resolved_path = read_source_job(job_root)
     bound = bind_source_job(parsed, job_root, resolved_path)
-    assets = verify_source_bindings(
+    asset_hashes = verify_source_bindings(
         job_root=job_root,
         raw=raw,
         job=bound,
@@ -1312,8 +1338,18 @@ def _refresh_source(
         request["mode"],
         upgrade_profile_id=request.get("upgrade_profile_id"),
     )
-    sampling = verify_source_sampling(bound, plan, assets)
-    return raw, bound, resolved_path, plan, assets, sampling
+    if bound.get("deboss_normals") and (
+        plan["spec"]["geometry"]["family"] != "rectangular_carton_v1"
+        or material_runtime_from_job({"render_spec": plan["spec"]})["still"]["normal"]
+    ):
+        _fail(
+            "当前渲染配置不支持激凹贴图",
+            code="render_generation_unsupported",
+            cause="deboss_profile_incompatible",
+            fix="使用支持激凹的花盒配置，保留原成片",
+        )
+    sampling = verify_source_sampling(bound, plan, asset_hashes["assets"])
+    return raw, bound, resolved_path, plan, asset_hashes, sampling
 
 
 def run_request(payload: Mapping[str, Any]) -> dict[str, Any]:
@@ -1338,7 +1374,7 @@ def _run_request(request: Mapping[str, Any]) -> dict[str, Any]:
     _emit("validate")
     roots = _configured_roots(request["job_root"])
     _assert_trusted_ancestors(request["job_root"], roots, must_exist=True)
-    raw, bound, _resolved_path, plan, assets, sampling = _refresh_source(request)
+    raw, bound, _resolved_path, plan, asset_hashes, sampling = _refresh_source(request)
     source_sha = _sha256_bytes(raw)
     cand_id = candidate_identity_sha(
         source_plan_identity=plan["fingerprint_token"],
@@ -1350,7 +1386,7 @@ def _run_request(request: Mapping[str, Any]) -> dict[str, Any]:
         mode=request["mode"],
         source_sha=source_sha,
         source_plan=plan,
-        asset_sha=assets,
+        asset_sha=asset_hashes["assets"],
         candidate_plan_identity=plan["fingerprint_token"],
         candidate_identity=cand_id,
         studio_adjustment=request["studio_adjustment"],
@@ -1388,7 +1424,7 @@ def _run_request(request: Mapping[str, Any]) -> dict[str, Any]:
         plan=plan,
         candidate_dir=candidate_dir,
         studio_adjustment=request["studio_adjustment"],
-        expected_asset_sha256=assets,
+        asset_hashes=asset_hashes,
     )
     packaging_pipeline.save_json(Path(remapped["resolved_job_path"]), remapped)
     disk_candidate = packaging_pipeline.load_json(Path(remapped["resolved_job_path"]))
@@ -1416,10 +1452,11 @@ def _run_request(request: Mapping[str, Any]) -> dict[str, Any]:
         _fail("启动前源合同身份已变化", cause="source_changed_after_validate")
     if plan_again["fingerprint_token"] != plan["fingerprint_token"]:
         _fail("启动前源计划身份已变化", cause="plan_changed_after_validate")
-    for face in SEMANTIC_FACES:
-        path = Path(str(bound_again["assets"][face]))
-        if _sha256_file(path) != assets[face]:
-            _fail("启动前六面资产身份已变化", cause=f"asset_changed_{face}")
+    for key, hashes in asset_hashes.items():
+        for face, expected in hashes.items():
+            if _sha256_file(Path(bound_again[key][face])) != expected:
+                label = face if key == "assets" else f"{key}.{face}"
+                _fail("启动前源贴图身份已变化", cause=f"asset_changed_{label}")
     _emit("blender")
     check_candidate_disk_budget(candidate_dir, plan, sampling)
     nonce_holder: list[str] = []
@@ -1453,15 +1490,17 @@ def _run_request(request: Mapping[str, Any]) -> dict[str, Any]:
     # acceptance or production_ready.
     glb_path = Path(evidence["glb"]["path"])
     report = compare_glb_artifact_contract(
-        load_glb_artifact(glb_path, max_bytes=MAX_FILE_BYTES), rendered["assets"],
+        load_glb_artifact(glb_path, max_bytes=MAX_FILE_BYTES), renderer_face_assets(rendered),
         rendered["dimensions_mm"], float(rendered["glb_tolerance_mm"]),
         rendered["render"].get("substrate_rgba", [PAPER_ALBEDO_LINEAR]*3 + [1.0]),
         geometry=rendered.get("render_spec", {}).get("geometry"),
         render_identity=rendered,
         material_layers=material_runtime_from_job(rendered),
+        deboss_normals=rendered.get("deboss_normals"),
     )
     if (not report["ok"] or _sha256_file(glb_path) != evidence["glb"]["sha256"]
-            or any(_sha256_file(Path(rendered["assets"][face])) != assets[face] for face in SEMANTIC_FACES)):
+            or any(_sha256_file(Path(rendered[key][face])) != expected
+                   for key, hashes in asset_hashes.items() for face, expected in hashes.items())):
         _fail("候选 GLB 未通过六面和几何校验", cause="runtime_glb_quality",
               fix="保留当前成片，核查实际六面贴图、UV、毫米尺寸和闭合纸芯")
     verify_full_card_contract(remapped, evidence)

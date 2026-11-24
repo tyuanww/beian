@@ -165,6 +165,8 @@ const WRITE_SITES: WriteSite[] = [
   { file: "workers/packaging/structure_v2/artwork.py", code: "os.replace(source, target)", glb: false },
   { file: "workers/packaging/structure_v2/artwork.py", code: "os.replace(previous, target)", glb: false },
   { file: "workers/packaging/structure_v2/confirmation.py", code: "os.replace(temp_name, path)", glb: false },
+  { file: "workers/packaging/structure_v2/deboss.py", code: "(staging / filename).write_bytes(payload)", glb: false },
+  { file: "workers/packaging/structure_v2/deboss.py", code: "os.replace(source, target)", glb: false },
   { file: "workers/packaging/structure_v2/repair.py", code: "os.replace(src, destination / f\"panel_{face}.png\")", glb: false },
   { file: "workers/packaging/structure_v2/resolver.py", code: "os.replace(temp_name, path)", glb: false },
   { file: "workers/packaging/structure_v2/unfolded_print.py", code: "os.replace(temporary, output)", glb: false }, // 展开稿 PDF

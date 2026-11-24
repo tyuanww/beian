@@ -1889,6 +1889,124 @@ def test_proposal_paths_are_cleaned_from_artwork_without_hiding_the_whole_layer(
     assert "withHiddenSemanticItems(semanticItems" in source
 
 
+def test_structure_export_saves_only_a_unique_native_deboss_plate():
+    source = EXPORTER.read_text(encoding="utf-8")
+    script = "\n".join(line for line in source.splitlines() if not line.startswith("#include "))
+    program = "const script = " + json.dumps(script) + r""";
+const vm = require("node:vm");
+
+function run(variant) {
+    const files = {};
+    const stages = [];
+    const config = {
+        source_ai: "source.ai", source_sha256: "a".repeat(64),
+        full_pdf: "full.pdf", print_pdf: "artwork.pdf", structure_json: "structure.json",
+        debug_log: "debug.log", result_json: "result.json", print_layers: ["印刷"],
+        deboss_pdf: "deboss-unique.pdf",
+    };
+    if (variant === "fallback") config.print_layers = ["其他印刷层"];
+    if (variant === "unrequested") delete config.deboss_pdf;
+    if (variant === "invalid-output") config.deboss_pdf = config.print_pdf;
+    if (variant === "existing-output") files[config.deboss_pdf] = "existing";
+
+    const document = {
+        typename: "Document", layers: [], artboards: [{artboardRect: [0, 50, 50, 0]}],
+        saveAs(file, options) {
+            if (file.path === config.deboss_pdf && variant === "save-failure") {
+                files[file.path] = "partial";
+                throw Error("save failed");
+            }
+            files[file.path] = {
+                layers: document.layers.filter(layer => layer.visible).map(layer => layer.name),
+                artboard: options.artboardRange,
+                openFillAndClip: craft.visible && openFill.filled && !openFill.closed && clipping.clipping,
+                stage: stages.at(-1),
+            };
+        },
+        close(mode) { files.closeMode = mode; },
+    };
+    function layer(name, visible = true) {
+        const result = {name, parent: document, typename: "Layer", visible, pageItems: []};
+        document.layers.push(result);
+        return result;
+    }
+    function path(parent, properties = {}) {
+        const result = {
+            parent, layer: parent.layer || parent, typename: "PathItem", filled: true,
+            hidden: false, closed: false,
+            pathPoints: [[2, 2], [2, 4], [4, 4]].map(anchor => ({anchor, leftDirection: anchor, rightDirection: anchor})),
+            ...properties,
+        };
+        parent.pageItems.push(result);
+        return result;
+    }
+    const print = layer(variant === "fallback" ? "图文画稿" : "印刷");
+    const craft = layer(variant === "legacy-alias" ? "击凹" : variant === "ordinary" ? "凹印说明" : "激凹", false);
+    layer("烫金");
+    const group = {parent: craft, layer: craft, typename: "GroupItem", clipped: true, pageItems: []};
+    craft.pageItems.push(group);
+    const openFill = path(group);
+    const clipping = path(group, {clipping: true, filled: false, closed: true});
+    path(print);
+    if (variant === "duplicates") layer("激凹", false);
+    if (variant === "both-aliases") layer("击凹", false);
+    if (variant === "invalid-geometry") openFill.pathPoints[1].anchor = [NaN, 4];
+    if (variant === "hidden-paths") group.hidden = true;
+    if (variant === "unsupported") group.pageItems.push({parent: group, layer: craft, typename: "RasterItem"});
+
+    vm.runInNewContext(script, {
+        app: {open: () => document}, PIPELINE_CONFIG_PATH: "config.json", UserInteractionLevel: {},
+        SaveOptions: {DONOTSAVECHANGES: "discard"}, PDFSaveOptions: function () {},
+        File: function (path) {
+            this.path = path;
+            Object.defineProperty(this, "exists", {get: () => Object.hasOwn(files, path)});
+            Object.defineProperty(this, "length", {get: () => (this.exists ? 128 : -1)});
+            this.remove = () => delete files[path];
+            this.open = () => true;
+            this.read = () => JSON.stringify(config);
+            this.writeln = () => {};
+            this.close = () => {};
+        },
+        applyUnattendedHost: () => ({}), restoreUnattendedArtwork() {},
+        writeJobProgress(config, stage) { stages.push(stage); },
+        writeUtf8(path, content) { files[path] = JSON.parse(content); },
+        prepareUnattendedClose() { files.visibilityBeforeClose = document.layers.map(layer => layer.visible); },
+        restoreUnattendedHost() {},
+    });
+    return files;
+}
+
+const variants = ["primary", "legacy-alias", "fallback", "unrequested", "invalid-output", "existing-output",
+    "ordinary", "duplicates", "both-aliases", "invalid-geometry", "hidden-paths", "unsupported", "save-failure"];
+process.stdout.write(JSON.stringify(Object.fromEntries(variants.map(name => [name, run(name)]))));
+"""
+    completed = subprocess.run(["node"], input=program, check=True, capture_output=True, text=True)
+    outputs = json.loads(completed.stdout)
+    for variant, output in outputs.items():
+        result = output["result.json"]
+        assert result["success"], (variant, result.get("error"))
+        print_layer = "图文画稿" if variant == "fallback" else "印刷"
+        assert output["artwork.pdf"]["layers"] == [print_layer], variant
+        assert output["full.pdf"]["layers"] == [print_layer, "烫金"], variant
+        visibility = [True, False, True] + ([False] if variant in {"duplicates", "both-aliases"} else [])
+        assert output["visibilityBeforeClose"] == visibility, variant
+        assert output["closeMode"] == "discard", variant
+        if variant in {"primary", "legacy-alias", "fallback"}:
+            layer_name = "击凹" if variant == "legacy-alias" else "激凹"
+            assert result["deboss_pdf"] == "deboss-unique.pdf", variant
+            assert output["deboss-unique.pdf"] == {
+                "layers": [layer_name], "artboard": "1", "openFillAndClip": True, "stage": "saving_artwork_pdf",
+            }, variant
+            plate = next(candidate for candidate in result["preview_plate_candidates"] if candidate["name"] == layer_name)
+            assert [path["closed"] for path in plate["preview_paths"]] == [False], variant
+        else:
+            assert "deboss_pdf" not in result, variant
+            if variant == "existing-output":
+                assert output["deboss-unique.pdf"] == "existing"
+            else:
+                assert "deboss-unique.pdf" not in output, variant
+
+
 def test_mixed_dieline_export_preserves_baseline_and_requires_unique_attachment():
     source = EXPORTER.read_text(encoding="utf-8")
     script = CURVE_HELPER.read_text(encoding="utf-8") + "\n" + "\n".join(

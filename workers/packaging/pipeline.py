@@ -62,6 +62,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 from dieline import PT_TO_MM, layout_to_template, parse_knife_pdf, pick_knife_layer  # noqa: E402
 from structure_v2 import (  # noqa: E402
+    ArtworkMappingError,
     ResolutionResult,
     factory_input_hold,
     load_structure,
@@ -71,6 +72,7 @@ from structure_v2 import (  # noqa: E402
     resolve_structure,
     stroke_proposal_clears_face_interiors,
 )
+from structure_v2.deboss import DebossTextures, render_deboss_textures  # noqa: E402
 from render_contract import (  # noqa: E402
     RenderContractError,
     apply_blender_result,
@@ -1232,6 +1234,8 @@ def run_illustrator_structure_export(
     }
     if allow_mixed_dieline and not proposal_layers and not semantic_assignments:
         worker_config.update({key: str(path) for key, path in mixed_paths.items()})
+    deboss_pdf = normalized_dir / f"deboss-{worker_config['attempt_id']}.pdf"
+    worker_config["deboss_pdf"] = str(deboss_pdf)
     save_json(config_path, worker_config)
     timeout_seconds = int(illustrator_config.get("timeout_seconds", 1260))
     process = subprocess.run(
@@ -1284,7 +1288,42 @@ def run_illustrator_structure_export(
     ):
         for key in mixed_paths:
             result.pop(key, None)
+    if result.get("deboss_pdf") != str(deboss_pdf) or not deboss_pdf.is_file():
+        result.pop("deboss_pdf", None)
     return result
+
+
+def _bound_deboss_plate(
+    export: Mapping[str, Any] | None,
+    resolution_path: Path,
+    source_sha256: str,
+    artwork_pdf: Path,
+) -> dict[str, str] | None:
+    plate_dir = resolution_path.parent / "illustrator_semantic"
+    try:
+        if export is not None:
+            name = Path(str(export.get("deboss_pdf") or "")).name
+            proof = None
+        else:
+            previous = load_json(resolution_path)
+            proof = previous.get("deboss_plate") if isinstance(previous, dict) else None
+            if not isinstance(proof, dict) or proof.get("source_sha256") != source_sha256:
+                return None
+            name = proof.get("pdf")
+        if not isinstance(name, str) or not re.fullmatch(r"deboss-[0-9a-f]{32}\.pdf", name):
+            return None
+        plate = plate_dir / name
+        if plate.is_symlink() or not plate.is_file() or plate.resolve().parent != plate_dir:
+            return None
+        binding = {
+            "pdf": name,
+            "source_sha256": source_sha256,
+            "artwork_sha256": file_sha256(artwork_pdf),
+            "pdf_sha256": file_sha256(plate),
+        }
+        return binding if proof is None or proof == binding else None
+    except (OSError, ValueError):
+        return None
 
 
 def _resolve_mixed_dieline(
@@ -1431,6 +1470,9 @@ def preflight_product_v2(
             resolution, structure_sidecar, artwork_pdf = mixed
     resolution_path = project_dir / "structure_resolution.json"
     resolution_payload = resolution.as_dict()
+    deboss_plate = _bound_deboss_plate(illustrator_result, resolution_path, source_sha256, artwork_pdf)
+    if deboss_plate is not None:
+        resolution_payload["deboss_plate"] = deboss_plate
     if mixed is None:
         input_candidates = structure_input_candidates(illustrator_result, source_sha256)
         if input_candidates is not None:
@@ -1474,16 +1516,20 @@ def preflight_product_v2(
     fingerprint_paths = [template_path, artwork_pdf]
     if structure_sidecar is not None:
         fingerprint_paths.append(structure_sidecar)
-    fingerprint = job_fingerprint(
-        source,
-        template_path,
-        {
-            **product,
-            "structure_hash": structure_job["structure_hash"],
-            "render_plan_token": plan["fingerprint_token"],
-        },
-        extra_paths=tuple(fingerprint_paths),
-    )
+    deboss_pdf = None
+    if (
+        deboss_plate is not None
+        and plan["identity"]["render_profile_id"] == "compat-legacy-v0"
+        and plan["spec"]["geometry"]["family"] == "rectangular_carton_v1"
+    ):
+        deboss_pdf = project_dir / "illustrator_semantic" / deboss_plate["pdf"]
+        fingerprint_paths.append(deboss_pdf)
+    fingerprint_inputs = {
+        **product,
+        "structure_hash": structure_job["structure_hash"],
+        "render_plan_token": plan["fingerprint_token"],
+    }
+    fingerprint = job_fingerprint(source, template_path, fingerprint_inputs, extra_paths=tuple(fingerprint_paths))
     if previous is not None and _cached_v2_result_usable(
         previous,
         fingerprint,
@@ -1501,18 +1547,31 @@ def preflight_product_v2(
         return previous
 
     sampling_report: dict[str, Any] = {}
+    sampling = {
+        "raster_width_px": int(plan["sampling"]["legacy_raster_width_px"]),
+        "minimum_face_pixels_per_mm": float(plan["sampling"]["minimum_face_pixels_per_mm"]),
+        "max_raster_pixels": int(plan["sampling"]["maximum_face_pixels"]),
+        "sampling_strategy": str(plan["sampling"].get("strategy") or "minimum-floor-v1"),
+        "face_target_pixels_per_mm": plan["sampling"].get("per_face_target_pixels_per_mm"),
+        "projection": plan.get("projection"),
+    }
     face_sizes = render_face_assets(
         artwork_pdf,
         structure_job,
         assets_dir,
-        raster_width_px=int(plan["sampling"]["legacy_raster_width_px"]),
-        minimum_face_pixels_per_mm=float(plan["sampling"]["minimum_face_pixels_per_mm"]),
-        max_raster_pixels=int(plan["sampling"]["maximum_face_pixels"]),
-        sampling_strategy=str(plan["sampling"].get("strategy") or "minimum-floor-v1"),
-        face_target_pixels_per_mm=plan["sampling"].get("per_face_target_pixels_per_mm"),
-        projection=plan.get("projection"),
         sampling_report=sampling_report,
+        **sampling,
     )
+    deboss = DebossTextures({}, {})
+    if deboss_pdf is not None:
+        try:
+            deboss = render_deboss_textures(deboss_pdf, structure_job, assets_dir, **sampling)
+        except (ArtworkMappingError, OSError) as error:
+            print(f"{code} 激凹工艺板跳过：{error}", file=sys.stderr, flush=True)
+            resolution_payload.pop("deboss_plate")
+            save_json(resolution_path, resolution_payload)
+            fingerprint_paths.remove(deboss_pdf)
+            fingerprint = job_fingerprint(source, template_path, fingerprint_inputs, extra_paths=tuple(fingerprint_paths))
     reader = PdfReader(str(artwork_pdf))
     media = reader.pages[0].mediabox
     page_size = [float(media.width), float(media.height)]
@@ -1564,6 +1623,10 @@ def preflight_product_v2(
         },
     }
     resolved_path = project_dir / "resolved_job.json"
+    if deboss.normals:
+        resolved["deboss_normals"] = deboss.normals
+    if deboss.face_assets:
+        resolved["deboss_face_assets"] = deboss.face_assets
     resolved["resolved_job_path"] = str(resolved_path)
     _apply_render_plan(resolved, plan)
     save_json(resolved_path, resolved)

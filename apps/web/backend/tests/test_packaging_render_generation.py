@@ -699,6 +699,27 @@ def make_spec_source(tmp_path: Path) -> tuple[object, dict, Path]:
     return pipeline, job, root
 
 
+def add_deboss_assets(job: dict, *, composite: bool = True) -> None:
+    asset_dir = Path(job["assets"]["front"]).parent
+    normal = asset_dir / "normal.png"
+    image = Image.new("RGB", (12, 8), (128, 128, 255))
+    image.paste((166, 128, 248), (4, 2, 8, 6))
+    image.save(normal)
+    digest = sha256_file(normal).removeprefix("sha256:")
+    normal = normal.rename(asset_dir / f"normal_front-{digest}.png")
+    job["deboss_normals"] = {"front": str(normal)}
+    if composite:
+        path = asset_dir / "composite.png"
+        with Image.open(job["assets"]["front"]) as print_face:
+            image = print_face.convert("RGBA")
+            image.paste((230, 231, 229, 255), (4, 2, 8, 6))
+            image.save(path)
+        digest = sha256_file(path).removeprefix("sha256:")
+        path = path.rename(asset_dir / f"deboss_face_front-{digest[:40]}.png")
+        job["deboss_face_assets"] = {"front": str(path)}
+    Path(job["resolved_job_path"]).write_text(json.dumps(job), encoding="utf-8")
+
+
 def request_payload(job_root: Path, **overrides) -> dict:
     payload = {
         "schema": "packaging-render-generation-request/1",
@@ -807,6 +828,51 @@ def _bind_experimental_gloss(job: dict) -> dict:
     job.update(plan["identity"])
     Path(job["resolved_job_path"]).write_text(json.dumps(job), encoding="utf-8")
     return job
+
+
+@pytest.mark.parametrize("damage", [None, "missing_normal", "original_albedo"])
+def test_candidate_glb_requires_deboss_normal_and_effective_albedo(tmp_path, monkeypatch, damage):
+    from test_packaging_glb_verify import _runtime_artifact, _write_artifact, glb_verify
+    from test_packaging_render_materials import _append_view
+
+    gen = generation_module()
+    _pipeline, job, root = make_spec_source(tmp_path)
+    add_deboss_assets(job)
+    before = inventory(root)
+    module = glb_verify()
+    assets = dict(job["assets"])
+    if damage != "original_albedo":
+        assets.update(job["deboss_face_assets"])
+    artifact, _assets = _runtime_artifact(
+        module, tmp_path, expected_assets=assets, dimensions=job["dimensions_mm"],
+        substrate=job["render"]["substrate_rgba"],
+    )
+    document = artifact.document
+    front = next(material for material in document["materials"] if material["name"] == "MAT_front")
+    albedo_index = front["pbrMetallicRoughness"]["baseColorTexture"]["index"]
+    document["images"][document["textures"][albedo_index]["source"]]["name"] = Path(assets["front"]).stem
+    if damage != "missing_normal":
+        normal = Path(job["deboss_normals"]["front"]).read_bytes()
+        artifact, buffer_view = _append_view(module, artifact, normal)
+        document["images"].append({"bufferView": buffer_view, "mimeType": "image/png"})
+        front["normalTexture"] = {"index": len(document["textures"])}
+        document["textures"].append({"source": len(document["images"]) - 1})
+    glb = _write_artifact(module, tmp_path, artifact).read_bytes()
+    seen = fake_blender(gen, monkeypatch, corrupt_glb=glb)
+    candidate = tmp_path / "candidate"
+    payload = request_payload(root, action="render-candidate", candidate_dir=str(candidate),
+                              blender_executable=str(dummy_blender(tmp_path / "fake-blender")))
+    if damage is None:
+        result = gen.run_request(payload)
+        assert result["artifact_checks"]["glb"] == "passed"
+        assert Path(result["outputs"]["glb"]["path"]).read_bytes() == glb
+    else:
+        with pytest.raises(gen.RenderGenerationError) as raised:
+            gen.run_request(payload)
+        assert raised.value.cause == "runtime_glb_quality"
+    for key in ("deboss_normals", "deboss_face_assets"):
+        assert Path(seen["snapshot"][key]["front"]).parent == candidate / "assets"
+    assert inventory(root) == before
 
 
 @pytest.mark.parametrize("damage", ["clearcoat", "normal_scale"])
@@ -1233,6 +1299,49 @@ def test_prepare_writes_only_candidate_and_keeps_source_inventory(tmp_path: Path
     assert inventory(root) == before
     source_disk = json.loads((root / "resolved_job.json").read_text(encoding="utf-8"))
     assert source_disk["outputs"]["front_right"] == job["outputs"]["front_right"]
+
+
+@pytest.mark.parametrize("composite", [False, True])
+def test_prepare_keeps_deboss_assets_in_private_candidate(tmp_path: Path, composite: bool):
+    gen = generation_module()
+    _pipeline, job, root = make_spec_source(tmp_path)
+    add_deboss_assets(job, composite=composite)
+    candidate = tmp_path / "candidate"
+    before = inventory(root)
+
+    result = gen.run_request(request_payload(root, action="prepare", candidate_dir=str(candidate)))
+
+    assert result["execution"]["status"] == "prepared"
+    disk = json.loads((candidate / "resolved_job.json").read_text(encoding="utf-8"))
+    for key in ("deboss_normals", "deboss_face_assets"):
+        if key not in job:
+            assert key not in disk
+            continue
+        assert disk[key].keys() == {"front"}
+        source = Path(job[key]["front"])
+        copied = Path(disk[key]["front"])
+        assert copied == candidate.resolve() / "assets" / source.name
+        assert copied.read_bytes() == source.read_bytes()
+        assert not copied.samefile(source)
+        assert copied.stat().st_nlink == 1
+    assert inventory(root) == before
+
+
+def test_prepare_rejects_deboss_with_shared_micro_normal(tmp_path):
+    gen = generation_module()
+    _pipeline, job, root = make_spec_source(tmp_path)
+    _bind_experimental_gloss(job)
+    add_deboss_assets(job)
+    before = inventory(root)
+    candidate = tmp_path / "candidate"
+
+    with pytest.raises(gen.RenderGenerationError) as raised:
+        gen.run_request(request_payload(root, action="prepare", candidate_dir=str(candidate)))
+
+    assert raised.value.code == "render_generation_unsupported"
+    assert raised.value.cause == "deboss_profile_incompatible"
+    assert not candidate.exists()
+    assert inventory(root) == before
 
 
 def test_existing_candidate_and_source_overlap_fail_closed(tmp_path: Path):
@@ -2212,7 +2321,7 @@ def test_asset_copy_failure_retains_only_private_partial_files(tmp_path, monkeyp
         monkeypatch.setattr(gen, "_sha256_file", corrupt_completed_destination)
     error_type = OSError if failure == "read_error" else gen.RenderGenerationError
     with pytest.raises(error_type):
-        gen.copy_candidate_assets({"assets": assets}, candidate, expected)
+        gen.copy_candidate_assets({"assets": assets}, candidate, {"assets": expected})
     assert complete_tree(source) == before
     assert (candidate / "assets").is_dir()
     assert not (candidate / "resolved_job.json").exists()

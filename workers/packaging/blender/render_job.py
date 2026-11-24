@@ -34,6 +34,7 @@ from glb_verify import (
 from render_contract import (
     blender_material_plan,
     material_runtime_from_job,
+    renderer_face_assets,
     renderer_geometry_config,
     substrate_micro_normal_png_bytes,
 )
@@ -149,13 +150,22 @@ def _load_micro_normal_image(job, plan):
     payload = substrate_micro_normal_png_bytes(micro)
     if not path.is_file() or path.read_bytes() != payload:
         path.write_bytes(payload)
+    return _load_normal_image(path)
+
+
+def _load_normal_image(path):
     image = bpy.data.images.load(str(path), check_existing=False)
     image.pack()
     _set_image_colorspace(image, "Non-Color")
     return image
 
 
-def make_material(name, image_path, plan, *, normal_image=None):
+def _load_deboss_normal_image(job, face):
+    path = job.get("deboss_normals", {}).get(face)
+    return _load_normal_image(path) if path else None
+
+
+def make_material(name, image_path, plan, *, normal_image=None, deboss_image=None):
     material = bpy.data.materials.new(name)
     material.use_nodes = True
     nodes = material.node_tree.nodes
@@ -183,7 +193,11 @@ def make_material(name, image_path, plan, *, normal_image=None):
     links.new(_multiply_paper_albedo(nodes, links, texture.outputs["Color"]), shader.inputs["Base Color"])
     links.new(texture.outputs["Alpha"], alpha_mask.inputs[0])
     links.new(alpha_mask.outputs[0], shader.inputs["Alpha"])
-    if plan["use_normal"]:
+    if deboss_image is not None:
+        if plan["use_normal"]:
+            raise RuntimeError("deboss requires a carton profile without a shared micro-normal")
+        _connect_normal(nodes, links, shader, deboss_image, 1.0)
+    elif plan["use_normal"]:
         if normal_image is None:
             raise RuntimeError("declared micro-normal is missing from the shared image")
         _connect_normal(nodes, links, shader, normal_image, plan["normal_strength"])
@@ -250,7 +264,7 @@ def add_box(job):
     width = float(dims["width"])
     depth = float(dims["depth"])
     height = float(dims["height"])
-    assets = {name: Path(path) for name, path in job["assets"].items()}
+    assets = renderer_face_assets(job)
     layers = material_runtime_from_job(job)
     plan = blender_material_plan(layers)
     if (
@@ -262,7 +276,11 @@ def add_box(job):
         raise RuntimeError("resolved substrate_rgba must be an opaque four-channel colour in the 0-1 range")
     normal_image = _load_micro_normal_image(job, plan)
     mats = {
-        name: make_material(f"MAT_{name}", path, plan, normal_image=normal_image)
+        name: make_material(
+            f"MAT_{name}", path, plan,
+            normal_image=normal_image,
+            deboss_image=_load_deboss_normal_image(job, name),
+        )
         for name, path in assets.items()
     }
     root = bpy.data.objects.new(f"{job['code']}_Model_Root", None)
@@ -327,8 +345,13 @@ def build_rectangular_carton(job, geometry):
     bpy.context.collection.objects.link(root)
     core = _physical_mesh(f"{job['code']}_Box_Core", model["core"], make_core_material(plan, normal_image=normal_image))
     objects = [core]
+    assets = renderer_face_assets(job)
     for face, mesh in model["surfaces"].items():
-        material = make_material(f"MAT_{face}", job["assets"][face], plan, normal_image=normal_image)
+        material = make_material(
+            f"MAT_{face}", assets[face], plan,
+            normal_image=normal_image,
+            deboss_image=_load_deboss_normal_image(job, face),
+        )
         objects.append(_physical_mesh(face.title(), mesh, material))
     for obj in [root, *objects]:
         obj["render_family"] = geometry["family"]
@@ -822,6 +845,7 @@ def export_model(job, root, model_objects):
         export_yup=True,
         export_texcoords=True,
         export_normals=True,
+        export_tangents=bool(job.get("deboss_normals")),
         export_materials="EXPORT",
         export_extras=job.get("render_spec", {}).get("geometry", {}).get("closure_detail") == SHELL_MODEL,
     )
@@ -840,13 +864,15 @@ def verify_glb(job):
         [PAPER_ALBEDO_LINEAR, PAPER_ALBEDO_LINEAR, PAPER_ALBEDO_LINEAR, 1.0],
     )
     pbr = layers if layers["still"]["coat"] or layers["still"]["normal"] or layers["glb_export"]["clearcoat"] or layers["glb_export"]["normal"] else None
+    assets = renderer_face_assets(job)
     try:
         artifact = load_glb_artifact(job["outputs"]["glb"])
         material_report = compare_glb_material_contract(
             artifact,
-            job["assets"],
+            assets,
             substrate_rgba,
             pbr=pbr,
+            deboss_normals=job.get("deboss_normals"),
         )
     except (OSError, ValueError, json.JSONDecodeError) as error:
         raise RuntimeError(f"GLB verification failed: cannot inspect exported material contract: {error}") from error
@@ -905,7 +931,7 @@ def verify_glb(job):
             for material in obj.data.materials
             if material
         ]
-    binding_report = compare_glb_texture_bindings(bindings, job["assets"])
+    binding_report = compare_glb_texture_bindings(bindings, assets)
     if not binding_report["ok"]:
         raise RuntimeError(
             "GLB verification failed: semantic artwork binding mismatch="

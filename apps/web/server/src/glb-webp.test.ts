@@ -40,6 +40,32 @@ describe("glb webp post-step", () => {
     assert.deepEqual(again.status === "skipped" && again.reason, "already_webp");
   });
 
+  it("compresses the print texture while preserving the exact normal map, even when shared", async () => {
+    const { NodeIO } = await import("@gltf-transform/core");
+    const { ALL_EXTENSIONS } = await import("@gltf-transform/extensions");
+    const sharp = (await import("sharp")).default;
+    const io = new NodeIO().registerExtensions(ALL_EXTENSIONS);
+    const doc = await io.readBinary(await buildPngTexturedGlbForProbe(256));
+    const [material] = doc.getRoot().listMaterials();
+    const normals = await sharp(Buffer.from([112, 128, 254, 144, 127, 254]), {
+      raw: { width: 2, height: 1, channels: 3 },
+    }).png().toBuffer();
+    const normalTexture = doc.createTexture("relief").setImage(normals).setMimeType("image/png");
+    material.setNormalTexture(normalTexture).setEmissiveTexture(normalTexture);
+    const path = join(dir, "relief.glb");
+    writeFileSync(path, await io.writeBinary(doc));
+
+    const result = await compressGlbTexturesToWebp(path);
+
+    assert.equal(result.status, "converted");
+    const compressed = await io.readBinary(readFileSync(path));
+    const [output] = compressed.getRoot().listMaterials();
+    assert.equal(output.getBaseColorTexture()?.getMimeType(), "image/webp");
+    assert.equal(output.getNormalTexture()?.getMimeType(), "image/png");
+    assert.deepEqual(Buffer.from(output.getNormalTexture()!.getImage()!), normals);
+    assert.equal(output.getEmissiveTexture(), output.getNormalTexture());
+  });
+
   it("keeps the original PNG GLB byte-for-byte when conversion throws", async () => {
     const path = join(dir, "b.glb");
     const original = Buffer.from(await buildPngTexturedGlbForProbe(32));

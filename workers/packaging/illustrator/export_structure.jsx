@@ -146,9 +146,13 @@ function isFactoryKnifeLayerName(name) {
     return name === "刀版" || name === "刀线";
 }
 
+function isDebossPlateLayerName(name) {
+    return name === "激凹" || name === "击凹";
+}
+
 function isProcessPlateLayerName(name) {
     var n = String(name || "");
-    return n.indexOf("击凹") >= 0 || n.indexOf("击凸") >= 0 || n.indexOf("哑油") >= 0 ||
+    return n.indexOf("激凹") >= 0 || n.indexOf("击凹") >= 0 || n.indexOf("击凸") >= 0 || n.indexOf("哑油") >= 0 ||
         n.indexOf("垫白") >= 0 || n.indexOf("丝印") >= 0 || n.indexOf("注塑") >= 0 ||
         n.indexOf("漏银") >= 0 || n.indexOf("烫") >= 0;
 }
@@ -1593,6 +1597,99 @@ function exportMixedDieline(documentRef, config, result, artboard) {
     }
 }
 
+function hasReliableDebossPlate(layer, artboard) {
+    if (layer.layers && layer.layers.length > 0) {
+        return false;
+    }
+    var candidate = {};
+    var budget = {paths: 0, points: 0};
+    var itemCount = 0;
+    var hasFill = false;
+    function collect(items, depth) {
+        if (!items || depth > 32 || items.length > MAX_PROPOSAL_PREVIEW_PATHS - itemCount) {
+            return false;
+        }
+        for (var index = 0; index < items.length; index += 1) {
+            itemCount += 1;
+            if (itemCount > MAX_PROPOSAL_PREVIEW_PATHS) {
+                return false;
+            }
+            var item = items[index];
+            if (item.hidden || item.opacity === 0) {
+                continue;
+            }
+            var type = inventoryItemType(item);
+            if (type === "GroupItem" || type === "CompoundPathItem") {
+                var children = type === "GroupItem" ? item.pageItems : item.pathItems;
+                if (!collect(children, depth + 1)) {
+                    return false;
+                }
+            } else if (type !== "PathItem") {
+                return false;
+            } else if (!item.clipping && !item.guides && (item.filled || item.stroked)) {
+                hasFill = hasFill || item.filled === true;
+                appendProposalPreview(candidate, item, artboard[0], artboard[1], budget);
+                if (candidate.preview_truncated) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+    return collect(layer.pageItems, 0) && hasFill && budget.paths > 0;
+}
+
+function exportDebossPlate(documentRef, config, result, artboard) {
+    var path = config.deboss_pdf;
+    if (typeof path !== "string" || !/\.pdf$/i.test(path)) {
+        return;
+    }
+    var output = null;
+    var saveStarted = false;
+    try {
+        var layer = null;
+        for (var index = 0; index < documentRef.layers.length; index += 1) {
+            var current = documentRef.layers[index];
+            if (isDebossPlateLayerName(current.name)) {
+                if (layer !== null) {
+                    return;
+                }
+                layer = current;
+            }
+        }
+        if (layer === null || !hasReliableDebossPlate(layer, artboard)) {
+            return;
+        }
+        output = new File(path);
+        if (output.exists) {
+            return;
+        }
+        withConfiguredPrintLayers(documentRef, [layer.name], function () {
+            writeJobProgress(config, "saving_artwork_pdf");
+            saveStarted = true;
+            // Native save preserves implicit fill closure and clipping groups.
+            savePdf(documentRef, path);
+        });
+        if (!output.exists || !(output.length > 0)) {
+            throw new Error("Deboss plate PDF was not written");
+        }
+        writeJobProgress(config, "writing_result");
+        result.deboss_pdf = path;
+    } catch (error) {
+        if (saveStarted) {
+            try {
+                if (output.exists && !output.remove()) {
+                    appendUtf8(config.debug_log, "Could not remove partial deboss plate PDF");
+                }
+                writeJobProgress(config, "writing_result");
+            } catch (cleanupError) {
+                appendUtf8(config.debug_log, "Deboss plate cleanup failed: " + cleanupError.message);
+            }
+        }
+        appendUtf8(config.debug_log, "Optional deboss plate export skipped: " + error.message);
+    }
+}
+
 var configPath = PIPELINE_CONFIG_PATH;
 var config = eval("(" + readUtf8(configPath) + ")");
 var debugPath = config.debug_log;
@@ -1851,6 +1948,7 @@ try {
     if (!hasExplicitProposalLayers && explicitRecords.length === 0 && result.semantic_edge_count === 0) {
         exportMixedDieline(documentRef, config, result, artboard);
     }
+    exportDebossPlate(documentRef, config, result, artboard);
     result.success = true;
     commitResult();
 } catch (error) {

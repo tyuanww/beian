@@ -25,6 +25,8 @@
 
 ## 成片与导出补充
 
+默认花盒用独立激凹工艺板和印刷面的同一仿射变换生成局部法线。PNG 和 GLB 以同一凹痕贴图表现受光。凹痕覆盖未印刷的纸面时，渲染在该区域补入纸底，六面读字贴图沿用原印刷 PDF。凹痕为打样预览，工艺板只提供范围。工艺板无法解析或采样时，打样沿普通印刷流程完成并记录工艺错误。
+
 打样台和打样单主区白底深字（深色主题也是）；GLB 中性环境；每张图右上角下载。有 `white_a_ground` / `white_b_ground` 的新单走 grounded 成片：canvas 铺 `rgb(228,228,232)` 再 multiply 地面、叠产品，预览和下载同一合成器；正面大约 480px 的 5:6 主图；页头藏「下载 PPT」，灯光收到「调灯」后面；地面坏了藏原图和下载。GroundedShot 第一屏先读 `white_*_card`（Blender 后最长边 1440），解码成功的 full 原位替换 canvas 源；卡 415/失败回退全图，full 失败保留卡图并提示重新打开此单。`*_card` 不能当产品静帧，也不能当 `*_ground`。`*_ground` 不能当产品静帧。Blender 先出产品 RGBA，再单独跑地面 pass（EEVEE 阴影 + 接触阴影，地面 albedo 0.91），地面失败不挡产品图；重试先 `unlinkSameGenerationStills`（含地面和核对卡）。没有地面图的旧单仍是三栏白底、浅底+内描边，页头「下载 PPT」（没写成仍显示，点了出「PPT 没写成，白底仍可下」）。成片不提供 PDF 下载入口（独立净版展开见下文）；点下载底部提示不挡操作；GLB 全屏居中；截图时下载钮藏起来；全屏被拒写「全屏打不开」。打样单下面印刷面读字。网页把产品叠到可调白底上，所以产品和背景能分开辨认、分开调光；GLB 本来就只导出盒身、环境灯另算。产品灯光调静帧产品层和 GLB 曝光，背景灯光调白底/地面和 GLB 底色，下载跟当前灯光走。原图是同页灯箱，不是另开未调光 PNG。打样中和打样失败可重试，先确认当前 worker 已退出；仍运行时只按既有安全取消合同处理，不能用重试绕过 Illustrator 禁杀阶段，无法安全退出就 409，不必重传。读字只给 `read_*`，对应 `assets/panel_{face}.png`，走现有 `canvasZoom.ts` 1–6×；白底仍只给 `front_right` / `back_left`，不要用 GLB 或 3/4 白底静帧读小字。详情 `publicMockup` / `fileOf` 才按磁盘补印刷面，列表 `publicMockupSummary` 不扫盘。打样 PPT 先用两张白底写 OOXML，不依赖 Node；写不出才试演示文稿运行时。缺 PPT 不要把整单判失败；内部仍用两张白底合成 PDF（页底先铺白；pymupdf 写不出且还没落盘才用已装 Pillow，不要盖掉已写成的文件，不要新装包）。磁盘上的产品 PNG 要重新打样才会变；页上灯光立刻作用。
 
 ### GLB 查看器显示
@@ -45,7 +47,7 @@
 
 ## GLB 贴图 WebP 与 `texture_format`
 
-- 旧管线（`runPackaging` → `finishMockup`）每次新生成的打样 GLB，在登记文件前做一次后处理：用 `@gltf-transform/core` + `@gltf-transform/functions`（`textureCompress`，编码器为已有 `sharp`）把贴图转为 `EXT_texture_webp`，quality 90。实现在 `apps/web/server/src/glbWebp.ts`。
+- 旧管线（`runPackaging` → `finishMockup`）在登记新生成的打样 GLB 前，用 `@gltf-transform` 和 `sharp` 把可压缩贴图转为 `EXT_texture_webp`，quality 90。用作法线的贴图保留原始格式和字节，同一贴图也用在其他槽位时同样保留。实现在 `apps/web/server/src/glbWebp.ts`。
 - 转换失败、无贴图、已是 WebP 或结果不比原文件小时，保留原 PNG GLB 原样不动，只写服务日志（`glb webp failed, keep original PNG GLB` / `glb webp skipped`），打样照常成功。成功时先写同目录临时文件（`.<name>.glb.webp-<pid>-<ms>.tmp`），复核 `extensionsUsed`，再把临时文件完整读回、核对结构计数与原文件一致，不一致记 `output_structure_mismatch` 并保留原文件，全部通过才原子改名替换。同一服务进程内压缩串行执行，一次只跑一个 GLB，限制解码内存峰值；旧管线调用不设等锁上限和替换前复查（不传 `lockWaitMs` / `beforeCommit`）。服务启动时清理 `DATA_DIR/mockups` 下被中断压缩遗留、名字完全匹配且超过 10 分钟的临时文件（不跟随符号链接），失败只记日志。
 - 不在原位转换旧文件；旧文件只走下面的 WebP 旁路，原件不动。
 

@@ -1,5 +1,5 @@
 /**
- * 新生成的打样 GLB 后处理：把贴图转成 EXT_texture_webp（quality 90）。
+ * 新生成的打样 GLB 后处理：压缩印刷等贴图，保留原法线像素。
  *
  * 纯 JS（@gltf-transform）+ 已有的 sharp。任何失败都保留原 PNG GLB，
  * 只记日志，绝不让打样失败。只处理本次新生成的文件，不回头转换旧文件。
@@ -93,7 +93,7 @@ export async function convertGlbBytesToWebp(
   quality = GLB_WEBP_QUALITY,
   encoderOverride?: unknown,
 ): Promise<{ bytes: Uint8Array; textures: number }> {
-  const [{ NodeIO }, { ALL_EXTENSIONS }, { textureCompress }, sharpMod] = await Promise.all([
+  const [{ NodeIO }, { ALL_EXTENSIONS, EXTTextureWebP }, { compressTexture, listTextureSlots }, sharpMod] = await Promise.all([
     import("@gltf-transform/core"),
     import("@gltf-transform/extensions"),
     import("@gltf-transform/functions"),
@@ -101,11 +101,23 @@ export async function convertGlbBytesToWebp(
   ]);
   const io = new NodeIO().registerExtensions(ALL_EXTENSIONS);
   const doc = await io.readBinary(input);
-  const textures = doc.getRoot().listTextures().length;
-  if (textures === 0) return { bytes: input, textures: 0 };
-  await doc.transform(textureCompress({ encoder: (encoderOverride ?? sharpMod.default) as typeof sharpMod.default, targetFormat: "webp", quality }));
+  const textures = doc.getRoot().listTextures();
+  const compressible = textures.filter((texture) =>
+    /^image\/(jpeg|png|webp|avif)$/.test(texture.getMimeType())
+    && !listTextureSlots(texture).some((slot) => /normalTexture$/i.test(slot)),
+  );
+  if (compressible.length === 0) return { bytes: input, textures: textures.length };
+  await Promise.all(compressible.map((texture) => compressTexture(texture, {
+    encoder: (encoderOverride ?? sharpMod.default) as typeof sharpMod.default,
+    targetFormat: "webp",
+    quality,
+  })));
+  doc.createExtension(EXTTextureWebP).setRequired(true);
+  if (!textures.some((texture) => texture.getMimeType() === "image/avif")) {
+    doc.getRoot().listExtensionsUsed().find((ext) => ext.extensionName === "EXT_texture_avif")?.dispose();
+  }
   const bytes = await io.writeBinary(doc);
-  return { bytes, textures };
+  return { bytes, textures: textures.length };
 }
 
 type GlbStructure = { meshes: number; primitives: number; materials: number; textures: number; images: number };
