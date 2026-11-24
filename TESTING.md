@@ -9,12 +9,12 @@
 - 解释/只读诊断：核实必要证据即可；需要复现时先确认不会触发未授权的外部调用或数据写入。
 - 纯文档/规则调整：检查 diff、引用和规则一致性，运行 `git diff --check`；不启动产品、不运行业务全量测试。
 - 局部代码修改：覆盖受影响行为及失败路径，运行相关测试；类型/构建变化检查对应 workspace，交互变化选择相关 E2E。已有有效覆盖可复用，不为实现细节机械补测试。
-- 跨模块合同、公共基础设施或无法可靠界定影响范围的修改：扩大到相关完整测试集；全项目影响或 `/ship` 时运行完整 L0。验证通过且代码未再改时不重复运行；新增修改、失败或未解决风险才补验。
-- `/ship` 保留完整 L0、UI build、`test:quality` 和 `quality` 门禁；普通任务按需验证不构成发布豁免。环境缺失时报告未验证项及影响，不擅自安装生产依赖或拿合成结果代替真实验收。
+- 跨模块合同、公共基础设施或无法可靠界定影响范围的修改：扩大到相关完整测试集。全项目影响或进入发版准备时运行完整 L0。验证通过且代码未再改时不重复运行；新增修改、失败或未解决风险才补验。
+- 发版准备须通过完整 L0、UI build、`test:quality` 和 `quality`。环境缺失时报告未验证项及影响，不擅自安装生产依赖或拿合成结果代替真实验收。
 
 三层。`npm test` 只等于 L0。不要在杭州跑单测。不要单测打外网、OCR、Blender、Illustrator COM。
 
-- L0 单测（Mac，`/ship` 必绿）：仓库根目录 `npm test`。复杂度工具链独立运行，不把 Knip 的 Node 版本要求泄漏到产品 `Node >=20` 合同；`/ship` 还必须在 Node 20.19+ 或 22.12+ 下执行 `npm run test:quality` 和 `npm run quality`。
+- L0 单测在 Mac 的仓库根目录运行 `npm test`。复杂度工具链独立运行，产品仍支持 `Node >=20`。发版准备在 Node 20.19+ 或 22.12+ 下执行 `npm run test:quality` 和 `npm run quality`。
   - 服务端：`npm run test -w beian-server`（`node:test`，`apps/web/server/src/*.test.ts`；`windows-release-script.test.ts` 另锁离线依赖交接的停服前 staging/换位/恢复顺序与 `installed` 指纹子命令，并锁 `export-one-structure.ps1` 不停 8787、层名用码点、透传 `--out-dir` / `--proposal-layers`，且不把 `--dry-run` 传给 Python）
   - 界面：`npm run test -w beian-ui`（`node:test`，`src/**/*.test.ts` 自动发现；纯函数，不引入 RTL）
   - 对照 worker：`cd apps/web/backend && .venv/bin/python -m pytest -q`（CLI 契约 + 对照/打样单测，含 `test_export_one_structure.py` 哈希选稿 / payload / dry-run，不启动 Illustrator COM。没有 FastAPI 测试）
@@ -84,7 +84,7 @@ Q06.6 A 的证据分层见 [runtime 收口补记](docs/designs/packaging-quality
 npm run verify -- docs
 npm run verify -- python
 npm run verify -- quality
-# 跨域修改或明确进入 ship 时：
+# 影响全项目或进入发版准备时：
 npm run verify -- full
 ```
 

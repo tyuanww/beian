@@ -2,7 +2,11 @@
 
 > **这是预发/演示环境，不是生产，也不属于 [发布合同](contracts/release.md)。** 它的 health、版本和功能表现都不能作为生产发版证据；生产只认杭州 Windows `beian-server-8787` 与 `hangzhou-release` 的可信链。
 
-## 现状（2026-10-10）
+## 当前状态
+
+`beian-wsl.service` 已停止并禁用自启。代码和数据保留在 `/opt/beian` 与 `/srv/beian-data`。下面是原有配置和维护步骤。获得明确的重新启用授权后，再执行会启动服务的步骤。待处理事项见 [TODOS 的 F08](../TODOS.md)。
+
+## 停用前配置（2026-10-10）
 
 | 项 | 值 |
 |---|---|

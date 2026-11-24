@@ -139,7 +139,7 @@ A/B/C/D 的唯一交付矩阵见 §10；§3–7 与 §9 是该矩阵引用的详
 
 本方案采用：per-action capability、同路由 generation 查询、旧单全资源虚拟身份、保留 16 条有界创建幂等、不扩大 viewer 写权限、upgrade 暂禁用。它们是待实施合同，不是已经修改的产品行为。
 
-剩余前置工作按 [RF-03 收口台账](packaging-quality-rf03-runtime-closeout.md) 逐项关闭；生产注册、Windows 实机验证、基线批准、真实稿 L2/UAT、提交/ship/部署各保留自身授权与证据门。不要为了让 RF-04 按钮变绿而删掉这些门。
+剩余前置工作按 [RF-03 收口台账](packaging-quality-rf03-runtime-closeout.md) 逐项关闭。生产注册、Windows 实机验证、基线批准、真实稿 L2 和 UAT 分别核对证据。提交、创建 PR、合并和部署按 [项目授权规则](../../AGENTS.md#发布与合并) 执行。不要为了让 RF-04 按钮变绿而删掉这些门。
 
 实现集中在既有深模块：`renderGenerations.ts` 管历史/身份/文件解析，`jobs.ts` 管 admission、幂等、队列、CAS 和唯一写者，现有 mockup HTTP 路由仅作权限/参数适配，`MockupPage.tsx`/`mockupStudio.ts` 消费绑定代资源。不得另造存储、队列、全局状态库或 HTTP 服务。按目录现有规则补纯函数测试；UI 浏览器测试覆盖异步请求、渲染与下载的代际。
 

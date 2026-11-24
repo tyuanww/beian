@@ -40,7 +40,12 @@
 - P1 为质量/验收阻塞；P2 为可靠性、产品及采用完善；P3 为独立后续，含条件性任务。优先级不表示所有事项都要立即开发。
 - 主题使用稳定 ID；下列编号是执行子步骤，不另算主题。执行记录写清“主题/步骤 ID、适用 SHA/合同/fixture、交付物、验证结果、未执行项”，再链接对应阶段记录。共享证据只记录一次，由其他主题引用。
 - 完成一个子步骤不关闭整个主题；代码、待批准、待现场分别记录。实施前重读当前状态，按 [TESTING.md](TESTING.md) 选择受影响验证；不要把这里的步骤当成现成脚本或已获得执行授权。
-- 按单一行为切片推进开发；提交、推送、明确 `/ship`、合并及自动发布分别检查已有授权。Windows 现场、生产注册/默认切换、真实稿外部处理、真实消息和删除按对应授权执行；未批准的外部步骤不阻塞可独立完成的本地实现。
+- 按单一行为切片推进开发。提交、推送、创建 PR、合并及自动发布分别检查已有授权。Windows 现场、生产注册/默认切换、真实稿外部处理、真实消息和删除按对应授权执行；未批准的外部步骤不阻塞可独立完成的本地实现。
+
+## 当前打样修复收尾
+
+- [ ] **成片一键高清下载。** 工作区已有实现和本地浏览器回归。获准后独立走发版检查和 PR。上线后用已有打样单验证，点一次下载即可自动保存原尺寸 PNG，等待期间预览仍可使用。见 [成片下载合同](docs/contracts/packaging-presentation.md#打样成片与背景)。
+- [ ] **Illustrator 刀线与拓扑扫描。** 工作区已修复非路径对象误计和完全重合线段耗尽邻接预算的问题，本地专项回归已通过。在获准的 Windows 隔离环境用 10ml「备案图」、超限的 10ml「转曲 C」和已成功的 30ml 做对照。比较修复前后的候选路径、结构边和完整盒型。10ml 仍失败时，记录原稿结构或导出链上的实际失败点。见 [单稿结构导出](scripts/windows/README.md)。
 
 ## 2026-10-09 刘籽烨需求工单
 
@@ -161,7 +166,7 @@ RF-10–RF-13 的原始依赖见 [ADR-007 §20.7](docs/adr-007-packaging-render-
   | Q06.5 · RF-11（Code/L0、杭州实跑已交付） | 独立 wrapper 接可信 main transaction fence，只写 RUNNER_TEMP，复用 generation/GLB/hash 门 | `3fcfea75` / `0.21.46.0`，[run 34191398011](https://github.com/weiweity/beian/actions/runs/34191398011) 真跑约 62s，TimeoutMs=90000，Job Object 成功路径通过；缺已解析 Blender 时会跳过，跳过不算通过；超时杀树分支未走到 |
   | Q06.6 · 生产接线候选（整项未完成） | A 显式临时 runtime 的固定纸盒壳 upgrade 已交付 Code/L0 和单次 Mac 原生合成正常路径；B 生产装配、C 启用仍未完成，见下方补记 | A 候选开发不依赖 .7；A→B 须 Q06.4 与既定八点审计，B→C 须 Q06.7/.8 及明确授权。默认不注册生产 runtime，注册范围、默认选择、历史重放分别核对；A 代码发版不等于生产准入 |
   | Q06.7 · RF-12 | 对最终候选做全量 L0/type/UI build/quality/相关 E2E 与显式合成 Blender 验证；旧单/g0/current、审计、资源释放及回滚演练；补断电耐久性证据 | 依赖 RF-00–RF-11 与纳入候选的 .6；已有相关证据有效则复用；进程崩溃模型、实际 Windows/断电分别标明，断电验证仅限获准隔离环境；形成 closeout，不触碰真实在途作业 |
-  | Q06.8 · 发布与受控验收准入 | 明确 ship/合并自动发布授权；核对最终 PR HEAD CI、merge SHA、同次可信发布、杭州来源和公网版本；按批准范围注册/开放验收候选 | 依赖 .7 与必要的质量批准；主桥/生产 adapter/候选 profile/默认切换分别核对，不能因代码上线自动放开；限定样本与操作者的验收不等于全量业务开放 |
+  | Q06.8 · 发布与受控验收准入 | 分别取得创建 PR 和合并的明确授权，合并会触发自动发布。核对最终 PR HEAD CI、merge SHA、同次可信发布、杭州来源和公网版本。按批准范围注册和开放验收候选 | 依赖 .7 与必要的质量批准；主桥/生产 adapter/候选 profile/默认切换分别核对，不能因代码上线自动放开；限定样本与操作者的验收不等于全量业务开放 |
   | Q06.9 · RF-13 | 杭州私有真稿 L2 + 刘籽烨 UAT：旧新盲评及上传→等待→看形→背景/灯光→原图/下载→印刷面 | 依赖 RF-12 landed、L1 green 与候选准入；复用 A01/A02 金标，每例留源稿 hash、旧新合同 hash、操作者、时间、评分/结论与拒绝原因；真实稿和输出不进 Git |
 
   Q06.6 A 补记（2026-09-14）：显式 `upgradeCandidate` 固定 `packshot-carton-geometry-v1` ID/声明 SHA，HTTP 不接收 profile 字段，Python 缺字段仍 `upgrade_unwired`；先验证 RF-02 源再解析绑定结构。既有平台门允许 darwin/linux、拒绝 win32，本次实跑仅 Mac；生产关闭来自默认无注册、临时根和平台门，不能把 `productionEnabled=false` 当独立防护。合法已有代的 history/activate 仍可用。完整本地门禁及 9/9 合成 E2E 已通过；单次 Mac 原生证据绑定 `0b9cd4b`，不是最终发布树重跑，详见 [runtime 收口补记](docs/designs/packaging-quality-rf03-runtime-closeout.md)。未改 registry、默认模板或正式 baseline；`production_ready=false`、human pending，Q06.6/.7/.8、Windows/断电/真实稿/人审仍不勾完成。
@@ -429,7 +434,7 @@ RF-10–RF-13 的原始依赖见 [ADR-007 §20.7](docs/adr-007-packaging-render-
 
   1. 按 [ADR-006](docs/adr-006-continuous-complexity-governance.md) 获取静态引用、行为测试、运行入口、生产边界四类证据；动态/仓库外入口未确认就保留。
   2. 给出精确文件清单、影响与回滚方式，在批准范围内逐批删除并同步缩小质量基线，不混入 3D/Windows 发版功能。
-  3. 验证受影响成功/失败语义与质量门；明确 `/ship` 后才出独立 PR。**验收：删除有四类证据，基线不扩张，相关回归通过。**
+  3. 验证受影响成功/失败语义与质量门。获得明确的创建 PR 授权后，再提交独立 PR。**验收：删除有四类证据，基线不扩张，相关回归通过。**
 
 - [ ] **F02 — Tunnel / 服务掉线告警**
 
@@ -469,9 +474,9 @@ RF-10–RF-13 的原始依赖见 [ADR-007 §20.7](docs/adr-007-packaging-render-
   1. 评估在干净环境重新生成跨平台完整的 lock（或 `npm install --os/--cpu` 补齐条目），比较依赖图变化范围；变化会触发一次离线依赖交接。
   2. 若采纳，删除各处临时修复并让 `installed` 校验覆盖原生包。**验收：** Linux/Windows 干净 `npm ci` 无需手动补装即可构建 UI；或记录不修的理由。
 
-- [ ] **F08 — WSL2 staging 副本与 Linux health 文案**
+- [ ] **F08 — WSL2 staging 副本已停用，重启议题暂缓**
 
-  状态：杭州机 WSL2 Ubuntu 上有一份预发副本（`beian-wsl.service`、`127.0.0.1:18787`、`/opt/beian`、数据 `/srv/beian-data`），经 Tailscale 由 root 管理，操作见 [WSL staging 操作指南](docs/howto-wsl-staging.md)。计划的 Cloudflare 主机名 `beian-staging.jianghua.site`（挂在现有远程管理隧道 `customer-agent-hangzhou` 上）尚未添加。Linux 上 Illustrator/Blender 不可用，但 health 的 Illustrator 状态走非 win32 分支，返回“macOS 继续使用现有 AppleScript 桥”，`ready=true`，会误导。
+  状态：`beian-wsl.service` 已停止并禁用自启。保留 `/opt/beian` 和 `/srv/beian-data`。如果重新启用预发，先取得授权，再按 [WSL 预发操作指南](docs/howto-wsl-staging.md) 和以下条件实施。旧版 Linux health 会误报 AppleScript 可用，重新开放前须修正。
 
   1. 修正 `apps/web/server/src/illustratorAgent.ts` 非 win32 分支：区分 darwin 与 Linux，Linux 返回 `required=true`/`ready=false` 或明确“本平台不支持打样”，并让 UI 不对 staging 用户开放打样入口。
   2. 经 DNS/隧道授权后再添加 staging 主机名，并要求登录，不得使用显示名裸登录；staging 的发布方式、数据隔离和是否保留在 TODOS 中说明。
