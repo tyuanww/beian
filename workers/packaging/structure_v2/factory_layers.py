@@ -7,7 +7,7 @@ import re
 from typing import Any, Mapping, Sequence
 
 FACTORY_KNIFE_LAYER_NAMES = ("刀版", "刀线")
-PROCESS_PLATE_MARKERS = ("击凹", "击凸", "哑油", "垫白", "丝印", "注塑", "漏银", "烫")
+PROCESS_PLATE_MARKERS = ("击凹", "激凹", "击凸", "哑油", "垫白", "丝印", "注塑", "漏银", "烫")
 NEVER_DEFAULT_PROPOSAL_MARKERS = ("印刷", "表", "标注", "码")
 CATEGORY_UNSUPPORTED_MARKERS = ("内包", "标贴")
 POUCH_MARKER = "膜袋"

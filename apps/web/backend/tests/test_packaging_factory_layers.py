@@ -25,6 +25,7 @@ def test_unique_factory_knife_and_print_fallback():
     assert factory.unique_factory_knife_layer_name(["刀版", "刀线"]) is None
     assert factory.unique_factory_knife_layer_name(["刀版", "刀版"]) is None
     assert factory.unique_print_fallback_layer_name(["刀线", "图层 1"]) == "图层 1"
+    assert factory.unique_print_fallback_layer_name(["刀线", "激凹", "盒面"]) == "盒面"
     assert factory.unique_print_fallback_layer_name(["印刷", "刀版", "表"]) is None
     assert factory.unique_print_fallback_layer_name(["图层 1", "图层 7"]) is None
 

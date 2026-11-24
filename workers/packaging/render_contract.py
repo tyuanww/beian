@@ -104,6 +104,8 @@ OUTPUT_SUFFIX_BY_KEY = {
     "sheet_pdf": ".pdf",
 }
 RENDERER_CONSUMED_JOB_KEYS = (
+    "deboss_face_assets",
+    "deboss_normals",
     "code",
     "slug",
     "display_name",
@@ -2568,11 +2570,13 @@ def _reserved_job_paths(job: Mapping[str, Any]) -> list[Path]:
         raw = job.get(key)
         if str(raw or "").strip():
             reserved.append(Path(str(raw)))
-    assets = job.get("assets") if isinstance(job.get("assets"), Mapping) else {}
-    for face in SEMANTIC_FACES:
-        raw = assets.get(face)
-        if str(raw or "").strip():
-            reserved.append(Path(str(raw)))
+    for key in ("assets", "deboss_normals", "deboss_face_assets"):
+        assets = job.get(key)
+        if isinstance(assets, Mapping):
+            for face in SEMANTIC_FACES:
+                raw = assets.get(face)
+                if str(raw or "").strip():
+                    reserved.append(Path(str(raw)))
     return reserved
 
 
@@ -2716,6 +2720,70 @@ def validate_job_asset_contract(
                     other=other,
                 )
         seen[face] = tokens
+    normals = _mapping(payload.get("deboss_normals", {}), "deboss_normals")
+    face_assets = _mapping(payload.get("deboss_face_assets", {}), "deboss_face_assets")
+    if any(face not in SEMANTIC_FACES for face in normals):
+        _invalid("激凹贴图含未知面", field="deboss_normals")
+    if any(face not in normals for face in face_assets):
+        _invalid("激凹渲染面需要同面法线", field="deboss_face_assets")
+    if not (normals or face_assets):
+        return
+
+    for key in ("resolved_job_path", "source_ai", "template_path"):
+        if str(payload.get(key) or "").strip():
+            seen[key] = _path_identity_tokens(Path(str(payload[key])))
+    for key, files, prefix, hash_length, mode, size_limit in (
+        ("deboss_normals", normals, "normal", 64, "RGB", 8 * 1024 * 1024),
+        ("deboss_face_assets", face_assets, "deboss_face", 40, "RGBA", 128 * 1024 * 1024),
+    ):
+        for face, raw in files.items():
+            field = f"{key}.{face}"
+            if not isinstance(raw, str) or not raw.strip():
+                _invalid("激凹贴图路径无效", field=field)
+            path = Path(raw)
+            artwork = Path(str(assets[face]))
+            name = re.fullmatch(rf"{prefix}_{face}-([0-9a-f]{{{hash_length}}})\.png", path.name)
+            if name is None or path.resolve().parent != artwork.resolve().parent:
+                _invalid("激凹贴图必须落在对应印刷面的 assets 目录", field=field)
+            tokens = _path_identity_tokens(path)
+            for other, other_tokens in seen.items():
+                if tokens & other_tokens:
+                    _invalid("激凹贴图不能覆盖其他渲染输入", field=field, other=other)
+            _validate_deboss_png(path, artwork, field, name[1], mode, size_limit)
+            seen[field] = tokens
+
+
+def _validate_deboss_png(
+    path: Path, artwork: Path, field: str, digest: str, mode: str, size_limit: int,
+) -> None:
+    from PIL import Image
+
+    if not _is_regular_png(path):
+        _invalid("激凹贴图必须是有效的 PNG", field=field)
+    try:
+        with path.open("rb") as handle:
+            if path.stat().st_size > size_limit:
+                _invalid("激凹贴图超过文件体积上限", field=field)
+            if hashlib.file_digest(handle, "sha256").hexdigest()[:len(digest)] != digest:
+                _invalid("激凹贴图内容和文件名不一致", field=field)
+            handle.seek(0)
+            with Image.open(handle) as image:
+                if image.format != "PNG" or image.mode != mode:
+                    _invalid("激凹贴图通道不符合 PNG 合同", field=field)
+                if mode == "RGBA":
+                    with Image.open(artwork) as original:
+                        if image.size != original.size:
+                            _invalid("激凹渲染面尺寸与印刷面不一致", field=field)
+                elif max(image.size) > 1536:
+                    _invalid("激凹法线超过尺寸上限", field=field)
+                image.verify()
+    except (OSError, SyntaxError, Image.DecompressionBombError):
+        _invalid("激凹贴图必须是有效的 PNG", field=field)
+
+
+def renderer_face_assets(job: Mapping[str, Any]) -> dict[str, str]:
+    """Keep reader images in assets and select the effective renderer base colors."""
+    return {**job["assets"], **job.get("deboss_face_assets", {})}
 
 
 def bind_persisted_job_to_project(

@@ -1071,7 +1071,7 @@ function Get-SourceSha256([string]$Path) {
 function Remove-JobPartialOutputs([object]$Config, [string]$JobDirectory) {
   $removed = @()
   $root = [System.IO.Path]::GetFullPath($JobDirectory).TrimEnd("\", "/")
-  foreach ($key in @("print_pdf", "full_pdf", "structure_json", "result_json", "close_json", "mixed_structure_json", "mixed_print_pdf")) {
+  foreach ($key in @("print_pdf", "full_pdf", "structure_json", "result_json", "close_json", "mixed_structure_json", "mixed_print_pdf", "deboss_pdf")) {
     $raw = Get-JsonProperty $Config $key
     if (-not $raw) { continue }
     $path = [System.IO.Path]::GetFullPath([string]$raw)

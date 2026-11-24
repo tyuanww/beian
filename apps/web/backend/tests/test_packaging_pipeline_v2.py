@@ -177,6 +177,59 @@ def test_default_preflight_uses_mixed_dieline_only_for_a_confirmable_carton(
         assert proposals[0]["valid_anchors"]
 
 
+@pytest.mark.parametrize("change_artwork", [False, True], ids=["same-artwork", "artwork-changed"])
+def test_deboss_plate_follows_the_confirmed_artwork(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, change_artwork: bool,
+):
+    pipeline = pipeline_module()
+    product, source = prepare_v2_product(tmp_path)
+    artwork = tmp_path / product.pop("artwork_pdf")
+    approved = tmp_path / product.pop("structure_sidecar")
+    geometry = json.loads(approved.read_text())
+    missing = tmp_path / "structure-empty.json"
+    geometry.update(vertices=[], edges=[], faces=[], folds=[], root_face=None)
+    geometry["validation"] = {
+        "status": "review_required",
+        "errors": ["structure_semantics_missing"],
+        "warnings": [],
+    }
+    missing.write_text(json.dumps(geometry))
+    output = tmp_path / "output"
+    project = output / product["code"]
+    normalized = project / "illustrator_semantic"
+    normalized.mkdir(parents=True)
+    plate = normalized / ("deboss-" + "a" * 32 + ".pdf")
+    mm_to_pt = 72 / 25.4
+    with pymupdf.open() as document:
+        page = document.new_page(width=120 * mm_to_pt, height=90 * mm_to_pt)
+        page.draw_circle(pymupdf.Point(60 * mm_to_pt, 42 * mm_to_pt), 2 * mm_to_pt, fill=(0, 0, 0))
+        document.save(plate)
+    monkeypatch.setattr(pipeline, "run_illustrator_structure_export", lambda *_args, **_options: {
+        "layers": ["刀版", "印刷", "激凹"],
+        "print_pdf": str(artwork),
+        "structure_json": str(missing),
+        "deboss_pdf": str(plate),
+    })
+    with pytest.raises(pipeline.PipelineHold) as caught:
+        pipeline.preflight_product_v2(product, tmp_path, output, False, {})
+    pending = json.loads(Path(caught.value.resolution_path).read_text())
+    assert pending["deboss_plate"]["source_sha256"] == hashlib.sha256(source.read_bytes()).hexdigest()
+    if change_artwork:
+        with pymupdf.open(artwork) as document:
+            document[0].insert_text((10, 10), "different artwork")
+            document.saveIncr()
+    product.update(artwork_pdf=str(artwork), structure_sidecar=str(approved))
+    job = pipeline.preflight_product_v2(product, tmp_path, output, False, {"enabled": False})
+    assert set(job.get("deboss_normals", {})) == (set() if change_artwork else {"front"})
+    pipeline.validate_job_asset_contract(job, project_dir=project)
+    if not change_artwork:
+        with Path(job["deboss_normals"]["front"]).open("ab") as stream:
+            stream.write(b"changed normal map")
+        with pytest.raises(pipeline.RenderContractError) as rejected:
+            pipeline.validate_job_asset_contract(job, project_dir=project)
+        assert rejected.value.details["field"] == "deboss_normals.front"
+
+
 def test_pipeline_v2_uses_resolved_geometry_and_exact_artwork(tmp_path: Path):
     pipeline = pipeline_module()
     product, _source = prepare_v2_product(tmp_path)

@@ -224,6 +224,7 @@ def compare_glb_artifact_contract(
     *, geometry: Mapping[str, Any] | None = None,
     render_identity: Mapping[str, str] | None = None,
     material_layers: Mapping[str, Any] | None = None,
+    deboss_normals: Mapping[str, object] | None = None,
 ) -> dict[str, Any]:
     """Verify the static exported box directly, without bpy or worker measurements.
 
@@ -326,7 +327,7 @@ def compare_glb_artifact_contract(
             "surface": compare_glb_surface_contract(surfaces, dimensions_mm, tolerance_mm, geometry=geometry),
             "core": compare_glb_core_contract(cores, dimensions_mm, tolerance_mm, geometry=geometry),
             "material": compare_glb_material_contract(
-                artifact, expected_assets, substrate_rgba, pbr=pbr_layers
+                artifact, expected_assets, substrate_rgba, pbr=pbr_layers, deboss_normals=deboss_normals,
             ),
         }
         if pbr_layers is not None:
@@ -408,12 +409,13 @@ def _paeth(left: int, up: int, upper_left: int) -> int:
     return upper_left
 
 
-def _decode_png_rgba(payload: bytes, *, max_pixels: int = 32_000_000) -> dict[str, Any]:
+def _decode_png_rgba(payload: bytes, *, max_pixels: int = 32_000_000, allow_rgb: bool = False) -> dict[str, Any]:
     """Decode generated PNG pixels without relying on Pillow inside Blender."""
     if not payload.startswith(PNG_SIGNATURE):
         raise ValueError("image is not a PNG")
     offset = len(PNG_SIGNATURE)
     width = height = 0
+    channels = 4
     idat = bytearray()
     saw_ihdr = False
     saw_iend = False
@@ -439,14 +441,16 @@ def _decode_png_rgba(payload: bytes, *, max_pixels: int = 32_000_000) -> dict[st
                 width <= 0
                 or height <= 0
                 or bit_depth != 8
-                or colour_type != 6
+                or (colour_type != 6 and not (allow_rgb and colour_type == 2))
                 or compression != 0
                 or filtering != 0
                 or interlace != 0
             ):
-                raise ValueError("PNG must be a non-interlaced 8-bit RGBA image")
+                raise ValueError("PNG must be a non-interlaced 8-bit RGB or RGBA image" if allow_rgb
+                                 else "PNG must be a non-interlaced 8-bit RGBA image")
             if width * height > max_pixels:
                 raise ValueError("PNG exceeds pixel budget")
+            channels = 3 if colour_type == 2 else 4
             saw_ihdr = True
         elif chunk_type == b"IDAT":
             if not saw_ihdr:
@@ -459,7 +463,7 @@ def _decode_png_rgba(payload: bytes, *, max_pixels: int = 32_000_000) -> dict[st
         offset = crc_end
     if not saw_ihdr or not saw_iend or offset != len(payload) or not idat:
         raise ValueError("PNG is missing required chunks")
-    stride = width * 4
+    stride = width * channels
     expected_bytes = (stride + 1) * height
     inflater = zlib.decompressobj()
     # One sentinel detects overflow without materializing the rest of a bomb.
@@ -488,9 +492,9 @@ def _decode_png_rgba(payload: bytes, *, max_pixels: int = 32_000_000) -> dict[st
             continue
         decoded = bytearray(stride)
         for column, value in enumerate(encoded):
-            left = decoded[column - 4] if column >= 4 else 0
+            left = decoded[column - channels] if column >= channels else 0
             up = previous[column]
-            upper_left = previous[column - 4] if column >= 4 else 0
+            upper_left = previous[column - channels] if column >= channels else 0
             if filter_type == 0:
                 predictor = 0
             elif filter_type == 1:
@@ -507,6 +511,11 @@ def _decode_png_rgba(payload: bytes, *, max_pixels: int = 32_000_000) -> dict[st
         previous = bytes(decoded)
         rows.append(previous)
     pixels = b"".join(rows)
+    if channels == 3:
+        rgba = bytearray(b"\xff") * (width * height * 4)
+        for channel in range(3):
+            rgba[channel::4] = pixels[channel::3]
+        pixels = rgba
     alpha = pixels[3::4]
     return {
         "width": width,
@@ -521,6 +530,8 @@ def _embedded_png_contract(
     artifact: GlbArtifact,
     image_index: int | None,
     expected_path: object,
+    *,
+    allow_rgb: bool = False,
 ) -> dict[str, Any]:
     image = _indexed(artifact.document.get("images"), image_index)
     if image is None:
@@ -532,8 +543,8 @@ def _embedded_png_contract(
             "mime_type": image.get("mimeType"),
         }
     try:
-        embedded = _decode_png_rgba(_buffer_view_bytes(artifact, image.get("bufferView")))
-        expected = _decode_png_rgba(Path(str(expected_path or "")).read_bytes())
+        embedded = _decode_png_rgba(_buffer_view_bytes(artifact, image.get("bufferView")), allow_rgb=allow_rgb)
+        expected = _decode_png_rgba(Path(str(expected_path or "")).read_bytes(), allow_rgb=allow_rgb)
     except (OSError, ValueError, zlib.error) as error:
         return {"ok": False, "code": "embedded_image_unreadable", "detail": str(error)}
     keys = ("width", "height", "pixel_sha256", "alpha_sha256")
@@ -560,6 +571,7 @@ def compare_glb_material_contract(
     *,
     colour_tolerance: float = 1e-4,
     pbr: Mapping[str, Any] | None = None,
+    deboss_normals: Mapping[str, object] | None = None,
 ) -> dict[str, Any]:
     """Verify exported MASK artwork and the opaque paperboard core.
 
@@ -656,6 +668,8 @@ def compare_glb_material_contract(
                 break
     if not core_bound:
         errors.append({"code": "paperboard_core_binding_missing"})
+    if deboss_normals:
+        errors.extend(_deboss_normal_errors(artifact, materials, deboss_normals))
     result: dict[str, Any] = {"ok": not errors, "errors": errors}
     if pbr is not None:
         capability = compare_glb_pbr_capability(artifact, pbr)
@@ -861,6 +875,49 @@ def _texcoord_bound(artifact: GlbArtifact, material_index: int, tex_coord: int) 
         if len(uvs) != len(positions):
             return False
     return True
+
+
+def _deboss_normal_errors(
+    artifact: GlbArtifact,
+    materials: list,
+    expected_normals: Mapping[str, object],
+) -> list[dict[str, Any]]:
+    document = artifact.document
+    errors: list[dict[str, Any]] = []
+    found_faces: set[str] = set()
+    for material_index, material in enumerate(materials):
+        if not isinstance(material, Mapping):
+            continue
+        face = _normalized_name(material.get("name")).removeprefix("mat_")
+        info = material.get("normalTexture")
+        if face not in expected_normals:
+            if info is not None:
+                errors.append({"code": "glb_deboss_normal_unexpected", "face": face})
+            continue
+        found_faces.add(face)
+        index = _texture_image_index(document, info)
+        texture = _indexed(document.get("textures"), info.get("index")) if isinstance(info, Mapping) else None
+        if (
+            face not in SEMANTIC_FACES
+            or not isinstance(info, Mapping)
+            or texture is None
+            or info.get("extensions")
+            or texture.get("extensions")
+            or _normal_scale(info) != 1.0
+            or _normal_texcoord(info) != 0
+            or not _texcoord_bound(artifact, material_index, 0)
+            or index == _base_color_image_index(document, material)
+        ):
+            errors.append({"code": "glb_deboss_normal_binding_invalid", "face": face})
+            continue
+        pixels = _embedded_png_contract(artifact, index, expected_normals[face], allow_rgb=True)
+        if not pixels["ok"]:
+            errors.append({"code": "glb_deboss_normal_pixels_invalid", "face": face, "image_contract": pixels})
+    errors.extend(
+        {"code": "glb_deboss_normal_missing", "face": face}
+        for face in expected_normals.keys() - found_faces
+    )
+    return errors
 
 
 def compare_glb_pbr_capability(
