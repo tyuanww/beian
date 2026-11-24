@@ -62,11 +62,14 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 from dieline import PT_TO_MM, layout_to_template, parse_knife_pdf, pick_knife_layer  # noqa: E402
 from structure_v2 import (  # noqa: E402
+    ResolutionResult,
     factory_input_hold,
+    load_structure,
     pouch_marker_hint,
     print_layer_failure_message,
     render_face_assets,
     resolve_structure,
+    stroke_proposal_clears_face_interiors,
 )
 from render_contract import (  # noqa: E402
     RenderContractError,
@@ -1161,6 +1164,7 @@ def run_illustrator_structure_export(
     proposal_layers: list[str] | None = None,
     print_layers: list[str] | None = None,
     source_sha256: str | None = None,
+    allow_mixed_dieline: bool = False,
 ) -> dict[str, Any]:
     """V2 exporter is explicit and object-level; legacy fallback stays unchanged."""
     app_path = Path(
@@ -1222,6 +1226,12 @@ def run_illustrator_structure_export(
         "proposal_layers": [str(value) for value in (proposal_layers or []) if str(value).strip()],
         "print_layers": normalized_print_layers,
     }
+    mixed_paths = {
+        "mixed_structure_json": normalized_dir / f"mixed-{worker_config['attempt_id']}.json",
+        "mixed_print_pdf": normalized_dir / f"mixed-{worker_config['attempt_id']}.pdf",
+    }
+    if allow_mixed_dieline and not proposal_layers and not semantic_assignments:
+        worker_config.update({key: str(path) for key, path in mixed_paths.items()})
     save_json(config_path, worker_config)
     timeout_seconds = int(illustrator_config.get("timeout_seconds", 1260))
     process = subprocess.run(
@@ -1268,7 +1278,48 @@ def run_illustrator_structure_export(
             stderr=process.stderr,
             result=detail,
         )
+    if not all(
+        result.get(key) == worker_config.get(key) == str(path) and path.is_file()
+        for key, path in mixed_paths.items()
+    ):
+        for key in mixed_paths:
+            result.pop(key, None)
     return result
+
+
+def _resolve_mixed_dieline(
+    source: Path,
+    export: dict[str, Any],
+    cache_dir: Path,
+) -> tuple[ResolutionResult, Path, Path] | None:
+    mixed_structure = export.get("mixed_structure_json")
+    mixed_artwork = export.get("mixed_print_pdf")
+    if not mixed_structure or not mixed_artwork:
+        return None
+    sidecar = Path(mixed_structure)
+    artwork = Path(mixed_artwork)
+    resolution = resolve_structure(source, sidecar=sidecar, cache_dir=cache_dir)
+    topology = resolution.topology or {}
+    proposals = topology.get("net_proposals", [])
+    diagnostics = topology.get("proposal_diagnostics", {})
+    if (
+        resolution.code != "structure_face_mapping_incomplete"
+        or len(proposals) != 1
+        or diagnostics.get("components_noded") != 1
+        or diagnostics.get("diagnostics", {}).get("ignored_open_components") != 0
+    ):
+        return None
+    face_ids = set(proposals[0]["face_ids"])
+    face_points = [face["points_mm"] for face in topology["face_proposal"] if face["id"] in face_ids]
+    if len(face_points) != len(face_ids):
+        return None
+    try:
+        structure = load_structure(sidecar)
+    except (OSError, ValueError):
+        return None
+    if not stroke_proposal_clears_face_interiors(structure, face_points):
+        return None
+    return resolution, sidecar, artwork
 
 
 def preflight_product_v2(
@@ -1320,6 +1371,7 @@ def preflight_product_v2(
             proposal_layers=proposal_layers,
             print_layers=template.get("print_layers"),
             source_sha256=source_sha256,
+            allow_mixed_dieline=structure_sidecar is None,
         )
         artwork_pdf = Path(illustrator_result["print_pdf"])
         if structure_sidecar is None:
@@ -1372,11 +1424,17 @@ def preflight_product_v2(
         cache_dir=project_dir / "structure_cache",
         pouch_hint=pouch_hint,
     )
+    mixed = None
+    if illustrator_result is not None and not pouch_hint and resolution.code == "structure_semantics_missing":
+        mixed = _resolve_mixed_dieline(source, illustrator_result, project_dir / "structure_cache")
+        if mixed is not None:
+            resolution, structure_sidecar, artwork_pdf = mixed
     resolution_path = project_dir / "structure_resolution.json"
     resolution_payload = resolution.as_dict()
-    input_candidates = structure_input_candidates(illustrator_result, source_sha256)
-    if input_candidates is not None:
-        resolution_payload["input_candidates"] = input_candidates
+    if mixed is None:
+        input_candidates = structure_input_candidates(illustrator_result, source_sha256)
+        if input_candidates is not None:
+            resolution_payload["input_candidates"] = input_candidates
     save_json(resolution_path, resolution_payload)
     if resolution.status != "ready" or resolution.resolved is None:
         artwork_preview = render_pdf_thumbnail(

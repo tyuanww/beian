@@ -40,6 +40,8 @@ cd apps/web/backend && PYTHONPATH=. .venv/bin/python -m app.cli --help
 
 UI 等待：`shouldShowWaitCard`（`queued` | `running` | `comparing`；`done`/`failed`/`completed` 不当等待）。离开核对页后，看板 `liveJobLine` 和侧栏 `liveNavPulse` 仍显示阶段。打样台只交稿；点进度/已出图进单独打样单（WaitCard 或成片/三图看形，下面印刷面读字），不要在打样台底下摊开结果。唯一「上刀线」（或单层「刀线」/「刀版」）默认黑盒提交识别，候选里唯一「印刷」可随刀线带上，失败对籽烨结案为打样失败，选层只给 admin；单独「印刷」和工艺板不能当刀线。
 
+旧稿符合 [混合刀线的结构合同](packaging-structure.md#候选预览预算) 时，唯一可确认正面继续自动出图。多个可确认正面沿用选择品名面的步骤。
+
 ## 生成人与排队显示
 
 - 生成人永远是建单人，只认建单时记下的 `created_by`。有 `created_by` 就查出名字显示，查不到或重名时显示「未记录」；老任务没有 `created_by` 的，接口返回 null，生成人也显示「未记录」。不拿最后下结论的人（actor）或别的账号 id 补，也不显示账号 id。单条任务、任务列表、审稿记录和打样列表里的生成人都按这一条处理，审稿台和打样台用同一个规则。历史记录的「生成人」列和筛选用这个值。签字人记在 `completed_by`，不改写生成人。

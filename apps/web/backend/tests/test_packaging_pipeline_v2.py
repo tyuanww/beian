@@ -109,6 +109,74 @@ def prepare_v2_product(tmp_path: Path) -> tuple[dict, Path]:
     )
 
 
+@pytest.mark.parametrize("case", [
+    "complete", "empty", "stray-stroke", "stray-loop", "connected-body-stroke", "connected-cap-stroke",
+])
+def test_default_preflight_uses_mixed_dieline_only_for_a_confirmable_carton(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, case: str,
+):
+    pipeline = pipeline_module()
+    product, source = prepare_v2_product(tmp_path)
+    artwork = tmp_path / product.pop("artwork_pdf")
+    normal_sidecar = tmp_path / product.pop("structure_sidecar")
+    mixed_artwork = write_artwork(tmp_path / "mixed-artwork.pdf")
+    mixed_sidecar = tmp_path / "mixed-structure.json"
+    geometry = json.loads(normal_sidecar.read_text())
+    geometry["source"]["adapter"] = "illustrator-stroke-proposal/1"
+    geometry.update(faces=[], folds=[], root_face=None)
+    geometry["validation"] = {
+        "status": "review_required",
+        "errors": ["structure_proposal_requires_confirmation"],
+        "warnings": [],
+    }
+    empty = {**geometry, "vertices": [], "edges": []}
+    normal_sidecar.write_text(json.dumps(empty))
+    added_lines = {
+        "stray-stroke": [((58, 45), (69, 45))],
+        "stray-loop": [((105, 24), (113, 24)), ((113, 24), (113, 32)),
+                       ((113, 32), (105, 32)), ((105, 32), (105, 24))],
+        "connected-body-stroke": [((50, 45), (65, 45))],
+        "connected-cap-stroke": [((50, 10), (65, 10))],
+    }
+    by_point = {}
+    for index, (start, end) in enumerate(added_lines.get(case, [])):
+        for point in (start, end):
+            if point not in by_point:
+                vertex = f"print-{len(by_point)}"
+                by_point[point] = vertex
+                geometry["vertices"].append({"id": vertex, "x": point[0], "y": point[1]})
+        geometry["edges"].append({
+            "id": f"print-line-{index}", "start": by_point[start], "end": by_point[end], "assignment": "crease",
+        })
+    mixed_sidecar.write_text(json.dumps(empty if case == "empty" else geometry))
+
+    def export(*_args, **options):
+        assert options["proposal_layers"] == []
+        return {
+            "layers": ["刀版", "印刷", "激凹"],
+            "print_pdf": str(artwork),
+            "structure_json": str(normal_sidecar),
+            "mixed_print_pdf": str(mixed_artwork),
+            "mixed_structure_json": str(mixed_sidecar),
+        }
+
+    monkeypatch.setattr(pipeline, "run_illustrator_structure_export", export)
+    with pytest.raises(pipeline.PipelineHold) as caught:
+        pipeline.preflight_product_v2(product, tmp_path, tmp_path / "output", False, {})
+
+    hold = caught.value
+    complete = case == "complete"
+    expected = "structure_face_mapping_incomplete" if complete else "structure_semantics_missing"
+    assert hold.code == expected
+    assert Path(hold.details["artwork_pdf"]) == (mixed_artwork if complete else artwork)
+    assert Path(hold.details["structure_sidecar"]) == (mixed_sidecar if complete else normal_sidecar)
+    resolution = json.loads(Path(hold.resolution_path).read_text())
+    proposals = (resolution.get("topology") or {}).get("net_proposals", [])
+    assert len(proposals) == int(complete)
+    if complete:
+        assert proposals[0]["valid_anchors"]
+
+
 def test_pipeline_v2_uses_resolved_geometry_and_exact_artwork(tmp_path: Path):
     pipeline = pipeline_module()
     product, _source = prepare_v2_product(tmp_path)

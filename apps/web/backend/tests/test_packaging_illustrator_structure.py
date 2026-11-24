@@ -1494,6 +1494,83 @@ process.stdout.write(JSON.stringify(filledKnife));
     }
 
 
+@pytest.mark.parametrize(("with_path", "tagged"), [
+    (False, False), (True, False), (False, True),
+], ids=["text-only", "with-filled-path", "explicit-ignore"])
+def test_factory_knife_candidate_excludes_text_frames(with_path, tagged):
+    source = EXPORTER.read_text(encoding="utf-8")
+    program = f"var withPath = {json.dumps(with_path)}; var tagged = {json.dumps(tagged)};" + r"""
+var config = {
+    source_sha256: "a".repeat(64),
+    source_ai: "source.ai",
+    full_pdf: "full.pdf",
+    print_pdf: "artwork.pdf",
+    structure_json: "structure.json",
+    result_json: "result.json",
+    print_layers: ["刀版"],
+    proposal_layers: ["刀版"]
+};
+var writes = {};
+var printItems;
+var documentFixture = {
+    typename: "Document",
+    artboards: [{artboardRect: [0, 100, 160, 0]}],
+    close: function () {},
+    saveAs: function (file) {
+        if (file.path === config.print_pdf) {
+            printItems = knife.pageItems.filter(function (item) { return !item.hidden; })
+                .map(function (item) { return item.typename; });
+        }
+    }
+};
+var knife = {typename: "Layer", name: "刀版", parent: documentFixture, visible: true};
+knife.pageItems = [{
+    typename: "TextFrame", layer: knife, parent: knife, hidden: false,
+    note: tagged ? "packaging:ignore" : ""
+}];
+if (withPath) {
+    knife.pageItems.push({
+        typename: "PathItem", layer: knife, parent: knife, hidden: false, filled: true, closed: true,
+        pathPoints: [[0, 80], [40, 80], [40, 60]].map(function (anchor) {
+            return {anchor: anchor, leftDirection: anchor, rightDirection: anchor};
+        })
+    });
+}
+documentFixture.layers = [knife];
+var PIPELINE_CONFIG_PATH = "config.json";
+var app = {open: function () { return documentFixture; }};
+var UserInteractionLevel = {DONTDISPLAYALERTS: 1};
+var SaveOptions = {DONOTSAVECHANGES: 1};
+function File(path) { this.path = path; }
+File.prototype.open = function (mode) { return mode === "r"; };
+File.prototype.read = function () { return JSON.stringify(config); };
+File.prototype.close = function () {};
+function PDFSaveOptions() {}
+function applyUnattendedHost() { return {}; }
+function restoreUnattendedArtwork() {}
+function prepareUnattendedClose() {}
+function restoreUnattendedHost() {}
+function writeJobProgress() {}
+function writeUtf8(path, value) { writes[path] = JSON.parse(value); }
+""" + "\n".join(line for line in source.splitlines() if not line.startswith("#include")) + r"""
+process.stdout.write(JSON.stringify({result: writes[config.result_json], printItems: printItems}));
+"""
+    completed = subprocess.run(["node", "-e", program], check=True, capture_output=True, text=True)
+    payload = json.loads(completed.stdout)
+    result = payload["result"]
+    assert result["success"], result.get("error")
+    candidates = result["proposal_layer_candidates"]
+    assert [candidate["name"] for candidate in candidates] == (["刀版"] if with_path else [])
+    assert result["proposal_path_count"] == int(with_path)
+    assert result["semantic_edge_count"] == (3 if with_path else 0)
+    assert "structure_path_too_short" not in result["semantic_errors"]
+    assert payload["printItems"] == ([] if tagged else ["TextFrame"])
+    if with_path:
+        assert candidates[0]["stroke_only_path_count"] == 1
+        assert len(candidates[0]["preview_paths"]) == 1
+        assert candidates[0]["preview_truncated"] is False
+
+
 def test_inventory_walks_layer_path_items_and_skips_annotation_layers():
     source = EXPORTER.read_text(encoding="utf-8")
     assign_start = source.index("function exactAssignment")
@@ -1504,6 +1581,7 @@ def test_inventory_walks_layer_path_items_and_skips_annotation_layers():
 function pathItem(layer, filled) {
     var anchor = [0, 80];
     return {
+        typename: "PathItem",
         layer: layer,
         stroked: !filled,
         filled: filled,
@@ -1809,6 +1887,144 @@ def test_proposal_paths_are_cleaned_from_artwork_without_hiding_the_whole_layer(
     assert "chosenRecords" in source
     assert "semanticItems.push(record.item)" in source
     assert "withHiddenSemanticItems(semanticItems" in source
+
+
+def test_mixed_dieline_export_preserves_baseline_and_requires_unique_attachment():
+    source = EXPORTER.read_text(encoding="utf-8")
+    script = CURVE_HELPER.read_text(encoding="utf-8") + "\n" + "\n".join(
+        line for line in source.splitlines() if not line.startswith("#include ")
+    )
+    program = "const script = " + json.dumps(script) + r""";
+const vm = require("node:vm");
+
+function run(variant) {
+    const files = {};
+    const config = {
+        source_ai: "source.ai", source_sha256: "A".repeat(64),
+        full_pdf: "full.pdf", print_pdf: "artwork.pdf", structure_json: "structure.json",
+        debug_log: "debug.log", result_json: "result.json", proposal_layers: [],
+        print_layers: ["印刷"], mixed_print_pdf: "mixed.pdf", mixed_structure_json: "mixed.json",
+    };
+    if (variant === "legacy") delete config.mixed_structure_json;
+    if (variant === "explicit-layer") config.proposal_layers = ["刀版"];
+    if (variant === "explicit-assignment") config.semantic_assignments = {layers: {"其他": "cut"}};
+
+    const document = {
+        typename: "Document", layers: [], pageItems: [],
+        artboards: [{artboardRect: [0, 50, 50, 0]}],
+        close() {},
+        saveAs(file) {
+            if (file.path === "mixed.pdf" && variant === "save-failure") throw Error("save failed");
+            files[file.path] = document.pageItems
+                .filter(item => item.typename === "PathItem" && item.layer.visible && !item.hidden)
+                .map(item => item.id);
+        },
+    };
+    function layer(name) {
+        const result = {name, parent: document, typename: "Layer", visible: true, pageItems: []};
+        document.layers.push(result);
+        return result;
+    }
+    function item(parent, id, properties) {
+        const result = {parent, id, layer: parent.layer || parent, hidden: false, ...properties};
+        parent.pageItems.push(result);
+        document.pageItems.push(result);
+        return result;
+    }
+    function path(parent, id, coordinates, options = {}) {
+        return item(parent, id, {
+            typename: "PathItem", stroked: true, filled: false, clipping: false,
+            pathPoints: coordinates.map(anchor => ({anchor, leftDirection: anchor, rightDirection: anchor})),
+            ...options,
+        });
+    }
+    const knife = layer("刀版");
+    const craft = layer("激凹");
+    const print = layer("印刷");
+    path(knife, "unused-knife", [[0, 0]]);
+    path(craft, "craft-plate", [[2, 0], [2, 3], [3, 3]], {filled: true, closed: true});
+    const group = item(print, "dieline", {typename: "GroupItem", pageItems: []});
+    const outline = path(group, "outline", [[0, 0], [30, 0], [30, 20], [0, 20]], {closed: true});
+    const creaseStart = variant === "straddling-group" ? [-0.3, 0] : [10, 0];
+    path(group, "crease", [creaseStart, [10, 20]]);
+    const degenerate = path(group, "degenerate", [[0, 0]]);
+    const tab = [[0.2, 0], [-7, 4], [-7, 16], [0.2, 20]];
+    if (variant === "partial-edge") tab[3] = [0.2, 16];
+    if (variant === "inside") { tab[1][0] = 7; tab[2][0] = 7; }
+    if (variant === "crossed-tab") [tab[1], tab[2]] = [tab[2], tab[1]];
+    path(print, "tab", tab, {closed: true});
+    path(print, "ornament", [[4, 4], [5, 5], [6, 4], [5, 3]], {closed: true});
+    path(print, "printing", [[2, 2], [2, 4], [4, 4]], {filled: true, closed: true});
+    if (variant === "duplicate-tab") path(print, "second-tab", tab, {closed: true});
+    if (variant === "non-stroke-group") outline.filled = true;
+    if (variant === "hidden-group") group.hidden = true;
+    if (variant === "ambiguous-group") {
+        const secondGroup = item(print, "second-group", {typename: "GroupItem", pageItems: []});
+        path(secondGroup, "second-outline", [[0, 0], [30, 0], [30, 20], [0, 20]], {closed: true});
+    }
+    if (variant === "explicit-empty-path") degenerate.note = "packaging:cut";
+    if (variant === "invalid-point") outline.pathPoints[0].anchor = [NaN, 0];
+    if (variant === "inventory-limit") {
+        document.pageItems = Array(5001).fill(outline);
+    }
+
+    const app = {version: "test", open: () => document};
+    vm.runInNewContext(script, {
+        app, PIPELINE_CONFIG_PATH: "config.json", UserInteractionLevel: {}, SaveOptions: {},
+        File: function (path) {
+            this.path = path;
+            this.open = () => true;
+            this.read = () => JSON.stringify(config);
+            this.writeln = () => {};
+            this.close = () => {};
+        },
+        PDFSaveOptions: function () {},
+        applyUnattendedHost() {
+            document.layers.forEach(layer => { layer.visible = false; });
+            return {};
+        },
+        restoreUnattendedArtwork() { document.layers.forEach(layer => { layer.visible = true; }); },
+        writeJobProgress() {},
+        writeUtf8(path, content) { files[path] = JSON.parse(content); },
+        prepareUnattendedClose() {},
+        restoreUnattendedHost() {},
+    });
+    return files;
+}
+
+const variants = [
+    "mixed", "legacy", "explicit-layer", "explicit-assignment", "explicit-empty-path",
+    "partial-edge", "inside", "crossed-tab", "straddling-group", "duplicate-tab",
+    "hidden-group", "non-stroke-group", "ambiguous-group", "invalid-point", "inventory-limit", "save-failure",
+];
+process.stdout.write(JSON.stringify(Object.fromEntries(variants.map(name => [name, run(name)]))));
+"""
+    completed = subprocess.run(
+        ["node"], input=program, check=True, capture_output=True, text=True
+    )
+    outputs = json.loads(completed.stdout)
+    mixed = outputs.pop("mixed")
+    legacy = outputs["legacy"]
+    result = mixed["result.json"]
+    assert result["semantic_edge_count"] == 0
+    assert [entry["name"] for entry in result["preview_plate_candidates"]] == ["激凹"]
+    assert {key: result.pop(key) for key in ("mixed_structure_json", "mixed_print_pdf")} == {
+        "mixed_structure_json": "mixed.json",
+        "mixed_print_pdf": "mixed.pdf",
+    }
+    structure = mixed.pop("mixed.json")
+    assert structure["source"]["adapter"] == "illustrator-stroke-proposal/1"
+    assert structure["source"]["sha256"] == "a" * 64
+    assert len(structure["edges"]) == 9
+    assert all(edge["assignment"] == "crease" for edge in structure["edges"])
+    assert mixed.pop("mixed.pdf") == ["degenerate", "ornament", "printing"]
+    assert mixed == legacy
+    for variant, output in outputs.items():
+        assert output["result.json"]["success"], variant
+        assert "mixed_structure_json" not in output["result.json"], variant
+        assert "mixed_print_pdf" not in output["result.json"], variant
+        assert "mixed.json" not in output, variant
+        assert "mixed.pdf" not in output, variant
 
 
 def test_structure_export_passes_explicit_print_layers_to_illustrator(

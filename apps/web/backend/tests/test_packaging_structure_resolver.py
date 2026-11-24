@@ -758,6 +758,38 @@ def test_public_precision_keeps_rotated_full_caps_confirmable():
         assert proposed.topology["net_proposals"][0]["valid_anchors"]
 
 
+def test_rotated_box_with_a_sloped_cut_uses_the_panel_grid_for_closure_fit():
+    for cap_shortfall in (1.8, 1.49):
+        strokes = stroke_payload(bottom_cap_depth=20.0 - cap_shortfall)
+        corner = next(vertex for vertex in strokes["vertices"] if vertex["id"] == "v-1")
+        strokes["vertices"].append(
+            {"id": "sloped-tip", "x": corner["x"] - 15.0, "y": corner["y"] + 3.0}
+        )
+        strokes["edges"].append(
+            {
+                "id": "sloped-cut",
+                "start": corner["id"],
+                "end": "sloped-tip",
+                "assignment": "cut",
+                "source_refs": ["synthetic:sloped-cut"],
+            }
+        )
+        rotated = {**strokes, "vertices": [], "edges": []}
+        append_linework(rotated, strokes, prefix="rotated", rotation_degrees=12.5)
+
+        proposed = resolve_structure_payload(rotated)
+
+        if cap_shortfall == 1.8:
+            assert proposed.code == "structure_box_net_missing"
+            assert not (proposed.topology or {}).get("net_proposals")
+        else:
+            assert proposed.code == "structure_face_mapping_incomplete"
+            net, = proposed.topology["net_proposals"]
+            assert net["dimensions_mm"] == {"width": 30.0, "depth": 20.0, "height": 50.0}
+            assert len(net["face_ids"]) == 6
+            assert net["valid_anchors"]
+
+
 def test_annotation_heavy_fixture_partitions_noise_before_candidate_search():
     case = regression_case("annotation_heavy_carton")
     payload = stroke_payload()
@@ -833,6 +865,50 @@ def test_detached_annotation_components_do_not_exhaust_the_global_topology_limit
     assert len(result.topology["net_proposals"]) == 1
     assert result.topology["proposal_diagnostics"]["components_seen"] > 4_096
     assert result.topology["proposal_diagnostics"]["candidate_components"] == 1
+
+
+def append_detached_parallel_strokes(payload: dict, y_positions: list[float]) -> None:
+    for index, y in enumerate(y_positions):
+        stroke = f"parallel-{index}"
+        start, end = f"{stroke}-a", f"{stroke}-b"
+        payload["vertices"].extend(
+            [{"id": start, "x": 130.0, "y": y}, {"id": end, "x": 140.0, "y": y}]
+        )
+        if index % 2:
+            start, end = end, start
+        payload["edges"].append({"id": stroke, "start": start, "end": end, "assignment": "crease"})
+
+
+def test_spatial_link_budget_recovers_a_complete_carton_with_exact_duplicate_strokes():
+    payload = stroke_payload()
+    baseline = resolve_structure_payload(payload)
+    append_detached_parallel_strokes(payload, [25.0] * 448)
+    original = deepcopy(payload)
+
+    result = resolve_structure_payload(payload)
+
+    assert payload == original
+    assert result.status == "review_required", result.message
+    assert result.code == "structure_face_mapping_incomplete"
+    assert result.resolved is None
+    nets = result.topology["net_proposals"]
+    assert len(nets) == 1
+    assert nets[0]["valid_anchors"]
+    assert nets == baseline.topology["net_proposals"]
+
+
+def test_spatial_link_budget_still_rejects_dense_distinct_strokes_after_deduplication():
+    payload = stroke_payload()
+    positions = [25.0 + index * 0.001 for index in range(448)]
+    append_detached_parallel_strokes(payload, [*positions, positions[-1]])
+
+    result = resolve_structure_payload(payload)
+
+    assert result.status == "unsupported"
+    assert result.code == "structure_limit_exceeded"
+    assert result.message == "结构线邻接关系超过候选扫描预算"
+    assert result.resolved is None
+    assert not (result.topology or {}).get("net_proposals")
 
 
 def test_axis_budget_cannot_hide_the_outer_carton_and_promote_a_smaller_insert():

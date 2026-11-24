@@ -42,6 +42,10 @@ class TopologyError(RuntimeError):
         return {"code": self.code, "message": str(self), "details": self.details}
 
 
+class _SpatialLinkBudgetExceeded(TopologyError):
+    pass
+
+
 def _extract_lines(geometry: Any) -> list[LineString]:
     if geometry is None or geometry.is_empty:
         return []
@@ -175,7 +179,7 @@ def _partition_spatial_line_components(
                 continue
             links += 1
             if links > MAX_PROPOSAL_SPATIAL_LINKS:
-                raise TopologyError(
+                raise _SpatialLinkBudgetExceeded(
                     "structure_limit_exceeded",
                     "结构线邻接关系超过候选扫描预算",
                     details={"links": links, "limit": MAX_PROPOSAL_SPATIAL_LINKS},
@@ -185,6 +189,15 @@ def _partition_spatial_line_components(
     for index, line in enumerate(lines):
         members[groups.find(index)].append(line)
     return sorted(members.values(), key=_component_sort_key)
+
+
+def _deduplicate_segments(lines: list[LineString]) -> list[LineString]:
+    by_endpoints: dict[tuple[tuple[float, ...], tuple[float, ...]], LineString] = {}
+    for line in lines:
+        start, end = line.coords
+        key = (start, end) if start <= end else (end, start)
+        by_endpoints.setdefault(key, line)
+    return list(by_endpoints.values())
 
 
 def _diagnostic(geometry: Any) -> dict[str, Any]:
@@ -390,26 +403,34 @@ def _face_transform(polygon: Any) -> tuple[list[float], list[float]] | None:
     return transform, [round(x_length, 6), round(y_length, 6)]
 
 
-def _dominant_orthogonal_angle(lines: list[LineString]) -> float:
+def _dominant_orthogonal_angle(
+    lines: list[LineString], *, reference_angle: float | None = None,
+) -> float:
     """Return the dominant carton-grid angle, modulo 90 degrees.
 
     Old Illustrator dielines frequently contain duplicate cut/crease strokes
     and separate reference diagrams.  Their useful panel edges still share an
     orthogonal basis.  A fourth-angle mean lets horizontal and vertical edges
     vote for the same basis without assuming that the net is axis-aligned.
+    When refining, only strokes close to either axis support the estimate.
     """
     cosine = 0.0
     sine = 0.0
+    max_deviation = math.radians(1.0)
     for line in lines:
         coordinates = list(line.coords)
         if len(coordinates) < 2 or line.length <= 1e-9:
             continue
         left, right = coordinates[0], coordinates[-1]
         angle = math.atan2(float(right[1]) - float(left[1]), float(right[0]) - float(left[0]))
+        if reference_angle is not None:
+            deviation = (angle - reference_angle + math.pi / 4) % (math.pi / 2) - math.pi / 4
+            if abs(deviation) > max_deviation:
+                continue
         cosine += float(line.length) * math.cos(4.0 * angle)
         sine += float(line.length) * math.sin(4.0 * angle)
     if abs(cosine) + abs(sine) <= 1e-9:
-        return 0.0
+        return reference_angle if reference_angle is not None else 0.0
     return math.atan2(sine, cosine) / 4.0
 
 
@@ -470,8 +491,10 @@ def _rectangular_candidates_for_component(
     source_hash: str,
     tolerance: float,
     work_state: list[int],
+    basis_angle: float | None = None,
 ) -> tuple[list[dict[str, Any]], list[float]]:
-    basis_angle = _dominant_orthogonal_angle(lines)
+    if basis_angle is None:
+        basis_angle = _dominant_orthogonal_angle(lines)
     local_lines = [
         LineString([_rotate_coordinate(tuple(point), -basis_angle) for point in line.coords])
         for line in lines
@@ -619,6 +642,101 @@ def _rectangular_candidates_for_component(
     return candidates, _basis_transform(basis_angle)
 
 
+def _derive_component_box_net_proposals(
+    components: list[list[LineString]],
+    *,
+    source_hash: str,
+    tolerance: float,
+) -> tuple[dict[str, dict[str, Any]], list[dict[str, Any]], int, int]:
+    candidates_by_id: dict[str, dict[str, Any]] = {}
+    net_proposals: list[dict[str, Any]] = []
+    work_state = [0]
+    candidate_components: set[int] = set()
+    # Keep the original basis when it already gives a published candidate ID.
+    for refine_basis in (False, True):
+        for component_index, component_lines in enumerate(components, start=1):
+            basis_angle = _dominant_orthogonal_angle(component_lines)
+            if refine_basis:
+                refined_angle = _dominant_orthogonal_angle(component_lines, reference_angle=basis_angle)
+                if refined_angle == basis_angle:
+                    continue
+                basis_angle = refined_angle
+            component_candidates, basis_transform = _rectangular_candidates_for_component(
+                component_lines,
+                basis_angle=basis_angle,
+                source_hash=source_hash,
+                tolerance=tolerance,
+                work_state=work_state,
+            )
+            if len(component_candidates) < 6:
+                continue
+            candidate_components.add(component_index)
+            if len(candidate_components) > MAX_PROPOSAL_CANDIDATE_COMPONENTS:
+                raise TopologyError(
+                    "structure_limit_exceeded",
+                    "可成盒结构组件超过人工确认预算",
+                    details={
+                        "count": len(candidate_components),
+                        "limit": MAX_PROPOSAL_CANDIDATE_COMPONENTS,
+                    },
+                )
+            try:
+                component_proposals = derive_box_net_proposals(
+                    component_candidates,
+                    policy=STROKE_PROPOSAL_GEOMETRY,
+                    binding_seed=f"{source_hash}:component:{component_index}",
+                    basis_transform=basis_transform,
+                )
+            except BoxNetProposalLimitError as error:
+                raise TopologyError(
+                    "structure_limit_exceeded",
+                    "完整盒型方案过多，不能安全交给人工确认",
+                    details={"component": component_index, "cause": str(error)},
+                ) from error
+            if not component_proposals:
+                continue
+            for candidate in component_candidates:
+                candidates_by_id[str(candidate["id"])] = candidate
+            net_proposals.extend(component_proposals)
+            if len(net_proposals) > 24:
+                raise TopologyError(
+                    "structure_limit_exceeded",
+                    "完整盒型方案超过人工确认上限",
+                    details={"count": len(net_proposals), "limit": 24},
+                )
+        if net_proposals:
+            break
+    return candidates_by_id, net_proposals, len(candidate_components), work_state[0]
+
+
+def _proposal_source_lines(structure: Mapping[str, Any]) -> list[LineString]:
+    vertices = {item["id"]: (float(item["x"]), float(item["y"])) for item in structure["vertices"]}
+    lines = [
+        LineString([vertices[edge["start"]], vertices[edge["end"]]])
+        for edge in structure["edges"]
+        if edge["assignment"] in LINEWORK_ASSIGNMENTS
+    ]
+    return [line for line in lines if line.length >= 1e-6]
+
+
+def stroke_proposal_clears_face_interiors(
+    structure: Mapping[str, Any], face_points: list[list[list[float]]],
+) -> bool:
+    tolerance = STROKE_PROPOSAL_GEOMETRY.boundary_mm
+    if tolerance is None:
+        return False
+    lines = _proposal_source_lines(structure)
+    tree = STRtree(lines)
+    for points in face_points:
+        interior = Polygon(points).buffer(-tolerance)
+        if interior.is_empty:
+            return False
+        for index in tree.query(interior, predicate="intersects"):
+            if lines[int(index)].intersection(interior).length >= 1e-6:
+                return False
+    return True
+
+
 def derive_rectangular_face_proposal(
     payload: Mapping[str, Any],
 ) -> dict[str, Any]:
@@ -631,13 +749,7 @@ def derive_rectangular_face_proposal(
     result from this function can be accepted without ``confirm_structure``.
     """
     structure = canonicalize_structure(payload)
-    vertices = {item["id"]: (float(item["x"]), float(item["y"])) for item in structure["vertices"]}
-    source_lines = [
-        LineString([vertices[edge["start"]], vertices[edge["end"]]])
-        for edge in structure["edges"]
-        if edge["assignment"] in LINEWORK_ASSIGNMENTS
-    ]
-    source_lines = [line for line in source_lines if line.length >= 1e-6]
+    source_lines = _proposal_source_lines(structure)
     if not source_lines:
         raise TopologyError("structure_semantics_missing", "结构线没有形成可确认的盒面候选")
 
@@ -646,7 +758,15 @@ def derive_rectangular_face_proposal(
         raise TopologyError("structure_contract_invalid", "旧刀线候选缺少边界容差策略")
     # Partition before GEOS noding.  Thousands of detached annotation marks
     # must not force a global union/polygonization or hide a valid carton.
-    source_components = _partition_spatial_line_components(source_lines, tolerance)
+    try:
+        source_components = _partition_spatial_line_components(source_lines, tolerance)
+    except _SpatialLinkBudgetExceeded:
+        # Component order contributes to public proposal IDs. Keep the original
+        # scan for linework that already fits and retry only after a budget error.
+        unique_lines = _deduplicate_segments(source_lines)
+        if len(unique_lines) == len(source_lines):
+            raise
+        source_components = _partition_spatial_line_components(unique_lines, tolerance)
     components: list[list[LineString]] = []
     ignored_open_components = 0
     for source_component in source_components:
@@ -662,55 +782,9 @@ def derive_rectangular_face_proposal(
                 ignored_open_components += 1
                 continue
             components.append(noded_component)
-    candidates_by_id: dict[str, dict[str, Any]] = {}
-    net_proposals: list[dict[str, Any]] = []
-    work_state = [0]
-    candidate_components = 0
-    for component_index, component_lines in enumerate(components, start=1):
-        if len(component_lines) < 4:
-            continue
-        component_candidates, basis_transform = _rectangular_candidates_for_component(
-            component_lines,
-            source_hash=structure["source"]["sha256"],
-            tolerance=tolerance,
-            work_state=work_state,
-        )
-        if len(component_candidates) < 6:
-            continue
-        candidate_components += 1
-        if candidate_components > MAX_PROPOSAL_CANDIDATE_COMPONENTS:
-            raise TopologyError(
-                "structure_limit_exceeded",
-                "可成盒结构组件超过人工确认预算",
-                details={
-                    "count": candidate_components,
-                    "limit": MAX_PROPOSAL_CANDIDATE_COMPONENTS,
-                },
-            )
-        try:
-            component_proposals = derive_box_net_proposals(
-                component_candidates,
-                policy=STROKE_PROPOSAL_GEOMETRY,
-                binding_seed=f'{structure["source"]["sha256"]}:component:{component_index}',
-                basis_transform=basis_transform,
-            )
-        except BoxNetProposalLimitError as error:
-            raise TopologyError(
-                "structure_limit_exceeded",
-                "完整盒型方案过多，不能安全交给人工确认",
-                details={"component": component_index, "cause": str(error)},
-            ) from error
-        if not component_proposals:
-            continue
-        for candidate in component_candidates:
-            candidates_by_id[str(candidate["id"])] = candidate
-        net_proposals.extend(component_proposals)
-        if len(net_proposals) > 24:
-            raise TopologyError(
-                "structure_limit_exceeded",
-                "完整盒型方案超过人工确认上限",
-                details={"count": len(net_proposals), "limit": 24},
-            )
+    candidates_by_id, net_proposals, candidate_components, work_units = _derive_component_box_net_proposals(
+        components, source_hash=structure["source"]["sha256"], tolerance=tolerance,
+    )
     if not net_proposals:
         raise TopologyError(
             "structure_box_net_missing",
@@ -853,7 +927,7 @@ def derive_rectangular_face_proposal(
             "components_seen": len(source_components),
             "components_noded": len(components),
             "candidate_components": candidate_components,
-            "work_units": work_state[0],
+            "work_units": work_units,
         },
     }
 
