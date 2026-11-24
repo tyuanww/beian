@@ -44,6 +44,7 @@ const ID = "af0900000001";
 const GEN = "g1-rf09-preview-" + "a".repeat(48);
 const GEN2 = "g2-rf09-preview-" + "b".repeat(48);
 const FULL_UPGRADE_NOTICE = "高清图暂时未加载，重新打开此单可重试";
+const STUDIO_DOWNLOAD_FAILED = "成片下载失败，请重试";
 const MEASURE_DIR = process.env.RF09_MEASURE_DIR || "";
 const UI_ROOT = fileURLToPath(new URL("../", import.meta.url));
 
@@ -434,39 +435,41 @@ test("card 失败回退 full；白底导出不等待 set", async ({ page }) => {
   expect(isBlue(png.px)).toBe(true);
 });
 
-test("ground 先失败时导出立即失败且无未处理拒绝", async ({ page }) => {
+test("画面使用地面时，地面高清失败立即报告下载失败", async ({ page }) => {
   const product = deferred();
   const unhandled = await trackUnhandled(page);
-  await serve(page, { gates: { white_a: product, white_b: product, white_a_ground: "fail", white_b_ground: "fail" } });
+  const job = jobModel();
+  job.files = job.files.filter((file) => !file.key.includes("_set"));
+  await serve(page, { job, gates: { white_a: product, white_b: product, white_a_ground: "fail", white_b_ground: "fail" } });
   await page.goto(`/mockup/${ID}`, { waitUntil: "domcontentloaded" });
   await page.locator(".mockup-backdrop-switch").getByText("白桌白墙", { exact: true }).click();
   const shot = canvas(page);
   await expect(shot).toHaveAttribute("data-preview-product", "card");
-  await expect(shot).toHaveAttribute("data-preview-set", "full");
+  await expect(shot).toHaveAttribute("data-preview-set-fallback", "1");
   const before = await unhandled.snapshot();
   await page.getByRole("button", { name: "下载正面 + 侧面", exact: true }).click();
-  await expect(page.locator(".mockup-hud")).toHaveText("导出失败");
+  await expect(page.locator(".mockup-hud")).toHaveText(STUDIO_DOWNLOAD_FAILED);
   expect((await unhandled.snapshot()).slice(before.length)).toEqual([]);
   await page.getByRole("button", { name: "下载正面 + 侧面", exact: true }).click();
-  await expect(page.locator(".mockup-hud")).toHaveText("导出失败");
+  await expect(page.locator(".mockup-hud")).toHaveText(STUDIO_DOWNLOAD_FAILED);
   expect((await unhandled.snapshot()).slice(before.length)).toEqual([]);
   product.release();
 });
 
-test("product 先失败时导出不等待悬挂的 ground", async ({ page }) => {
-  const ground = deferred();
+test("产品高清失败时立即报告下载失败，不等尚未就绪的布景", async ({ page }) => {
+  const set = deferred();
   const unhandled = await trackUnhandled(page);
-  await serve(page, { gates: { white_a: "fail", white_b: "fail", white_a_ground: ground, white_b_ground: ground } });
+  await serve(page, { gates: { white_a: "fail", white_b: "fail", white_a_set: set, white_b_set: set } });
   await page.goto(`/mockup/${ID}`, { waitUntil: "domcontentloaded" });
   await page.locator(".mockup-backdrop-switch").getByText("白桌白墙", { exact: true }).click();
   const shot = canvas(page);
   await expect(shot).toHaveAttribute("data-preview-product", "card");
-  await expect(shot).toHaveAttribute("data-preview-set", "full");
+  await expect(shot).toHaveAttribute("data-preview-set", "card");
   const before = await unhandled.snapshot();
   await page.getByRole("button", { name: "下载正面 + 侧面", exact: true }).click();
-  await expect(page.locator(".mockup-hud")).toHaveText("导出失败");
+  await expect(page.locator(".mockup-hud")).toHaveText(STUDIO_DOWNLOAD_FAILED);
   expect((await unhandled.snapshot()).slice(before.length)).toEqual([]);
-  ground.release();
+  set.release();
 });
 
 test("白桌白墙下载不因可选 set pending 挂起", async ({ page }) => {
@@ -495,47 +498,65 @@ test("白桌白墙下载不因可选 set pending 挂起", async ({ page }) => {
   setFull.release();
 });
 
-test("预览已用 set card 时下载不静默换成 ground，full 就绪后可下同背景", async ({ page }) => {
+test("点一次下载，布景高清就绪后自动保存，不等未使用的地面或 GLB", async ({ page }) => {
+  test.setTimeout(30_000);
   const setFull = deferred();
-  await serve(page, { gates: { white_a_set: setFull, white_b_set: setFull } });
-  await page.goto(`/mockup/${ID}`, { waitUntil: "domcontentloaded" });
-  await page.locator(".mockup-backdrop-switch").getByText("白桌白墙", { exact: true }).click();
-  const shot = canvas(page);
-  await expect(shot).toHaveAttribute("data-preview-set", "card");
-  await expect.poll(async () => isMagenta(await sample(page, 0.08, 0.08))).toBe(true);
-  const stolen = page.waitForEvent("download", { timeout: 1500 }).then(() => "got").catch(() => "none");
-  await page.getByRole("button", { name: "下载正面 + 侧面", exact: true }).click();
-  expect(await stolen).toBe("none");
-  await expect(page.locator(".mockup-hud")).toHaveText(FULL_UPGRADE_NOTICE);
-  const ghost = page.waitForEvent("download", { timeout: 1500 }).then(() => "got").catch(() => "none");
-  setFull.release();
-  await expect(shot).toHaveAttribute("data-preview-set", "full");
-  await expect.poll(async () => isCyan(await sample(page, 0.08, 0.08))).toBe(true);
-  expect(await ghost).toBe("none");
-  const download = page.waitForEvent("download");
-  await page.getByRole("button", { name: "下载正面 + 侧面", exact: true }).click();
-  const saved = await download;
-  const bytes = readFileSync((await saved.path())!);
-  const corner = await inspectDownload(page, bytes, 4, 4);
-  const center = await inspectDownload(page, bytes, 40, 48);
-  expect(corner.size).toEqual([80, 96]);
-  expect(isBlue(center.px)).toBe(true);
-  expect(isCyan(corner.px)).toBe(true);
-  expect(isMagenta(corner.px)).toBe(false);
-  expect(isGroundFallback(corner.px)).toBe(false);
+  const unused = deferred();
+  await serve(page, { gates: {
+    white_a_set: setFull, white_a_ground: unused,
+    white_b: unused, white_b_ground: unused, white_b_set: unused, glb: unused,
+  } });
+  try {
+    await page.goto(`/mockup/${ID}`, { waitUntil: "domcontentloaded" });
+    await page.locator(".mockup-backdrop-switch").getByText("白桌白墙", { exact: true }).click();
+    await expect(canvas(page)).toHaveAttribute("data-preview-set", "card");
+    await expect.poll(async () => isMagenta(await sample(page, 0.08, 0.08))).toBe(true);
+    const savedFiles: string[] = [];
+    page.on("download", (item) => savedFiles.push(item.suggestedFilename()));
+    await page.getByRole("button", { name: "下载正面 + 侧面", exact: true }).click();
+    await expect(page.locator(".mockup-hud")).toHaveText("正在准备成片");
+    const browserState = await page.context().newCDPSession(page);
+    try {
+      // Playwright evaluate supplies a user gesture. Observe without refreshing it.
+      await expect.poll(async () => {
+        const { result } = await browserState.send("Runtime.evaluate", {
+          expression: `({ active: navigator.userActivation.isActive, status: document.querySelector('.mockup-hud')?.textContent })`,
+          returnByValue: true,
+          userGesture: false,
+        });
+        return result.value;
+      }, { timeout: 12_000 }).toEqual({ active: false, status: "正在准备成片" });
+    } finally {
+      await browserState.detach();
+    }
+    expect(savedFiles).toEqual([]);
+    const download = page.waitForEvent("download");
+    setFull.release();
+    const saved = await download;
+    const bytes = readFileSync((await saved.path())!);
+    const corner = await inspectDownload(page, bytes, 4, 4);
+    const center = await inspectDownload(page, bytes, 40, 48);
+    expect(corner.size).toEqual([80, 96]);
+    expect(isBlue(center.px)).toBe(true);
+    expect(isCyan(corner.px)).toBe(true);
+    expect(isMagenta(corner.px)).toBe(false);
+    expect(isGroundFallback(corner.px)).toBe(false);
+    expect(savedFiles).toEqual(["white_a.png"]);
+  } finally {
+    setFull.release();
+    unused.release();
+  }
 });
 
-test("set full 持续 pending 时解锁，切白底可下，迟到 set 不产生幽灵下载", async ({ page }) => {
+test("切白底可单独下载，已点的布景仍按原背景自动保存", async ({ page }) => {
   const setFull = deferred();
   await serve(page, { gates: { white_a_set: setFull, white_b_set: setFull } });
   await page.goto(`/mockup/${ID}`, { waitUntil: "domcontentloaded" });
   await page.locator(".mockup-backdrop-switch").getByText("白桌白墙", { exact: true }).click();
   await expect(canvas(page)).toHaveAttribute("data-preview-set", "card");
   await expect.poll(async () => isMagenta(await sample(page, 0.08, 0.08))).toBe(true);
-  const stolen = page.waitForEvent("download", { timeout: 1500 }).then(() => "got").catch(() => "none");
   await page.getByRole("button", { name: "下载正面 + 侧面", exact: true }).click();
-  expect(await stolen).toBe("none");
-  await expect(page.locator(".mockup-hud")).toHaveText(FULL_UPGRADE_NOTICE);
+  await expect(page.locator(".mockup-hud")).toHaveText("正在准备成片");
   await page.locator(".mockup-backdrop-switch").getByText("白底", { exact: true }).click();
   const download = page.waitForEvent("download");
   await page.getByRole("button", { name: "下载正面 + 侧面", exact: true }).click();
@@ -543,15 +564,9 @@ test("set full 持续 pending 时解锁，切白底可下，迟到 set 不产生
   const white = await inspectDownload(page, readFileSync((await saved.path())!), 40, 48);
   expect(white.size).toEqual([80, 96]);
   expect(isBlue(white.px)).toBe(true);
-  const ghost = page.waitForEvent("download", { timeout: 1500 }).then(() => "got").catch(() => "none");
+  const sceneDownload = page.waitForEvent("download");
   setFull.release();
-  await expect(canvas(page)).toHaveAttribute("data-preview-set", "full");
-  expect(await ghost).toBe("none");
-  await page.locator(".mockup-backdrop-switch").getByText("白桌白墙", { exact: true }).click();
-  await expect.poll(async () => isCyan(await sample(page, 0.08, 0.08))).toBe(true);
-  const again = page.waitForEvent("download");
-  await page.getByRole("button", { name: "下载正面 + 侧面", exact: true }).click();
-  const recovered = await again;
+  const recovered = await sceneDownload;
   const setPng = await inspectDownload(page, readFileSync((await recovered.path())!), 4, 4);
   expect(setPng.size).toEqual([80, 96]);
   expect(isCyan(setPng.px)).toBe(true);
@@ -566,20 +581,26 @@ test("set full 失败且预览仍是 card 时不导出错误背景", async ({ pa
   const stolen = page.waitForEvent("download", { timeout: 1500 }).then(() => "got").catch(() => "none");
   await page.getByRole("button", { name: "下载正面 + 侧面", exact: true }).click();
   expect(await stolen).toBe("none");
-  await expect(page.locator(".mockup-hud")).toHaveText(FULL_UPGRADE_NOTICE);
+  await expect(page.locator(".mockup-hud")).toHaveText(STUDIO_DOWNLOAD_FAILED);
 });
 
-test("自动 HUD 消失后主动下载失败仍再提示", async ({ page }) => {
-  await serve(page, { gates: { white_a_set: "fail", white_b_set: "fail" } });
+test("布景下载失败后可以在同页重试并保存", async ({ page }) => {
+  const gates: GateMap = { white_a_set: "fail", white_b_set: "fail" };
+  await serve(page, { gates });
   await page.goto(`/mockup/${ID}`, { waitUntil: "domcontentloaded" });
   await page.locator(".mockup-backdrop-switch").getByText("白桌白墙", { exact: true }).click();
   await expect(canvas(page)).toHaveAttribute("data-preview-set", "card");
   await expect(page.locator(".mockup-hud")).toHaveText(FULL_UPGRADE_NOTICE);
-  await expect(page.locator(".mockup-hud")).toHaveCount(0, { timeout: 4000 });
-  const stolen = page.waitForEvent("download", { timeout: 1500 }).then(() => "got").catch(() => "none");
-  await page.getByRole("button", { name: "下载正面 + 侧面", exact: true }).click();
-  expect(await stolen).toBe("none");
-  await expect(page.locator(".mockup-hud")).toHaveText(FULL_UPGRADE_NOTICE);
+  const button = page.getByRole("button", { name: "下载正面 + 侧面", exact: true });
+  await button.click();
+  await expect(page.locator(".mockup-hud")).toHaveText(STUDIO_DOWNLOAD_FAILED);
+  gates.white_a_set = "open";
+  const download = page.waitForEvent("download");
+  await button.click();
+  const saved = await download;
+  const corner = await inspectDownload(page, readFileSync((await saved.path())!), 4, 4);
+  expect(corner.size).toEqual([80, 96]);
+  expect(isCyan(corner.px)).toBe(true);
 });
 
 test("灯箱已显示 set full 时下载不跟小预览 fallback 走 ground", async ({ page }) => {

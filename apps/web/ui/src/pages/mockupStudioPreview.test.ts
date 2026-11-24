@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   blobFromLitStill, blobFromStudioStill,
-  loadStudioPreview, loadStillImage, observeStudioFrame, peekSettled, planStudioExport,
+  loadStudioExport, loadStudioPreview, loadStillImage, observeStudioFrame,
   prepareStudioCanvas, releaseCanvasBacking, releaseStudioGeneration, setCanvasBacking, studioAssetHref,
   studioDrawnUpgradeFailed, studioPreviewSummary, studioStillCacheHas, studioStillCacheSize,
   type StudioPreviewSources,
@@ -369,32 +369,36 @@ test("failed full is requested again on a new preview of the same identity", asy
   assert.ok(fulls > first);
 });
 
-test("peekSettled reports fulfilled, rejected, and still-pending without swallowing the original promise", async () => {
-  const pending = peekSettled(new Promise<string>(() => undefined));
-  assert.equal((await pending).status, "pending");
-  const ok = peekSettled(Promise.resolve("full"));
-  assert.deepEqual(await ok, { status: "fulfilled", value: "full" });
-  const boom = Promise.reject(new Error("404"));
-  const result = await peekSettled(boom);
-  assert.equal(result.status, "rejected");
-  await assert.rejects(boom);
+test("export waits for the shown set without requesting unused ground", async () => {
+  const requested: string[] = [];
+  let releaseSet!: (value: HTMLImageElement) => void;
+  const setFull = new Promise<HTMLImageElement>((resolve) => { releaseSet = resolve; });
+  const product = image("product-full");
+  const set = image("set-full");
+  let ready = false;
+  const pending = loadStudioExport("white_set", image("set-card"), { product: "p", ground: "g", set: "s" }, (url) => {
+    requested.push(url);
+    return url === "s" ? setFull : Promise.resolve(product);
+  }).then((data) => {
+    ready = true;
+    return data;
+  });
+  await tick();
+  assert.equal(ready, false);
+  assert.deepEqual(requested, ["p", "s"]);
+  releaseSet(set);
+  assert.deepEqual(await pending, { product, ground: null, set });
 });
 
-test("peekSettled attaches a handler before a later rejection so it is not unhandled", async () => {
-  const stray: unknown[] = [];
-  const onUnhandled = (error: unknown) => { stray.push(error); };
-  process.on("unhandledRejection", onUnhandled);
-  try {
-    let rejectLater!: (error: Error) => void;
-    const delayed = new Promise<string>((_, reject) => { rejectLater = reject; });
-    assert.equal((await peekSettled(delayed)).status, "pending");
-    rejectLater(new Error("late-fail"));
-    await tick();
-    await tick();
-    assert.equal(stray.length, 0);
-  } finally {
-    process.off("unhandledRejection", onUnhandled);
-  }
+test("a required export input fails without waiting for the other input", async () => {
+  let rejectSet!: (error: Error) => void;
+  const setFull = new Promise<HTMLImageElement>((_, reject) => { rejectSet = reject; });
+  const pending = loadStudioExport("white_set", image("set-card"), { product: "p", ground: "g", set: "s" }, (url) => (
+    url === "s" ? setFull : Promise.reject(new Error("product missing"))
+  ));
+  await assert.rejects(pending, /product missing/);
+  rejectSet(new Error("late set failure"));
+  await tick();
 });
 
 test("setCanvasBacking skips identical sizes; releaseCanvasBacking zeros the backing store", () => {
@@ -579,13 +583,14 @@ test("same-asset generation load evicts the previous stillLoads entry; release d
   }
 });
 
-test("export plan keeps a shown set until full is ready and allows true fallback", () => {
-  const setCard = image("sc");
-  assert.deepEqual(planStudioExport("white", setCard, "pending"), { action: "compose", set: null });
-  assert.deepEqual(planStudioExport("white_set", null, "pending"), { action: "compose", set: null });
-  assert.deepEqual(planStudioExport("white_set", setCard, "pending"), { action: "defer-set-full" });
-  assert.deepEqual(planStudioExport("white_set", setCard, "failed"), { action: "defer-set-full" });
-  assert.deepEqual(planStudioExport("white_set", image("s"), "ready"), { action: "compose", set: "full" });
+test("export loads ground for the shown fallback and just product for solid backgrounds", async () => {
+  const fullUrls = { product: "p", ground: "g", set: "s" };
+  const requested: string[] = [];
+  const load = async (url: string) => { requested.push(url); return image(url); };
+  assert.deepEqual(await loadStudioExport("white_set", null, fullUrls, load), { product: image("p"), ground: image("g"), set: null });
+  assert.deepEqual(await loadStudioExport("white", image("sc"), fullUrls, load), { product: image("p"), ground: null, set: null });
+  assert.deepEqual(await loadStudioExport("silver", image("sc"), fullUrls, load), { product: image("p"), ground: null, set: null });
+  assert.deepEqual(requested, ["p", "g", "p", "p"]);
 });
 
 test("drawn-layer summary ignores unused set and records white_set fallback", () => {

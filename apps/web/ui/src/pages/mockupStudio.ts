@@ -487,10 +487,10 @@ export type StudioPreviewSources = {
 const ABSENT_LAYER: StudioLayerFact = { origin: "none", fetch: "absent" };
 const PENDING_LAYER: StudioLayerFact = { origin: "none", fetch: "pending" };
 
-export function studioDrawnLayerKeys(
+function studioDrawnLayerKeys(
   backdrop: BackdropPreset,
   set: SizedSource | null,
-): { keys: StudioLayerKey[]; setFallback: boolean } {
+): { keys: ["product"] | ["product", "ground" | "set"]; setFallback: boolean } {
   const preset = parseBackdropPreset(backdrop);
   if (preset !== "white_set") return { keys: ["product"], setFallback: false };
   const size = set ? sourceSize(set) : { width: 0, height: 0 };
@@ -520,34 +520,23 @@ export function studioDrawnUpgradeFailed(
   return keys.some((key) => Boolean(facts[key].upgradeFailed));
 }
 
-export type StudioExportPlan =
-  | { action: "compose"; set: "full" | null }
-  | { action: "defer-set-full" };
-
-/** Freeze the visible backdrop decision at click time. Never silently swap a shown set for ground. */
-export function planStudioExport(
+/** Request full-resolution inputs for the backdrop visible at click time. */
+export async function loadStudioExport(
   backdrop: BackdropPreset,
-  previewSet: SizedSource | null,
-  setFull: "pending" | "ready" | "failed" | "absent",
-): StudioExportPlan {
-  const usesSet = studioDrawnLayerKeys(backdrop, previewSet).keys.includes("set");
-  if (!usesSet) return { action: "compose", set: null };
-  if (setFull === "ready") return { action: "compose", set: "full" };
-  return { action: "defer-set-full" };
-}
-
-export async function peekSettled<T>(
-  promise: Promise<T>,
-): Promise<{ status: "fulfilled"; value: T } | { status: "rejected"; error: unknown } | { status: "pending" }> {
-  const slot: { current: { status: "fulfilled"; value: T } | { status: "rejected"; error: unknown } | { status: "pending" } } = {
-    current: { status: "pending" },
+  drawnSet: SizedSource | null,
+  urls: Record<StudioLayerKey, string>,
+  load = loadStillImage,
+) {
+  const [, layer] = studioDrawnLayerKeys(backdrop, drawnSet).keys;
+  const [product, background] = await Promise.all([
+    load(urls.product),
+    layer ? load(urls[layer]) : null,
+  ]);
+  return {
+    product,
+    ground: layer === "ground" ? background : null,
+    set: layer === "set" ? background : null,
   };
-  promise.then(
-    (value) => { slot.current = { status: "fulfilled", value }; },
-    (error) => { slot.current = { status: "rejected", error }; },
-  );
-  await Promise.resolve();
-  return slot.current;
 }
 
 export function applyStudioPreviewDataset(

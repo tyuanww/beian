@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { HUD_MS, FULL_UPGRADE_NOTICE, allowFullUpgradeNotice, downloadHudLine, missingPptHud } from "./mockupHud.js";
+import { HUD_MS, FULL_UPGRADE_NOTICE, STUDIO_DOWNLOAD_PREPARING, STUDIO_DOWNLOAD_FAILED, allowFullUpgradeNotice, downloadHudLine, missingPptHud } from "./mockupHud.js";
 
 describe("mockup download hud", () => {
   it("names the file being saved and does not block copy", () => {
@@ -12,9 +12,10 @@ describe("mockup download hud", () => {
     assert.equal(missingPptHud(), "演示稿暂不可用，白底仍可下载");
     assert.equal(FULL_UPGRADE_NOTICE, "高清图暂时未加载，重新打开此单可重试");
     assert.equal(HUD_MS, 2200);
-    assert.equal(allowFullUpgradeNotice("", "g1", "auto"), true);
-    assert.equal(allowFullUpgradeNotice("g1", "g1", "auto"), false);
-    assert.equal(allowFullUpgradeNotice("g1", "g1", "action"), true);
-    assert.equal(allowFullUpgradeNotice("g1", "g2", "auto"), true);
+    assert.equal(STUDIO_DOWNLOAD_PREPARING, "正在准备成片");
+    assert.equal(STUDIO_DOWNLOAD_FAILED, "成片下载失败，请重试");
+    assert.equal(allowFullUpgradeNotice(null, "g1"), true);
+    assert.equal(allowFullUpgradeNotice("g1", "g1"), false);
+    assert.equal(allowFullUpgradeNotice("g1", "g2"), true);
   });
 });

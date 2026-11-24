@@ -3,16 +3,10 @@
 export const HUD_MS = 2200;
 
 export const FULL_UPGRADE_NOTICE = "高清图暂时未加载，重新打开此单可重试";
+export const STUDIO_DOWNLOAD_PREPARING = "正在准备成片";
+export const STUDIO_DOWNLOAD_FAILED = "成片下载失败，请重试";
 
-export type HudNoticeSource = "auto" | "action";
-
-/** Auto upgrade notices are once per generation; a later download click must still be able to show the same copy. */
-export function allowFullUpgradeNotice(
-  alreadyShownFor: string,
-  generation: string,
-  source: HudNoticeSource,
-): boolean {
-  if (source === "action") return true;
+export function allowFullUpgradeNotice(alreadyShownFor: string | null, generation: string): boolean {
   return alreadyShownFor !== generation;
 }
 
