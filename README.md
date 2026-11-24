@@ -82,7 +82,7 @@
 
 不要跑 uvicorn。没有 `app.main`。产品入口只有 Hono `:8787`。
 
-测试范围、准备、顺序和 L0/L1/L2 边界统一见 [TESTING.md](TESTING.md)。普通修改按影响选择验证；`/ship` 保留完整门禁。
+测试范围、准备、顺序和 L0/L1/L2 边界统一见 [TESTING.md](TESTING.md)。普通修改按影响选择验证。发版准备执行完整检查。
 
 `0.28.0.0` 的 Q06.6 A 仅为显式临时 runtime 装配固定纸盒壳候选的升级路径，普通产品默认不注册，Windows 主桥创建仍关闭；合法已有代的历史查看/切换继续可用。隔离装配参数见 [worker README](workers/packaging/README.md)，A→B 生产装配→C 启用及带日期的发布记录见 [TODOS.md](TODOS.md)。代码版本不代表生产能力已开放。
 

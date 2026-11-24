@@ -2,7 +2,7 @@
 
 本文件保存原 AGENTS 的对应工程合同，仅在涉及本主题时读取。产品行为不构成执行作业、发送消息或操作生产的授权。日期与验收状态是记录时快照，当前结论须绑定本次证据。路径除链接外均相对仓库根。
 
-升 VERSION 时：`VERSION` 文件和 `apps/web/server/src/index.ts` 里的 `VERSION` 常量必须同号。`package.json` 只写三位（npm 不认第四位）：MICRO（`0.12.8.0` → `0.12.8.1`）三位不动；PATCH/MINOR/MAJOR 才改三位。4 位号，记录时版本线为 `0.21.x.0`；实际基线读当前 `VERSION`，不得据此降版。用户点名大版本才跳 MINOR。开放 PR 的 VERSION 若落后于 `main`，不合；先 `/ship` 重占号。
+升 VERSION 时：`VERSION` 文件和 `apps/web/server/src/index.ts` 里的 `VERSION` 常量必须同号。`package.json` 只写三位（npm 不认第四位）：MICRO（`0.12.8.0` → `0.12.8.1`）三位不动；PATCH/MINOR/MAJOR 才改三位。4 位号，记录时版本线为 `0.21.x.0`；实际基线读当前 `VERSION`，不得据此降版。用户点名大版本才跳 MINOR。开放 PR 的 VERSION 落后于 `main` 时，先在开发分支重新分配版本号，再按 [发版检查](../../TESTING.md) 核对 PR 最终提交，通过后才合并。
 
 杭州机箱管理员必须在生产数据目录 `users.json` 中用真实飞书 `open_id` 显式绑定 `role: "admin"`，才能扫描 Blender / Illustrator（含 PATH）。姓名、花名和显示名只展示，绝不参与提权；同企业首次登录一律是 `reviewer`。删除账号、设 `disabled: true` 或调整角色后，已有飞书会话在下一次请求立即撤销或同步，不要求重新登录；公网模式还必须撤销并落盘清除旧显示名会话。退出直接删 token，不得因账号目录暂时不可读而保留。伸美其他人默认审稿员：能进审稿台，不能扫本机 exe。2026-08-24 当周曾决定不做品牌登录闪屏、申请权限工单（office-hours D1=A）；未有新决定前不主动扩展，相关新请求出现时再核对范围。
 

@@ -16,18 +16,18 @@
 
 ### 机器分工
 
-- Mac：开发。入口 `http://127.0.0.1:8787`。跑 `/ship`（出 PR）和 `/land-and-deploy`（squash 合 `main`）。不要 SSH。不要把 `www.jianghua.site` 当本机开发入口。不要只开 Vite `:5173` 就点开始打样/对照——`:8787` 没开时 `/api` 会变成 HTML，单不会入队。本机 API 会把发布排水令牌写到 `apps/web/backend/data/runtime/release-control.json`。`**/backend/data/runtime/` 已在 `.gitignore`，不要提交，也不要把令牌写进文档、日志或 PR。
+- Mac 开发入口为 `http://127.0.0.1:8787`。在 Mac 开发机完成发版检查，按 [项目授权规则](../../AGENTS.md#发布与合并) 创建 PR 和从 GitHub squash 合入 `main`。不要 SSH。不要把 `www.jianghua.site` 当本机开发入口。开始打样或对照前，先确认 `:8787` 在运行。只开 Vite `:5173` 时，`/api` 会变成 HTML，单不会入队。本机 API 会把发布排水令牌写到 `apps/web/backend/data/runtime/release-control.json`。`**/backend/data/runtime/` 已在 `.gitignore`，不要提交，也不要把令牌写进文档、日志或 PR。
 - 杭州 Windows「人事-台式」：生产。入口 `https://www.jianghua.site` → 本机 `:8787` → Cloudflare Named Tunnel（只在杭州跑）。仓库 `D:\beian`，数据 `C:\supply\data`（`WB_PUBLIC=1`，`WB_DEV_DISPLAY_LOGIN=false`）。self-hosted runner 机器名 `hangzhou-windows`、标签 `hangzhou`。密钥只在杭州开工板 / `C:\supply\data`，不进仓库；Mac 不要要、不要写密钥。
 - 远程：UU 远程用来看着人事-台式。Mac 对话不能 SSH 进杭州，也不能把 UU 当成自动部署后端。杭州机开机即可；`:8787`、cloudflared、Actions runner 是 Windows 服务（无人值守）。Illustrator/Blender/对照仍要交互桌面，不要做成 Session 0 服务。
 
 ### Custom deploy hooks
 
-- Pre-merge: `/ship` 已跑 `npm test` 与 ui build。Mac `/land-and-deploy` 只合 GitHub。
+- 合并前按 [TESTING.md](../../TESTING.md) 完成发版检查，核对 PR 最终提交的 CI。
 - Deploy trigger: **合进 `main` 后，只由杭州 self-hosted runner 处理该次可信 `main` push**。workflow 从事件提交下载绑定过的发布组件，并把同一个完整 `GITHUB_SHA` 作为不可变 `TargetSha` 交给 `release.ps1`；杭州 checkout 里的本地脚本不是兜底入口。runner 灰掉就先恢复同一 runner；对照/打样/Illustrator 在途就等作业结束，然后仅对刚才那条 push run 使用 **Re-run failed jobs**。若 `jobs_active` 来自 Illustrator 已重启后仍为 running + close_unconfirmed 的原生文字请求（不会自愈），在维护窗停 8787 后按 `scripts/windows/README.md`「原生文字请求卡在 close_unconfirmed」恢复，再启动 8787 并重跑，不手改任务 JSON。压缩写入器记录的 PID 已经消失时，服务端自己按已退出恢复，即使旧的 `executor-close.json` 写着另一个 PID，也不手改 `batch.json`。回包带有 `disk_blockers` 时，超时日志只转发这份名单。回包没有该字段时，超时日志仍用脚本里的旧列举。名单都不决定 `ready`。`0.19.x → 0.20.x` 首次切换也是在批准维护窗停止旧 WinSW 后重跑同一失败 run，不创建 `workflow_dispatch`，不从分支、本地 checkout 或另一 SHA 发版；来源已是 `0.20` 或目标达到 `0.21` 时不得复用该授权。
 
   发布脚本在不停服时完成不可变 SHA、依赖图、离线运行时和 admission readiness 核对；随后用 ACL journal、SYSTEM watchdog、WinSW 停服、ff-only、UI 构建、InteractiveToken Agent 同步、transaction fence 和 Session 1 发版 L1 身份冒烟组成一个恢复事务。Illustrator 身份冒烟之后，`release.ps1` 调用 RF-11 `blender-contract-smoke.ps1`（只写 `RUNNER_TEMP`，复用 quality eval 与 generation GLB/hash 门）。`0.21.46.0` hangzhou-release `34191398011` 真跑 `WINDOWS_BLENDER_CONTRACT_SMOKE ok`（约 62s）。发版 `TimeoutMs` 为 90000。wrapper 用 Job Object 杀树（`PROC_THREAD_ATTRIBUTE_JOB_LIST` + `CREATE_SUSPENDED`，`KILL_ON_JOB_CLOSE`）。未解析到 Blender 可执行文件时跳过、不回滚；跳过不算质量门杭州实跑完成。超时或合同失败仍走既有 `Invoke-ArmedRecovery "升版失败"`。这不是真实感或 L2 证据。请求生命周期必须由 Node `fetch` 最外层的 `ReleaseCoordinator` 按请求登记，并同时等待 handler 与 `ServerResponse finish/close/error`；不得退回 Hono 中间件标量计数、`Response.body` 包装器、超时清零或 PID/连接数猜测。恢复必须在独占锁内重读 journal；回滚到不理解 fault fence 的 legacy 版本前会保持 8787 停止，并要求 Illustrator fault 文件及 Illustrator/AIRobin/cscript/wscript 全部不存在。脚本不杀全部 `node.exe`，不做 PID 型 listener 清理，不动 cloudflared，不在停服后在线安装 npm/Python 依赖：npm 依赖图变化时，只在停服前于同卷 `D:\beian-deps` 用 `npm ci` 构建并断网验证 staged 树，停服后以目录重命名原子换入，失败由恢复脚本换回备份；Python requirements 变化仍在停服前拒绝。密钥只在杭州数据目录和 loopback 控制头内，不进仓库或日志。细节见 `scripts/windows/README.md`。
 
-- 杭州 Grok 禁止：在生产机 `/ship` 新功能、改产品代码当开发机用、把生产隧道指到 Mac、对照跑着时 pull/重启、`git reset --hard`。发版后若只脏 `package-lock.json`，先只读检查差异和来源；仅在确认是可丢弃的发版副产物且已获丢弃该改动的明确授权后，杭州才执行 `git checkout -- package-lock.json`，不得以“只脏此文件”推定可覆盖。
+- 杭州生产机禁止准备新功能 PR、改产品代码当开发机用、把生产隧道指到 Mac、对照跑着时 pull/重启、`git reset --hard`。发版后若只脏 `package-lock.json`，先只读检查差异和来源；仅在确认是可丢弃的发版副产物且已获丢弃该改动的明确授权后，杭州才执行 `git checkout -- package-lock.json`，不得以“只脏此文件”推定可覆盖。
 - Mac Grok 禁止：
   - `cloudflared tunnel run beian`（隧道只能在杭州，抢了就 1033/串台）
   - 合完 PR 立刻说「已上线」
@@ -38,6 +38,6 @@
   - 向杭州要密钥
 - 杭州运维（Mac 不改、不贴升级步骤）：Clash 系统代理时备案域名必须直连，否则进度条会绕日本节点；原记录把 Error 1033 归因为 Named Tunnel 和 `:8787` 都不在；该归因不能仅凭错误码确认，应分别核查 Tunnel 与杭州 listener。恢复仍由杭州在对应授权下处理，Mac 不动 DNS。站点拆包是以后的产品活。
 - `release.ps1` 起停 `:8787` 只走 WinSW 服务 `beian-server-8787`（`Restart-Service`），不要 `schtasks /Create ONLOGON`。cloudflared 是官方 Windows 服务（token），发版不动隧道。
-- Deploy status: [hangzhou-release](https://github.com/tyuanww/beian/actions/workflows/hangzhou-release.yml) 绿 → 约 20 秒 → 公网 health 的 version 等于 VERSION。公网再用 `/canary https://www.jianghua.site` 前，先确认 Mac 没有 cloudflared。
+- [hangzhou-release](https://github.com/tyuanww/beian/actions/workflows/hangzhou-release.yml) 成功后等约 20 秒。核验公网 health 前，先确认 Named Tunnel 运行在杭州，Mac 未运行该隧道。公网 health 的 `version` 必须与本次合入的 `VERSION` 一致。
 - Health check: `https://www.jianghua.site/api/health` 必须打到杭州。细节见 `scripts/windows/README.md`。
 - Illustrator 看门狗：Agent `faulted`（含 `watchdog_restart_cap`）或任务停在 `save_source_changed` / `close_unconfirmed` 时 Illustrator 槽被锁，发版前置检查会因 `jobs_active` / Agent faulted 拒绝，发版 Illustrator smoke 也会失败；发版 smoke 撞重启上限不发飞书。恢复见 `scripts/windows/README.md`「Illustrator 看门狗」。
