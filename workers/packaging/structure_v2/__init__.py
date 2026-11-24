@@ -19,6 +19,7 @@ from .topology import (
     analyze_topology,
     derive_face_proposal,
     derive_rectangular_face_proposal,
+    stroke_proposal_clears_face_interiors,
 )
 
 __all__ = [
@@ -44,6 +45,7 @@ __all__ = [
     "resolve_structure",
     "resolve_structure_payload",
     "render_face_assets",
+    "stroke_proposal_clears_face_interiors",
     "REQUIRED_PRINT_FACES",
     "repair_print_faces",
     "structure_cache_key",

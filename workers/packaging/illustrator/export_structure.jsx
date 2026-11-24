@@ -1248,6 +1248,351 @@ function withConfiguredPrintLayers(documentRef, configuredNames, callback) {
     }
 }
 
+function createIllustratorStructure(config, pageSize) {
+    return {
+        schema: "packaging-structure/1",
+        units: "pt",
+        source: {
+            sha256: String(config.source_sha256).toLowerCase(),
+            adapter: "illustrator-semantic/1",
+            adapter_version: "1.1.0",
+            document_ref: String(config.source_ai),
+            coordinate_space: "artboard-top-left",
+            page_size: pageSize,
+            geometry: {
+                coordinate_frame: "artboard-top-left",
+                precision: 0.001,
+                curve_tolerance: 0.25,
+                curved_source_segments: 0,
+                generated_line_segments: 0,
+                repairs: []
+            }
+        },
+        vertices: [],
+        edges: [],
+        faces: [],
+        folds: [],
+        root_face: null,
+        validation: {status: "review_required", errors: [], warnings: []}
+    };
+}
+
+var MIXED_MATCH_TOLERANCE_PT = 0.5;
+var MIXED_LINE_PRECISION_PT = 0.001;
+var MAX_MIXED_ITEMS = 5000;
+var MAX_MIXED_POINTS = 20000;
+var MAX_MIXED_MATCH_COMPARISONS = 200000;
+
+function mixedInventoryCount(items) {
+    if (!items || typeof items.length !== "number" || items.length > MAX_MIXED_ITEMS) {
+        throw new Error("Incomplete mixed dieline inventory");
+    }
+    return items.length;
+}
+
+function hasMixedExplicitSemantics(documentRef, config) {
+    var assignments = config.semantic_assignments || {};
+    for (var kind in assignments) {
+        if (assignments.hasOwnProperty(kind)) {
+            return true;
+        }
+    }
+    // The preview inventory can stop before reaching an explicit tag.
+    var items = documentRef.pageItems;
+    var count = mixedInventoryCount(items);
+    for (var index = 0; index < count; index += 1) {
+        var item = items[index];
+        if (exactAssignment(item.note) || exactAssignment(item.name) ||
+            (item.layer && exactAssignment(item.layer.name))) {
+            return true;
+        }
+    }
+    return false;
+}
+
+function isMixedStrokePath(item) {
+    return item.typename === "PathItem" && !item.hidden &&
+        !item.clipping && !item.guides && item.stroked && !item.filled;
+}
+
+function mixedGroupPaths(group) {
+    if (group.hidden || group.clipped) {
+        return null;
+    }
+    var items = group.pageItems;
+    var count = mixedInventoryCount(items);
+    var paths = [];
+    for (var index = 0; index < count; index += 1) {
+        if (!isMixedStrokePath(items[index]) || items[index].parent !== group) {
+            return null;
+        }
+        paths.push(items[index]);
+    }
+    return paths.length ? paths : null;
+}
+
+function findMixedDielineInputs(documentRef, printNames) {
+    var layers = documentRef.layers;
+    var layerCount = mixedInventoryCount(layers);
+    var input = null;
+    var seen = [];
+    for (var layerIndex = 0; layerIndex < layerCount; layerIndex += 1) {
+        var layer = layers[layerIndex];
+        if (!containsExactLayerName(printNames, layer.name)) {
+            continue;
+        }
+        if (containsExactLayerName(seen, layer.name)) {
+            return null;
+        }
+        seen.push(layer.name);
+        if (!layer.visible) {
+            continue;
+        }
+        var items = layer.pageItems;
+        var itemCount = mixedInventoryCount(items);
+        var siblings = [];
+        var paths = null;
+        for (var index = 0; index < itemCount; index += 1) {
+            var item = items[index];
+            if (item.parent !== layer) {
+                continue;
+            }
+            if (item.typename === "GroupItem") {
+                var groupPaths = mixedGroupPaths(item);
+                if (groupPaths !== null) {
+                    if (paths !== null || input !== null) {
+                        return null;
+                    }
+                    paths = groupPaths;
+                }
+            } else if (isMixedStrokePath(item) && item.closed && item.pathPoints.length === 4) {
+                siblings.push(item);
+            }
+        }
+        if (paths !== null) {
+            input = {paths: paths, siblings: siblings};
+        }
+    }
+    return seen.length === printNames.length ? input : null;
+}
+
+function mixedPathPoint(raw) {
+    if (!raw || typeof raw[0] !== "number" || typeof raw[1] !== "number" ||
+        !isFinite(raw[0]) || !isFinite(raw[1]) ||
+        Math.abs(raw[0]) > 10000000 || Math.abs(raw[1]) > 10000000) {
+        throw new Error("Invalid mixed dieline point");
+    }
+    return [raw[0], raw[1]];
+}
+
+function readMixedDielinePath(item, artboard, budget) {
+    var sourcePoints = item.pathPoints;
+    var count = sourcePoints.length;
+    budget.points += count;
+    if (budget.points > MAX_MIXED_POINTS || count > 4096) {
+        throw new Error("Mixed dieline point budget exceeded");
+    }
+    var path = {pathPoints: [], closed: Boolean(item.closed), hasGeometry: false, straightSegments: []};
+    var index;
+    for (index = 0; index < count; index += 1) {
+        var point = sourcePoints[index];
+        path.pathPoints.push({
+            anchor: mixedPathPoint(point.anchor),
+            leftDirection: mixedPathPoint(point.leftDirection),
+            rightDirection: mixedPathPoint(point.rightDirection)
+        });
+    }
+    if (count < 2) {
+        return path;
+    }
+    var segmentCount = path.closed ? count : count - 1;
+    for (index = 0; index < segmentCount; index += 1) {
+        var a = path.pathPoints[index];
+        var b = path.pathPoints[(index + 1) % count];
+        if (hasCurve(a, b)) {
+            path.hasGeometry = true;
+        } else if (!samePoint(a.anchor, b.anchor)) {
+            path.hasGeometry = true;
+            path.straightSegments.push([
+                structurePoint(a.anchor, artboard[0], artboard[1]),
+                structurePoint(b.anchor, artboard[0], artboard[1])
+            ]);
+        }
+    }
+    return path;
+}
+
+function nearMixedEndpoint(a, b) {
+    var dx = a[0] - b[0];
+    var dy = a[1] - b[1];
+    return dx * dx + dy * dy <= MIXED_MATCH_TOLERANCE_PT * MIXED_MATCH_TOLERANCE_PT;
+}
+
+function mixedLineCross(start, end, point) {
+    return (end[0] - start[0]) * (point[1] - start[1]) -
+        (end[1] - start[1]) * (point[0] - start[0]);
+}
+
+function isSimpleMixedQuadrilateral(segments) {
+    if (segments.length !== 4) {
+        return false;
+    }
+    var turnSum = 0;
+    for (var index = 0; index < 4; index += 1) {
+        var edge = segments[index];
+        var turn = mixedLineCross(edge[0], edge[1], segments[(index + 1) % 4][1]);
+        if (turn === 0) {
+            return false;
+        }
+        turnSum += turn > 0 ? 1 : -1;
+    }
+    // A crossed loop has two turns in each direction.
+    return turnSum !== 0;
+}
+
+function mixedLineSide(point, start, end, length) {
+    var distance = mixedLineCross(start, end, point) / length;
+    if (Math.abs(distance) <= MIXED_LINE_PRECISION_PT) {
+        return 0;
+    }
+    return distance > 0 ? 1 : -1;
+}
+
+function mixedTabIsOutside(match, tabSegments, tabIndex, groupVertices) {
+    var start = match[0];
+    var end = match[1];
+    var dx = end[0] - start[0];
+    var dy = end[1] - start[1];
+    var length = Math.sqrt(dx * dx + dy * dy);
+    var first = mixedLineSide(tabSegments[(tabIndex + 2) % 4][0], start, end, length);
+    var second = mixedLineSide(tabSegments[(tabIndex + 3) % 4][0], start, end, length);
+    if (first === 0 || first !== second) {
+        return false;
+    }
+    var opposite = false;
+    for (var index = 0; index < groupVertices.length; index += 1) {
+        var vertex = groupVertices[index];
+        var side = mixedLineSide([vertex.x, vertex.y], start, end, length);
+        if (side === first) {
+            return false;
+        }
+        if (side === -first) {
+            opposite = true;
+        }
+    }
+    return opposite;
+}
+
+function matchMixedDielineTab(input, groupSegments, groupVertices, artboard, budget) {
+    if (input.siblings.length * (4 * groupSegments.length + groupVertices.length) >
+        MAX_MIXED_MATCH_COMPARISONS) {
+        throw new Error("Mixed dieline comparison budget exceeded");
+    }
+    var tab = null;
+    for (var index = 0; index < input.siblings.length; index += 1) {
+        var item = input.siblings[index];
+        var path = readMixedDielinePath(item, artboard, budget);
+        var segments = path.straightSegments;
+        if (!isSimpleMixedQuadrilateral(segments)) {
+            continue;
+        }
+        var match = null;
+        var matchIndex = -1;
+        for (var tabIndex = 0; tabIndex < 4; tabIndex += 1) {
+            var a = segments[tabIndex][0];
+            var b = segments[tabIndex][1];
+            for (var segmentIndex = 0; segmentIndex < groupSegments.length; segmentIndex += 1) {
+                var candidate = groupSegments[segmentIndex];
+                if ((nearMixedEndpoint(a, candidate[0]) && nearMixedEndpoint(b, candidate[1])) ||
+                    (nearMixedEndpoint(a, candidate[1]) && nearMixedEndpoint(b, candidate[0]))) {
+                    if (match !== null) {
+                        return null;
+                    }
+                    match = candidate;
+                    matchIndex = tabIndex;
+                }
+            }
+        }
+        if (match !== null && mixedTabIsOutside(match, segments, matchIndex, groupVertices)) {
+            if (tab !== null) {
+                return null;
+            }
+            tab = {item: item, path: path};
+        }
+    }
+    return tab;
+}
+
+function buildMixedDielineProposal(input, structure, artboard) {
+    var budget = {points: 0};
+    var errors = [];
+    var segments = [];
+    var exportedItems = [];
+    var index;
+    for (index = 0; index < input.paths.length; index += 1) {
+        var path = readMixedDielinePath(input.paths[index], artboard, budget);
+        if (!path.hasGeometry) {
+            continue;
+        }
+        var count = exportSemanticPath(path, index, "crease", structure, errors, artboard[0], artboard[1]);
+        if (count === 0 || errors.length > 0) {
+            return null;
+        }
+        exportedItems.push(input.paths[index]);
+        for (var segmentIndex = 0; segmentIndex < path.straightSegments.length; segmentIndex += 1) {
+            segments.push(path.straightSegments[segmentIndex]);
+        }
+    }
+    var tab = matchMixedDielineTab(input, segments, structure.vertices, artboard, budget);
+    if (tab === null ||
+        exportSemanticPath(tab.path, index, "crease", structure, errors, artboard[0], artboard[1]) !== 4 ||
+        errors.length > 0) {
+        return null;
+    }
+    structure.source.adapter = "illustrator-stroke-proposal/1";
+    structure.validation.errors = ["structure_proposal_requires_confirmation", "structure_face_mapping_incomplete"];
+    exportedItems.push(tab.item);
+    return exportedItems;
+}
+
+function exportMixedDieline(documentRef, config, result, artboard) {
+    if (typeof config.mixed_structure_json !== "string" || !config.mixed_structure_json ||
+        typeof config.mixed_print_pdf !== "string" || !config.mixed_print_pdf) {
+        return;
+    }
+    try {
+        if (hasMixedExplicitSemantics(documentRef, config)) {
+            return;
+        }
+        var input = findMixedDielineInputs(documentRef, normalizedPrintLayerNames(config.print_layers));
+        if (input === null) {
+            return;
+        }
+        var structure = createIllustratorStructure(config, result.page_size_points);
+        var items = buildMixedDielineProposal(input, structure, artboard);
+        if (items === null) {
+            return;
+        }
+        withConfiguredPrintLayers(documentRef, config.print_layers, function () {
+            withHiddenSemanticItems(items, function () {
+                for (var index = 0; index < items.length; index += 1) {
+                    if (!items[index].hidden) {
+                        throw new Error("Cannot hide mixed dieline path");
+                    }
+                }
+                writeJobProgress(config, "saving_artwork_pdf");
+                savePdf(documentRef, config.mixed_print_pdf);
+            });
+        });
+        writeJobProgress(config, "writing_result");
+        writeUtf8(config.mixed_structure_json, jsonStringify(structure));
+        result.mixed_structure_json = config.mixed_structure_json;
+        result.mixed_print_pdf = config.mixed_print_pdf;
+    } catch (error) {
+        appendUtf8(config.debug_log, "Optional mixed dieline export skipped: " + error.message);
+    }
+}
+
 var configPath = PIPELINE_CONFIG_PATH;
 var config = eval("(" + readUtf8(configPath) + ")");
 var debugPath = config.debug_log;
@@ -1322,32 +1667,7 @@ try {
         result.layers.push(documentRef.layers[layerIndex].name);
     }
 
-    var structure = {
-        schema: "packaging-structure/1",
-        units: "pt",
-        source: {
-            sha256: String(config.source_sha256).toLowerCase(),
-            adapter: "illustrator-semantic/1",
-            adapter_version: "1.1.0",
-            document_ref: String(config.source_ai),
-            coordinate_space: "artboard-top-left",
-            page_size: result.page_size_points,
-            geometry: {
-                coordinate_frame: "artboard-top-left",
-                precision: 0.001,
-                curve_tolerance: 0.25,
-                curved_source_segments: 0,
-                generated_line_segments: 0,
-                repairs: []
-            }
-        },
-        vertices: [],
-        edges: [],
-        faces: [],
-        folds: [],
-        root_face: null,
-        validation: {status: "review_required", errors: [], warnings: []}
-    };
+    var structure = createIllustratorStructure(config, result.page_size_points);
     var semanticItems = [];
     var explicitRecords = [];
     var proposalRecords = [];
@@ -1356,6 +1676,7 @@ try {
     var proposalPreviewBudget = {paths: 0, points: 0};
     var platePreviewBudget = {paths: 0, points: 0};
     var remainderItems = [];
+    var hasExplicitProposalLayers = Boolean(config.proposal_layers && config.proposal_layers.length);
     if (!config.proposal_layers || config.proposal_layers.length < 1) {
         var earlyKnife = uniqueFactoryKnifeLayerName(result.layers);
         if (earlyKnife !== null) {
@@ -1378,6 +1699,10 @@ try {
         var assignment = assignmentOf(item, config);
         if (assignment !== null) {
             explicitRecords.push({item: item, pathIndex: pathIndex, assignment: assignment});
+            return;
+        }
+        var type = inventoryItemType(item);
+        if (type && type !== "PathItem") {
             return;
         }
         if (configuredProposalLayer(item, config)) {
@@ -1523,6 +1848,9 @@ try {
     writeJobProgress(config, "writing_result");
     writeUtf8(config.structure_json, jsonStringify(structure));
     result.semantic_errors = structure.validation.errors;
+    if (!hasExplicitProposalLayers && explicitRecords.length === 0 && result.semantic_edge_count === 0) {
+        exportMixedDieline(documentRef, config, result, artboard);
+    }
     result.success = true;
     commitResult();
 } catch (error) {
