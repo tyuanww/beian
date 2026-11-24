@@ -37,6 +37,7 @@ PUBLISHED_PROFILE_SHA256 = {
     "smoke-v1": "sha256:5737d719bc6c56bde25e5c6ea1cd0ed8864821f0f0e8798ef4c0a88f80765165",
     "packshot-f-v1": "sha256:04074941381245d98b1787c4f993fe6951e9dba8657c851461eb4818ebf0a538",
     "packshot-carton-geometry-v1": "sha256:74a17949ac80cd1f3fa34640dcaf246a8a656dc78989e0b08589cb2306860aca",
+    "packshot-framing-v1": "sha256:33416ddeeba0322a6fa74ca1abfff5fe93d86a974648277ce43cfa53c47316d3",
 }
 KRAFT_RGBA = [0.55, 0.38, 0.18, 1.0]
 MICRO_NORMAL = {
@@ -143,7 +144,10 @@ def test_published_registry_keeps_legacy_visual_identities_without_new_material_
         assert "material_coat_weight" not in flat
         assert "ink_color_space" not in flat
         assert spec["color"]["view_transform"] == "Standard"
-    assert json.loads(CURRENT_TEMPLATE.read_text(encoding="utf-8"))["render_profile_id"] == "compat-legacy-v0"
+    template = json.loads(CURRENT_TEMPLATE.read_text(encoding="utf-8"))
+    default_spec = contract.resolve_render_spec(carton_job(), template["render_profile_id"])
+    legacy_spec = contract.resolve_render_spec(carton_job(), "compat-legacy-v0")
+    assert default_spec["material"] == legacy_spec["material"]
     matrix = contract.render_capability_matrix()
     assert all(
         entry["substrate_profile"] == "white-card-default-v1"

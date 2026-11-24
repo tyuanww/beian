@@ -13,6 +13,8 @@ from typing import Any, Mapping, NamedTuple
 
 from PIL import Image, ImageChops, ImageFilter
 
+from glb_verify import PAPER_ALBEDO_LINEAR
+
 from .artwork import ArtworkMappingError, ROLE_SIZE_KEYS, render_face_assets
 
 
@@ -25,6 +27,17 @@ _INK_ALPHA_CUTOFF = 128
 class DebossTextures(NamedTuple):
     normals: dict[str, str]
     face_assets: dict[str, str]
+
+
+def supports_deboss(spec: Mapping[str, Any]) -> bool:
+    material = spec["material"]
+    white_card = [PAPER_ALBEDO_LINEAR] * 3 + [1.0]
+    return (
+        spec["geometry"]["family"] == "rectangular_carton_v1"
+        and material["substrate_profile"] == "white-card-default-v1"
+        and material["substrate_rgba"] == white_card
+        and material.get("substrate_micro_normal") is None
+    )
 
 
 def _mask_differences(mask: Image.Image) -> tuple[bytes, bytes]:

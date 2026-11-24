@@ -37,6 +37,7 @@ if str(ROOT) not in sys.path:
 import pipeline as packaging_pipeline  # noqa: E402
 from glb_verify import _decode_png_rgba, load_glb_artifact, compare_glb_artifact_contract, PAPER_ALBEDO_LINEAR  # noqa: E402
 from quality_layers import build_runtime_quality_report  # noqa: E402
+from structure_v2.deboss import supports_deboss  # noqa: E402
 from render_contract import (  # noqa: E402
     OPTIONAL_RENDERER_OUTPUT_KEYS,
     RenderContractError,
@@ -1338,10 +1339,7 @@ def _refresh_source(
         request["mode"],
         upgrade_profile_id=request.get("upgrade_profile_id"),
     )
-    if bound.get("deboss_normals") and (
-        plan["spec"]["geometry"]["family"] != "rectangular_carton_v1"
-        or material_runtime_from_job({"render_spec": plan["spec"]})["still"]["normal"]
-    ):
+    if bound.get("deboss_normals") and not supports_deboss(plan["spec"]):
         _fail(
             "当前渲染配置不支持激凹贴图",
             code="render_generation_unsupported",

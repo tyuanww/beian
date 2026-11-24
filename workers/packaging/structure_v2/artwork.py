@@ -505,7 +505,8 @@ def render_face_assets(
                 layer_mappings.append((coverage, inverse, corners))
 
             desired_pixels_per_mm = (
-                float(targets[role]) if projection_mode else page_desired_pixels_per_mm
+                float(targets[role]) if projection_mode
+                else max(page_desired_pixels_per_mm, float(targets.get(role, 0.0)))
             )
             layer_corners = [corners for _coverage, _inverse_transform, corners in layer_mappings]
             if projection_mode:

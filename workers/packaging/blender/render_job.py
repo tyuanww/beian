@@ -11,14 +11,10 @@ _PACKAGING = Path(__file__).resolve().parents[1]
 if str(_PACKAGING) not in sys.path:
     sys.path.insert(0, str(_PACKAGING))
 from camera_frame import (
-    aabb_after_z_rotation,
     box_bottom_z_mm,
-    camera_fit_after_yaw,
-    camera_location_mm,
-    camera_ortho_scale_mm,
-    camera_target_mm,
     ground_plane_size,
     ground_plane_z,
+    resolved_shot_camera,
     white_set_wall_y_mm,
 )
 from glb_verify import (
@@ -660,8 +656,9 @@ def add_studio(job):
     exact_white_background = bool(render_config.get("exact_white_background", True))
     apply_eevee_engine(scene)
     apply_eevee_shadows(scene)
-    scene.render.resolution_x = int(render_config["resolution_x"])
-    scene.render.resolution_y = int(render_config["resolution_y"])
+    scene.render.resolution_x, scene.render.resolution_y = map(
+        int, still_shots(job)["master_resolution_px"]
+    )
     scene.render.resolution_percentage = 100
     scene.render.image_settings.file_format = "PNG"
     scene.render.image_settings.color_mode = "RGBA"
@@ -747,47 +744,49 @@ def add_studio(job):
     look_at(rim, (0, 0, 90))
     apply_studio_contract(scene, job, (key, fill, rim))
 
-    dims = job["dimensions_mm"]
-    width = float(dims["width"])
-    depth = float(dims["depth"])
-    height = float(dims["height"])
-    loc = camera_location_mm(width, depth, height)
-    target = camera_target_mm(width, depth, height)
-    bpy.ops.object.camera_add(location=loc)
+    bpy.ops.object.camera_add()
     camera = bpy.context.object
     camera.name = "Product Camera"
     camera.data.type = "ORTHO"
-    camera.data.ortho_scale = float(job["render"].get("camera_ortho_scale_mm") or camera_ortho_scale_mm(width, depth, height))
     camera.data.clip_start = 0.1
-    camera.data.clip_end = max(4000.0, camera.data.ortho_scale * 8)
-    look_at(camera, target)
+    apply_camera_fit(camera, job, 0.0)
     scene.camera = camera
     enable_light_contact_shadows()
     return camera
 
 
+def still_shots(job):
+    shots = (job.get("render_spec") or {}).get("shots")
+    if shots:
+        return shots
+    render = job["render"]
+    pin = float(render.get("camera_ortho_scale_mm") or 0.0)
+    return {
+        "master_resolution_px": (render["resolution_x"], render["resolution_y"]),
+        "camera_mode": "legacy-pinned" if pin else "dimension-fit",
+        "camera_ortho_scale_mm": pin,
+        "front_rotation_deg": render.get("front_rotation_deg", 0),
+        "back_rotation_deg": render.get("back_rotation_deg", 180),
+    }
+
+
 def apply_camera_fit(camera, job, yaw_rad):
     dims = job["dimensions_mm"]
-    width = float(dims["width"])
-    depth = float(dims["depth"])
-    height = float(dims["height"])
-    loc, target, scale = camera_fit_after_yaw(width, depth, height, yaw_rad)
-    pinned = float(job["render"].get("camera_ortho_scale_mm") or 0)
-    span_w, span_d, _span_h = aabb_after_z_rotation(width, depth, height, yaw_rad)
-    camera.location = loc
-    if pinned and abs(span_w - width) < 1e-6 and abs(span_d - depth) < 1e-6:
-        camera.data.ortho_scale = pinned
-    else:
-        camera.data.ortho_scale = scale
+    fit = resolved_shot_camera(
+        float(dims["width"]), float(dims["depth"]), float(dims["height"]), yaw_rad, still_shots(job)
+    )
+    camera.location = fit["location_mm"]
+    camera.data.ortho_scale = fit["ortho_scale_mm"]
     camera.data.clip_end = max(4000.0, camera.data.ortho_scale * 8)
-    look_at(camera, target)
+    look_at(camera, fit["target_mm"])
 
 
 def render_views(job, root, model_objects, ground, set_objects):
     scene = bpy.context.scene
     camera = scene.camera
-    front_rotation = math.radians(float(job["render"].get("front_rotation_deg", 0)))
-    back_rotation = math.radians(float(job["render"].get("back_rotation_deg", 180)))
+    shots = still_shots(job)
+    front_rotation = math.radians(float(shots["front_rotation_deg"]))
+    back_rotation = math.radians(float(shots["back_rotation_deg"]))
     render_view_pair(
         scene,
         camera,

@@ -3083,7 +3083,7 @@ def test_production_flower_box_outputs_zoomable_white_shots():
     )
     render = contract.current_renderer_config(production)
 
-    assert template["render_profile_id"] == "compat-legacy-v0"
+    assert production["shots"]["camera_mode"] == "projected-fit-v1"
     assert smoke["render_profile_id"] == "smoke-v1"
     assert render["resolution_x"] >= 3000
     assert render["resolution_y"] >= 3600

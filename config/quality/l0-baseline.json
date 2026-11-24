@@ -16,7 +16,7 @@
     }
   ],
   "pytest": {
-    "min_tests": 1441,
+    "min_tests": 1457,
     "max_deselected": 10,
     "allowed_skips": [
       {

@@ -26,6 +26,6 @@
     "top": "print"
   },
   "composite_inset_reference_px": 4,
-  "render_profile_id": "compat-legacy-v0",
+  "render_profile_id": "packshot-framing-v1",
   "glb_tolerance_mm": 0.5
 }

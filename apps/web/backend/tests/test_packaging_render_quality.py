@@ -298,7 +298,7 @@ def test_fixture_ids_and_input_sha256_are_stable(tmp_path: Path):
     assert materialized[0]["artwork_script_sha256"] != materialized[0]["artwork_sha256"]
     template = json.loads(Path(materialized[0]["template"]).read_text(encoding="utf-8"))
     assert "raster_width_px" not in template
-    assert template["render_profile_id"] == "compat-legacy-v0"
+    assert template["render_profile_id"] == eval_mod.current_template_render()["render_profile_id"]
 
 
 def test_fixtures_contain_no_real_brand_or_customer_content(tmp_path: Path):
@@ -658,7 +658,7 @@ def test_render_profile_sha256_changes_when_registry_sampling_changes(
             encoding="utf-8"
         )
     )
-    profile = next(item for item in payload["profiles"] if item["id"] == "compat-legacy-v0")
+    profile = next(item for item in payload["profiles"] if item["id"] == baseline["render_profile_id"])
     profile["sampling"] = dict(profile["sampling"])
     profile["sampling"]["minimum_face_pixels_per_mm"] = (
         float(profile["sampling"]["minimum_face_pixels_per_mm"]) + 1.0

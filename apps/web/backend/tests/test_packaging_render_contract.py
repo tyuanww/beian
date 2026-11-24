@@ -13,6 +13,7 @@ import pytest
 PACKAGING = Path(__file__).resolve().parents[4] / "workers" / "packaging"
 CONTRACT_PATH = PACKAGING / "render_contract.py"
 REGISTRY_PATH = PACKAGING / "profiles" / "render-profiles.v1.json"
+PRE_FRAMING_REGISTRY = REGISTRY_PATH.parent / "history" / "pre-framing.v1.json"
 CURRENT_TEMPLATE = PACKAGING / "templates" / "flower_box_47_5x47_5x177_5.json"
 FACES = ("front", "right", "back", "left", "top", "bottom")
 
@@ -83,6 +84,7 @@ def test_registry_loads_strict_profiles_and_capability_matrix():
         "smoke-v1",
         "packshot-f-v1",
         "packshot-carton-geometry-v1",
+        "packshot-framing-v1",
     ]
     assert all(
         profile["profile_sha256"] == contract.profile_declared_sha256(profile)
@@ -96,6 +98,7 @@ def test_registry_loads_strict_profiles_and_capability_matrix():
         "smoke-v1",
         "packshot-f-v1",
         "packshot-carton-geometry-v1",
+        "packshot-framing-v1",
     ]
     assert matrix["pouch_thin_card_v1"] == [
         {
@@ -104,7 +107,14 @@ def test_registry_loads_strict_profiles_and_capability_matrix():
             "finish_profile": "none",
             "studio_profile": "legacy-fixed-three-area-v0",
             "preview_fidelity": "thin_card",
-        }
+        },
+        {
+            "profile_id": "packshot-framing-v1",
+            "substrate_profile": "white-card-default-v1",
+            "finish_profile": "none",
+            "studio_profile": "legacy-fixed-three-area-v0",
+            "preview_fidelity": "thin_card",
+        },
     ]
     assert "flexible_pouch_v1" not in matrix
 
@@ -118,6 +128,72 @@ def test_pinned_historical_spec_replays_without_resigning():
     assert spec == before
     current = contract.resolve_render_spec(carton_job(), "compat-legacy-v0")
     assert current["registry_sha256"] != before["registry_sha256"]
+
+
+def test_pre_framing_plans_replay_with_their_original_identity():
+    contract = contract_module()
+    historical = contract.load_profile_registry(PRE_FRAMING_REGISTRY)
+    current = contract.validate_registry_update(PRE_FRAMING_REGISTRY, REGISTRY_PATH)
+    assert historical["registry_sha256"] != current["registry_sha256"]
+    historical_jobs = [
+        (profile_id, carton_job()) for profile_id in historical["profiles"]
+    ] + [("compat-legacy-v0", pouch_job())]
+    for profile_id, structure in historical_jobs:
+        old_plan = contract.render_plan_for_new_job(
+            structure, profile_id, registry_path=PRE_FRAMING_REGISTRY
+        )
+        persisted = {
+            **structure,
+            **old_plan["identity"],
+            "render_spec": old_plan["spec"],
+            "render": old_plan["render"],
+        }
+        reloaded = json.loads(json.dumps(persisted))
+        assert contract.render_plan_for_resolved_job(reloaded) == old_plan
+        fresh = contract.render_plan_for_new_job(structure, profile_id)
+        assert (
+            fresh["identity"]["render_contract_hash"]
+            == old_plan["identity"]["render_contract_hash"]
+        )
+
+
+@pytest.mark.parametrize("create_job", [carton_job, pouch_job], ids=["carton", "pouch"])
+def test_default_template_selects_projected_framing_for_both_families(create_job):
+    contract = contract_module()
+    template = json.loads(CURRENT_TEMPLATE.read_text(encoding="utf-8"))
+    assert template["render_profile_id"] == "packshot-framing-v1"
+    structure = create_job()
+    plan = contract.render_plan_for_new_job(structure, template["render_profile_id"])
+    legacy = contract.render_plan_for_new_job(structure, "compat-legacy-v0")
+    assert plan["spec"]["shots"] == {
+        **legacy["spec"]["shots"],
+        "camera_mode": "projected-fit-v1",
+        "camera_ortho_scale_mm": None,
+    }
+    legacy_render = dict(legacy["render"])
+    assert legacy_render.pop("camera_ortho_scale_mm") == 224.0
+    assert plan["render"] == legacy_render
+    for section in ("geometry", "material", "color", "sampling", "outputs"):
+        assert plan["spec"][section] == legacy["spec"][section]
+    assert (
+        plan["identity"]["render_profile_sha256"]
+        != legacy["identity"]["render_profile_sha256"]
+    )
+    assert plan["fingerprint_token"] != legacy["fingerprint_token"]
+
+
+def test_projected_framing_rejects_a_fixed_ortho_scale(tmp_path: Path):
+    contract = contract_module()
+    payload = registry_payload()
+    profile = next(
+        item for item in payload["profiles"] if item["id"] == "packshot-framing-v1"
+    )
+    profile["studio"]["camera_ortho_scale_mm"] = 224.0
+    registry = write_registry(tmp_path / "registry.json", payload)
+    with pytest.raises(contract.RenderContractError) as raised:
+        contract.load_profile_registry(registry)
+    assert raised.value.code == "render_contract_invalid"
+    assert raised.value.details["field"].endswith(".studio.camera_ortho_scale_mm")
 
 
 def test_historical_registry_cannot_authorize_new_f_profile():
@@ -208,7 +284,7 @@ def test_geometry_profile_keeps_all_published_visual_identities_and_replays_pre_
     contract = contract_module()
     old = contract.load_profile_registry(PACKAGING / "profiles/history/pre-rf05.v1.json")
     current = contract.load_profile_registry()
-    assert len(current["profiles"]) == len(old["profiles"])+1
+    assert list(current["profiles"])[len(old["profiles"])] == "packshot-carton-geometry-v1"
     for profile_id, profile in old["profiles"].items():
         assert current["profiles"][profile_id] == profile
         spec = contract.resolve_render_spec(carton_job(), profile_id, registry_path=PACKAGING / "profiles/history/pre-rf05.v1.json")
@@ -298,12 +374,11 @@ def test_f_flat_render_cannot_disagree_with_spec(key, missing):
     assert_error(contract, "render_contract_invalid", lambda: contract._assert_job_render_matches_spec({"render": render}, spec))
 
 
-def test_f_new_plan_has_different_cache_token_without_changing_default():
+def test_f_new_plan_has_different_cache_token():
     contract = contract_module()
     legacy = contract.render_plan_for_new_job(carton_job(), "compat-legacy-v0")
     candidate = contract.render_plan_for_new_job(carton_job(), "packshot-f-v1")
     assert legacy["fingerprint_token"] != candidate["fingerprint_token"]
-    assert json.loads(CURRENT_TEMPLATE.read_text()).get("render_profile_id", "compat-legacy-v0") == "compat-legacy-v0"
 
 
 def test_resolve_carton_uses_only_accepted_structure_dimensions_and_is_canonical():
@@ -709,7 +784,7 @@ def test_registry_byte_identity_is_distinct_from_semantic_contract_hash(tmp_path
     )
 
 
-def test_compat_profile_matches_current_effective_renderer_parameters():
+def test_compat_profile_keeps_legacy_renderer_parameters():
     contract = contract_module()
     template = json.loads(CURRENT_TEMPLATE.read_text(encoding="utf-8"))
     profile_hash = contract.load_profile_registry()["profiles"]["compat-legacy-v0"][
@@ -721,7 +796,6 @@ def test_compat_profile_matches_current_effective_renderer_parameters():
         {},
     )
 
-    assert template["render_profile_id"] == "compat-legacy-v0"
     assert contract.current_renderer_config(spec) == {
         "substrate_rgba": [0.7, 0.7, 0.7, 1.0],
         "resolution_x": 3000,

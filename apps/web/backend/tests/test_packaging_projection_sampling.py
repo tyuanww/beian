@@ -1,6 +1,8 @@
 """RF-08 projection Jacobian sampling and face pixel budget."""
 from __future__ import annotations
 
+import importlib.util
+from itertools import product
 import json
 import math
 import os
@@ -9,6 +11,7 @@ import shutil
 import subprocess
 import sys
 import time
+from types import SimpleNamespace
 
 from PIL import Image
 import pymupdf
@@ -30,6 +33,7 @@ from camera_frame import (  # noqa: E402
     face_world_point,
     ortho_frustum_mm,
     project_face_sampling,
+    project_world_to_pixels,
     resolved_shot_camera,
     rotate_z,
 )
@@ -45,6 +49,7 @@ TALL = {"width": 40.0, "depth": 40.0, "height": 180.0}
 WIDE = {"width": 160.0, "depth": 40.0, "height": 30.0}
 SKINNY = {"width": 20.0, "depth": 120.0, "height": 40.0}
 WHITE = {"width": 47.5, "depth": 47.5, "height": 177.5}
+SMALL_CARTON = {"width": 32.229, "depth": 25.946, "height": 78.706}
 
 
 def dimension_fit_shots(**overrides) -> dict:
@@ -162,6 +167,122 @@ def test_output_resolution_and_camera_scale_change_sampling_demand():
     )
 
 
+@pytest.mark.parametrize(
+    "dimensions, resolution, rotations",
+    [
+        (SMALL_CARTON, [3000, 3600], (0.0, 180.0)),
+        (WIDE, [3000, 3600], (40.0, 190.0)),
+        (TALL, [3600, 3000], (0.0, 215.0)),
+        ({"width": 115.0, "depth": 3.0, "height": 190.0}, [3000, 3600], (0.0, 180.0)),
+    ],
+    ids=["10ml", "wide-asymmetric-yaw", "tall-landscape", "thin-pouch"],
+)
+def test_projected_fit_centers_both_shots_at_one_scale(dimensions, resolution, rotations):
+    shots = dimension_fit_shots(
+        camera_mode="projected-fit-v1",
+        master_resolution_px=resolution,
+        front_rotation_deg=rotations[0],
+        back_rotation_deg=rotations[1],
+    )
+    width, depth, height = (dimensions[key] for key in ("width", "depth", "height"))
+    corners = tuple(product((-width / 2, width / 2), (-depth / 2, depth / 2), (0.0, height)))
+    sampling = project_face_sampling(dimensions, shots, sampling_limits())
+    frame_fills = []
+    scales = []
+    for view, degrees in zip(shots["views"], rotations, strict=True):
+        yaw = math.radians(degrees)
+        camera = resolved_shot_camera(width, depth, height, yaw, shots)
+        scales.append(camera["ortho_scale_mm"])
+        pixels = [
+            project_world_to_pixels(
+                rotate_z(point, yaw),
+                camera["location_mm"],
+                camera["axes"],
+                camera["frustum_mm"],
+                camera["resolution_px"],
+            )
+            for point in corners
+        ]
+        for coordinates, edge in zip(zip(*pixels), resolution, strict=True):
+            low, high = min(coordinates), max(coordinates)
+            assert (low + high) / (2 * edge) == pytest.approx(0.5)
+            frame_fills.append((high - low) / edge)
+        for face in FACES:
+            row = sampling["faces"][face]["shots"][view]
+            assert row["ortho_scale_mm"] == camera["ortho_scale_mm"]
+            assert row["projected_max_ppm"] == pytest.approx(
+                face_jacobian_ppm(face, dimensions, camera)["projected_max_ppm"], abs=5.1e-7
+            )
+    assert scales[0] == scales[1]
+    assert max(frame_fills) == pytest.approx(0.72, abs=0.005)
+
+
+@pytest.mark.parametrize(
+    "mode, pin, front_scale, front_ppm, target_ppm",
+    [
+        ("legacy-pinned", 224.0, 224.0, 16.071429, 24.107143),
+        ("dimension-fit", None, 241.4, 14.913007, 22.369511),
+    ],
+)
+def test_saved_camera_modes_keep_projection_fixture(mode, pin, front_scale, front_ppm, target_ppm):
+    shots = dimension_fit_shots(camera_mode=mode, camera_ortho_scale_mm=pin, back_rotation_deg=225.0)
+    report = project_face_sampling(WHITE, shots, sampling_limits())
+    front = report["faces"]["front"]
+    assert front["shots"]["front_right"]["ortho_scale_mm"] == front_scale
+    assert front["shots"]["front_right"]["projected_max_ppm"] == front_ppm
+    assert front["shots"]["back_left"]["ortho_scale_mm"] == 241.4
+    assert front["shots"]["back_left"]["projected_max_ppm"] == 14.913007
+    assert front["target_pixels_per_mm"] == target_ppm
+
+
+def test_blender_still_passes_use_resolved_camera_and_keep_flat_render_fallback(monkeypatch):
+    camera = SimpleNamespace(data=SimpleNamespace())
+    scene = SimpleNamespace(camera=camera, render=SimpleNamespace(image_settings=SimpleNamespace()))
+    context = SimpleNamespace(scene=scene, view_layer=SimpleNamespace(update=lambda: None))
+    monkeypatch.setitem(sys.modules, "bpy", SimpleNamespace(context=context))
+    monkeypatch.setitem(sys.modules, "mathutils", SimpleNamespace(Matrix=object, Vector=object))
+    spec = importlib.util.spec_from_file_location("still_renderer", PACKAGING / "blender" / "render_job.py")
+    renderer = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(renderer)
+    monkeypatch.setattr(renderer, "look_at", lambda obj, target: setattr(obj, "target", target))
+
+    root = SimpleNamespace(rotation_euler=SimpleNamespace(z=0.0))
+    recorded = {}
+    outputs = {
+        view + suffix: view + suffix
+        for view in ("front_right", "back_left")
+        for suffix in ("", "_ground", "_set")
+    }
+
+    def record_still(scene, path):
+        cam = scene.camera
+        recorded[path] = (root.rotation_euler.z, cam.location, cam.target, cam.data.ortho_scale)
+
+    monkeypatch.setattr(renderer, "render_still", record_still)
+    job = {
+        "dimensions_mm": WHITE,
+        "render": {"resolution_x": 3000, "resolution_y": 3600, "camera_ortho_scale_mm": "224"},
+        "outputs": outputs,
+    }
+    renderer.render_views(job, root, [], SimpleNamespace(), [SimpleNamespace(), SimpleNamespace()])
+    assert recorded["front_right"][0] == 0.0
+    assert recorded["back_left"][0] == math.pi
+    assert recorded["front_right"][3] == recorded["back_left"][3] == 224.0
+
+    shots = dimension_fit_shots(camera_mode="projected-fit-v1", front_rotation_deg=10.0, back_rotation_deg=215.0)
+    renderer.render_views(
+        {**job, "render_spec": {"shots": shots}}, root, [], SimpleNamespace(), [SimpleNamespace(), SimpleNamespace()]
+    )
+    sampling = project_face_sampling(WHITE, shots, sampling_limits())
+    scales = sampling["faces"]["front"]["shots"]
+    for view, degrees in (("front_right", 10.0), ("back_left", 215.0)):
+        yaw, _location, target, scale = recorded[view]
+        assert yaw == math.radians(degrees)
+        assert target == (0.0, 0.0, WHITE["height"] / 2.0)
+        assert scale == scales[view]["ortho_scale_mm"]
+        assert recorded[view + "_ground"] == recorded[view + "_set"] == recorded[view]
+
+
 def test_illegal_basis_and_non_finite_values_fail_closed():
     with pytest.raises(ValueError):
         project_face_sampling(
@@ -233,6 +354,7 @@ def test_production_registry_does_not_register_projection_profile():
         "smoke-v1",
         "packshot-f-v1",
         "packshot-carton-geometry-v1",
+        "packshot-framing-v1",
     ]
 
 

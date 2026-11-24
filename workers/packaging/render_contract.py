@@ -799,7 +799,7 @@ def _normalize_studio(value: Any, label: str) -> dict[str, Any]:
     camera_mode = _text(
         studio.get("camera_mode"),
         f"{label}.camera_mode",
-        allowed={"legacy-pinned", "dimension-fit"},
+        allowed={"legacy-pinned", "dimension-fit", "projected-fit-v1"},
     )
     raw_scale = studio.get("camera_ortho_scale_mm")
     if camera_mode == "legacy-pinned":
@@ -808,7 +808,7 @@ def _normalize_studio(value: Any, label: str) -> dict[str, Any]:
         )
     elif raw_scale is not None:
         _invalid(
-            "dimension-fit 相机不能携带固定 ortho scale",
+            f"{camera_mode} 相机不能携带固定 ortho scale",
             field=f"{label}.camera_ortho_scale_mm",
         )
     else:
@@ -1643,6 +1643,7 @@ def _registry_for_persisted_identity(registry_hash: str, current: Mapping[str, A
     if registry_hash == current["registry_sha256"]:
         return current
     histories = {
+        "sha256:3c5d2787afe1f25811a5c066c36fc2b09cc2f98c52e201a051fe111203ca26e6": "pre-framing.v1.json",
         "sha256:1f490d26590ddcb5a100fa3087d9d36649b7a98e4722cf521f6f342da718ad07": "pre-rf05.v1.json",
         "sha256:38ee501b794e9979a8ab06f2e0e1a476271ea9c7897c41eed3460d0f0acfc77b": "pre-f.v1.json",
     }
@@ -2311,14 +2312,21 @@ def _plan_from_spec(spec: Mapping[str, Any]) -> dict[str, Any]:
         "identity": identity,
         "fingerprint_token": canonical_sha256(identity),
     }
-    if sampling.get("strategy") == PROJECTION_SAMPLING_STRATEGY:
+    projected_sampling = sampling.get("strategy") == PROJECTION_SAMPLING_STRATEGY
+    shots = _mapping(spec.get("shots"), "spec.shots")
+    if projected_sampling or shots["camera_mode"] == "projected-fit-v1":
         geometry = _mapping(spec.get("geometry"), "spec.geometry")
-        shots = _mapping(spec.get("shots"), "spec.shots")
-        plan["projection"] = _projection_report(
+        projection = _projection_report(
             geometry["outer_dimensions_mm"],
             shots,
             sampling,
         )
+        plan["projection"] = projection
+        if not projected_sampling:
+            plan["preferred_face_pixels_per_mm"] = {
+                face: min(target, sampling["maximum_face_pixels_per_mm"])
+                for face, target in projection["per_face_target_pixels_per_mm"].items()
+            }
     return plan
 
 
