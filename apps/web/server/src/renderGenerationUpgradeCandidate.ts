@@ -4,7 +4,7 @@ export const ISOLATED_UPGRADE_PROFILE_ID = "packshot-carton-geometry-v1" as cons
 export const ISOLATED_UPGRADE_PROFILE_DECLARED_SHA256 =
   "sha256:74a17949ac80cd1f3fa34640dcaf246a8a656dc78989e0b08589cb2306860aca" as const;
 export const ISOLATED_UPGRADE_REGISTRY_SHA256 =
-  "3c5d2787afe1f25811a5c066c36fc2b09cc2f98c52e201a051fe111203ca26e6" as const;
+  "5182a72f66a134cc84619113af431524e627252e91909fa91f4022d5c22a07c6" as const;
 
 export type IsolatedUpgradeCandidate = Readonly<{
   profileId: typeof ISOLATED_UPGRADE_PROFILE_ID;

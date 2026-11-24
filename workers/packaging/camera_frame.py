@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from itertools import product
 import math
 
 
@@ -80,6 +81,7 @@ SHOT_YAW_FIELDS = {
     "back_left": "back_rotation_deg",
 }
 PPM_DECIMALS = 6
+PROJECTED_FIT_FILL = 0.72
 
 
 def _sub(a: tuple[float, float, float], b: tuple[float, float, float]) -> tuple[float, float, float]:
@@ -212,6 +214,39 @@ def project_world_to_pixels(
     return pixel_x, pixel_y
 
 
+def _configured_shot_yaws(shots: dict) -> dict[str, float]:
+    views = shots.get("views")
+    if not views:
+        raise ValueError("shots_missing")
+    yaws = {}
+    for view in views:
+        field = SHOT_YAW_FIELDS.get(str(view))
+        if field is None:
+            raise ValueError("shot_view_invalid")
+        yaws[str(view)] = math.radians(float(shots[field]))
+    return yaws
+
+
+def _projected_fit_scale_mm(
+    width: float, depth: float, height: float, shots: dict, resolution: tuple[int, int]
+) -> float:
+    corners = tuple(product((-width / 2, width / 2), (-depth / 2, depth / 2), (0.0, height)))
+    unit_frustum = ortho_frustum_mm(1.0, *resolution)
+    required_scale = 0.0
+    for yaw in _configured_shot_yaws(shots).values():
+        rotated_spans = aabb_after_z_rotation(width, depth, height, yaw)
+        location = camera_location_mm(*rotated_spans)
+        axes = blender_camera_axes(location, camera_target_mm(*rotated_spans))
+        pixels = [
+            project_world_to_pixels(rotate_z(corner, yaw), location, axes, unit_frustum, resolution)
+            for corner in corners
+        ]
+        # The fraction occupied with a 1 mm ortho scale is the scale needed to fill that axis.
+        for coordinates, edge in zip(zip(*pixels), resolution):
+            required_scale = max(required_scale, (max(coordinates) - min(coordinates)) / edge)
+    return required_scale / PROJECTED_FIT_FILL
+
+
 def resolved_shot_camera(
     width: float,
     depth: float,
@@ -219,24 +254,29 @@ def resolved_shot_camera(
     yaw_rad: float,
     shots: dict,
 ) -> dict:
-    """Same placement as render_job.apply_camera_fit for one product yaw."""
+    """Resolve the camera shared by Blender stills and artwork sampling."""
 
     span_w, span_d, span_h = aabb_after_z_rotation(width, depth, height, yaw_rad)
     location = camera_location_mm(span_w, span_d, span_h)
     target = camera_target_mm(span_w, span_d, span_h)
-    fitted = camera_ortho_scale_mm(span_w, span_d, span_h)
+    resolution = shots["master_resolution_px"]
+    res_x, res_y = int(resolution[0]), int(resolution[1])
+    mode = shots.get("camera_mode")
     pinned = shots.get("camera_ortho_scale_mm")
-    if (
-        shots.get("camera_mode") == "legacy-pinned"
+    if mode == "projected-fit-v1":
+        center_z = height / 2.0
+        location = (location[0], location[1], location[2] + (center_z - target[2]))
+        target = (0.0, 0.0, center_z)
+        scale = _projected_fit_scale_mm(width, depth, height, shots, (res_x, res_y))
+    elif (
+        mode == "legacy-pinned"
         and pinned not in (None, 0, 0.0)
         and abs(span_w - width) < 1e-6
         and abs(span_d - depth) < 1e-6
     ):
         scale = float(pinned)
     else:
-        scale = fitted
-    resolution = shots["master_resolution_px"]
-    res_x, res_y = int(resolution[0]), int(resolution[1])
+        scale = camera_ortho_scale_mm(span_w, span_d, span_h)
     return {
         "view": None,
         "yaw_rad": float(yaw_rad),
@@ -343,9 +383,10 @@ def project_face_sampling(
     allowed_pixels = int(sampling["maximum_face_pixels"])
     if not math.isfinite(oversample) or oversample < 1.0:
         raise ValueError("oversample_ratio_invalid")
-    views = list(shots.get("views") or ())
-    if not views:
-        raise ValueError("shots_missing")
+    cameras = {
+        view: resolved_shot_camera(width, depth, height, yaw, shots)
+        for view, yaw in _configured_shot_yaws(shots).items()
+    }
     faces: dict[str, dict] = {}
     violations: list[dict] = []
     targets: dict[str, float] = {}
@@ -353,15 +394,9 @@ def project_face_sampling(
         shot_rows = {}
         max_ppm = 0.0
         min_ppm = math.inf
-        for view in views:
-            field = SHOT_YAW_FIELDS.get(str(view))
-            if field is None:
-                raise ValueError("shot_view_invalid")
-            yaw = math.radians(float(shots[field]))
-            camera = resolved_shot_camera(width, depth, height, yaw, shots)
-            camera["view"] = str(view)
+        for view, camera in cameras.items():
             row = face_jacobian_ppm(face, dimensions, camera)
-            shot_rows[str(view)] = {
+            shot_rows[view] = {
                 "projected_max_ppm": row["projected_max_ppm"],
                 "projected_min_ppm": row["projected_min_ppm"],
                 "ortho_scale_mm": camera["ortho_scale_mm"],

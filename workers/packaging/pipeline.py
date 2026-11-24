@@ -72,7 +72,7 @@ from structure_v2 import (  # noqa: E402
     resolve_structure,
     stroke_proposal_clears_face_interiors,
 )
-from structure_v2.deboss import DebossTextures, render_deboss_textures  # noqa: E402
+from structure_v2.deboss import DebossTextures, render_deboss_textures, supports_deboss  # noqa: E402
 from render_contract import (  # noqa: E402
     RenderContractError,
     apply_blender_result,
@@ -1517,11 +1517,7 @@ def preflight_product_v2(
     if structure_sidecar is not None:
         fingerprint_paths.append(structure_sidecar)
     deboss_pdf = None
-    if (
-        deboss_plate is not None
-        and plan["identity"]["render_profile_id"] == "compat-legacy-v0"
-        and plan["spec"]["geometry"]["family"] == "rectangular_carton_v1"
-    ):
+    if deboss_plate is not None and supports_deboss(plan["spec"]):
         deboss_pdf = project_dir / "illustrator_semantic" / deboss_plate["pdf"]
         fingerprint_paths.append(deboss_pdf)
     fingerprint_inputs = {
@@ -1552,7 +1548,9 @@ def preflight_product_v2(
         "minimum_face_pixels_per_mm": float(plan["sampling"]["minimum_face_pixels_per_mm"]),
         "max_raster_pixels": int(plan["sampling"]["maximum_face_pixels"]),
         "sampling_strategy": str(plan["sampling"].get("strategy") or "minimum-floor-v1"),
-        "face_target_pixels_per_mm": plan["sampling"].get("per_face_target_pixels_per_mm"),
+        "face_target_pixels_per_mm": plan.get(
+            "preferred_face_pixels_per_mm", plan["sampling"].get("per_face_target_pixels_per_mm"),
+        ),
         "projection": plan.get("projection"),
     }
     face_sizes = render_face_assets(

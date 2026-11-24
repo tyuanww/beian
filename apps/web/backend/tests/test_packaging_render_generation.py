@@ -1201,7 +1201,7 @@ def test_isolated_upgrade_constants_match_production_registry():
     profile = next(item for item in payload["profiles"] if item["id"] == gen.ISOLATED_UPGRADE_PROFILE_ID)
     assert profile["declared_sha256"] == gen.ISOLATED_UPGRADE_PROFILE_DECLARED_SHA256
     digest = hashlib.sha256(registry_path.read_bytes()).hexdigest()
-    assert digest == "3c5d2787afe1f25811a5c066c36fc2b09cc2f98c52e201a051fe111203ca26e6"
+    assert digest == "5182a72f66a134cc84619113af431524e627252e91909fa91f4022d5c22a07c6"
 
 
 def test_self_reported_or_tampered_hash_is_not_rf02_verification(tmp_path: Path):

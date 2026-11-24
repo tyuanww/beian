@@ -178,11 +178,14 @@ def test_default_preflight_uses_mixed_dieline_only_for_a_confirmable_carton(
 
 
 @pytest.mark.parametrize("change_artwork", [False, True], ids=["same-artwork", "artwork-changed"])
+@pytest.mark.parametrize("profile_id", ["compat-legacy-v0", "packshot-neutral-v1", "packshot-framing-v1"])
 def test_deboss_plate_follows_the_confirmed_artwork(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, change_artwork: bool,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, change_artwork: bool, profile_id: str,
 ):
     pipeline = pipeline_module()
     product, source = prepare_v2_product(tmp_path)
+    template = tmp_path / product["template"]
+    template.write_text(json.dumps({**json.loads(template.read_text()), "render_profile_id": profile_id}))
     artwork = tmp_path / product.pop("artwork_pdf")
     approved = tmp_path / product.pop("structure_sidecar")
     geometry = json.loads(approved.read_text())
@@ -220,6 +223,7 @@ def test_deboss_plate_follows_the_confirmed_artwork(
             document.saveIncr()
     product.update(artwork_pdf=str(artwork), structure_sidecar=str(approved))
     job = pipeline.preflight_product_v2(product, tmp_path, output, False, {"enabled": False})
+    assert job["render_profile_id"] == profile_id
     assert set(job.get("deboss_normals", {})) == (set() if change_artwork else {"front"})
     pipeline.validate_job_asset_contract(job, project_dir=project)
     if not change_artwork:
@@ -228,6 +232,39 @@ def test_deboss_plate_follows_the_confirmed_artwork(
         with pytest.raises(pipeline.RenderContractError) as rejected:
             pipeline.validate_job_asset_contract(job, project_dir=project)
         assert rejected.value.details["field"] == "deboss_normals.front"
+
+
+def test_framing_sampling_prefers_the_visible_density_without_exceeding_the_budget(tmp_path: Path):
+    pipeline = pipeline_module()
+    product, _source = prepare_v2_product(tmp_path)
+    template = tmp_path / product["template"]
+    template.write_text(json.dumps({
+        **json.loads(template.read_text()), "render_profile_id": "packshot-framing-v1",
+    }))
+    job = pipeline.preflight_product_v2(product, tmp_path, tmp_path / "output", False, {"enabled": False})
+    plan = pipeline.persistable_plan_from_bound_job(job)
+    mapping = json.loads(Path(job["structure_resolution_path"]).read_text())["resolved"]
+    sampling = {
+        "raster_width_px": 1200,
+        "minimum_face_pixels_per_mm": plan["sampling"]["minimum_face_pixels_per_mm"],
+        "face_target_pixels_per_mm": plan["preferred_face_pixels_per_mm"],
+        "projection": plan["projection"],
+    }
+    artwork = tmp_path / product["artwork_pdf"]
+    report = {}
+    pipeline.render_face_assets(artwork, mapping, tmp_path / "detail", sampling_report=report, **sampling)
+    front = report["faces"]["front"]
+    assert front["source_ppm"] >= front["projected_max_ppm"] > 35.0
+    assert front["target_ppm"] == 20.0
+
+    budget = 1_000_000
+    sizes = pipeline.render_face_assets(
+        artwork, mapping, tmp_path / "bounded", max_raster_pixels=budget,
+        sampling_report=report, **sampling,
+    )
+    width, height = sizes["front"]
+    assert width * height <= budget
+    assert 20.0 <= report["faces"]["front"]["source_ppm"] < front["projected_max_ppm"]
 
 
 def test_pipeline_v2_uses_resolved_geometry_and_exact_artwork(tmp_path: Path):
