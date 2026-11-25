@@ -100,7 +100,7 @@ test("white and silver stay product-only and switching to white set only request
   preview.cancel();
 });
 
-test("an evicted request failure cannot erase a newer request for the same generation", async () => {
+test("a generation switch shares the active URL and keeps failed URLs retryable", async () => {
   const original = Object.getOwnPropertyDescriptor(globalThis, "Image");
   const pending: Array<{ resolve: () => void; reject: (error: Error) => void }> = [];
   class FakeImage {
@@ -110,17 +110,27 @@ test("an evicted request failure cannot erase a newer request for the same gener
   Object.defineProperty(globalThis, "Image", { configurable: true, value: FakeImage });
   try {
     const oldUrl = studioAssetHref("cache-rejection-race", "white_a", "old");
+    const newUrl = studioAssetHref("cache-rejection-race", "white_a", "new");
     const oldRequest = loadStillImage(oldUrl);
     const oldFailure = assert.rejects(oldRequest, /late decode failure/);
-    const newerGeneration = loadStillImage(studioAssetHref("cache-rejection-race", "white_a", "new"));
-    const retriedOld = loadStillImage(oldUrl);
-    assert.notEqual(retriedOld, oldRequest);
+    const newerGeneration = loadStillImage(newUrl);
+    assert.equal(studioStillCacheHas(oldUrl), false);
+    assert.equal(loadStillImage(oldUrl), oldRequest, "returning to the active URL shares its request");
+    assert.equal(pending.length, 1, "another generation waits for the active image");
     pending[0].reject(new Error("late decode failure"));
     await oldFailure;
-    assert.equal(loadStillImage(oldUrl), retriedOld, "late failure must retain the replacement promise");
-    assert.equal(pending.length, 3, "cache hit must not start another decode");
-    pending[1].resolve(); pending[2].resolve();
-    await Promise.all([newerGeneration, retriedOld]);
+    const retriedOld = loadStillImage(oldUrl);
+    assert.notEqual(retriedOld, oldRequest);
+    assert.equal(loadStillImage(oldUrl), retriedOld, "retry shares the new promise");
+    assert.equal(loadStillImage(newUrl), newerGeneration, "old failure keeps the new generation's request");
+    await tick();
+    assert.equal(pending.length, 2);
+    pending[1].resolve();
+    await newerGeneration;
+    await tick();
+    assert.equal(pending.length, 3);
+    pending[2].resolve();
+    await retriedOld;
   } finally {
     if (original) Object.defineProperty(globalThis, "Image", original);
     else Reflect.deleteProperty(globalThis, "Image");

@@ -325,6 +325,19 @@ export async function blobFromLitStill(
 }
 
 const stillLoads = new Map<string, Promise<HTMLImageElement>>();
+const STILL_URGENCY = { download: 0, original: 1, fallback: 2, upgrade: 3 };
+type StillUrgency = keyof typeof STILL_URGENCY;
+type StillDemand = { urgency: StillUrgency; signal?: AbortSignal; order: number };
+type StillRequest = {
+  url: string;
+  promise: Promise<HTMLImageElement>;
+  resolve: (image: HTMLImageElement) => void;
+  reject: (error: unknown) => void;
+  demands: StillDemand[];
+};
+const queuedStills = new Map<string, StillRequest>();
+let activeStill: StillRequest | undefined;
+let stillDemandOrder = 0;
 
 /** A successful relight changes bytes without changing job id or file keys. */
 export function studioAssetHref(jobId: string, key: string, generation = "", download = false): string {
@@ -346,9 +359,8 @@ async function decodeStillImage(url: string, priority: RequestPriority): Promise
   return image;
 }
 
-export function loadStillImage(url: string, priority: RequestPriority = "auto"): Promise<HTMLImageElement> {
-  const existing = stillLoads.get(url);
-  if (existing) return existing;
+function rememberStillLoad(url: string, promise: Promise<HTMLImageElement>): void {
+  if (stillLoads.get(url) === promise) return;
   // Relights reuse a logical asset: do not retain every decoded generation forever.
   const [asset, query = ""] = url.split("?");
   if (new URLSearchParams(query).has("generation") || new URLSearchParams(query).has("generation_id")) {
@@ -356,13 +368,67 @@ export function loadStillImage(url: string, priority: RequestPriority = "auto"):
       if (cached.split("?")[0] === asset) stillLoads.delete(cached);
     }
   }
-  const pending = decodeStillImage(url, priority).catch((error) => {
-    if (stillLoads.get(url) === pending) stillLoads.delete(url);
-    throw error;
-  });
-  stillLoads.set(url, pending);
+  stillLoads.set(url, promise);
   attachPerfProbe();
-  return pending;
+}
+
+function rejectStillLoad(request: StillRequest, error: unknown): void {
+  if (stillLoads.get(request.url) === request.promise) stillLoads.delete(request.url);
+  request.reject(error);
+}
+
+function startNextStill(): void {
+  let next: { request: StillRequest; demand: StillDemand } | undefined;
+  for (const request of queuedStills.values()) {
+    request.demands = request.demands.filter(({ signal }) => !signal?.aborted);
+    if (!request.demands.length) {
+      queuedStills.delete(request.url);
+      rejectStillLoad(request, new DOMException("Preview is no longer needed", "AbortError"));
+    }
+    for (const demand of request.demands) {
+      const rank = STILL_URGENCY[demand.urgency];
+      if (!next || rank < STILL_URGENCY[next.demand.urgency]
+        || (rank === STILL_URGENCY[next.demand.urgency] && demand.order < next.demand.order)) {
+        next = { request, demand };
+      }
+    }
+  }
+  if (!next || activeStill) return;
+  const { request, demand } = next;
+  queuedStills.delete(request.url);
+  activeStill = request;
+  const priority = demand.urgency === "upgrade" ? "low" : "high";
+  void decodeStillImage(request.url, priority).then(
+    (image) => { activeStill = undefined; request.resolve(image); },
+    (error) => { activeStill = undefined; rejectStillLoad(request, error); },
+  ).then(startNextStill);
+}
+
+/** The tab shares one lane for full PNGs. Cards decode directly, outside this lane. */
+export function loadStillImage(
+  url: string,
+  { urgency = "fallback", signal }: { urgency?: StillUrgency; signal?: AbortSignal } = {},
+): Promise<HTMLImageElement> {
+  const demand = () => ({ urgency, signal, order: stillDemandOrder++ });
+  const queued = queuedStills.get(url);
+  if (queued) {
+    if (!queued.demands.some((entry) => entry.urgency === urgency && entry.signal === signal)) queued.demands.push(demand());
+    rememberStillLoad(url, queued.promise);
+    startNextStill();
+    return queued.promise;
+  }
+  const existing = stillLoads.get(url) ?? (activeStill?.url === url ? activeStill.promise : undefined);
+  if (existing) {
+    rememberStillLoad(url, existing);
+    return existing;
+  }
+  let resolve!: StillRequest["resolve"];
+  let reject!: StillRequest["reject"];
+  const promise = new Promise<HTMLImageElement>((accept, fail) => { resolve = accept; reject = fail; });
+  queuedStills.set(url, { url, promise, resolve, reject, demands: [demand()] });
+  rememberStillLoad(url, promise);
+  startNextStill();
+  return promise;
 }
 
 /** Drop only this page's cache references. An already-started download retains its own frozen sources. */
@@ -531,8 +597,8 @@ export async function loadStudioExport(
 ) {
   const [, layer] = studioDrawnLayerKeys(backdrop, drawnSet).keys;
   const [product, background] = await Promise.all([
-    load(urls.product),
-    layer ? load(urls[layer]) : null,
+    load(urls.product, { urgency: "download" }),
+    layer ? load(urls[layer], { urgency: "download" }) : null,
   ]);
   return {
     product,
@@ -591,6 +657,7 @@ type StudioPreviewLayer = {
   image: HTMLImageElement | null;
   fact: StudioLayerFact;
   upgrading: boolean;
+  fullLoad?: AbortController;
 };
 
 function previewLayer(urls: StudioSourceUrls | null): StudioPreviewLayer {
@@ -618,6 +685,8 @@ export function loadStudioPreview(
   function update(): void {
     if (cancelled) return;
     const room = backdrop === "white_set";
+    if (!room) stopFull("set");
+    if (!room || set.image) stopFull("ground");
     const needsGround = room && (!set.full || set.fact.fetch === "failed");
     if (product.fact.fetch === "failed" || (needsGround && ground.fact.fetch === "failed")) {
       if (!reportedFailure) failed();
@@ -650,14 +719,7 @@ export function loadStudioPreview(
     layer.fact = PENDING_LAYER;
     const priority = key === "product" ? "high" : "auto";
     if (!card) {
-      void loadFull(full, priority).then(
-        (image) => loaded(key, image, "full"),
-        () => {
-          if (cancelled) return;
-          layer.fact = { origin: "none", fetch: "failed" };
-          update();
-        },
-      );
+      requestFull(key, full, "fallback");
       return;
     }
     void loadCard(card, priority).then(
@@ -684,14 +746,37 @@ export function loadStudioPreview(
     const layer = layers[key];
     if (!layer.full || layer.fact.origin !== "card" || layer.upgrading) return;
     layer.upgrading = true;
-    void loadFull(layer.full, "low").then(
-      (image) => loaded(key, image, "full"),
+    requestFull(key, layer.full, "upgrade");
+  }
+
+  function requestFull(key: StudioLayerKey, url: string, urgency: "fallback" | "upgrade"): void {
+    const layer = layers[key];
+    const controller = new AbortController();
+    layer.fullLoad = controller;
+    void loadFull(url, { urgency, signal: controller.signal }).then(
+      (image) => {
+        if (controller.signal.aborted) return;
+        layer.fullLoad = undefined;
+        loaded(key, image, "full");
+      },
       () => {
-        if (cancelled) return;
-        layer.fact = { ...layer.fact, upgradeFailed: true };
+        if (controller.signal.aborted) return;
+        layer.fullLoad = undefined;
+        layer.fact = urgency === "upgrade"
+          ? { ...layer.fact, upgradeFailed: true }
+          : { origin: "none", fetch: "failed" };
         update();
       },
     );
+  }
+
+  function stopFull(key: StudioLayerKey): void {
+    const layer = layers[key];
+    if (!layer.fullLoad) return;
+    layer.fullLoad.abort();
+    layer.fullLoad = undefined;
+    if (!layer.upgrading) layer.fact = DEFERRED_LAYER;
+    layer.upgrading = false;
   }
 
   return {
@@ -700,7 +785,10 @@ export function loadStudioPreview(
       promote = afterFirstPreview;
       update();
     },
-    cancel(): void { cancelled = true; },
+    cancel(): void {
+      cancelled = true;
+      for (const layer of Object.values(layers)) layer.fullLoad?.abort();
+    },
   };
 }
 
