@@ -23,6 +23,6 @@ describe("release version and review documentation", () => {
     assert.match(read("docs/contracts/interface.md"), /关掉「对照」时只画当前字段/);
     assert.match(read("docs/explanation-review-spot.md"), /贴在当前框旁边/);
     assert.match(read("docs/howto-review-spot.md"), /怎么使用对照/);
-    assert.match(read("TODOS.md"), /这一版不勾 B01\.4/);
+    assert.match(read("TODOS.md"), /^[ \t]+- \[ \] \*\*B01\.4(?:[ \t]|\*\*)/m);
   });
 });

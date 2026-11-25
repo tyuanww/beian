@@ -2,7 +2,9 @@
 
 适用：代码仓换 GitHub 账号/仓库，或杭州 self-hosted runner 需要重新注册时。本文记录 2026-10-10 从 `weiweity/beian`（账号封禁、仓库不可访问）迁到 `tyuanww/beian` 的实际顺序。它是操作指南，不是授权：每一步的仓库设置、生产机操作仍按 [发布合同](contracts/release.md) 和 [AGENTS.md](../AGENTS.md) 取得授权；合 `main` 会自动触发杭州发布。
 
-## 结论先看
+## 迁移时的状态
+
+当前仓库保护及剩余事项见 [TODOS.md 的 B03 和 F06](../TODOS.md)。
 
 | 项 | 2026-10-10 状态 |
 |---|---|
@@ -21,7 +23,7 @@
 1. 在新账号建空仓，不初始化 README。
 2. 从完整的本地 clone 推送全部分支与标签：`git push --mirror <new-url>`，或至少 `git push <new> main --tags`。旧仓不可访问时，以本地最完整的 clone 为源，先核对 `git log -1 main` 与最后已知的生产 SHA 一致。
 3. 本地各工作树执行 `git remote set-url origin https://github.com/tyuanww/beian`，`gh repo set-default tyuanww/beian`。
-4. 历史 PR、Issue、Actions run 和评审对话不会随 git 迁移。仓内引用旧仓的 PR/run 链接保留为历史证据，不批量改写；在 TODOS 页首注明旧仓不可访问。
+4. Git 迁移只迁移 Git 对象。保留旧仓 PR、Issue、Actions run 和评审对话的历史引用，在迁移记录注明旧仓可访问性。
 
 ### 2. 打开 Actions 与仓库设置（GitHub，需仓库管理员）
 
@@ -48,7 +50,7 @@
 
 ## 迁移后仍要做的事
 
-- 主分支保护（TODOS B03）。
+- 主分支保护细项及移交（TODOS B03）。
 - secrets、deploy key、webhook、Environments 逐项重建与回读；旧 runner/PAT/`gh` 令牌轮换或作废；GitHub 之外的镜像（TODOS F06）。
 - 新仓是公开仓：确认仓内无密钥、真实稿和客户数据（这些本就只在杭州 `C:\supply\data`）。
 

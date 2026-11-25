@@ -77,4 +77,4 @@
 
 - [资源采证参考](../scripts/resource-stress/README.md)
 - [测试与验证](../TESTING.md)
-- [R04 未完成事项](../TODOS.md#r04--切面与渲染资源压测)
+- [作业与产品待办中的 R04](../TODOS.md#p2-作业与产品完善)
