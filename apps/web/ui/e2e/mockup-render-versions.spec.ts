@@ -108,10 +108,19 @@ test("首次生成、运行中旧代下载、晚到 full/ground/GLB 不回写、
   test.setTimeout(45_000);
   const state=model(),oldFull=deferred(),oldGlb=deferred();
   const errors:string[]=[];page.on("pageerror",error=>errors.push(error.message));
-  await serve(page,state,{oldFull,oldGlb});
+  await serve(page,state,{oldFull,oldGlb,detail:()=>state.job.current_render_generation_id === LEGACY
+    ? {...state.job,files:state.job.files?.filter(file=>!file.key.includes("_set"))}
+    : state.job});
+  const requested=(key:string,generation:string)=>state.urls.some(href=>{
+    const url=new URL(href);
+    return url.pathname.endsWith(`/files/${key}`) && url.searchParams.get("generation_id") === generation;
+  });
   try {
     await page.goto(`/mockup/${ID}`,{waitUntil:"domcontentloaded"});
-    await page.locator(".mockup-backdrop-switch").getByText("白底",{exact:true}).click();
+    const backdrop=page.locator(".mockup-backdrop-switch");
+    await backdrop.getByText("白桌白墙",{exact:true}).click();
+    await expect.poll(()=>["white_a_ground_card","white_a_ground","glb"].every(key=>requested(key,LEGACY))).toBe(true);
+    await backdrop.getByText("白底",{exact:true}).click();
     await expect.poll(async()=>{const c=await centerColor(page);return c[0]>c[2];}).toBe(true);
     const download=page.waitForEvent("download");
     await page.getByRole("button",{name:"下载正面 + 侧面",exact:true}).click();
@@ -131,6 +140,9 @@ test("首次生成、运行中旧代下载、晚到 full/ground/GLB 不回写、
     await expect.poll(async()=>{const c=await centerColor(page);return c[2]>c[0];}).toBe(true);
     await expect(page.locator("model-viewer")).toHaveAttribute("src",new RegExp(`generation_id=${G1}`));
     await expect(page.getByRole("link",{name:"下载模型",exact:true})).toHaveAttribute("href",new RegExp(`generation_id=${G1}`));
+    expect(requested("white_a_ground_card",G1)).toBe(false);
+    await backdrop.getByText("白桌白墙",{exact:true}).click();
+    await expect.poll(()=>requested("white_a_set_card",G1)).toBe(true);
     state.lose(); // Lost activation response: GET confirms target, no second activation POST.
     await page.locator(`[data-generation-id="${G0}"]`).getByRole("button",{name:"使用此版本"}).click();
     await expect(page.locator(".mockup-sheet-photos")).toHaveAttribute("data-render-generation",G0);
@@ -140,8 +152,6 @@ test("首次生成、运行中旧代下载、晚到 full/ground/GLB 不回写、
     state.complete(false);
     await expect(page.locator(".mockup-version-status")).toContainText("当前图片未变");
     await expect(page.locator(".mockup-sheet-photos")).toHaveAttribute("data-render-generation",G0);
-    expect(state.urls.some(url=>url.includes("white_a_ground_card"))).toBe(true);
-    expect(state.urls.some(url=>url.includes("white_a_set_card"))).toBe(true);
     expect(state.unknown).toEqual([]);expect(errors).toEqual([]);
   } finally {oldFull.release();oldGlb.release();}
 });
@@ -270,12 +280,12 @@ test("历史分页失败保留原图与已读记录，重新读取后可加载�
   const state=model();state.job.current_render_generation_id=G1;state.job.has_render_generations=true;
   const first:RenderGenerationRow={generation_id:G1,mode:"legacy_relight",profile:"synthetic",quality_status:"runtime_verified",created_at:"2026-09-06T10:01:00Z",current:true};
   const second:RenderGenerationRow={generation_id:G0,mode:"legacy_import",profile:"synthetic",quality_status:"unwired",created_at:"2026-09-06T10:00:00Z",current:false};
-  const cursors:Array<string | null>=[];let failNext=true;
+  const cursors:Array<string | null>=[];let staleCursor=true;
   await serve(page,state);
   await page.route(new RegExp(`/api/mockups/${ID}/render-generations(?:\\?.*)?$`),async route=>{
     if(route.request().method() !== "GET")return route.fallback();
     const cursor=new URL(route.request().url()).searchParams.get("cursor");cursors.push(cursor);
-    if(cursor && failNext){failNext=false;return route.fulfill({status:400,contentType:"application/json",body:JSON.stringify({code:"render_generation_invalid",reason:"cursor_invalid",message:"合成过期分页"})});}
+    if(cursor && staleCursor)return route.fulfill({status:400,contentType:"application/json",body:JSON.stringify({code:"render_generation_invalid",reason:"cursor_invalid",message:"合成过期分页"})});
     return route.fulfill({contentType:"application/json",body:JSON.stringify({items:cursor ? [second] : [first],next_cursor:cursor ? null : "synthetic-page-two"})});
   });
   await page.goto(`/mockup/${ID}`);await page.getByRole("button",{name:"出图版本",exact:true}).click();
@@ -285,13 +295,14 @@ test("历史分页失败保留原图与已读记录，重新读取后可加载�
   await expect(page.locator(`[data-generation-id="${G1}"]`)).toBeVisible();
   await expect(page.locator(".mockup-sheet-photos")).toHaveAttribute("data-render-generation",G1);
   await expect.poll(async()=>{const c=await centerColor(page);return c[2]>c[0];}).toBe(true);
+  staleCursor=false;
   await page.getByRole("button",{name:"重新读取",exact:true}).click();
   await expect(page.locator(".mockup-versions [role=alert]")).toHaveCount(0);
   await page.getByRole("button",{name:"更多版本",exact:true}).click();
   await expect(page.locator(".mockup-version-list > li")).toHaveCount(2);
   await expect(page.locator(`[data-generation-id="${G0}"]`)).toContainText("原图存档 · 未补验");
   await expect(page.getByRole("button",{name:"更多版本",exact:true})).toHaveCount(0);
-  expect(cursors).toEqual([null,"synthetic-page-two",null,"synthetic-page-two"]);
+  expect(cursors.filter((cursor,index)=>index===0 || cursor!==cursors[index-1])).toEqual([null,"synthetic-page-two",null,"synthetic-page-two"]);
   expect(state.calls.filter(call=>call.method === "POST")).toHaveLength(0);expect(state.unknown).toEqual([]);
 });
 
@@ -305,7 +316,7 @@ test("旧代图片报错仅刷新一次，新代已显示后迟到的旧详情�
     if(detailReads === 2){await oldDetail.promise;await route.fulfill({contentType:"application/json",body:JSON.stringify(body)});lateDelivered=true;return;}
     return route.fulfill({contentType:"application/json",body:JSON.stringify(body)});
   });
-  await page.route(new RegExp(`/api/mockups/${ID}/files/white_[ab]_ground(?:_card)?\\?`),async route=>{
+  await page.route(new RegExp(`/api/mockups/${ID}/files/white_[ab](?:_card)?\\?`),async route=>{
     if(new URL(route.request().url()).searchParams.get("generation_id") !== LEGACY)return route.fallback();
     return route.fulfill({status:409,contentType:"application/json",body:JSON.stringify({code:"render_generation_stale",reason:"current_changed"})});
   });

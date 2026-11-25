@@ -38,10 +38,11 @@ test("same-job relight cannot replace new cards with old cached full images", as
       current = generation;
       const source = (key: string) => ({ full: studioAssetHref("relight-regression", key, generation), card: studioAssetHref("relight-regression", `${key}_card`, generation) });
       const published: string[] = [];
-      const cancel = loadStudioPreview({ product: source("white_a"), ground: source("white_a_ground"), set: null },
+      const preview = loadStudioPreview({ product: source("white_a"), ground: source("white_a_ground"), set: null },
         (s) => published.push((s.product as unknown as FakeImage).generation), assert.fail,
         loadStillImage, async () => new FakeImage() as unknown as HTMLImageElement);
-      await tick(); await tick(); cancel();
+      preview.show("white_set", true);
+      await tick(); await tick(); preview.cancel();
       assert.ok(published.length >= 2, "card and full must both publish");
       assert.ok(published.every((value) => value === generation), JSON.stringify(published));
       const downloaded = await loadStillImage(source("white_a").full);
@@ -55,29 +56,48 @@ test("same-job relight cannot replace new cards with old cached full images", as
   }
 });
 
-test("preview publishes cards first, then upgrades each full source without resizing", async () => {
+test("preview decodes selected backdrop cards before starting full upgrades", async () => {
   const pending = new Map<string, (value: HTMLImageElement) => void>();
+  const requested: string[] = [];
   const frames: StudioPreviewSources[] = [];
-  const cancel = loadStudioPreview(urls, (frame) => frames.push(frame), assert.fail,
-    (url) => new Promise((resolve) => pending.set(url, resolve)), async (url) => image(url));
+  const preview = loadStudioPreview(urls, (frame) => frames.push(frame), assert.fail,
+    (url) => new Promise((resolve) => pending.set(url, resolve)),
+    async (url) => { requested.push(url); return image(url); });
+  preview.show("white_set", false);
   await tick();
-  assert.ok(frames[0], "product and ground cards must paint without waiting for set");
-  assert.deepEqual([frames[0].product.src, frames[0].ground.src], ["pc", "gc"]);
-  assert.equal(frames[0].set, null);
-  assert.equal(frames[0].facts.set.fetch, "pending");
-  const withSet = frames.find((frame) => frame.set?.src === "sc");
-  assert.ok(withSet);
+  assert.deepEqual(requested, ["pc", "sc"]);
+  assert.equal(pending.size, 0, "nothing full starts before the page permits it");
+  assert.equal(frames[0]?.product.src, "pc");
+  assert.equal(frames.at(-1)?.set?.src, "sc");
+  assert.equal(frames.at(-1)?.ground, null, "the set replaces the ground shadow");
+
+  preview.show("white_set", true);
+  assert.deepEqual([...pending.keys()], ["p", "s"]);
   pending.get("p")!(image("p"));
   pending.get("s")!(image("s"));
   await tick();
   assert.equal(frames.at(-1)?.product.naturalWidth, 3000);
-  assert.equal(frames.at(-1)?.ground.src, "gc");
   assert.equal(frames.at(-1)?.set?.src, "s");
-  pending.get("g")!(image("g"));
-  await tick();
-  assert.equal(frames.at(-1)?.ground.src, "g");
   assert.equal(frames[0].product.src, "pc", "published snapshots are immutable");
-  cancel();
+  preview.cancel();
+});
+
+test("white and silver stay product-only and switching to white set only requests the missing backdrop", async () => {
+  const requested: string[] = [];
+  const frames: StudioPreviewSources[] = [];
+  const load = async (url: string) => { requested.push(url); return image(url); };
+  const preview = loadStudioPreview(urls, (frame) => frames.push(frame), assert.fail, load, load);
+  preview.show("white", false);
+  await tick();
+  assert.deepEqual(requested, ["pc"]);
+  preview.show("silver", false);
+  await tick();
+  assert.deepEqual(requested, ["pc"]);
+  preview.show("white_set", false);
+  await tick();
+  assert.deepEqual(requested, ["pc", "sc"]);
+  assert.equal(frames.at(-1)?.set?.src, "sc");
+  preview.cancel();
 });
 
 test("an evicted request failure cannot erase a newer request for the same generation", async () => {
@@ -109,8 +129,9 @@ test("an evicted request failure cannot erase a newer request for the same gener
 
 test("failed full upgrades retain usable cards without reporting a broken preview", async () => {
   const frames: StudioPreviewSources[] = [];
-  loadStudioPreview(urls, (frame) => frames.push(frame), assert.fail,
+  const preview = loadStudioPreview({ ...urls, set: null }, (frame) => frames.push(frame), assert.fail,
     async () => { throw new Error("full unavailable"); }, async (url) => image(url));
+  preview.show("white_set", true);
   await tick();
   await tick();
   const last = frames.at(-1)!;
@@ -122,9 +143,10 @@ test("failed full upgrades retain usable cards without reporting a broken previe
 
 test("missing cards fall back to full; optional set failure does not hide product", async () => {
   const frames: StudioPreviewSources[] = [];
-  loadStudioPreview(urls, (frame) => frames.push(frame), assert.fail,
+  const preview = loadStudioPreview(urls, (frame) => frames.push(frame), assert.fail,
     async (url) => { if (url === "s") throw new Error("missing set"); return image(url); },
     async () => { throw new Error("415"); });
+  preview.show("white_set", true);
   await tick();
   assert.equal(frames.at(-1)?.product.src, "p");
   assert.equal(frames.at(-1)?.set, null);
@@ -132,8 +154,9 @@ test("missing cards fall back to full; optional set failure does not hide produc
 
 test("missing mandatory ground reports failure and never publishes an incomplete composition", async () => {
   let failed = 0;
-  loadStudioPreview(urls, () => assert.fail("must not publish"), () => failed++,
-    async () => { throw new Error("missing"); }, async () => { throw new Error("415"); });
+  const preview = loadStudioPreview({ ...urls, set: null }, () => assert.fail("must not publish"), () => failed++,
+    async (url) => { if (url === "g") throw new Error("missing"); return image(url); }, async () => { throw new Error("415"); });
+  preview.show("white_set", false);
   await tick();
   assert.equal(failed, 1);
 });
@@ -144,9 +167,10 @@ test("cancellation suppresses late initial results and late errors", async () =>
     const waiting = new Promise<HTMLImageElement>((resolve, fail) => {
       finish = () => reject ? fail(new Error("late")) : resolve(image("late"));
     });
-    const cancel = loadStudioPreview({ product: { full: "p" }, ground: { full: "g" }, set: null },
+    const preview = loadStudioPreview({ product: { full: "p" }, ground: { full: "g" }, set: null },
       () => assert.fail("late publication"), () => assert.fail("late error"), () => waiting);
-    cancel(); finish(); await tick();
+    preview.show("white_set", false);
+    preview.cancel(); finish(); await tick();
   }
 });
 
@@ -154,9 +178,10 @@ test("cancellation after card publication prevents old full images replacing a n
   const frames: StudioPreviewSources[] = [];
   let finish!: (image: HTMLImageElement) => void;
   const waiting = new Promise<HTMLImageElement>((resolve) => { finish = resolve; });
-  const cancel = loadStudioPreview(urls, (frame) => frames.push(frame), assert.fail,
+  const preview = loadStudioPreview(urls, (frame) => frames.push(frame), assert.fail,
     () => waiting, async (url) => image(url));
-  await tick(); cancel(); finish(image("old-full")); await tick();
+  preview.show("white_set", true);
+  await tick(); preview.cancel(); finish(image("old-full")); await tick();
   assert.ok(frames.length >= 1);
   assert.ok(frames.every((frame) => frame.product.src === "pc"));
   assert.ok(frames.every((frame) => frame.product.src !== "old-full"));
@@ -235,61 +260,67 @@ test("frame observation still measures window resizes without ResizeObserver and
 });
 
 test("pending optional set does not block first paint or product/ground full upgrades", async () => {
-  const pending = new Map<string, { resolve: (value: HTMLImageElement) => void; reject: (error: Error) => void }>();
-  const wait = (url: string) => new Promise<HTMLImageElement>((resolve, reject) => pending.set(url, { resolve, reject }));
-  const frames: StudioPreviewSources[] = [];
-  const cancel = loadStudioPreview(urls, (frame) => frames.push(frame), assert.fail, wait, wait);
-  pending.get("pc")!.resolve(image("pc"));
-  pending.get("gc")!.resolve(image("gc"));
-  await tick();
-  assert.equal(frames.length, 1);
-  assert.deepEqual([frames[0].product.src, frames[0].ground.src, frames[0].set], ["pc", "gc", null]);
-  pending.get("p")!.resolve(image("p"));
-  pending.get("g")!.resolve(image("g"));
-  await tick();
-  assert.equal(frames.at(-1)?.product.src, "p");
-  assert.equal(frames.at(-1)?.ground.src, "g");
-  assert.equal(frames.at(-1)?.set, null);
-  pending.get("sc")!.resolve(image("sc"));
-  await tick();
-  assert.equal(frames.at(-1)?.set?.src, "sc");
-  pending.get("s")!.resolve(image("s"));
-  await tick();
-  assert.equal(frames.at(-1)?.set?.src, "s");
-  cancel();
-});
-
-test("set arriving first still waits for product and ground before publish", async () => {
   const pending = new Map<string, (value: HTMLImageElement) => void>();
   const wait = (url: string) => new Promise<HTMLImageElement>((resolve) => pending.set(url, resolve));
   const frames: StudioPreviewSources[] = [];
-  loadStudioPreview(urls, (frame) => frames.push(frame), assert.fail, wait, wait);
+  const preview = loadStudioPreview(urls, (frame) => frames.push(frame), assert.fail, wait, wait);
+  preview.show("white_set", false);
+  pending.get("pc")!(image("pc"));
+  await tick();
+  assert.deepEqual(frames.map((frame) => [frame.product.src, frame.ground, frame.set]), [["pc", null, null]]);
+  assert.equal(pending.has("gc"), false);
+
+  preview.show("white_set", true);
+  pending.get("gc")!(image("gc"));
+  pending.get("p")!(image("p"));
+  await tick();
+  pending.get("g")!(image("g"));
+  await tick();
+  assert.equal(frames.at(-1)?.product.src, "p");
+  assert.equal(frames.at(-1)?.ground?.src, "g");
+  assert.equal(frames.at(-1)?.set, null);
   pending.get("sc")!(image("sc"));
   await tick();
+  assert.equal(frames.at(-1)?.set?.src, "sc");
   pending.get("s")!(image("s"));
+  await tick();
+  assert.equal(frames.at(-1)?.set?.src, "s");
+  preview.cancel();
+});
+
+test("set arriving first still waits for product and does not need ground", async () => {
+  const pending = new Map<string, (value: HTMLImageElement) => void>();
+  const wait = (url: string) => new Promise<HTMLImageElement>((resolve) => pending.set(url, resolve));
+  const frames: StudioPreviewSources[] = [];
+  const preview = loadStudioPreview(urls, (frame) => frames.push(frame), assert.fail, wait, wait);
+  preview.show("white_set", false);
+  pending.get("sc")!(image("sc"));
   await tick();
   assert.equal(frames.length, 0);
   pending.get("pc")!(image("pc"));
-  pending.get("gc")!(image("gc"));
   await tick();
-  assert.ok(frames.some((frame) => frame.set?.src === "s"));
+  assert.equal(frames.at(-1)?.set?.src, "sc");
+  assert.equal(pending.has("gc"), false);
+  preview.cancel();
 });
 
 test("late set after cancel does not publish or start a new full", async () => {
-  const pending = new Map<string, { resolve: (value: HTMLImageElement) => void; reject: (error: Error) => void }>();
-  const wait = (url: string) => new Promise<HTMLImageElement>((resolve, reject) => pending.set(url, { resolve, reject }));
-  let fulls = 0;
+  const pending = new Map<string, (value: HTMLImageElement) => void>();
+  const wait = (url: string) => new Promise<HTMLImageElement>((resolve) => pending.set(url, resolve));
+  const fulls: string[] = [];
   const frames: StudioPreviewSources[] = [];
-  const cancel = loadStudioPreview(urls, (frame) => frames.push(frame), assert.fail,
-    async (url) => { fulls++; return wait(url); }, wait);
-  pending.get("pc")!.resolve(image("pc"));
-  pending.get("gc")!.resolve(image("gc"));
+  const preview = loadStudioPreview(urls, (frame) => frames.push(frame), assert.fail,
+    async (url) => { fulls.push(url); return wait(url); }, wait);
+  preview.show("white_set", false);
+  pending.get("pc")!(image("pc"));
   await tick();
-  cancel();
-  pending.get("sc")!.resolve(image("sc"));
+  preview.show("white_set", true);
+  preview.cancel();
+  pending.get("sc")!(image("sc"));
+  pending.get("gc")!(image("gc"));
   await tick();
   assert.ok(frames.every((frame) => frame.set == null));
-  assert.equal(fulls, 2, "only product and ground full upgrades may start before cancel");
+  assert.deepEqual(fulls, ["p"]);
 });
 
 test("cancel then late card failure does not start full or refill stillLoads", async () => {
@@ -313,13 +344,14 @@ test("cancel then late card failure does not start full or refill stillLoads", a
       fulls++;
       return loadStillImage(url);
     };
-    const cancel = loadStudioPreview(
+    const preview = loadStudioPreview(
       { product: source("white_a"), ground: source("white_a_ground"), set: source("white_a_set") },
       () => assert.fail("must not publish after cancel"),
       () => assert.fail("must not fail after cancel"),
       loadFull,
     );
-    cancel();
+    preview.show("white_set", false);
+    preview.cancel();
     releaseStudioGeneration(job, generation);
     for (const card of cards) card.reject(new Error("late card"));
     await tick();
@@ -338,8 +370,9 @@ test("mandatory failure closes the preview so a late sibling does not start full
   const wait = (url: string) => new Promise<HTMLImageElement>((resolve, reject) => pending.set(url, { resolve, reject }));
   let fulls = 0;
   let failed = 0;
-  loadStudioPreview(urls, () => assert.fail("incomplete composition"), () => failed++,
+  const preview = loadStudioPreview({ ...urls, set: null }, () => assert.fail("incomplete composition"), () => failed++,
     async (url) => { fulls++; return wait(url); }, wait);
+  preview.show("white_set", false);
   pending.get("pc")!.reject(new Error("415"));
   await tick();
   pending.get("p")!.reject(new Error("missing product"));
@@ -349,24 +382,25 @@ test("mandatory failure closes the preview so a late sibling does not start full
   pending.get("gc")!.reject(new Error("415"));
   await tick();
   assert.equal(fulls, fullsAfterProduct, "ground must not start full after the preview already failed");
+  assert.equal(failed, 1, "late sibling result does not report the same failure twice");
 });
 
 test("failed full is requested again on a new preview of the same identity", async () => {
-  let fulls = 0;
+  const fulls: string[] = [];
   const loadFull = async (url: string) => {
-    fulls++;
+    fulls.push(url);
     throw new Error(`full ${url}`);
   };
   const loadCard = async (url: string) => image(url);
-  loadStudioPreview(urls, () => undefined, assert.fail, loadFull, loadCard);
-  await tick();
-  await tick();
-  const first = fulls;
-  assert.ok(first >= 3);
-  loadStudioPreview(urls, () => undefined, assert.fail, loadFull, loadCard);
-  await tick();
-  await tick();
-  assert.ok(fulls > first);
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const preview = loadStudioPreview(urls, () => undefined, assert.fail, loadFull, loadCard);
+    preview.show("white_set", false);
+    await tick();
+    preview.show("white_set", true);
+    await tick();
+    preview.cancel();
+  }
+  assert.deepEqual(fulls, ["p", "s", "p", "s"]);
 });
 
 test("export waits for the shown set without requesting unused ground", async () => {

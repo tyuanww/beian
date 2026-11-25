@@ -331,6 +331,117 @@ async function q05AttachHeap(page: Page) {
   };
 }
 
+test("首屏先发所选背景的卡图，正反面可看后才请求高清与模型", async ({ page }) => {
+  const cards = deferred();
+  const front = deferred();
+  const full = deferred();
+  const model = deferred();
+  const { urls } = await serve(page, {
+    gates: {
+      white_a_card: front, white_b_card: cards, white_a_set_card: cards, white_b_set_card: cards,
+      white_a: full, white_b: full, white_a_set: full, white_b_set: full, glb: model,
+    },
+  });
+  const requested = () => urls.map((url) => new URL(url).pathname.split("/").at(-1)).sort();
+  const firstWave = ["white_a_card", "white_a_set_card", "white_b_card", "white_b_set_card"];
+  try {
+    await page.goto(`/mockup/${ID}`, { waitUntil: "domcontentloaded" });
+    await expect.poll(() => firstWave.every((key) => requested().includes(key))).toBe(true);
+    await page.evaluate(() => new Promise<void>((resolve) =>
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+    expect(requested()).toEqual(firstWave);
+
+    cards.release();
+    await expect(canvas(page, "反面与侧面成片")).toHaveAttribute("data-preview-source", "card");
+    expect(requested()).toEqual(firstWave);
+
+    front.release();
+    await expect(canvas(page)).toHaveAttribute("data-preview-source", "card");
+    await expect.poll(async () => isRed(await sample(page, 0.5, 0.5))).toBe(true);
+    await expect.poll(() => requested()).toEqual(expect.arrayContaining(["white_a", "white_b", "glb"]));
+    expect(requested().filter((key) => key?.includes("ground"))).toEqual([]);
+
+    full.release();
+    await expect(canvas(page)).toHaveAttribute("data-preview-source", "full");
+  } finally {
+    front.release(); cards.release(); full.release(); model.release();
+  }
+});
+
+test("切回已看过的版本，仍等新绘制的正反面才请求高清与模型", async ({ page }) => {
+  const secondVersion = deferred();
+  const model = deferred();
+  const gates: GateMap = { glb: model };
+  const job = jobModel();
+  job.has_render_generations = true;
+  if (job.render_generation_capabilities) job.render_generation_capabilities.activate = { allowed: true };
+  const history: RenderGenerationRow[] = [GEN, GEN2].map((generation_id) => ({
+    generation_id, current: generation_id === GEN, mode: "legacy_relight",
+    profile: "synthetic", quality_status: "unwired", created_at: "2026-09-08T00:00:00Z",
+  }));
+  const { urls } = await serve(page, { gates, job, history });
+  const requests = (generation: string, start = 0) => urls.slice(start).map((href) => new URL(href))
+    .filter((url) => url.searchParams.get("generation_id") === generation)
+    .map((url) => url.pathname.split("/").at(-1)).sort();
+  const selectVersion = async (generation: string) => {
+    await page.locator(`[data-generation-id="${generation}"]`).getByRole("button", { name: "使用此版本" }).click();
+    await expect(page.locator(".mockup-sheet-photos")).toHaveAttribute("data-render-generation", generation);
+  };
+  const cards = ["white_a_card", "white_a_set_card", "white_b_card", "white_b_set_card"];
+  const upgrades = ["white_a", "white_a_set", "white_b", "white_b_set", "glb"];
+  const back = canvas(page, "反面与侧面成片");
+
+  try {
+    await page.goto(`/mockup/${ID}`, { waitUntil: "domcontentloaded" });
+    await expect.poll(() => requests(GEN)).toEqual(expect.arrayContaining(upgrades));
+    await page.getByRole("button", { name: "出图版本", exact: true }).click();
+
+    for (const key of cards) gates[key] = secondVersion;
+    await selectVersion(GEN2);
+    await expect.poll(() => requests(GEN2)).toEqual(cards);
+    await expect(canvas(page)).not.toHaveAttribute("data-preview-product");
+    await expect(back).not.toHaveAttribute("data-preview-product");
+
+    // A's cards can decode from browser memory without a second network request.
+    await page.evaluate((generation) => {
+      const decode = HTMLImageElement.prototype.decode;
+      const release = (side: string) => new Promise<void>((resolve) =>
+        window.addEventListener(`release-card-${side}`, () => resolve(), { once: true }));
+      const front = release("a");
+      const back = release("b");
+      HTMLImageElement.prototype.decode = async function () {
+        const url = new URL(this.src);
+        const key = url.pathname.split("/").at(-1) || "";
+        if (url.searchParams.get("generation_id") !== generation) return decode.call(this);
+        performance.mark(`returned-preview:${key}`);
+        const side = /^white_([ab])(?:_set)?_card$/.exec(key)?.[1];
+        await Promise.all([decode.call(this), side === "a" ? front : side === "b" ? back : undefined]);
+      };
+    }, GEN);
+    const decoded = () => page.evaluate(() => performance.getEntriesByType("mark")
+      .filter(({ name }) => name.startsWith("returned-preview:")).map(({ name }) => name.split(":")[1]).sort());
+    const returnStart = urls.length;
+    await selectVersion(GEN);
+    await expect.poll(decoded).toEqual(expect.arrayContaining(cards));
+    await expect(canvas(page)).not.toHaveAttribute("data-preview-product");
+    await expect(back).not.toHaveAttribute("data-preview-product");
+
+    await page.evaluate(() => window.dispatchEvent(new Event("release-card-a")));
+    await expect(canvas(page)).toHaveAttribute("data-preview-product", "card");
+    await expect.poll(async () => isRed(await sample(page, 0.5, 0.5))).toBe(true);
+    await expect(back).not.toHaveAttribute("data-preview-product");
+    expect(requests(GEN, returnStart)).not.toContain("glb");
+    expect(await decoded()).toEqual(cards);
+
+    await page.evaluate(() => window.dispatchEvent(new Event("release-card-b")));
+    await expect.poll(() => requests(GEN, returnStart)).toContain("glb");
+    await expect(canvas(page)).toHaveAttribute("data-preview-product", "full");
+    await expect(back).toHaveAttribute("data-preview-product", "full");
+  } finally {
+    secondVersion.release(); model.release();
+  }
+});
+
 test("同代 card 真正绘制后再升级 full，像素与来源属性一起变", async ({ page }) => {
   const gates: GateMap = {
     white_a: deferred(), white_a_ground: deferred(), white_a_set: deferred(),

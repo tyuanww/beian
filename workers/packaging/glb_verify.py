@@ -543,8 +543,13 @@ def _embedded_png_contract(
             "mime_type": image.get("mimeType"),
         }
     try:
-        embedded = _decode_png_rgba(_buffer_view_bytes(artifact, image.get("bufferView")), allow_rgb=allow_rgb)
-        expected = _decode_png_rgba(Path(str(expected_path or "")).read_bytes(), allow_rgb=allow_rgb)
+        embedded_bytes = _buffer_view_bytes(artifact, image.get("bufferView"))
+        embedded = _decode_png_rgba(embedded_bytes, allow_rgb=allow_rgb)
+        expected_bytes = Path(str(expected_path or "")).read_bytes()
+        expected = embedded
+        if expected_bytes != embedded_bytes:
+            del embedded_bytes
+            expected = _decode_png_rgba(expected_bytes, allow_rgb=allow_rgb)
     except (OSError, ValueError, zlib.error) as error:
         return {"ok": False, "code": "embedded_image_unreadable", "detail": str(error)}
     keys = ("width", "height", "pixel_sha256", "alpha_sha256")
