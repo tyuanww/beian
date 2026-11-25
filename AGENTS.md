@@ -1,99 +1,46 @@
 # AGENTS.md
 
-请用中文回复。
+请用中文回复。`beian` 是供应链备案审核网页。React 界面在 `apps/web/ui`，Hono 控制面在 `apps/web/server`，Python 对照在 `apps/web/backend`，打样只调用 `workers/packaging`。
 
-## 规则适用与任务完成
+## 执行与授权
 
-- 本文件适用于本仓库；继承宿主加载的全局规则及父目录规则，子目录规则只约束对应目录。按宿主指令优先级处理冲突；用户本轮明确范围和仍有效的授权优先于本文件与 Skill 的默认流程。不能用 Skill 扩大授权或越过安全边界。
-- 解释、检查、诊断、审查、PLAN ONLY：读取必要证据，给结论、依据、未确认项及建议即完成；不自动修复、改配置或发布。用户同时明确要求“检查并优化/修复”时，修改属于已授权范围。
-- 实施任务：完成范围内的修改、适度验证并报告结果，不只给计划或因常规实现选择反复确认。已有授权继续有效；“继续”推进当前阶段，不自动进入提交、推送、PR、合并、生产操作或删除阶段。
-- 仅在缺少会实质影响结果的信息，或下一步超出授权时询问。先完成可独立推进的已授权工作；需要批准时展示具体对象、变更和验证结果。信息可从允许的只读证据推导时先核实，不把可选流程、工具缺失或模板问题当作整项任务的阻塞。
-- 提交、推送、创建 PR、合并和部署分别检查已有授权，不凭修复请求推导发布授权。已明确授权的同一动作无需重复询问。发送消息（包括测试消息）、发布飞书版本、购买云、DNS/公网端口变更、重要数据删除须有对应明确授权。产品按钮行为说明不是代理执行该动作的授权。
-- 修改前查看相关文件的 Git 状态和差异，保留用户未提交工作；不覆盖、不顺手清理无关改动。发现并发改动时合并兼容内容，仅在同一内容无法兼容时询问。
-- 下文目录是定位入口，工程合同只在涉及对应模块时适用，不是每次任务的检查清单。查代码遵守全局 CodeGraph 条件；只读规则文档不必先查代码图。只读必要文件，不全面扫描无关文件、凭据、会话记录或缓存。
-- 默认由当前 agent 完成；只有用户或已选定 Skill 明确要求时才使用子 agent / 多模型流程。保留用户明确的外部模型路由，不因本文件调整而换模型；普通解释、文档修改和局部修复不自动进入完整评审流水线。
-- 完成报告区分文档/静态检查、本地测试、发版 L1、质量门杭州实跑、真实稿 L2 和生产发布；未执行的验证写明，不用计划、合成数据或旧快照证明当前验收。范围外建议不妨碍已授权工作结案。
+- 按用户要求的结果推进。只读分析、审查或方案交付结论和证据。实施任务在授权范围内改到位并验证。常规可逆选择自行处理，遇到实质业务取舍或权限不足时先完成独立部分。
+- 改文件前核对目标差异，保留用户已有修改。按项目合同复用现有实现和验证入口。同一变更涉及的规则与行为一起更新。
+- 生产机、`apps/web/backend/data/runtime/` 和生产 tasks 目录的登录、读写或脚本执行均需单独授权，包括只读统计。发送消息及测试消息、发布飞书版本、购买云、变更 DNS 或公网端口、删除重要数据，也需对应授权。修改共享电脑的全局 Git 配置、凭据或令牌权限前先取得同意。
+- 按任务选择 Skill。用户点名时读取对应 `SKILL.md`。默认由当前 agent 完成，子 agent 和模型按已授权的流程使用。Skill 的安装、升级、遥测、配置、自动提交和记忆写入沿用各自授权。审计 Skill 时只读其内容。
 
-## 项目与安全边界
+### 发布与合并
 
-`beian` 是供应链备案审核网页：React UI + Hono/TypeScript 控制面，Python 对照计算，打样只调用 `workers/packaging`。产品/验收入口 `:8787`；开发 Vite `:5173` 反代 `/api`，不得增加第三个入口。旧 `apps/web/frontend` 与 Python HTTP 壳已删除，不新增 FastAPI/uvicorn。
+提交、推送、创建 PR、合并、部署和删除分别核对授权。「继续」沿用已授权阶段。合 `main` 需要用户本轮明确说「合 #N」。从 Mac 在 GitHub squash 合入后会触发杭州 Windows 发布。
 
-- 不重写审核引擎和 3D 流水线，在迁入代码上改；打样台只调用 `workers/packaging`，缺 Blender 要写清失败。
-- 不得提交 `.env`、`.env.baidu`、`.env.secrets`、`backend/data` 运行时文件、稿件、Vite 缓存、`.claude/`。
-- 不得 `git add -A`。`docs/designs/hangzhou-production-cutover.md` 禁止进仓（已 gitignore）。推迟的 `docs/designs/login-and-permissions.md` 未 ignore，发版只按文件名 add。
-- 不得读取或打印真实密钥。
-- 密钥不要写进前端或仓库。
-- 不得自行改 DNS、发布飞书版本、购买云、映射公网端口。
-- 公网/Tunnel 后禁止显示名裸登录。
-- Mac 绿灯不等于 Windows 已验收。杭州生产怎么升版见 [发布合同](docs/contracts/release.md)。合 `main` 后 runner 自动跑 `release.ps1`；Actions 红或公网 health 对不上 VERSION 时不要报已上线。
-- 对照失败或已完成的单不能签字；干净签字单不能再对红；对红后优先读非空 `hits_v2`（空数组回退第一轮）。工艺说明 / 颜色要求 / 版本号 / 更新内容的 pending 不挡签字。
-- 飞书授权失败回到飞书，不要把远程验收人送到本机 `:8787`。JSON 404 不是 Vite 挂了；只有 HTML 或空 Content-Type 才当开发页没转到 8787。
-- 杭州生产机、`apps/web/backend/data/runtime/`、生产 tasks 目录：不登录、不读写、不跑任何脚本（含只读统计），每次须老板单独批准。
-- 不往线上传测试稿或测试数据；需要真后端验证时用临时数据目录（`npm run verify:real-backend`）。
-- 合 `main` 只在老板本轮明确说「合 #N」后执行；「继续」「推进」不算合并授权。
-- 只结束自己启动的进程，按 PID；禁止 `pkill`/`killall` 按名字匹配。
-- 改共用电脑的全局 git 配置、凭据或令牌权限，先问。
+## 项目边界
 
-## 按任务加载合同
+- 产品和验收入口是 `:8787`。开发 Vite 用 `:5173` 反代 `/api`。禁止添加第三个产品入口、恢复旧前端或增加 FastAPI/uvicorn。保留现有审核引擎和 3D 流水线。需要 Blender 而缺失时报告明确失败。
+- 禁止读取或打印真实密钥，禁止把密钥放进前端或仓库。按文件名暂存。禁止 `git add -A`，禁止暂存环境文件、密钥、运行时数据、稿件、Vite 缓存、`.claude/` 和 `docs/designs/hangzhou-production-cutover.md`。发版暂存时排除暂缓的 `docs/designs/login-and-permissions.md`。
+- 公网及 Tunnel 禁止显示名裸登录。真实后端测试用独立临时数据目录，线上入口禁止传入测试稿或测试数据。只按 PID 结束自己启动的进程，禁止按名称批量结束。
+- 对照失败或已完成的单禁止签字，干净签字单禁止再对红。对红结果优先使用非空 `hits_v2`，空数组回退第一轮。工艺说明、颜色要求、版本号、更新内容的 pending 不拦签字，其余条件照常判断。见[审稿合同](docs/contracts/review.md)。
 
-根文件只负责授权、路由与完成条件。先按下面的触发条件读取对应合同；它们继承本文件，涉及的约束必须执行，无关主题不整批加载。共享接口变更读取受影响两侧。只读文档不必先查代码图；定位代码仍按宿主的 CodeGraph 条件执行。
+## 按任务查阅
 
-| 触及范围 | 必读入口 |
+只读本次涉及的合同，共享边界读受影响的两侧。代码定位按全局 CodeGraph 约定执行。
+
+| 任务 | 入口 |
 |---|---|
-| 测试范围、命令、CI、证据复用 | [TESTING.md](TESTING.md) |
-| 文档主源、当前进度与历史资料 | [文档治理索引](docs/README.md)；未完成事项只维护 [TODOS.md](TODOS.md) |
-| 公共接口、模块边界、数据模型 | [架构合同](docs/contracts/architecture.md) |
-| 对照/对红/打样入队、上传、等待、作业持久化 | [作业合同](docs/contracts/jobs.md) |
-| 审稿引擎与核对页、签字、人工结论 | [审稿合同](docs/contracts/review.md) |
-| 打样结构、候选、六面 GLB、Illustrator、Blender 宿主 | [结构与宿主合同](docs/contracts/packaging-structure.md) |
-| 成片、下载、灯光、补图/重试、缓存头、页面/资产路由 | [成片与资产合同](docs/contracts/packaging-presentation.md) |
-| 身份、权限、会话、设置、飞书推送、版本号 | [身份与设置合同](docs/contracts/identity-settings.md) |
-| 用户可见布局、样式、文案、交互 | 先读 [DESIGN.md](DESIGN.md) 和 [界面约束](docs/contracts/interface.md)，再按模块读上述合同；无关后端或文档修改不触发 |
-| 发布实现、发布诊断、合并/部署、杭州运行时 | [杭州发布合同](docs/contracts/release.md) 与 [Windows README](scripts/windows/README.md) |
+| 测试范围、命令、CI、证据 | [TESTING.md](TESTING.md) |
+| 当前事项、文档归属 | [TODOS.md](TODOS.md)、[文档治理](docs/README.md) |
+| 公共接口、模块和数据 | [架构合同](docs/contracts/architecture.md) |
+| 对照、对红、打样入队、上传、等待和持久化 | [作业合同](docs/contracts/jobs.md) |
+| 审稿、核对页、签字和人工结论 | [审稿合同](docs/contracts/review.md) |
+| 结构、候选、六面 GLB、Illustrator 和 Blender | [结构与宿主合同](docs/contracts/packaging-structure.md) |
+| 成片、下载、灯光、补图、缓存和资产路由 | [成片与资产合同](docs/contracts/packaging-presentation.md) |
+| 身份、权限、会话、设置、飞书及版本 | [身份与设置合同](docs/contracts/identity-settings.md)、[开发登录排障](docs/howto-dev-start.md) |
+| 用户可见布局、样式、文案和交互 | [DESIGN.md](DESIGN.md)、[界面约束](docs/contracts/interface.md)，再读对应模块合同 |
+| 发布、杭州运行时 | [杭州发布合同](docs/contracts/release.md)、[Windows README](scripts/windows/README.md) |
 
-代码入口：`apps/web/ui`、`apps/web/server`、`apps/web/backend`、`workers/packaging`。本机设置在 gitignored 的 `apps/web/backend/data/settings.json` 和 `settings.secrets.json`（`WB_DATA_DIR` 可覆盖）；不读取或打印真实密钥。
+## 验证与维护
 
-## 执行与验证
-
-- 开始时明确当前阶段、改动范围和完成条件，检查目标文件 Git 状态；同轮已读且未变的规则、代码和证据可复用。
-- 普通任务按风险验证：纯文档只做 diff/引用/一致性检查；局部代码运行受影响测试，跨模块扩大范围；具体命令、顺序和真实稿限制见 [TESTING.md](TESTING.md)。
-- 用户明确要求发版准备或创建 PR 时，执行完整 L0、UI build、`test:quality`、`quality` 和已选 Skill 要求的独立评审。普通任务的按需验证不能替代发版检查。
-- 已通过的结果在相关代码、测试、配置、依赖和环境未变时可复用；新增修改或失败只使相关证据失效，影响不能界定则扩大验证。最终 PR HEAD 的 CI 仍须核对，不能用旧快照替代。
-- 可用 `npm run verify -- <lane>` 记录验证回执，具体分组见 TESTING；它不自动跳过测试。
-- 有共享文件或构建产物依赖的步骤按顺序运行；每条命令单独保留退出码。质量探针已隔离；其他步骤仍须确认共享状态后再并行。不要让后一个成功命令覆盖前一个失败结果。
-- 完成报告写改动、验证、未执行项和当前阶段。Code、L0、发版 L1、质量门杭州实跑、真实稿 L2、UAT、生产发布分别举证；不以合成数据或日期证明验收通过。
-- 报 L0 时 server / UI / pytest / e2e 分开写 tests、pass、fail、skipped，跳过的用例写名字；只跑了部分文件要写出文件名，没跑的写「未跑」。
-- PR 改了基线（`config/quality/l0-baseline.json`、error-text-match 的 `ALLOWED`/`MAX_TOTAL`、quality 基线），要在 PR 描述里单独列出；评审人逐条确认，不能跟功能改动一起默认放行。
-- 挡住签字或退回的界面条件，必须同时有「按钮不存在」的断言和「正常单上按钮存在」的对照断言；界面隐藏不能代替服务端拦截。
-
-## Skill 使用
-
-用户明确点名 Skill 时读取对应 `SKILL.md`，在已授权范围内执行。未点名时按实际任务目标选取相关 Skill，不因出现“检查”“架构”“缺陷”等词就启动完整流程。宿主无专用 Skill 工具时按其支持方式读取文件，不因工具名称不同停止。
-
-- 审计 Skill 内容不等于执行 Skill：只读相关规则，不运行其前置脚本、遥测、升级、配置修改或自动提交。
-- Skill 的升级、功能引导、路由安装、自动 checkpoint、记忆写入等附带流程不属于日常项目任务；未获对应授权则跳过，不为这些可选步骤打断任务。已有明确偏好保留，但配置开关本身不替代本次动作所需授权。
-- 缺陷诊断交付根因、证据和修复建议。用户明确要求修复时，再实施并按 [TESTING.md](TESTING.md) 验证。
-- Skill 要求询问时先判断该问题是否已被本轮范围或有效授权回答；确需询问才给出具体原因。必需工具不可用时说明受影响步骤并完成其余工作，不伪称完成必需评审；可选工具不可用不阻塞。
-
-## 发布与合并
-
-- 获得明确的创建 PR 授权后，在 Mac 开发机完成发版检查并创建 PR。
-- 用户本轮明确说「合 #N」后，从 Mac 在 GitHub squash 合入指定 PR。合 `main` 自动触发杭州 Windows runner 发布。
-- 按 [杭州发布合同](docs/contracts/release.md) 核对对应 merge SHA 的发布链、杭州来源和公网 health 的版本。三项通过后才报告发版 L1 已上线。质量门杭州实跑、真实稿 L2 和 UAT 各自以 [TODOS.md](TODOS.md) 的证据为准。
-- 公网和开工板截图反映杭州当前运行版本。本地改动用本地验证或其对应发布记录举证。
-
-## 规则与执行方式
-
-| 错误类型 | 拦截方式（lint/测试/CI/流程/只靠文字） | 位置或 PR |
-|---|---|---|
-| 前端靠匹配报错文案判断状态 | lint error-text-match，只减不增 | `scripts/quality/error-text-match.mjs` |
-| 改了数据格式，旧存盘读出来出错 | 测试 `legacyPageOver` 加真后端自证场景 | `apps/web/server/src/legacyPageOver.ts` |
-| CI 数字人工抄写 | CI `check-l0-counts` | `scripts/quality/check-l0-counts.mjs` |
-| 文档规则和代码对不上 | 测试 `contractSamples` | `apps/web/server/src/contractSamples.test.ts` |
-| 文档提交漏进 PR | 流程，文档直接提交到功能分支 | 流程 |
-| 靠计时的测试不稳定 | 测试改成断言状态 | `apps/web/ui/e2e/review-workspace.spec.ts`（「锁页后收起撤销提示」） |
-| 隐藏界面条件太宽或没有断言 | 测试，要有「不存在」和「对照组存在」两条断言 | `apps/web/ui/e2e/review-workspace.spec.ts` |
-| 没跑的检查说成跑过 | 只靠文字：「只跑了部分文件要写出文件名，没跑的写「未跑」」 | `AGENTS.md` |
-| 按名字结束进程 | 只靠文字：「只结束自己启动的进程，按 PID；禁止 `pkill`/`killall` 按名字匹配」 | `AGENTS.md` |
-
-被纠正一次就补一行；表里已有的规则又犯了，就要升级成检查。
+- 按 [TESTING.md](TESTING.md) 验证。纯文档检查差异、链接和一致性。代码跑受影响用例。发版准备或创建 PR 跑完整 L0、UI build、`test:quality`、`quality` 和适用的独立评审，并核对最终 PR HEAD 的 CI。复用证据时核对输入和环境。共享构建或状态的命令按依赖顺序运行，保留各步退出码。
+- 报告实际跑过的检查。L0 分列服务端、UI、pytest、E2E 的通过、失败和跳过，写明跳过项、仅跑的文件及未跑的组。PR 如调整 L0、文案 lint 或质量基线，在描述中单列并逐项评审。
+- 报已上线前，核对同一合并 SHA 的杭州发布与公网版本。静态检查、本地测试、发版 L1、Blender 质量门杭州实跑、真实稿 L2 和业务 UAT 各用本阶段证据。用 [TODOS.md](TODOS.md) 维护待办和未验项。
+- 签字或退回的界面变更，同时断言受限单没有按钮、正常单有按钮，并验证服务端能独立拦截。
+- 纠正反复出现的问题时，先排除产生错误的路径。用类型或运行时边界约束输入，用 lint 检查静态禁用项，用测试核对可观察行为。用历史失败样本证明新增检查能拦。重复的核验步骤优先复用仓内命令。常驻规则保留本项目需要判断的约定和入口。
