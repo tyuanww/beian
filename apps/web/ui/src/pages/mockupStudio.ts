@@ -336,7 +336,17 @@ export function studioAssetHref(jobId: string, key: string, generation = "", dow
   return suffix ? `${base}?${suffix}` : base;
 }
 
-export function loadStillImage(url: string): Promise<HTMLImageElement> {
+async function decodeStillImage(url: string, priority: RequestPriority): Promise<HTMLImageElement> {
+  if (typeof Image === "undefined") throw new Error("load");
+  const image = new Image();
+  image.crossOrigin = "anonymous";
+  image.fetchPriority = priority;
+  image.src = url;
+  await image.decode();
+  return image;
+}
+
+export function loadStillImage(url: string, priority: RequestPriority = "auto"): Promise<HTMLImageElement> {
   const existing = stillLoads.get(url);
   if (existing) return existing;
   // Relights reuse a logical asset: do not retain every decoded generation forever.
@@ -346,16 +356,7 @@ export function loadStillImage(url: string): Promise<HTMLImageElement> {
       if (cached.split("?")[0] === asset) stillLoads.delete(cached);
     }
   }
-  const pending = (async () => {
-    if (typeof Image === "undefined") {
-      throw new Error("load");
-    }
-    const image = new Image();
-    image.crossOrigin = "anonymous";
-    image.src = url;
-    await image.decode();
-    return image;
-  })().catch((error) => {
+  const pending = decodeStillImage(url, priority).catch((error) => {
     if (stillLoads.get(url) === pending) stillLoads.delete(url);
     throw error;
   });
@@ -470,7 +471,7 @@ function attachPerfProbe(): void {
 type StudioSourceUrls = { full: string; card?: string };
 export type StudioLayerKey = "product" | "ground" | "set";
 type StudioLayerOrigin = "card" | "full" | "none";
-type StudioLayerFetch = "pending" | "ready" | "failed" | "absent";
+type StudioLayerFetch = "deferred" | "pending" | "ready" | "failed" | "absent";
 type StudioLayerFact = {
   origin: StudioLayerOrigin;
   fetch: StudioLayerFetch;
@@ -479,12 +480,13 @@ type StudioLayerFact = {
 export type StudioPreviewFacts = Record<StudioLayerKey, StudioLayerFact>;
 export type StudioPreviewSources = {
   product: HTMLImageElement;
-  ground: HTMLImageElement;
+  ground: HTMLImageElement | null;
   set: HTMLImageElement | null;
   facts: StudioPreviewFacts;
 };
 
 const ABSENT_LAYER: StudioLayerFact = { origin: "none", fetch: "absent" };
+const DEFERRED_LAYER: StudioLayerFact = { origin: "none", fetch: "deferred" };
 const PENDING_LAYER: StudioLayerFact = { origin: "none", fetch: "pending" };
 
 function studioDrawnLayerKeys(
@@ -583,123 +585,122 @@ function rf09Mark(name: string): void {
   performance.mark(name);
 }
 
-function copyFacts(facts: StudioPreviewFacts): StudioPreviewFacts {
-  return {
-    product: { ...facts.product },
-    ground: { ...facts.ground },
-    set: { ...facts.set },
-  };
+type StudioPreviewLayer = {
+  full?: string;
+  card?: string;
+  image: HTMLImageElement | null;
+  fact: StudioLayerFact;
+  upgrading: boolean;
+};
+
+function previewLayer(urls: StudioSourceUrls | null): StudioPreviewLayer {
+  return { ...urls, image: null, fact: urls ? DEFERRED_LAYER : ABSENT_LAYER, upgrading: false };
 }
 
-/** Decode at source resolution. Cards are local, full images reuse the existing download cache. */
+/** Keep decoded layers across backdrop switches. Only the current backdrop drives new requests. */
 export function loadStudioPreview(
   urls: { product: StudioSourceUrls; ground: StudioSourceUrls; set: StudioSourceUrls | null },
   publish: (sources: StudioPreviewSources) => void,
   failed: () => void,
   loadFull = loadStillImage,
-  loadCard = async (url: string) => {
-    const image = new Image();
-    image.crossOrigin = "anonymous";
-    image.src = url;
-    await image.decode();
-    return image;
-  },
-): () => void {
+  loadCard = decodeStillImage,
+) {
   attachPerfProbe();
+  const product = previewLayer(urls.product);
+  const ground = previewLayer(urls.ground);
+  const set = previewLayer(urls.set);
+  const layers = { product, ground, set };
   let cancelled = false;
-  let closed = false;
-  const images: { product?: HTMLImageElement; ground?: HTMLImageElement; set: HTMLImageElement | null } = { set: null };
-  const facts: StudioPreviewFacts = {
-    product: { ...PENDING_LAYER },
-    ground: { ...PENDING_LAYER },
-    set: urls.set ? { ...PENDING_LAYER } : { ...ABSENT_LAYER },
-  };
+  let reportedFailure = false;
+  let backdrop: BackdropPreset = "white";
+  let promote = false;
 
-  function emit(): void {
-    if (cancelled || closed || !images.product || !images.ground) return;
-    publish({
-      product: images.product,
-      ground: images.ground,
-      set: images.set,
-      facts: copyFacts(facts),
-    });
-  }
-
-  function failMandatory(): void {
-    if (cancelled || closed) return;
-    closed = true;
-    failed();
-  }
-
-  function startFull(url: string): Promise<HTMLImageElement> | undefined {
-    if (cancelled || closed) return;
-    return loadFull(url);
-  }
-
-  async function upgrade(source: StudioSourceUrls, key: StudioLayerKey): Promise<void> {
-    const pending = startFull(source.full);
-    if (!pending) return;
-    try {
-      const image = await pending;
-      if (cancelled || closed) return;
-      facts[key] = { origin: "full", fetch: "ready" };
-      if (key === "set") images.set = image;
-      else images[key] = image;
-      rf09Mark(`rf09-decode-${key}-full`);
-      emit();
-    } catch {
-      if (cancelled || closed) return;
-      facts[key] = { ...facts[key], upgradeFailed: true };
-      emit();
-    }
-  }
-
-  async function loadLayer(source: StudioSourceUrls | null, key: StudioLayerKey, optional: boolean): Promise<void> {
-    if (!source) {
-      facts[key] = { ...ABSENT_LAYER };
+  function update(): void {
+    if (cancelled) return;
+    const room = backdrop === "white_set";
+    const needsGround = room && (!set.full || set.fact.fetch === "failed");
+    if (product.fact.fetch === "failed" || (needsGround && ground.fact.fetch === "failed")) {
+      if (!reportedFailure) failed();
+      reportedFailure = true;
       return;
     }
-    if (source.card) {
-      try {
-        if (cancelled || closed) return;
-        const card = await loadCard(source.card);
-        if (cancelled || closed) return;
-        facts[key] = { origin: "card", fetch: "ready" };
-        if (key === "set") images.set = card;
-        else images[key] = card;
-        rf09Mark(`rf09-decode-${key}-card`);
-        emit();
-        await upgrade(source, key);
-        return;
-      } catch {
-        /* missing card: try full only if this preview is still alive */
-      }
+    reportedFailure = false;
+
+    requestLayer("product");
+    if (room) requestLayer("set");
+    if (needsGround || (room && promote && !set.image)) requestLayer("ground");
+
+    if (product.image && (!needsGround || ground.image)) {
+      publish({
+        product: product.image, ground: ground.image, set: set.image,
+        facts: { product: product.fact, ground: ground.fact, set: set.fact },
+      });
     }
-    if (cancelled || closed) return;
-    const pending = startFull(source.full);
-    if (!pending) return;
-    try {
-      const image = await pending;
-      if (cancelled || closed) return;
-      facts[key] = { origin: "full", fetch: "ready" };
-      if (key === "set") images.set = image;
-      else images[key] = image;
-      rf09Mark(`rf09-decode-${key}-full`);
-      emit();
-    } catch {
-      if (cancelled || closed) return;
-      facts[key] = { origin: "none", fetch: "failed" };
-      if (optional) emit();
-      else failMandatory();
+    if (promote) {
+      requestUpgrade("product");
+      if (room) requestUpgrade(set.image ? "set" : "ground");
     }
   }
 
-  void loadLayer(urls.product, "product", false);
-  void loadLayer(urls.ground, "ground", false);
-  void loadLayer(urls.set, "set", true);
-  return () => {
-    cancelled = true;
-    closed = true;
+  function requestLayer(key: StudioLayerKey): void {
+    const layer = layers[key];
+    const { card, full } = layer;
+    if (!full || layer.fact.fetch !== "deferred") return;
+    if (!card && key === "set" && !promote) return;
+    layer.fact = PENDING_LAYER;
+    const priority = key === "product" ? "high" : "auto";
+    if (!card) {
+      void loadFull(full, priority).then(
+        (image) => loaded(key, image, "full"),
+        () => {
+          if (cancelled) return;
+          layer.fact = { origin: "none", fetch: "failed" };
+          update();
+        },
+      );
+      return;
+    }
+    void loadCard(card, priority).then(
+      (image) => loaded(key, image, "card"),
+      () => {
+        if (cancelled) return;
+        layer.card = undefined;
+        layer.fact = DEFERRED_LAYER;
+        update();
+      },
+    );
+  }
+
+  function loaded(key: StudioLayerKey, image: HTMLImageElement, origin: "card" | "full"): void {
+    if (cancelled) return;
+    const layer = layers[key];
+    layer.image = image;
+    layer.fact = { origin, fetch: "ready" };
+    rf09Mark(`rf09-decode-${key}-${origin}`);
+    update();
+  }
+
+  function requestUpgrade(key: StudioLayerKey): void {
+    const layer = layers[key];
+    if (!layer.full || layer.fact.origin !== "card" || layer.upgrading) return;
+    layer.upgrading = true;
+    void loadFull(layer.full, "low").then(
+      (image) => loaded(key, image, "full"),
+      () => {
+        if (cancelled) return;
+        layer.fact = { ...layer.fact, upgradeFailed: true };
+        update();
+      },
+    );
+  }
+
+  return {
+    show(next: BackdropPreset, afterFirstPreview: boolean): void {
+      backdrop = next;
+      promote = afterFirstPreview;
+      update();
+    },
+    cancel(): void { cancelled = true; },
   };
 }
 

@@ -26,7 +26,7 @@ type SceneProps = Omit<ViewerProps, "onSourceError"> & { onFail: () => void };
  * 本机解得了 WebP、两次地址都失败，写「3D 没加载出来，请重新打开此单」。
  * 本机解不了 WebP 时，没有两个版本就不请求模型。有两个版本则只拉原始。这条路径失败仍写「这台设备显示不了 3D，已换成效果图」。
  */
-export function MockupGlbViewer({ textureFormat, originalSource, versions, onSourceError, ...props }: ViewerProps & { textureFormat?: string; originalSource: string; versions: GlbVersionInfo }) {
+export function MockupGlbViewer({ allowLoad, textureFormat, originalSource, versions, onSourceError, ...props }: ViewerProps & { allowLoad: boolean; textureFormat?: string; originalSource: string; versions: GlbVersionInfo }) {
   const [webp, setWebp] = useState<boolean | null>(() => webpSupport.known());
   const gate = glbTextureGate(textureFormat, webp);
   useEffect(() => {
@@ -46,11 +46,12 @@ export function MockupGlbViewer({ textureFormat, originalSource, versions, onSou
   const failureText = gate === "fallback" ? GLB_WEBP_UNSUPPORTED_TEXT : GLB_LOAD_FAILED_TEXT;
   // 真拉过且都失败才通知外层刷新版本；本机解码不了 WebP 而直接降级时不算失败。
   useEffect(() => { if (exhausted && tried) errorRef.current(); }, [exhausted, tried, plan]);
-  // 先只放效果图，浏览器空闲时才开始在后台拉 GLB。
   const [idle, setIdle] = useState(false);
-  useEffect(() => whenIdle(() => setIdle(true)), []);
+  useEffect(() => {
+    if (allowLoad) return whenIdle(() => setIdle(true));
+  }, [allowLoad]);
   const source = attempts?.[count];
-  if (!source || !idle) return <GlbPosterOnly poster={props.poster} note={exhausted ? failureText : null} loading={!exhausted} />;
+  if (!source || !allowLoad || !idle) return <GlbPosterOnly poster={props.poster} note={exhausted ? failureText : null} loading={!exhausted} />;
   return <GlbScene key={source} {...props} source={source}
     onFail={() => setFailed((prev) => ({ plan, count: (prev.plan === plan ? prev.count : 0) + 1 }))} />;
 }
@@ -59,7 +60,7 @@ function GlbPosterOnly({ poster, note, loading }: { poster?: string; note: strin
   const [posterFailed, setPosterFailed] = useState<string | null>(null);
   return <>
     {poster && posterFailed !== poster
-      ? <img className="mockup-glb-poster" src={poster} alt="" aria-hidden="true" onError={() => setPosterFailed(poster)} />
+      ? <img className="mockup-glb-poster" crossOrigin="anonymous" fetchPriority="low" src={poster} alt="" aria-hidden="true" onError={() => setPosterFailed(poster)} />
       : <div className="mockup-glb-poster mockup-glb-skeleton" aria-hidden="true" />}
     {note && <p role="status" className="mockup-glb-message mockup-glb-progress">{note}</p>}
     {loading && <div className="mockup-glb-message mockup-glb-progress">
@@ -260,7 +261,7 @@ function GlbScene({ source, poster, backdrop, backgroundLight, productLight, onF
   const interactive = glbInteractive(ready, error);
   return <>
     {loading && (showPoster
-      ? <img className="mockup-glb-poster" src={poster} alt="" aria-hidden="true" onError={() => setPosterFailed(poster ?? null)} />
+      ? <img className="mockup-glb-poster" crossOrigin="anonymous" fetchPriority="low" src={poster} alt="" aria-hidden="true" onError={() => setPosterFailed(poster ?? null)} />
       : <div className="mockup-glb-poster mockup-glb-skeleton" aria-hidden="true" />)}
     {current && !error && <model-viewer
       key={current.url}

@@ -761,6 +761,41 @@ export function MockupNewPage({
   );
 }
 
+type StudioShotKey = "white_a" | "white_b";
+
+type StudioPreviewVisit = {
+  identity: string;
+  id: number;
+  shots: ReadonlySet<StudioShotKey>;
+  painted: boolean;
+};
+
+function useStudioFirstPaint(identity: string, front: boolean, back: boolean) {
+  const [visit, setVisit] = useState<StudioPreviewVisit>(() => ({ identity, id: 0, shots: new Set(), painted: false }));
+  if (visit.identity !== identity) {
+    setVisit({ identity, id: visit.id + 1, shots: new Set(), painted: false });
+  }
+  const { id, shots, painted } = visit;
+  const complete = (!front || shots.has("white_a")) && (!back || shots.has("white_b"));
+
+  useEffect(() => {
+    if (!complete || (!front && !back)) return;
+    // Allow the browser to present the canvases before admitting background requests.
+    let frame = requestAnimationFrame(() => {
+      frame = requestAnimationFrame(() => {
+        setVisit((previous) => previous.id === id ? { ...previous, painted: true } : previous);
+      });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [id, complete, front, back]);
+
+  const markSettled = useCallback((shot: StudioShotKey) => {
+    setVisit((previous) => previous.id === id ? { ...previous, shots: new Set([...previous.shots, shot]) } : previous);
+  }, [id]);
+
+  return { afterFirstPreview: (!front && !back) || painted, markSettled };
+}
+
 export function MockupJobPage({
   jobId,
   canCreate,
@@ -796,6 +831,13 @@ export function MockupJobPage({
   const repairPending = job?.print_faces_repair?.status === "queued" || job?.print_faces_repair?.status === "running";
   const unfoldedPending = job?.unfolded_print?.status === "queued" || job?.unfolded_print?.status === "running";
   const generation=job?.current_render_generation_id || job?.studio_relit_at || job?.job_finished_at || "";
+  const whiteA = job?.files?.find((file) => file.key === "white_a");
+  const whiteB = job?.files?.find((file) => file.key === "white_b");
+  const groundA = job?.files?.find((file) => file.key === "white_a_ground");
+  const groundB = job?.files?.find((file) => file.key === "white_b_ground");
+  const { afterFirstPreview, markSettled } = useStudioFirstPaint(
+    `${jobId}:${generation}`, Boolean(whiteA && groundA), Boolean(whiteB && groundB),
+  );
   const visibleGeneration=useRef(generation);
   visibleGeneration.current=generation;
   const sourceErrorGeneration=useRef<string | null>(null);
@@ -1057,10 +1099,6 @@ export function MockupJobPage({
     );
   }
 
-  const whiteA = (job.files || []).find((f) => f.key === "white_a");
-  const whiteB = (job.files || []).find((f) => f.key === "white_b");
-  const groundA = (job.files || []).find((f) => f.key === "white_a_ground");
-  const groundB = (job.files || []).find((f) => f.key === "white_b_ground");
   const hasGlb = (job.files || []).some((f) => f.key === "glb");
   const hasPpt = (job.files || []).some((f) => f.key === "ppt");
   const grounded = jobHasGround(job.files);
@@ -1180,6 +1218,8 @@ export function MockupJobPage({
       {!boundAssetsReady ? <p className="page-lead" role="status">正在确认当前版本资源。</p> : <div key={`${job.id}:${generation}`} data-render-generation={generation} className={grounded ? "mockup-sheet-photos is-grounded" : "mockup-sheet-photos"}>
         {groundA && whiteA ? (
           <GroundedShot
+            afterFirstPreview={afterFirstPreview}
+            onInitialPreview={markSettled}
             generation={generation}
             onSourceError={refreshSource}
             jobId={job.id}
@@ -1228,6 +1268,8 @@ export function MockupJobPage({
         )}
         {groundB && whiteB ? (
           <GroundedShot
+            afterFirstPreview={afterFirstPreview}
+            onInitialPreview={markSettled}
             generation={generation}
             onSourceError={refreshSource}
             jobId={job.id}
@@ -1276,6 +1318,7 @@ export function MockupJobPage({
         )}
         {hasGlb ? (
           <GlbShot
+            afterFirstPreview={afterFirstPreview}
             jobId={job.id}
             files={job.files}
             generation={generation}
@@ -1519,6 +1562,7 @@ function ReadFaceShot({
 }
 
 function GlbShot({
+  afterFirstPreview,
   jobId,
   files,
   generation,
@@ -1530,6 +1574,7 @@ function GlbShot({
   glbFs,
   onNotice,
 }: {
+  afterFirstPreview: boolean;
   jobId: string;
   files?: Array<{ key: string } & GlbTextureInfo & GlbVersionInfo>;
   generation:string;
@@ -1553,10 +1598,11 @@ function GlbShot({
         style={{ background: fill }}
       >
         <MockupGlbViewer
+          allowLoad={afterFirstPreview}
           source={glbUrls.primary}
           originalSource={glbUrls.original}
           versions={glbVersionInfo}
-          poster={posterKey ? fileHref(jobId, posterKey, false, generation) : undefined}
+          poster={afterFirstPreview && posterKey ? fileHref(jobId, posterKey, false, generation) : undefined}
           textureFormat={glbTextureFormat(files)}
           backdrop={backdrop}
           backgroundLight={backgroundLight}
@@ -1606,6 +1652,8 @@ function useReleasedCanvasRef() {
 }
 
 function GroundedShot({
+  afterFirstPreview,
+  onInitialPreview,
   generation,
   onSourceError,
   jobId,
@@ -1625,6 +1673,8 @@ function GroundedShot({
   onNotice,
   lazy,
 }: {
+  afterFirstPreview: boolean;
+  onInitialPreview: (shot: StudioShotKey) => void;
   generation: string;
   onSourceError:()=>void;
   jobId: string;
@@ -1652,11 +1702,19 @@ function GroundedShot({
   const [canvasRef, setCanvasRef] = useReleasedCanvasRef();
   const frameRef = useRef<HTMLDivElement>(null);
   const previewRef = useRef<StudioPreviewSources | null>(null);
+  const loaderRef = useRef<ReturnType<typeof loadStudioPreview> | null>(null);
+  const settledRef = useRef<string>();
   const drawnSetRef = useRef<PreviewSource | null>(null);
   const lightboxDrawnSetRef = useRef<PreviewSource | null>(null);
   const exporting = useRef(new Set<BackdropPreset>());
   const noticedUpgrade = useRef("");
   const sourceIdentity = `${jobId}:${generation}:${fileKey}:${groundKey}:${(files || []).map((file) => file.key).sort().join(",")}`;
+
+  function markInitialPreview() {
+    if (settledRef.current === sourceIdentity) return;
+    settledRef.current = sourceIdentity;
+    onInitialPreview(fileKey);
+  }
 
   useEffect(() => {
     setBad(false);
@@ -1691,24 +1749,34 @@ function GroundedShot({
   }, [lazy, visible]);
 
   useEffect(() => {
-    if (!visible || bad) return;
-    setReady(0);
+    if (!visible) return;
     const urls = (key: "white_a" | "white_b" | "white_a_ground" | "white_b_ground" | "white_a_set" | "white_b_set") => ({
       full: fileHref(jobId, key, false, generation),
       card: jobHasReviewCard(files, key) ? fileHref(jobId, reviewCardKey(key), false, generation) : undefined,
     });
-    const cancel = loadStudioPreview({
+    const loader = loadStudioPreview({
       product: urls(fileKey), ground: urls(groundKey),
       set: jobHasSet(files, fileKey) ? urls(stillSetKey(fileKey)) : null,
     }, (sources) => {
       previewRef.current = sources;
+      setBad(false);
       setReady((value) => value + 1);
-    }, () => {setBad(true);onSourceError();});
+    }, () => {
+      setBad(true);
+      markInitialPreview();
+      onSourceError();
+    });
+    loaderRef.current = loader;
     return () => {
-      cancel();
+      loader.cancel();
+      loaderRef.current = null;
       previewRef.current = null;
     };
-  }, [visible, bad, sourceIdentity]);
+  }, [visible, sourceIdentity]);
+
+  useEffect(() => {
+    loaderRef.current?.show(backdrop, afterFirstPreview);
+  }, [visible, sourceIdentity, backdrop, afterFirstPreview]);
 
   useEffect(() => {
     if (!visible || bad || !ready) return;
@@ -1716,7 +1784,7 @@ function GroundedShot({
     const sources = previewRef.current;
     if (!canvas || !sources || !frameSize[0] || !frameSize[1]) return;
     const ctx = prepareStudioCanvas(canvas, frameSize[0], frameSize[1]);
-    if (!ctx) { setBad(true); applyStudioPreviewDataset(canvas, null, backdrop, null); return; }
+    if (!ctx) { setBad(true); markInitialPreview(); applyStudioPreviewDataset(canvas, null, backdrop, null); return; }
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = "high";
     try {
@@ -1729,6 +1797,7 @@ function GroundedShot({
     });
     drawnSetRef.current = sources.set;
     applyStudioPreviewDataset(canvas, sources.facts, backdrop, sources.set);
+    markInitialPreview();
     if (typeof window !== "undefined" && (window as Window & { __RF09_PERF__?: boolean }).__RF09_PERF__
       && typeof performance !== "undefined" && typeof performance.mark === "function") {
       if (performance.getEntriesByName("rf09-composed", "mark").length >= 24) performance.clearMarks("rf09-composed");
@@ -1738,7 +1807,7 @@ function GroundedShot({
       noticedUpgrade.current = sourceIdentity;
       onNotice(FULL_UPGRADE_NOTICE);
     }
-    } catch { ctx.clearRect(0, 0, canvas.width, canvas.height); applyStudioPreviewDataset(canvas, null, backdrop, null); setBad(true); }
+    } catch { ctx.clearRect(0, 0, canvas.width, canvas.height); applyStudioPreviewDataset(canvas, null, backdrop, null); setBad(true); markInitialPreview(); }
   }, [visible, bad, ready, frameSize, productLight, backgroundLight, backdrop]);
 
   useEffect(() => {
@@ -1891,11 +1960,11 @@ function GroundedLightboxStill({
   productLight: number;
   backgroundLight: number;
   backdrop: BackdropPreset;
-  placeholder?: { product: PreviewSource; ground: PreviewSource; set: PreviewSource | null } | null;
+  placeholder?: { product: PreviewSource; ground: PreviewSource | null; set: PreviewSource | null } | null;
   drawnSetOut: { current: PreviewSource | null };
 }) {
   const [canvasRef, setCanvasRef] = useReleasedCanvasRef();
-  const sourcesRef = useRef<{ product: PreviewSource; ground: PreviewSource; set: PreviewSource | null } | null>(
+  const sourcesRef = useRef<{ product: PreviewSource; ground: PreviewSource | null; set: PreviewSource | null } | null>(
     placeholder || null,
   );
   const [loaded, setLoaded] = useState(placeholder ? 1 : 0);

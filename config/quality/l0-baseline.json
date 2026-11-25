@@ -11,12 +11,12 @@
     },
     {
       "name": "ui",
-      "min_tests": 786,
+      "min_tests": 787,
       "allowed_skips": []
     }
   ],
   "pytest": {
-    "min_tests": 1457,
+    "min_tests": 1458,
     "max_deselected": 10,
     "allowed_skips": [
       {

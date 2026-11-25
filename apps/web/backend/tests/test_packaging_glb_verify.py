@@ -320,6 +320,20 @@ def test_exported_glb_requires_masked_rgba_faces_and_opaque_substrate_core(tmp_p
     assert report == {"ok": True, "errors": []}
 
 
+def test_exported_glb_accepts_same_pixels_with_different_png_encoding(tmp_path: Path):
+    module = glb_verify()
+    artifact, assets = _material_artifact(module, tmp_path)
+    front = Path(assets["front"])
+    original = front.read_bytes()
+    with Image.open(BytesIO(original)) as image:
+        image.save(front, format="PNG", compress_level=0)
+    assert front.read_bytes() != original
+
+    report = module.compare_glb_material_contract(artifact, assets, [1.0, 1.0, 1.0, 1.0])
+
+    assert report == {"ok": True, "errors": []}
+
+
 def test_exported_glb_accepts_omitted_white_base_colour_factor(tmp_path: Path):
     module = glb_verify()
     artifact, assets = _material_artifact(module, tmp_path)
