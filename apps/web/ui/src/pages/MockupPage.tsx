@@ -862,7 +862,7 @@ export function MockupJobPage({
       if (!allowFullUpgradeNotice(fullUpgradeHud.current, generation)) return;
       fullUpgradeHud.current = generation;
     }
-    setHud(text);
+    setHud((current) => current === STUDIO_DOWNLOAD_FAILED && text === FULL_UPGRADE_NOTICE ? current : text);
     if (hudTimer.current != null) window.clearTimeout(hudTimer.current);
     hudTimer.current = window.setTimeout(() => setHud(""), HUD_MS);
   }
@@ -1241,8 +1241,9 @@ export function MockupJobPage({
         ) : whiteA ? (
           <WhiteShot
             key={`${job.id}:${generation}:white_a`}
+            fullTransfer={grounded ? { start: startStudioExport, finish: finishStudioExport } : undefined}
             generation={generation}
-            onSourceError={refreshSource}
+            onSourceError={grounded ? () => refreshSource({ quiet: true }) : refreshSource}
             jobId={job.id}
             fileKey="white_a"
             alt="正面与侧面白底"
@@ -1291,8 +1292,9 @@ export function MockupJobPage({
         ) : whiteB ? (
           <WhiteShot
             key={`${job.id}:${generation}:white_b`}
+            fullTransfer={grounded ? { start: startStudioExport, finish: finishStudioExport } : undefined}
             generation={generation}
-            onSourceError={refreshSource}
+            onSourceError={grounded ? () => refreshSource({ quiet: true }) : refreshSource}
             jobId={job.id}
             fileKey="white_b"
             alt="反面与侧面白底"
@@ -1975,25 +1977,28 @@ function GroundedLightboxStill({
     setLoaded(seed ? 1 : 0);
     setPaintError(false);
     const seedSet = seed?.set ?? null;
-    let cancelled = false;
+    const controller = new AbortController();
+    const loadOriginal = (key: string) => loadStillImage(fileHref(jobId, key, false, generation), {
+      urgency: "original", signal: controller.signal,
+    });
     void (async () => {
       try {
         const setKey = stillSetKey(fileKey);
-        const productP = loadStillImage(fileHref(jobId, fileKey, false, generation));
-        const groundP = loadStillImage(fileHref(jobId, groundKey, false, generation));
+        const productP = loadOriginal(fileKey);
+        const groundP = loadOriginal(groundKey);
         const setP = jobHasSet(files, fileKey)
-          ? loadStillImage(fileHref(jobId, setKey, false, generation))
+          ? loadOriginal(setKey)
           : Promise.resolve(null);
         const required = Promise.all([productP, groundP]);
         required.catch(() => undefined);
         setP.catch(() => undefined);
         const [product, ground] = await required;
-        if (cancelled) return;
+        if (controller.signal.aborted) return;
         sourcesRef.current = { product, ground, set: seedSet };
         setLoaded((n) => n + 1);
         try {
           const set = await setP;
-          if (cancelled) return;
+          if (controller.signal.aborted) return;
           sourcesRef.current = { product, ground, set };
           setLoaded((n) => n + 1);
         } catch {
@@ -2004,7 +2009,7 @@ function GroundedLightboxStill({
       }
     })();
     return () => {
-      cancelled = true;
+      controller.abort();
       if (canvasRef.current) releaseCanvasBacking(canvasRef.current);
     };
   }, [jobId, generation, files, fileKey, groundKey]);
@@ -2081,6 +2086,7 @@ function StudioLightSliders({
 }
 
 function WhiteShot({
+  fullTransfer,
   generation,
   onSourceError,
   jobId,
@@ -2095,6 +2101,7 @@ function WhiteShot({
   onBackgroundLight,
   onDownload,
 }: {
+  fullTransfer?: { start: () => void; finish: (result: "saved" | "failed") => void };
   generation: string;
   onSourceError:()=>void;
   jobId: string;
@@ -2111,10 +2118,27 @@ function WhiteShot({
 }) {
   const [bad, setBad] = useState(false);
   const [originalOpen, setOriginalOpen] = useState(false);
-  const imgRef = useRef<HTMLImageElement>(null);
-  const [imageReady, setImageReady] = useState(false);
-  const exporting = useRef(false);
+  const [image, setImage] = useState<HTMLImageElement | null>(null);
+  const exporting = useRef(new Set<BackdropPreset>());
   const fill = studioBackdrop(backgroundLight, backdrop);
+  const sourceUrl = fileHref(jobId, fileKey, false, generation);
+  const queueFull = Boolean(fullTransfer);
+
+  useEffect(() => {
+    if (!queueFull || image || bad) return;
+    const controller = new AbortController();
+    void loadStillImage(sourceUrl, {
+      urgency: originalOpen ? "original" : "fallback", signal: controller.signal,
+    }).then((source) => {
+      if (!controller.signal.aborted) setImage(source);
+    }, () => {
+      if (controller.signal.aborted) return;
+      setBad(true);
+      setOriginalOpen(false);
+      onSourceError();
+    });
+    return () => controller.abort();
+  }, [queueFull, image, bad, sourceUrl, originalOpen]);
 
   useEffect(() => {
     if (!originalOpen) return;
@@ -2126,22 +2150,29 @@ function WhiteShot({
   }, [originalOpen]);
 
   async function saveLit() {
-    const img = imgRef.current;
-    if (!img || exporting.current) return;
-    exporting.current = true;
+    const exportKey = fullTransfer ? backdrop : "white";
+    if ((!image && !fullTransfer) || exporting.current.has(exportKey)) return;
+    exporting.current.add(exportKey);
+    fullTransfer?.start();
     try {
-      const blob = await blobFromLitStill(img, { productLight, backgroundLight, backdrop });
+      const source = image ?? await loadStillImage(sourceUrl, { urgency: "download" });
+      if (!image) {
+        setImage(source);
+        setBad(false);
+      }
+      const blob = await blobFromLitStill(source, { productLight, backgroundLight, backdrop });
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = url;
       link.download = downloadName || `${caption}.png`;
       link.click();
       URL.revokeObjectURL(url);
-      onDownload();
+      if (fullTransfer) fullTransfer.finish("saved");
+      else onDownload();
     } catch {
-      /* 导出失败不假装已经在下载 */
+      fullTransfer?.finish("failed");
     } finally {
-      exporting.current = false;
+      exporting.current.delete(exportKey);
     }
   }
 
@@ -2149,40 +2180,39 @@ function WhiteShot({
     <figure className="mockup-sheet-photo">
       <div className={`mockup-sheet-frame ${backdropFrameClass(backdrop)}`} style={{ background: fill }}>
         {bad ? (
-          <p className="page-lead">这张预览图无法显示，请重新生成。</p>
+          <p className="page-lead">{fullTransfer ? "这张预览图暂时无法显示。" : "这张预览图无法显示，请重新生成。"}</p>
         ) : (
           <>
-          <img
-            ref={imgRef}
-            src={fileHref(jobId, fileKey, false, generation)}
+          {queueFull ? null : <img
+            src={sourceUrl}
             alt={alt}
             onError={() => {setBad(true);onSourceError();}}
-            onLoad={() => setImageReady(true)}
+            onLoad={(event) => setImage(event.currentTarget)}
             style={{ display: "none" }}
-          />
-          {imageReady && imgRef.current ? <LegacyLitCanvas image={imgRef.current} alt={alt} productLight={productLight} backgroundLight={backgroundLight} backdrop={backdrop} /> : null}
+          />}
+          {image ? <LegacyLitCanvas image={image} alt={alt} productLight={productLight} backgroundLight={backgroundLight} backdrop={backdrop} /> : null}
           </>
         )}
         {bad ? null : (
-          <>
-            <button
-              type="button"
-              className="mockup-dl mockup-dl-fs"
-              aria-label={`打开${caption}原图`}
-              onClick={() => setOriginalOpen(true)}
-            >
-              原图
-            </button>
-            <button
-              type="button"
-              className="mockup-dl mockup-dl-corner"
-              aria-label={`下载${caption}`}
-              onClick={() => void saveLit()}
-            >
-              下载
-            </button>
-          </>
+          <button
+            type="button"
+            className="mockup-dl mockup-dl-fs"
+            aria-label={`打开${caption}原图`}
+            onClick={() => setOriginalOpen(true)}
+          >
+            原图
+          </button>
         )}
+        {!bad || fullTransfer ? (
+          <button
+            type="button"
+            className="mockup-dl mockup-dl-corner"
+            aria-label={`下载${caption}`}
+            onClick={() => void saveLit()}
+          >
+            下载
+          </button>
+        ) : null}
       </div>
       <figcaption className="mockup-sheet-cap">{caption}</figcaption>
       {originalOpen && !bad
@@ -2199,7 +2229,7 @@ function WhiteShot({
                   className={`mockup-still-lightbox-stage ${backdropFrameClass(backdrop)}`}
                   style={{ background: fill }}
                 >
-                  {imageReady && imgRef.current ? <LegacyLitCanvas image={imgRef.current} alt={alt} productLight={productLight} backgroundLight={backgroundLight} backdrop={backdrop} full /> : null}
+                  {image ? <LegacyLitCanvas image={image} alt={alt} productLight={productLight} backgroundLight={backgroundLight} backdrop={backdrop} full /> : null}
                 </div>
                 <StudioLightSliders
                   productLight={productLight}

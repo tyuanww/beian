@@ -83,10 +83,12 @@ describe("GLB poster 选择", () => {
     assert.equal(glbPosterKey(completed, "white"), "white_a_card");
     assert.equal(glbPosterKey(completed, "silver"), "white_a_card");
   });
-  it("缺审阅卡或桌墙图时逐级回退到原图", () => {
-    assert.equal(glbPosterKey(without("white_a_set_card"), "white_set"), "white_a_set");
-    assert.equal(glbPosterKey(without("white_a_set_card", "white_a_set"), "white_set"), "white_a_card");
-    assert.equal(glbPosterKey(without("white_a_card"), "white"), "white_a");
+  it("有地面图时只用审阅卡；无地面图的旧单仍可用原图", () => {
+    assert.equal(glbPosterKey(without("white_a_set_card"), "white_set"), "white_a_card");
+    assert.equal(glbPosterKey(without("white_a_set_card", "white_a_card"), "white_set"), null);
+    assert.equal(glbPosterKey(without("white_a_card"), "white"), null);
+    assert.equal(glbPosterKey([{ key: "white_a_set" }, { key: "white_a" }], "white_set"), "white_a_set");
+    assert.equal(glbPosterKey([{ key: "white_a" }], "white"), "white_a");
   });
   it("渲染器原始输出名 front_right* 不会出现在 job.files，不被误用；没有正面图时为 null", () => {
     assert.equal(glbPosterKey([{ key: "front_right" }, { key: "front_right_set_card" }], "white_set"), null);

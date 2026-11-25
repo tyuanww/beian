@@ -1,4 +1,4 @@
-import type { BackdropPreset } from "./mockupStudio";
+import { jobHasGround, type BackdropPreset } from "./mockupStudio";
 
 /** 3D 加载进度：total 未知（无 Content-Length，如服务端即时 gzip）时为 indeterminate。 */
 export type GlbProgress =
@@ -79,7 +79,7 @@ export async function readGlbWithProgress(
 }
 
 /**
- * 选一张已有效果图做 poster：白桌白墙优先用桌墙图，审阅卡（小图）优先于原图。
+ * 白桌白墙优先用桌墙图。有地面图时只用审阅卡，高清 PNG 由成片队列加载。
  * job.files 里的 key 是服务端映射后的 white_a*，不是渲染器输出名 front_right*：
  * 见 apps/web/server/src/renderGenerationBridge.ts RENDER_GENERATION_OUTPUT_KEYS
  * （front_right→white_a、front_right_set_card→white_a_set_card 等）。
@@ -89,7 +89,8 @@ export function glbPosterKey(files: Array<{ key: string }> | undefined, backdrop
   const order = backdrop === "white_set"
     ? ["white_a_set_card", "white_a_set", "white_a_card", "white_a"]
     : ["white_a_card", "white_a"];
-  return order.find((key) => keys.has(key)) ?? null;
+  const allowFull = !jobHasGround(files);
+  return order.find((key) => keys.has(key) && (allowFull || key.endsWith("_card"))) ?? null;
 }
 
 /** 模型加载完成且已取景后才允许拖拽：加载中透明的 model-viewer 不应被转动，否则出现时机位已偏。 */

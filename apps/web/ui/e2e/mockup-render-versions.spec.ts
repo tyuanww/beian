@@ -48,7 +48,7 @@ function model() {
   };
 }
 
-async function serve(page:Page,state:ReturnType<typeof model>,options:{oldFull?:ReturnType<typeof deferred>;oldGlb?:ReturnType<typeof deferred>;reader?:boolean;detail?:()=>MockupJob}={}) {
+async function serve(page:Page,state:ReturnType<typeof model>,options:{oldGround?:ReturnType<typeof deferred>;oldGlb?:ReturnType<typeof deferred>;reader?:boolean;detail?:()=>MockupJob}={}) {
   await page.route("**/*",async route=>{
     const request=route.request(),url=new URL(request.url()),path=url.pathname,method=request.method();
     const json=(body:unknown,status=200)=>route.fulfill({status,contentType:"application/json",body:JSON.stringify(body)});
@@ -89,7 +89,7 @@ async function serve(page:Page,state:ReturnType<typeof model>,options:{oldFull?:
       state.urls.push(url.href);const key=path.split("/").pop()!,generation=url.searchParams.get("generation_id");
       if(!key.startsWith("read_") && !generation){state.unknown.push(`unbound:${key}`);return route.fulfill({status:409});}
       if(generation === LEGACY && key === "glb" && options.oldGlb)await options.oldGlb.promise;
-      if(generation === LEGACY && !key.endsWith("_card") && key !== "glb" && options.oldFull)await options.oldFull.promise;
+      if(generation === LEGACY && key === "white_a_ground" && options.oldGround)await options.oldGround.promise;
       if(key === "glb")return route.fulfill({contentType:"model/gltf-binary",body:carton()});
       const layer=key.includes("ground") || key.includes("set");
       const color=layer ? "white" : generation === G1 ? "rgb(20,50,230)" : "rgb(220,60,30)";
@@ -104,11 +104,11 @@ async function centerColor(page:Page) {
     Array.from(canvas.getContext("2d")!.getImageData(canvas.width/2,canvas.height/2,1,1).data));
 }
 
-test("首次生成、运行中旧代下载、晚到 full/ground/GLB 不回写、历史切回与失败留图",async({page})=>{
+test("首次生成、运行中旧代下载、晚到高清地面和 GLB 不回写、历史切回与失败留图",async({page})=>{
   test.setTimeout(45_000);
-  const state=model(),oldFull=deferred(),oldGlb=deferred();
+  const state=model(),oldGround=deferred(),oldGlb=deferred();
   const errors:string[]=[];page.on("pageerror",error=>errors.push(error.message));
-  await serve(page,state,{oldFull,oldGlb,detail:()=>state.job.current_render_generation_id === LEGACY
+  await serve(page,state,{oldGround,oldGlb,detail:()=>state.job.current_render_generation_id === LEGACY
     ? {...state.job,files:state.job.files?.filter(file=>!file.key.includes("_set"))}
     : state.job});
   const requested=(key:string,generation:string)=>state.urls.some(href=>{
@@ -120,10 +120,11 @@ test("首次生成、运行中旧代下载、晚到 full/ground/GLB 不回写、
     const backdrop=page.locator(".mockup-backdrop-switch");
     await backdrop.getByText("白桌白墙",{exact:true}).click();
     await expect.poll(()=>["white_a_ground_card","white_a_ground","glb"].every(key=>requested(key,LEGACY))).toBe(true);
-    await backdrop.getByText("白底",{exact:true}).click();
+    await expect(page.locator('canvas[aria-label="正面与侧面成片"]')).toHaveAttribute("data-preview-ground","card");
     await expect.poll(async()=>{const c=await centerColor(page);return c[0]>c[2];}).toBe(true);
     const download=page.waitForEvent("download");
     await page.getByRole("button",{name:"下载正面 + 侧面",exact:true}).click();
+    await backdrop.getByText("白底",{exact:true}).click();
     await page.getByRole("button",{name:"出图版本",exact:true}).click();
     await page.getByRole("button",{name:"重新出图",exact:true}).click();
     await expect.poll(()=>state.facts.size).toBe(1);
@@ -132,7 +133,7 @@ test("首次生成、运行中旧代下载、晚到 full/ground/GLB 不回写、
     state.complete(true);
     await expect(page.locator(".mockup-sheet-photos")).toHaveAttribute("data-render-generation",G1);
     await expect.poll(async()=>{const c=await centerColor(page);return c[2]>c[0];}).toBe(true);
-    oldFull.release();oldGlb.release();
+    oldGround.release();oldGlb.release();
     const saved=await download;const bytes=readFileSync((await saved.path())!);
     const pixel=await page.evaluate(async data=>{const image=await createImageBitmap(new Blob([new Uint8Array(data)]));
       const canvas=new OffscreenCanvas(image.width,image.height),ctx=canvas.getContext("2d")!;ctx.drawImage(image,0,0);image.close();return [...ctx.getImageData(40,48,1,1).data];},Array.from(bytes));
@@ -153,7 +154,7 @@ test("首次生成、运行中旧代下载、晚到 full/ground/GLB 不回写、
     await expect(page.locator(".mockup-version-status")).toContainText("当前图片未变");
     await expect(page.locator(".mockup-sheet-photos")).toHaveAttribute("data-render-generation",G0);
     expect(state.unknown).toEqual([]);expect(errors).toEqual([]);
-  } finally {oldFull.release();oldGlb.release();}
+  } finally {oldGround.release();oldGlb.release();}
 });
 
 test("响应丢失后刷新仅恢复请求，显式确认复用同号同内容",async({page})=>{
