@@ -234,7 +234,7 @@ def test_production_geometry_manifest_preserves_original_artwork_and_blank_flaps
     ai = tmp_path / "source.ai"
     ai.write_bytes(b"synthetic Illustrator input")
     digest = hashlib.sha256(ai.read_bytes()).hexdigest()
-    vertices, faces = [], []
+    vertices, edges, faces = [], [], []
     for panel in net()["panels"]:
         x0, y0, x1, y1 = panel["bounds_mm"]
         points = [(x0, y0), (x1, y0), (x1, y1), (x0, y1)]
@@ -243,15 +243,22 @@ def test_production_geometry_manifest_preserves_original_artwork_and_blank_flaps
             identity = panel["id"] + str(i)
             vertices.append({"id": identity, "x": x, "y": y})
             ids.append(identity)
-        faces.append({"id": panel["id"], "role": {"glue": "glue_tab", "tuck": "flap"}.get(panel["role"], panel["role"]), "boundary": ids})
-    resolution = {"status": "ready", "structure": {"units": "mm", "source": {"sha256": digest, "page_size": [190, 150]},
-        "validation": {"status": "accepted"}, "vertices": vertices, "faces": faces}}
+        boundary = []
+        for i, (start, end) in enumerate(zip(ids, ids[1:] + ids[:1])):
+            edge_id = f"edge-{panel['id']}-{i}"
+            edges.append({"id": edge_id, "start": end, "end": start, "assignment": "cut"})
+            boundary.append(edge_id)
+        faces.append({"id": panel["id"], "role": {"glue": "glue_tab", "tuck": "flap"}.get(panel["role"], panel["role"]), "boundary": boundary[::2] + boundary[1::2]})
+    resolution = {"status": "ready", "structure": {"schema": "packaging-structure/1", "units": "mm",
+        "source": {"sha256": digest, "adapter": "illustrator-semantic/1", "adapter_version": "1", "page_size": [190, 150]},
+        "validation": {"status": "accepted"}, "vertices": vertices, "edges": edges, "faces": faces, "folds": [], "root_face": None}}
     manifest = tmp_path / "unfolded-source.json"
     assert publisher.produce_unfolded_source(resolution, ai, manifest)
     payload = json.loads(manifest.read_text())
     assert payload["export"] == "native"
     assert payload["source_ai_sha256"] == digest
     assert len(payload["panels"]) == 8
+    assert next(panel for panel in payload["panels"] if panel["role"] == "glue")["bounds_mm"] == [0, 30, 20, 70]
     artwork = tmp_path / "native.pdf"
     with pymupdf.open() as doc:
         page = doc.new_page(width=190 * 72 / 25.4, height=150 * 72 / 25.4)
@@ -264,6 +271,10 @@ def test_production_geometry_manifest_preserves_original_artwork_and_blank_flaps
     faces[0]["role"] = "unknown"
     assert not publisher.produce_unfolded_source(resolution, ai, tmp_path / "bad.json")
     faces[0]["role"] = "glue_tab"
+    original_corner = edges[0]["start"]
+    edges[0]["start"] = vertices[10]["id"]
+    assert not publisher.produce_unfolded_source(resolution, ai, tmp_path / "open-boundary.json")
+    edges[0]["start"] = original_corner
     ai.write_bytes(b"changed")
     assert not publisher.produce_unfolded_source(resolution, ai, tmp_path / "changed.json")
 

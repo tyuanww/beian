@@ -5,6 +5,7 @@ import { isAbsolute, relative, resolve } from "node:path";
 /** Public reason codes. Chinese copy is the HTTP message, not a second field. */
 const UNFOLDED_REASON = {
   source_missing: "source_missing",
+  geometry_unverified: "geometry_unverified",
   geometry_incomplete: "geometry_incomplete",
   separation_unreliable: "separation_unreliable",
   host_unavailable: "host_unavailable",
@@ -18,6 +19,7 @@ export type UnfoldedReason = (typeof UNFOLDED_REASON)[keyof typeof UNFOLDED_REAS
 
 export const UNFOLDED_MESSAGE: Record<UnfoldedReason, string> = {
   source_missing: "找不到这单的源稿，不能做净版展开。",
+  geometry_unverified: "这单没有可核验的完整展开结构，不能生成净版 PDF。",
   geometry_incomplete: "展开几何不完整，不能确认粘口和封口。",
   separation_unreliable: "刀线、折线和印刷装饰无法可靠分开，不能按颜色猜测删除。",
   host_unavailable: "需要用 Illustrator 重新导出净版，但本机宿主现在不可用。",
@@ -39,6 +41,7 @@ export const PRINT_FACE_NAMES = ["front", "back", "left", "right", "top", "botto
 
 const PUBLIC_STATUS_REASONS = new Set<string>([
   "source_missing",
+  "geometry_unverified",
   "geometry_incomplete",
   "separation_unreliable",
   "host_unavailable",
@@ -101,7 +104,7 @@ export class UnfoldedPrintHttpError extends Error {
   }
 }
 export type UnfoldedSourcePlan =
-  | { ok: true; mode: UnfoldedPrintMode; assembly: "semantic-net" | "attested-pdf" }
+  | { ok: true; mode: UnfoldedPrintMode; assembly: "semantic-net" | "attested-pdf"; sourceAiSha?: string }
   | { ok: false; reason: "geometry_incomplete" | "separation_unreliable" };
 
 const HELPER_ROLES = new Set(["cut", "crease", "dimension", "production"]);
@@ -145,6 +148,7 @@ export function readUnfoldedSourcePlan(text: string): UnfoldedSourcePlan {
     ok: true,
     mode: requested === "native" ? "native_export" : "publish_existing",
     assembly,
+    ...(typeof record.source_ai_sha256 === "string" ? { sourceAiSha: record.source_ai_sha256 } : {}),
   };
 }
 
@@ -154,6 +158,7 @@ export function projectUnfoldedPrint(input: {
   generationId: string;
   sourceSha256: string | null;
   pdfReady: boolean;
+  legacyGeometryRetry?: boolean;
 }): PublicUnfoldedPrint {
   const request = input.request;
   const generation = input.generationId || "";
@@ -185,6 +190,7 @@ export function projectUnfoldedPrint(input: {
     };
   }
   if (request?.status === "failed") {
+    if (input.legacyGeometryRetry) return { status: "unavailable" };
     const reason = request.reason && PUBLIC_STATUS_REASONS.has(request.reason) && request.reason !== "close_unconfirmed"
       ? request.reason
       : "export_failed";
@@ -207,6 +213,11 @@ function knownUnfoldedReason(value: unknown): UnfoldedReason {
   const reason = typeof value === "string" ? value : "";
   if (reason === "busy" || !PUBLIC_STATUS_REASONS.has(reason)) return "export_failed";
   return reason as UnfoldedReason;
+}
+
+export function unfoldedWorkerFailureReason(stdout: string): UnfoldedReason {
+  const result = parseUnfoldedPublishStdout(stdout);
+  return result.ok || result.reason === "close_unconfirmed" ? "export_failed" : result.reason;
 }
 
 export function parseUnfoldedPublishStdout(stdout: string): { ok: true; width_mm: number; height_mm: number } | { ok: false; reason: UnfoldedReason } {

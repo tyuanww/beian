@@ -882,6 +882,7 @@ export type RenderGenerationHistory = {items:RenderGenerationRow[];next_cursor:s
 
 export type MockupJob = {
   unfolded_print?: UnfoldedPrint;
+  unfolded_artwork_preview_url?: string;
   print_faces_zip?: { status: "unavailable" | "incomplete" | "ready"; reason?: "faces_incomplete"; file_key?: "print_faces_zip" };
   id: string;
   status: "queued" | "running" | "review_required" | "unsupported" | "done" | "failed";

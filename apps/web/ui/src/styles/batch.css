@@ -32,7 +32,9 @@
 .history-date input { min-width: 0; width: 100%; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--ink); min-height: 40px; padding: 6px 10px; font: inherit; }
 .history-pagination { margin: 20px 0 0; color: var(--muted); }
 .unfolded-panel { border: 1px solid var(--line); border-radius: 22px; padding: 24px; }
-.unfolded-preview { display: block; width: 100%; height: min(68vh, 740px); min-height: 360px; border: 1px solid var(--line); border-radius: 12px; background: var(--col); margin-top: 20px; }
+.unfolded-preview { display: block; width: 100%; height: min(56vh, 44rem); height: min(56svh, 44rem); border: 1px solid var(--line); border-radius: 12px; background: var(--col); margin-top: 12px; }
+.unfolded-artwork-preview { margin: 12px 0 0; color: var(--muted); }
+.unfolded-artwork-preview img { display: block; width: 100%; height: min(48vh, 36rem); height: min(48svh, 36rem); object-fit: contain; margin-top: 8px; background: var(--col); border-radius: 12px; }
 .physical-size { font-variant-numeric: tabular-nums; font-size: 17px; color: var(--ink); }
 .result-preview { width: 100%; height: 65vh; object-fit: contain; border: 0; background: var(--col); }
 @media (max-width: 1250px) { .history-filter-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }

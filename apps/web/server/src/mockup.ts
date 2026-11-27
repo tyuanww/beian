@@ -627,6 +627,7 @@ export type PublicMockupView = MockupErrorView & {
 
 export function publicMockup(job: MockupJob, view: PublicMockupView = {}) {
   const resolution = readStructureResolution(job);
+  const artworkPreview = job.status === "done" && mockupStructureArtworkPreviewPath(job);
   return {
     ...publicMockupSummaryFields(job, view),
     files: visibleMockupFiles(job),
@@ -640,7 +641,9 @@ export function publicMockup(job: MockupJob, view: PublicMockupView = {}) {
       generationId: job.current_render_generation_id || "",
       sourceSha256: sha256RegularFile(join(mockupRoot(false), job.id, UNFOLDED_SOURCE_NAME), join(mockupRoot(false), job.id), UNFOLDED_SOURCE_MAX_BYTES),
       pdfReady: pdfHeaderRegularFile(join(mockupRoot(false), job.id, "assets", UNFOLDED_PRINT_NAME), join(mockupRoot(false), job.id)),
+      legacyGeometryRetry: legacyUnfoldedGeometryRetry(job),
     }),
+    ...(artworkPreview ? { unfolded_artwork_preview_url: `/api/mockups/${job.id}/structure-preview` } : {}),
     print_faces_zip: projectPrintFacesZip(readyPrintFaceCount(job.id)),
     can_relight_studio: canRelightStudio(job),
     studio_relit_by: job.studio_relit_by,
@@ -690,16 +693,18 @@ export function stampAutoConfirmed(job: MockupJob, anchor: StructureAnchorDecisi
 }
 
 type StructureResolution = {
+  status?: unknown;
   topology?: { face_proposal?: unknown[]; net_proposals?: unknown[] };
   structure?: {
     structure_hash?: unknown;
     source?: { page_size?: unknown; sha256?: unknown };
+    validation?: { status?: unknown };
+    faces?: Array<{ role?: unknown } | null>;
   };
   input_candidates?: unknown;
 };
 
-function readStructureResolution(job: MockupJob): StructureResolution | undefined {
-  const path = job.structure_resolution_path;
+function readStructureResolution(job: MockupJob, path = job.structure_resolution_path): StructureResolution | undefined {
   if (!path || !existsSync(path) || !underJobDir(job.id, path)) return undefined;
   try {
     const stat = statSync(path);
@@ -713,6 +718,19 @@ function readStructureResolution(job: MockupJob): StructureResolution | undefine
   } catch {
     return undefined;
   }
+}
+
+function legacyUnfoldedGeometryRetry(job: MockupJob): boolean {
+  const request = job.unfolded_print_request;
+  if (request?.status !== "failed" || request.reason !== "geometry_incomplete" || !/^0{64}$/.test(request.source_sha256)) return false;
+  const path = unfoldedSourceResolutionPath(job);
+  if (!path) return false;
+  const resolution = readStructureResolution(job, path);
+  if (resolution?.status !== "ready" || resolution.structure?.validation?.status !== "accepted") return false;
+  const faces = resolution.structure.faces;
+  if (!Array.isArray(faces)) return false;
+  const roles = new Set(faces.map((face) => face?.role));
+  return roles.has("glue_tab") && roles.has("flap");
 }
 
 function canonicalSourceHash(value: unknown): string | null {
@@ -1851,6 +1869,29 @@ function visibleMockupFiles(job: MockupJob): PublicMockupFile[] {
 
 export function isMockupJobFile(jobId: string, path: string | null | undefined): path is string {
   return Boolean(path && existsSync(path) && underJobDir(jobId, path));
+}
+
+export function mockupContainedRegularPath(id: string, path?: string): string | undefined {
+  if (!path) return undefined;
+  try {
+    const root = mockupJobDir(id);
+    if (!lstatSync(root).isDirectory() || !lstatSync(path).isFile()) return undefined;
+    const actual = realpathSync(path);
+    const rel = relative(realpathSync(root), actual);
+    return rel && !rel.startsWith("..") && !isAbsolute(rel) ? actual : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export function unfoldedSourceResolutionPath(job: MockupJob): string | undefined {
+  return mockupContainedRegularPath(job.id, join(mockupJobDir(job.id), mockupProjectCode(job.id), "structure_resolution.json"))
+    || mockupContainedRegularPath(job.id, job.structure_resolution_path);
+}
+
+export function mockupStructureArtworkPreviewPath(job: MockupJob): string | undefined {
+  const path = mockupContainedRegularPath(job.id, job.structure_artwork_preview_path);
+  return path && pngMagicAtPath(path) ? path : undefined;
 }
 
 export function fileOf(job: MockupJob, key: string) {

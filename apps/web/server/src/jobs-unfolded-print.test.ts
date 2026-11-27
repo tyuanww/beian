@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, readdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { afterEach, it } from "node:test";
 import { makeTestTempDir } from "./testTemp.js";
@@ -55,6 +55,27 @@ function seed(tid = id, payload: unknown = net) {
     owner: viewer.id, files: [], source_path: join(dir, "source.ai"),
   });
   return dir;
+}
+
+function seedLegacyResolution(dir: string, panels = net.panels): void {
+  const job = readMockupFromDisk(id)!;
+  const sha256 = createHash("sha256").update(readFileSync(join(dir, "source.ai"))).digest("hex");
+  const vertices = panels.flatMap(({ id: panel, bounds_mm: [x0, y0, x1, y1] }) =>
+    [[x0, y0], [x1, y0], [x1, y1], [x0, y1]].map(([x, y], index) => ({ id: `${panel}-v${index}`, x, y })));
+  const edges = panels.flatMap(({ id: panel }) => [0, 1, 2, 3].map((index) => ({
+    id: `${panel}-e${index}`, start: `${panel}-v${index}`, end: `${panel}-v${(index + 1) % 4}`, assignment: "cut",
+  })));
+  const faces = panels.map(({ id: panel, role }) => ({ id: panel, role: role === "glue" ? "glue_tab" : role === "tuck" ? "flap" : role,
+    boundary: [2, 3, 1, 0].map((edge) => `${panel}-e${edge}`) }));
+  const resolution = { status: "ready", structure: { schema: "packaging-structure/1", units: "mm",
+    validation: { status: "accepted" }, source: { sha256, page_size: [180, 140] }, vertices, edges, faces } };
+  const path = join(dir, "structure_resolution.json");
+  writeFileSync(path, JSON.stringify(resolution));
+  rmSync(join(dir, "unfolded-source.json"));
+  saveMockup({ ...job, structure_resolution_path: path, unfolded_print_request: {
+    id: "a".repeat(32), status: "failed", mode: "publish_existing", created_at: job.created_at, actor_id: viewer.id,
+    source_sha256: "0".repeat(64), generation_id: "", reason: "geometry_incomplete",
+  } });
 }
 
 async function settled(tid = id) {
@@ -122,12 +143,14 @@ it("rejects an unreliable separation without writing a pdf", async () => {
 });
 
 it("names missing geometry and a missing source separately", async () => {
-  seed();
-  rmSync(join(DATA_DIR, "mockups", id, "unfolded-source.json"));
-  await assert.rejects(requestUnfoldedPrint(id, viewer), (error: { reason?: string }) => error.reason === "geometry_incomplete");
+  const dir = seed();
+  seedLegacyResolution(dir, net.panels.filter(({ role }) => role !== "glue" && role !== "tuck"));
+  assert.equal(publicMockup(readMockupFromDisk(id)!).unfolded_print.status, "failed");
+  await assert.rejects(requestUnfoldedPrint(id, viewer), (error: { reason?: string }) => error.reason === "geometry_unverified");
+  assert.equal(existsSync(join(dir, "unfolded-source.json")), false);
+  assert.equal(existsSync(join(dir, "assets", "unfolded-print.pdf")), false);
   const bare = "ab00ab00ab03";
-  const dir = join(DATA_DIR, "mockups", bare);
-  mkdirSync(dir, { recursive: true });
+  mkdirSync(join(DATA_DIR, "mockups", bare), { recursive: true });
   saveMockup({ id: bare, status: "done", job_kind: "mockup", job_status: "succeeded", created_at: "2026-10-09T00:00:00Z", owner: viewer.id, files: [] });
   await assert.rejects(requestUnfoldedPrint(bare, viewer), (error: { reason?: string }) => error.reason === "source_missing");
 });
@@ -201,19 +224,10 @@ it("requeues a publish only after the worker pid is confirmed gone", () => {
   release();
 });
 
-it("publishes a native export only after a separate close record and ignores worker millimetres", async () => {
-  const dir = seed(id, {
-    ...net,
-    assembly: "attested-pdf",
-    export: "native",
-    separation: undefined,
-    attestation: {
-      schema: "unfolded-separation-attestation/1",
-      method: "semantic-identity",
-      hidden_roles: ["cut", "crease", "dimension", "production"],
-      covers_blank_structure: true,
-    },
-  });
+it("recovers a complete legacy proof and publishes it only after native close at source millimetres", async () => {
+  const dir = seed();
+  seedLegacyResolution(dir);
+  assert.equal(publicMockup(readMockupFromDisk(id)!).unfolded_print.status, "unavailable");
   const original = readFileSync(join(dir, "source.ai"));
   setJobsTestHooks({
     illustratorHostReady: true,
@@ -223,6 +237,9 @@ it("publishes a native export only after a separate close record and ignores wor
       const config = JSON.parse(readFileSync(opts.configPath, "utf8"));
       assert.notEqual(config.application, config.source_ai);
       assert.match(config.source_ai, /source\.ai$/);
+      const proof = JSON.parse(readFileSync(join(root, "unfolded-source.json"), "utf8"));
+      assert.equal(proof.source_ai_sha256, config.source_sha256);
+      assert.equal(proof.panels.length, 8);
       const printPdf = join(root, "print.pdf");
       execFileSync(PYTHON, ["-c", "import pymupdf,sys; d=pymupdf.open(); d.new_page(width=180*72/25.4, height=140*72/25.4); d.save(sys.argv[1]); d.close()", printPdf]);
       writeFileSync(join(root, "close.json"), JSON.stringify({
@@ -238,7 +255,11 @@ it("publishes a native export only after a separate close record and ignores wor
       return { code: 0, stdout: JSON.stringify({ width_mm: 1, height_mm: 1 }), stderr: "", timedOut: false };
     },
   });
-  await requestUnfoldedPrint(id, viewer);
+  const requests = [requestUnfoldedPrint(id, viewer), requestUnfoldedPrint(id, viewer)];
+  const preparations = readdirSync(dir).filter((entry) => entry.startsWith(".unfolded-source-")).length;
+  const [first, second] = await Promise.all(requests);
+  assert.equal(preparations, 1);
+  assert.equal(first.unfolded_print_request?.id, second.unfolded_print_request?.id);
   const job = await settled();
   assert.equal(job.unfolded_print_request?.status, "succeeded");
   assert.equal(publicMockup(job).unfolded_print.width_mm, 180);

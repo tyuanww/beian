@@ -3,7 +3,7 @@ import { rewriteLegacyHits } from "./legacyCopy.js";
 import { withHitText } from "./hitText.js";
 import { runNativeText, verbatimMemoryFailure } from "./workers.js";
 import { createHash, randomBytes } from "node:crypto";
-import { closeSync, copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, readSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { closeSync, copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, readSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { DATA_DIR, PACKAGING, PYTHON } from "./config.js";
 import { compareBookkeeping } from "./billing.js";
@@ -24,6 +24,7 @@ import {
   isMockupJobFile,
   loadAllMockups,
   loadMockup,
+  mockupContainedRegularPath,
   mockupJobDir,
   mockupProjectCode,
   mockupRenderPlanBytes,
@@ -34,6 +35,7 @@ import {
   printFaceRepairActive,
   publicRenderMutation,
   unfoldedPrintActive,
+  unfoldedSourceResolutionPath,
   readMockupFromDisk,
   requiredPrintFacesReady,
   resetMockupCache,
@@ -63,6 +65,7 @@ import {
   loadTasksForRecovery,
   loadTask,
   nowIso,
+  replaceFile,
   saveTask,
   VERBATIM_STATUSES,
   assertCanAccessTask,
@@ -85,6 +88,7 @@ import {
   runPrintFaceRepair,
   runUnfoldedNative,
   runUnfoldedPublish,
+  runUnfoldedSourceRecovery,
   type RunPythonResult,
   type WorkerProcessIdentity,
   type WorkerProcessState,
@@ -108,6 +112,7 @@ import {
   projectUnfoldedPrint,
   readUnfoldedSourcePlan,
   sha256RegularFile,
+  unfoldedWorkerFailureReason,
   type UnfoldedPrintMode,
   type UnfoldedPrintRequest,
   type UnfoldedReason,
@@ -1029,7 +1034,7 @@ async function executeUnfoldedNative(job: MockupJob, requestId: string): Promise
       return;
     }
     if (result.code !== 0) {
-      finishUnfolded(job.id, requestId, "export_failed");
+      finishUnfolded(job.id, requestId, unfoldedWorkerFailureReason(result.stdout));
       return;
     }
     await publishAttestedUnfolded(fresh, requestId, printPdf);
@@ -1139,6 +1144,53 @@ function recoverUnfoldedPrintsOnBoot(): void {
   }
 }
 
+const MAX_UNFOLDED_RESOLUTION_BYTES = 25 * 1024 * 1024;
+const unfoldedSourceRecoveries = new Map<string, Promise<MockupJob>>();
+
+function unfoldedRecoveryInputs(job: MockupJob) {
+  const source = mockupContainedRegularPath(job.id, job.source_path);
+  const resolution = unfoldedSourceResolutionPath(job);
+  if (!source || !/\.ai$/i.test(source) || !resolution) return null;
+  const root = realpathSync(mockupJobDir(job.id));
+  const resolutionSha = sha256RegularFile(resolution, root, MAX_UNFOLDED_RESOLUTION_BYTES);
+  const sourceSha = sha256RegularFile(source, root, UNFOLDED_BINARY_MAX_BYTES);
+  return sourceSha && resolutionSha ? { source, sourceSha, resolution, resolutionSha } : null;
+}
+
+async function recoverUnfoldedSource(job: MockupJob, viewer: Viewer, root: string): Promise<MockupJob> {
+  const source = mockupContainedRegularPath(job.id, job.source_path);
+  if (!source || !/\.ai$/i.test(source)) return failUnfolded(job, viewer, "source_missing");
+  const inputs = unfoldedRecoveryInputs(job);
+  if (!inputs) return failUnfolded(job, viewer, "geometry_unverified");
+  const staging = mkdtempSync(join(root, ".unfolded-source-"));
+  const output = join(staging, UNFOLDED_SOURCE_NAME);
+  try {
+    const result = await runUnfoldedSourceRecovery({
+      source: inputs.source, resolution: inputs.resolution, output, jobDir: root, executionId: randomBytes(16).toString("hex"),
+    }).catch(() => null);
+    const fresh = readMockupFromDisk(job.id);
+    if (!fresh) throw Object.assign(new Error("没有这单打样"), { status: 404 });
+    assertCanManageMockup(fresh, viewer);
+    if (unfoldedPrintActive(fresh) || unfoldedPublic(fresh).status === "ready") return fresh;
+    if (unfoldedBusy(fresh)) throw new UnfoldedPrintHttpError(409, "busy", unfoldedPublic(fresh));
+    const current = unfoldedRecoveryInputs(fresh);
+    if (fresh.current_render_generation_id !== job.current_render_generation_id
+      || current?.sourceSha !== inputs.sourceSha || current.resolutionSha !== inputs.resolutionSha) {
+      throw new UnfoldedPrintHttpError(409, "source_changed", unfoldedPublic(fresh));
+    }
+    const rootSource = join(root, UNFOLDED_SOURCE_NAME);
+    if (sha256RegularFile(rootSource, root, UNFOLDED_SOURCE_MAX_BYTES)) return fresh;
+    if (!result || result.timedOut || result.code !== 0 || !sha256RegularFile(output, staging, UNFOLDED_SOURCE_MAX_BYTES)) {
+      const reason = !result || result.timedOut ? "export_failed" : unfoldedWorkerFailureReason(result.stdout);
+      return failUnfolded(fresh, viewer, reason, "native_export", inputs.resolutionSha, inputs.sourceSha);
+    }
+    replaceFile(rootSource, readFileSync(output, "utf8"));
+    return fresh;
+  } finally {
+    rmSync(staging, { recursive: true, force: true });
+  }
+}
+
 /** Reuse a ready net from the same source. Native export shares the Illustrator slot; it does not start Blender. */
 export async function requestUnfoldedPrint(id: string, viewer: Viewer): Promise<MockupJob> {
   const job = readMockupFromDisk(id);
@@ -1146,6 +1198,8 @@ export async function requestUnfoldedPrint(id: string, viewer: Viewer): Promise<
   assertCanManageMockup(job, viewer);
   if (unfoldedPublic(job).status === "ready" || unfoldedPrintActive(job)) return job;
   if (unfoldedBusy(job)) throw new UnfoldedPrintHttpError(409, "busy", unfoldedPublic(job));
+  const pendingRecovery = unfoldedSourceRecoveries.get(id);
+  if (pendingRecovery) return pendingRecovery;
   const root = mockupJobDir(job.id);
   const generated = mockupRenderPlanBytes(job);
   if (generated) {
@@ -1166,12 +1220,22 @@ export async function requestUnfoldedPrint(id: string, viewer: Viewer): Promise<
     }
   }
   const sourceSha = sha256RegularFile(join(root, UNFOLDED_SOURCE_NAME), root, UNFOLDED_SOURCE_MAX_BYTES);
-  if (!sourceSha) {
-    const ai = job.source_path && /\.ai$/i.test(job.source_path)
-      ? sha256RegularFile(job.source_path, root, UNFOLDED_BINARY_MAX_BYTES)
-      : null;
-    return failUnfolded(job, viewer, ai ? "geometry_incomplete" : "source_missing");
+  if (sourceSha) return enqueueUnfoldedPrint(job, viewer, root, sourceSha);
+  const recovery = recoverUnfoldedSource(job, viewer, root).then((fresh) => {
+    if (unfoldedPrintActive(fresh) || unfoldedPublic(fresh).status === "ready") return fresh;
+    const recoveredSha = sha256RegularFile(join(root, UNFOLDED_SOURCE_NAME), root, UNFOLDED_SOURCE_MAX_BYTES);
+    if (!recoveredSha) return failUnfolded(fresh, viewer, "geometry_unverified");
+    return enqueueUnfoldedPrint(fresh, viewer, root, recoveredSha);
+  });
+  unfoldedSourceRecoveries.set(id, recovery);
+  try {
+    return await recovery;
+  } finally {
+    unfoldedSourceRecoveries.delete(id);
   }
+}
+
+function enqueueUnfoldedPrint(job: MockupJob, viewer: Viewer, root: string, sourceSha: string): MockupJob {
   let planText = "";
   try {
     planText = readFileSync(join(root, UNFOLDED_SOURCE_NAME), "utf8");
@@ -1186,6 +1250,9 @@ export async function requestUnfoldedPrint(id: string, viewer: Viewer): Promise<
       ? sha256RegularFile(job.source_path, root, UNFOLDED_BINARY_MAX_BYTES) || undefined
       : undefined;
     if (!nativeSha) return failUnfolded(job, viewer, "source_missing", "native_export", sourceSha);
+    if (plan.sourceAiSha !== undefined && plan.sourceAiSha !== nativeSha) {
+      return failUnfolded(job, viewer, "source_changed", "native_export", sourceSha, nativeSha);
+    }
     if (!unfoldedHostReady()) return failUnfolded(job, viewer, "host_unavailable", "native_export", sourceSha, nativeSha);
   } else if (plan.mode === "publish_existing") {
     const artwork = job.structure_artwork_path || "";
@@ -1205,7 +1272,7 @@ export async function requestUnfoldedPrint(id: string, viewer: Viewer): Promise<
   };
   saveMockup(job);
   queueMicrotask(() => { try { tryStart(); } catch { /* queued fact remains for boot recovery */ } });
-  return readMockupFromDisk(id) || job;
+  return readMockupFromDisk(job.id) || job;
 }
 
 /** Old clients get in-flight deduplication only; never overwrite root output files. */
