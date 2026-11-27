@@ -106,6 +106,7 @@ import {
   isStructureProposalId,
   isWhiteFile,
   mockupFileBrokenMessage,
+  mockupStructureArtworkPreviewPath,
   listJobs,
   publicMockup,
   publicMockupSummary,
@@ -186,7 +187,7 @@ type NodeBindings = HttpBindings | Http2Bindings;
 type Env = { Bindings: NodeBindings; Variables: { session: Session } };
 
 const app = new Hono<Env>();
-const VERSION = "0.31.1.36";
+const VERSION = "0.31.1.37";
 
 const STRUCTURE_INPUT_BODY_BYTES = 16 * 1024;
 
@@ -1793,8 +1794,8 @@ app.get("/api/mockups/:id/structure-preview", (c) => {
   need(c, "read");
   const job = getJob(assertTid(c.req.param("id")));
   if (!job) throw new HTTPException(404, { message: "没有这单打样" });
-  const path = job.structure_artwork_preview_path;
-  if (!isMockupJobFile(job.id, path) || !pngMagicAt(path)) {
+  const path = mockupStructureArtworkPreviewPath(job);
+  if (!path) {
     throw new HTTPException(404, { message: "结构原稿预览还没有" });
   }
   const etag = fileEtag(path);

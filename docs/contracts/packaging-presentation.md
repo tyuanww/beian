@@ -35,7 +35,7 @@
 
 支持独立局部法线的白卡花盒用激凹工艺板和印刷面的同一仿射变换生成凹痕。适用性由花盒结构和纸材决定。PNG 和 GLB 以同一凹痕贴图表现受光。凹痕覆盖未印刷的纸面时，渲染在该区域补入纸底，六面读字贴图沿用原印刷 PDF。凹痕为打样预览，工艺板只提供范围。工艺板无法解析或采样时，打样沿普通印刷流程完成并记录工艺错误。
 
-打样台和打样单主区白底深字（深色主题也是）；GLB 中性环境；每张图右上角下载。有 `white_a_ground` / `white_b_ground` 的新单走 grounded 成片：canvas 铺 `rgb(228,228,232)` 再 multiply 地面、叠产品，预览和下载使用相同的图层顺序、背景和灯光规则；正面大约 480px 的 5:6 主图；页头藏「下载 PPT」，灯光收到「调灯」后面；需要地面图且地面坏了，藏原图和下载。GroundedShot 第一屏先读 `white_*_card?compact=1`（原核对卡最长边 1440，传输变体最长边 960），解码成功的 full 原位替换 canvas 源；卡 415/失败回退全图，full 失败保留卡图并提示重新打开此单。`*_card` 不能当产品静帧，也不能当 `*_ground`。`*_ground` 不能当产品静帧。Blender 先出产品 RGBA，再单独跑地面 pass（EEVEE 阴影 + 接触阴影，地面 albedo 0.91），地面失败不挡产品图；重试先 `unlinkSameGenerationStills`（含地面和核对卡）。没有地面图的旧单仍是三栏白底、浅底+内描边，页头「下载 PPT」（没写成仍显示，点了出「PPT 没写成，白底仍可下」）。成片不提供 PDF 下载入口（独立净版展开见下文）；点下载底部提示不挡操作；GLB 全屏居中；截图时下载钮藏起来；全屏被拒写「全屏打不开」。打样单下面印刷面读字。网页把产品叠到可调白底上，所以产品和背景能分开辨认、分开调光；GLB 本来就只导出盒身、环境灯另算。产品灯光调静帧产品层和 GLB 曝光，背景灯光调白底/地面和 GLB 底色，下载跟当前灯光走。原图是同页灯箱，不是另开未调光 PNG。打样中和打样失败可重试，先确认当前 worker 已退出；仍运行时只按既有安全取消合同处理，不能用重试绕过 Illustrator 禁杀阶段，无法安全退出就 409，不必重传。读字只给 `read_*`，对应 `assets/panel_{face}.png`，走现有 `canvasZoom.ts` 1–6×；白底仍只给 `front_right` / `back_left`，不要用 GLB 或 3/4 白底静帧读小字。详情 `publicMockup` / `fileOf` 才按磁盘补印刷面，列表 `publicMockupSummary` 不扫盘。打样 PPT 先用两张白底写 OOXML，不依赖 Node；写不出才试演示文稿运行时。缺 PPT 不要把整单判失败；内部仍用两张白底合成 PDF（页底先铺白；pymupdf 写不出且还没落盘才用已装 Pillow，不要盖掉已写成的文件，不要新装包）。磁盘上的产品 PNG 要重新打样才会变；页上灯光立刻作用。
+打样台和打样单主区白底深字（深色主题也是）；GLB 中性环境；每张图右上角下载。有 `white_a_ground` / `white_b_ground` 的新单走 grounded 成片：canvas 铺 `rgb(228,228,232)` 再 multiply 地面、叠产品，预览和下载使用相同的图层顺序、背景和灯光规则；正面大约 480px 的 5:6 主图；页头藏「下载 PPT」，灯光收到「调灯」后面；需要地面图且地面坏了，藏原图和下载。GroundedShot 第一屏先读 `white_*_card?compact=1`（原核对卡最长边 1440，传输变体最长边 960），解码成功的 full 原位替换 canvas 源；卡 415/失败回退全图，full 失败保留卡图并提示重新打开此单。`*_card` 不能当产品静帧，也不能当 `*_ground`。`*_ground` 不能当产品静帧。Blender 先出产品 RGBA，再单独跑地面 pass（EEVEE 阴影 + 接触阴影，地面 albedo 0.91），地面失败不挡产品图；重试先 `unlinkSameGenerationStills`（含地面和核对卡）。没有地面图的旧单仍是三栏白底、浅底+内描边，页头「下载 PPT」（没写成仍显示，点了出「PPT 没写成，白底仍可下」）。成片不提供 PDF 下载入口（独立净版展开见下文）；点下载底部提示不挡操作；GLB 全屏居中；截图时下载钮藏起来；全屏被拒写「全屏打不开」。打样单的「印刷面」标签用于读字。网页把产品叠到可调白底上，所以产品和背景能分开辨认、分开调光；GLB 本来就只导出盒身、环境灯另算。产品灯光调静帧产品层和 GLB 曝光，背景灯光调白底/地面和 GLB 底色，下载跟当前灯光走。原图是同页灯箱，不是另开未调光 PNG。打样中和打样失败可重试，先确认当前 worker 已退出；仍运行时只按既有安全取消合同处理，不能用重试绕过 Illustrator 禁杀阶段，无法安全退出就 409，不必重传。读字只给 `read_*`，对应 `assets/panel_{face}.png`，走现有 `canvasZoom.ts` 1–6×；白底仍只给 `front_right` / `back_left`，不要用 GLB 或 3/4 白底静帧读小字。详情 `publicMockup` / `fileOf` 才按磁盘补印刷面，列表 `publicMockupSummary` 不扫盘。打样 PPT 先用两张白底写 OOXML，不依赖 Node；写不出才试演示文稿运行时。缺 PPT 不要把整单判失败；内部仍用两张白底合成 PDF（页底先铺白；pymupdf 写不出且还没落盘才用已装 Pillow，不要盖掉已写成的文件，不要新装包）。磁盘上的产品 PNG 要重新打样才会变；页上灯光立刻作用。
 
 ### GLB 查看器显示
 
@@ -47,7 +47,9 @@
 
 ## 净版展开与六面下载
 
-仅 `GET /api/mockups/:id` 详情增加 unfolded_print 与 print_faces_zip；列表不带这两个字段。unfolded_print.status 为 unavailable / queued / running / ready / failed，reason 仅有原因时出现；只有 ready 带 file_key=unfolded_print、width_mm、height_mm，单位为源稿毫米 1:1，不缩 A4。close_unconfirmed 只与 running 共存。原因集合为 source_missing、geometry_incomplete、separation_unreliable、host_unavailable、source_changed、close_unconfirmed、export_failed。POST 错误优先显示服务端 message，GET 没有 message 时才用稳定原因兜底。
+`GET /api/mockups/:id` 详情提供 `unfolded_print` 与 `print_faces_zip`，列表不含这两个字段。`unfolded_print.status` 为 unavailable、queued、running、ready 或 failed。只有 ready 带 `file_key=unfolded_print`、`width_mm` 和 `height_mm`，单位为源稿毫米 1:1，不缩 A4。状态原因是 `source_missing`、`geometry_unverified`、`geometry_incomplete`、`separation_unreliable`、`host_unavailable`、`source_changed`、`close_unconfirmed` 或 `export_failed`。`close_unconfirmed` 只与 running 共存。缺少可核验的完整语义结构是 `geometry_unverified`，已声明的结构未通过几何校验是 `geometry_incomplete`。POST 失败时显示服务端 `message`，也可按稳定原因展示。详情恢复到排队、运行或已完成时，以详情状态为准。
+
+已完成的单有任务内的整张稿件 PNG 时，详情额外提供 `unfolded_artwork_preview_url`，指向原有的受权限保护的 `/structure-preview`。该图可以在净版 PDF 不可用时查看，不代表印刷净版，也不是 PDF 下载入口。
 
 独立 print_faces_zip：0 面 unavailable、1–5 面 incomplete + faces_incomplete、六面才 ready + file_key=print_faces_zip。净版不能由六面拼接或 GLB 截图代替。
 

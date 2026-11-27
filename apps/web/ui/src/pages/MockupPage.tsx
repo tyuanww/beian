@@ -4,7 +4,7 @@ import { type GlbTextureInfo, glbTextureFormat } from "./mockupGlbTexture";
 import { type GlbVersionInfo, glbSourceUrls, glbVersions } from "./mockupGlbSource";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { Alert, App, Button, ConfigProvider, Empty, Input, Segmented, Space, Table, Tabs, Tag, theme as antdTheme } from "antd";
+import { Alert, App, Button, ConfigProvider, Empty, Input, Segmented, Space, Table, Tag, theme as antdTheme } from "antd";
 import { api, ApiError, isUploadReceiptExpired, UPLOAD_TIMEOUT_MS, type MockupJob, type PendingUploadReceipt } from "../api";
 import {
   forgetMockupHandoff,
@@ -37,8 +37,9 @@ import {
   type PaintedStudioBackground,
   type StudioShotKey,
 } from "./mockupStillDownload";
-import { panBy, resetZoom, zoomAt, zoomCss, type ZoomState } from "./canvasZoom";
-import { listedReadFaces, READ_FACE_LABEL, readFaceKey } from "./mockupReadFaces";
+import { listedReadFaces } from "./mockupReadFaces";
+import { MockupPrintView } from "./MockupPrintView";
+import { MockupViewTabs } from "./MockupViewTabs";
 import {
   BACKDROP_LABEL,
   BACKDROP_PRESETS,
@@ -809,6 +810,12 @@ function useStudioFirstPaint(identity: string, front: boolean, back: boolean) {
   return { afterFirstPreview: (!front && !back) || painted, markSettled };
 }
 
+const RESULT_TABS = [
+  { key: "studio", label: "立体效果" },
+  { key: "print", label: "印刷面" },
+] as const;
+type ResultView = (typeof RESULT_TABS)[number]["key"];
+
 export function MockupJobPage({
   jobId,
   studioActor,
@@ -829,7 +836,7 @@ export function MockupJobPage({
   const [versionsOpen, setVersionsOpen] = useState(false);
   const [lightsOpen, setLightsOpen] = useState(false);
   const [backdrop, setBackdrop] = useState<BackdropPreset>(readBackdropPreset);
-  const [activePlane, setActivePlane] = useState("unfolded");
+  const [view, setView] = useState<ResultView>("studio");
   const [unfoldedSubmitting, setUnfoldedSubmitting] = useState(false);
   const [unfoldedError, setUnfoldedError] = useState<string | null>(null);
   const glbBox = useRef<HTMLDivElement>(null);
@@ -949,6 +956,9 @@ export function MockupJobPage({
     if (seededJobId.current !== jobId) {
       seededJobId.current = jobId;
       setJob(mockupHandoffFor(jobId));
+      setView("studio");
+      setUnfoldedSubmitting(false);
+      setUnfoldedError(null);
     }
     setError(null);
     announced.current = "";
@@ -1105,6 +1115,8 @@ export function MockupJobPage({
   const hasGlb = (job.files || []).some((f) => f.key === "glb");
   const hasPpt = (job.files || []).some((f) => f.key === "ppt");
   const grounded = jobHasGround(job.files);
+  const viewId = `mockup-result-${job.id}`;
+  const showStudio = view === "studio";
   const boundAssetsReady=!job.render_generation_capabilities || Boolean(job.current_render_generation_id);
   const readFaces = listedReadFaces(job.files || []);
   const missingRequired = (["front", "back", "left", "right"] as const).filter((role) => !readFaces.includes(role));
@@ -1117,27 +1129,43 @@ export function MockupJobPage({
       ? "没有可用底稿，请重新生成。"
       : "没有印刷面图，请重新生成。";
 
+  const requestUnfolded = async () => {
+    setUnfoldedSubmitting(true);
+    setUnfoldedError(null);
+    try {
+      const next = await api.requestUnfoldedPrint(job.id);
+      if (alive.current && seededJobId.current === job.id) setJob(next);
+    } catch (err) {
+      if (!alive.current || seededJobId.current !== job.id) return;
+      setUnfoldedError(err instanceof Error ? err.message : "展开图生成失败，请重试。");
+      void api.mockup(job.id).then((next) => {
+        if (alive.current && seededJobId.current === job.id) setJob(next);
+      }).catch(() => undefined);
+    } finally {
+      if (alive.current && seededJobId.current === job.id) setUnfoldedSubmitting(false);
+    }
+  };
+
   return (
     <section className="mockup-sheet">
       <header className="page-head">
         <div>
           <h1 className="page-title">{mockTitle(job)}</h1>
-          <p className="page-lead">上面看立体效果，下面看印刷文字。</p>
         </div>
         <div className="mockup-sheet-head-actions">
-          <Button
+          {showStudio ? <Button
             aria-expanded={lightsOpen}
             aria-controls="mockup-studio-lights"
             onClick={() => setLightsOpen((open) => !open)}
           >
             {lightsOpen ? "收起调灯" : "调灯"}
-          </Button>
+          </Button> : null}
           {canCreate && job.status === "failed" ? (
             <Button disabled={retrying} onClick={() => void retry()}>
               {retrying ? "正在重试…" : "重试"}
             </Button>
           ) : null}
-          {job.render_generation_capabilities?.history.allowed ? (
+          {showStudio && job.render_generation_capabilities?.history.allowed ? (
             <Button aria-expanded={versionsOpen} aria-controls="mockup-render-versions" onClick={()=>setVersionsOpen(value=>!value)}>
               {versionsOpen ? "收起版本" : "出图版本"}
             </Button>
@@ -1145,7 +1173,7 @@ export function MockupJobPage({
           <Button onClick={onBack}>
             返回 3D 打样
           </Button>
-          {grounded ? null : hasPpt ? (
+          {!showStudio || grounded ? null : hasPpt ? (
             <Button
               href={fileHref(job.id, "ppt", true)}
               download
@@ -1153,7 +1181,7 @@ export function MockupJobPage({
             >
               下载演示稿
             </Button>
-          ) : grounded ? null : (
+          ) : (
             <Button onClick={() => notice(missingPptHud())}>
               下载演示稿
             </Button>
@@ -1161,43 +1189,8 @@ export function MockupJobPage({
         </div>
       </header>
       {error ? <p className="page-lead" role="status">{error}</p> : null}
-      {job.render_generation_capabilities ? <RenderVersions key={job.id} job={job} open={versionsOpen}
-        productLight={productLight} backgroundLight={backgroundLight} onJob={setJob} /> : null}
-      <div className="mockup-backdrop-switch">
-        <span className="mockup-backdrop-label" id="mockup-backdrop-label">
-          背景
-        </span>
-        <Segmented
-          aria-labelledby="mockup-backdrop-label"
-          options={BACKDROP_PRESETS.map((preset) => ({
-            label: BACKDROP_LABEL[preset],
-            value: preset,
-          }))}
-          value={backdrop}
-          onChange={(value) => {
-            const next = parseBackdropPreset(value);
-            setBackdrop(next);
-            writeBackdropPreset(next);
-          }}
-        />
-      </div>
-      {lightsOpen ? (
-        <div id="mockup-studio-lights">
-          <StudioLightSliders
-            productLight={productLight}
-            backgroundLight={backgroundLight}
-            onProductLight={setProductLight}
-            onBackgroundLight={setBackgroundLight}
-          />
-        </div>
-      ) : null}
-
       {job.status === "failed" ? (
         <Alert type="error" showIcon title={mockupFailReason(job.error || job.job_error)} />
-      ) : null}
-
-      {canAdmin && !repairPending && job.status === "done" && !job.has_render_generations && !job.render_mutation ? (
-        <AdminRotateFront job={job} onConfirmed={setJob} />
       ) : null}
 
       {showPrintAlert ? (
@@ -1218,157 +1211,174 @@ export function MockupJobPage({
         </div>
       ) : null}
 
-      {!boundAssetsReady ? <p className="page-lead" role="status">正在确认当前版本资源。</p> : <div key={`${job.id}:${generation}`} data-render-generation={generation} className={grounded ? "mockup-sheet-photos is-grounded" : "mockup-sheet-photos"}>
-        {groundA && whiteA ? (
-          <GroundedShot
-            afterFirstPreview={afterFirstPreview && !downloads.preparing}
-            onInitialPreview={markSettled}
-            generation={generation}
-            onSourceError={refreshSource}
-            jobId={job.id}
-            files={job.files}
-            fileKey="white_a"
-            groundKey="white_a_ground"
-            alt="正面与侧面成片"
-            caption="正面 + 侧面"
-            downloads={downloads}
-            productLight={productLight}
-            backgroundLight={backgroundLight}
-            backdrop={backdrop}
-            onProductLight={setProductLight}
-            onBackgroundLight={setBackgroundLight}
-            onNotice={notice}
+      <MockupViewTabs id={viewId} label="打样内容" tabs={RESULT_TABS} active={view} onChange={setView} />
+      <div className="mockup-result-panel" role="tabpanel" aria-labelledby={`${viewId}-tab-studio`} hidden={!showStudio}>
+        {job.render_generation_capabilities ? <RenderVersions key={job.id} job={job} open={versionsOpen}
+          productLight={productLight} backgroundLight={backgroundLight} onJob={setJob} /> : null}
+        <div className="mockup-backdrop-switch">
+          <span className="mockup-backdrop-label" id="mockup-backdrop-label">
+            背景
+          </span>
+          <Segmented
+            aria-labelledby="mockup-backdrop-label"
+            options={BACKDROP_PRESETS.map((preset) => ({
+              label: BACKDROP_LABEL[preset],
+              value: preset,
+            }))}
+            value={backdrop}
+            onChange={(value) => {
+              const next = parseBackdropPreset(value);
+              setBackdrop(next);
+              writeBackdropPreset(next);
+            }}
           />
-        ) : whiteA ? (
-          <WhiteShot
-            key={`${job.id}:${generation}:white_a`}
-            queueFull={grounded}
-            generation={generation}
-            onSourceError={grounded ? () => refreshSource({ quiet: true }) : refreshSource}
-            jobId={job.id}
-            fileKey="white_a"
-            alt="正面与侧面白底"
-            caption="正面 + 侧面"
-            downloads={downloads}
-            productLight={productLight}
-            backgroundLight={backgroundLight}
-            backdrop={backdrop}
-            onProductLight={setProductLight}
-            onBackgroundLight={setBackgroundLight}
-          />
-        ) : (
-          <figure className="mockup-sheet-photo">
-            <div
-              className={`mockup-sheet-frame${grounded ? " is-studio-ground" : ""} ${backdropFrameClass(backdrop)}`}
-              style={{ background: studioBackdrop(backgroundLight, backdrop) }}
-            >
-              <p className="page-lead">还没有正面+侧面。</p>
-            </div>
-            <figcaption className="mockup-sheet-cap">正面 + 侧面</figcaption>
-          </figure>
-        )}
-        {groundB && whiteB ? (
-          <GroundedShot
-            afterFirstPreview={afterFirstPreview && !downloads.preparing}
-            onInitialPreview={markSettled}
-            generation={generation}
-            onSourceError={refreshSource}
-            jobId={job.id}
-            files={job.files}
-            fileKey="white_b"
-            groundKey="white_b_ground"
-            alt="反面与侧面成片"
-            caption="反面 + 侧面"
-            downloads={downloads}
-            productLight={productLight}
-            backgroundLight={backgroundLight}
-            backdrop={backdrop}
-            onProductLight={setProductLight}
-            onBackgroundLight={setBackgroundLight}
-            onNotice={notice}
-          />
-        ) : whiteB ? (
-          <WhiteShot
-            key={`${job.id}:${generation}:white_b`}
-            queueFull={grounded}
-            generation={generation}
-            onSourceError={grounded ? () => refreshSource({ quiet: true }) : refreshSource}
-            jobId={job.id}
-            fileKey="white_b"
-            alt="反面与侧面白底"
-            caption="反面 + 侧面"
-            downloads={downloads}
-            productLight={productLight}
-            backgroundLight={backgroundLight}
-            backdrop={backdrop}
-            onProductLight={setProductLight}
-            onBackgroundLight={setBackgroundLight}
-          />
-        ) : (
-          <figure className="mockup-sheet-photo">
-            <div
-              className={`mockup-sheet-frame${grounded ? " is-studio-ground" : ""} ${backdropFrameClass(backdrop)}`}
-              style={{ background: studioBackdrop(backgroundLight, backdrop) }}
-            >
-              <p className="page-lead">还没有反面+侧面。</p>
-            </div>
-            <figcaption className="mockup-sheet-cap">反面 + 侧面</figcaption>
-          </figure>
-        )}
-        {hasGlb ? (
-          <GlbShot
-            afterFirstPreview={afterFirstPreview}
-            deferLoad={downloads.preparing}
-            jobId={job.id}
-            files={job.files}
-            generation={generation}
-            onSourceError={() => refreshSource({ quiet: true })}
-            boxRef={glbBox}
-            backgroundLight={backgroundLight}
-            productLight={productLight}
-            backdrop={backdrop}
-            glbFs={glbFs}
-            onNotice={notice}
-          />
-        ) : (
-          <figure className="mockup-sheet-photo">
-            <div className="mockup-sheet-frame">
-              <Empty description={job.status === "done" ? "暂无 3D 模型" : "3D 模型还未生成"} />
-            </div>
-            <figcaption className="mockup-sheet-cap">3D 模型</figcaption>
-          </figure>
-        )}
-      </div>}
-      <StudioStillDownloadHistory downloads={downloads} visible={[
-        whiteA && boundAssetsReady ? studioDownloadFor(downloads.entries, { generation, fileKey: "white_a", backdrop, productLight, backgroundLight }) : undefined,
-        whiteB && boundAssetsReady ? studioDownloadFor(downloads.entries, { generation, fileKey: "white_b", backdrop, productLight, backgroundLight }) : undefined,
-      ]} />
-      <section className="mockup-read-faces" aria-label="印刷面">
-        <div className="batch-section-head">
-          <div>
-            <div className="asset-title-row"><h2 className="mockup-read-title">印刷面</h2><span className="format-tag">PNG</span></div>
-            <p className="page-lead">各面图片可放大查看。</p>
-          </div>
-          <Button href={job.print_faces_zip?.status === "ready" ? fileHref(job.id, "print_faces_zip", true) : undefined}
-            disabled={job.print_faces_zip?.status !== "ready"}>下载六面</Button>
         </div>
-        <Tabs activeKey={activePlane} onChange={setActivePlane} items={[
-          { key: "unfolded", label: "2D 展开图", children: <UnfoldedPanel job={job} canCreate={canCreate}
-            submitting={unfoldedSubmitting} error={unfoldedError} onRequest={async () => {
-              setUnfoldedSubmitting(true); setUnfoldedError(null);
-              try { const next = await api.requestUnfoldedPrint(job.id); if (alive.current) setJob(next); }
-              catch (err) { if (alive.current) { setUnfoldedError(err instanceof Error ? err.message : "展开图生成失败，请重试。"); void api.mockup(job.id).then(next => { if (alive.current) setJob(next); }).catch(() => undefined); } }
-              finally { if (alive.current) setUnfoldedSubmitting(false); }
-            }} /> },
-          ...(["front", "back", "left", "right", "top", "bottom"] as const).map(role => ({
-            key: role, label: READ_FACE_LABEL[role], children: readFaces.includes(role)
-              ? <ReadFaceShot jobId={job.id} fileKey={readFaceKey(role)} label={READ_FACE_LABEL[role]}
-                  highlighted={false} faceId={`read-face-${role}`} downloadName={job.files.find(item => item.key === readFaceKey(role))?.name}
-                  onDownload={() => notice(downloadHudLine("印刷面"))} />
-              : <Empty description={`${READ_FACE_LABEL[role]}还没有印刷面图，可重新生成。`} />,
-          })),
+        {lightsOpen ? (
+          <div id="mockup-studio-lights">
+            <StudioLightSliders
+              productLight={productLight}
+              backgroundLight={backgroundLight}
+              onProductLight={setProductLight}
+              onBackgroundLight={setBackgroundLight}
+            />
+          </div>
+        ) : null}
+
+        {canAdmin && !repairPending && job.status === "done" && !job.has_render_generations && !job.render_mutation ? (
+          <AdminRotateFront job={job} onConfirmed={setJob} />
+        ) : null}
+
+        {!boundAssetsReady ? <p className="page-lead" role="status">正在确认当前版本资源。</p> : <div key={`${job.id}:${generation}`} data-render-generation={generation} className={grounded ? "mockup-sheet-photos is-grounded" : "mockup-sheet-photos"}>
+          {groundA && whiteA ? (
+            <GroundedShot
+              afterFirstPreview={afterFirstPreview && !downloads.preparing}
+              onInitialPreview={markSettled}
+              generation={generation}
+              onSourceError={refreshSource}
+              jobId={job.id}
+              files={job.files}
+              fileKey="white_a"
+              groundKey="white_a_ground"
+              alt="正面与侧面成片"
+              caption="正面 + 侧面"
+              downloads={downloads}
+              productLight={productLight}
+              backgroundLight={backgroundLight}
+              backdrop={backdrop}
+              onProductLight={setProductLight}
+              onBackgroundLight={setBackgroundLight}
+              onNotice={notice}
+            />
+          ) : whiteA ? (
+            <WhiteShot
+              key={`${job.id}:${generation}:white_a`}
+              queueFull={grounded}
+              generation={generation}
+              onSourceError={grounded ? () => refreshSource({ quiet: true }) : refreshSource}
+              jobId={job.id}
+              fileKey="white_a"
+              alt="正面与侧面白底"
+              caption="正面 + 侧面"
+              downloads={downloads}
+              productLight={productLight}
+              backgroundLight={backgroundLight}
+              backdrop={backdrop}
+              onProductLight={setProductLight}
+              onBackgroundLight={setBackgroundLight}
+            />
+          ) : (
+            <figure className="mockup-sheet-photo">
+              <div
+                className={`mockup-sheet-frame${grounded ? " is-studio-ground" : ""} ${backdropFrameClass(backdrop)}`}
+                style={{ background: studioBackdrop(backgroundLight, backdrop) }}
+              >
+                <p className="page-lead">还没有正面+侧面。</p>
+              </div>
+              <figcaption className="mockup-sheet-cap">正面 + 侧面</figcaption>
+            </figure>
+          )}
+          {groundB && whiteB ? (
+            <GroundedShot
+              afterFirstPreview={afterFirstPreview && !downloads.preparing}
+              onInitialPreview={markSettled}
+              generation={generation}
+              onSourceError={refreshSource}
+              jobId={job.id}
+              files={job.files}
+              fileKey="white_b"
+              groundKey="white_b_ground"
+              alt="反面与侧面成片"
+              caption="反面 + 侧面"
+              downloads={downloads}
+              productLight={productLight}
+              backgroundLight={backgroundLight}
+              backdrop={backdrop}
+              onProductLight={setProductLight}
+              onBackgroundLight={setBackgroundLight}
+              onNotice={notice}
+            />
+          ) : whiteB ? (
+            <WhiteShot
+              key={`${job.id}:${generation}:white_b`}
+              queueFull={grounded}
+              generation={generation}
+              onSourceError={grounded ? () => refreshSource({ quiet: true }) : refreshSource}
+              jobId={job.id}
+              fileKey="white_b"
+              alt="反面与侧面白底"
+              caption="反面 + 侧面"
+              downloads={downloads}
+              productLight={productLight}
+              backgroundLight={backgroundLight}
+              backdrop={backdrop}
+              onProductLight={setProductLight}
+              onBackgroundLight={setBackgroundLight}
+            />
+          ) : (
+            <figure className="mockup-sheet-photo">
+              <div
+                className={`mockup-sheet-frame${grounded ? " is-studio-ground" : ""} ${backdropFrameClass(backdrop)}`}
+                style={{ background: studioBackdrop(backgroundLight, backdrop) }}
+              >
+                <p className="page-lead">还没有反面+侧面。</p>
+              </div>
+              <figcaption className="mockup-sheet-cap">反面 + 侧面</figcaption>
+            </figure>
+          )}
+          {hasGlb ? (
+            <GlbShot
+              afterFirstPreview={afterFirstPreview}
+              deferLoad={downloads.preparing}
+              jobId={job.id}
+              files={job.files}
+              generation={generation}
+              onSourceError={() => refreshSource({ quiet: true })}
+              boxRef={glbBox}
+              backgroundLight={backgroundLight}
+              productLight={productLight}
+              backdrop={backdrop}
+              glbFs={glbFs}
+              onNotice={notice}
+            />
+          ) : (
+            <figure className="mockup-sheet-photo">
+              <div className="mockup-sheet-frame">
+                <Empty description={job.status === "done" ? "暂无 3D 模型" : "3D 模型还未生成"} />
+              </div>
+              <figcaption className="mockup-sheet-cap">3D 模型</figcaption>
+            </figure>
+          )}
+        </div>}
+        <StudioStillDownloadHistory downloads={downloads} visible={[
+          whiteA && boundAssetsReady ? studioDownloadFor(downloads.entries, { generation, fileKey: "white_a", backdrop, productLight, backgroundLight }) : undefined,
+          whiteB && boundAssetsReady ? studioDownloadFor(downloads.entries, { generation, fileKey: "white_b", backdrop, productLight, backgroundLight }) : undefined,
         ]} />
-      </section>
+      </div>
+      <div className="mockup-result-panel" role="tabpanel" aria-labelledby={`${viewId}-tab-print`} hidden={showStudio}>
+        <MockupPrintView key={job.id} job={job} active={!showStudio} canCreate={canCreate}
+          submitting={unfoldedSubmitting} error={unfoldedError} onRequest={() => void requestUnfolded()}
+          onDownload={() => notice(downloadHudLine("印刷面"))} />
+      </div>
       {typeof document !== "undefined"
         ? createPortal(
             <div role="status" aria-live="polite" aria-atomic="true">
@@ -1378,190 +1388,6 @@ export function MockupJobPage({
           )
         : null}
     </section>
-  );
-}
-
-function ReadFaceShot({
-  jobId,
-  fileKey,
-  label,
-  downloadName,
-  highlighted,
-  faceId,
-  onDownload,
-}: {
-  jobId: string;
-  fileKey: string;
-  label: string;
-  downloadName?: string;
-  highlighted?: boolean;
-  faceId?: string;
-  onDownload: () => void;
-}) {
-  const [bad, setBad] = useState(false);
-  const [zoom, setZoom] = useState(resetZoom);
-  const viewRef = useRef<HTMLDivElement>(null);
-  const zoomElRef = useRef<HTMLDivElement>(null);
-  const zoomRef = useRef<ZoomState>(zoom);
-  const panDrag = useRef<{ x: number; y: number } | null>(null);
-  const panRaf = useRef<number | null>(null);
-  const wheelEnd = useRef<number | null>(null);
-  zoomRef.current = zoom;
-
-  const paintZoom = (next: ZoomState) => {
-    const el = zoomElRef.current;
-    if (el) el.style.transform = zoomCss(next);
-  };
-
-  const commitZoom = (next: ZoomState) => {
-    zoomRef.current = next;
-    paintZoom(next);
-    setZoom(next);
-  };
-
-  const zoomFromCenter = (nextScale: number) => {
-    const view = viewRef.current;
-    const ox = view ? view.clientWidth / 2 : 0;
-    const oy = view ? view.clientHeight / 2 : 0;
-    commitZoom(zoomAt(zoomRef.current, nextScale, ox, oy));
-  };
-
-  useEffect(() => {
-    const el = viewRef.current;
-    if (!el || bad) return;
-    const onWheel = (event: WheelEvent) => {
-      event.preventDefault();
-      const rect = el.getBoundingClientRect();
-      const factor = event.deltaY < 0 ? 1.12 : 1 / 1.12;
-      zoomRef.current = zoomAt(
-        zoomRef.current,
-        zoomRef.current.scale * factor,
-        event.clientX - rect.left,
-        event.clientY - rect.top,
-      );
-      if (panRaf.current == null) {
-        panRaf.current = window.requestAnimationFrame(() => {
-          panRaf.current = null;
-          paintZoom(zoomRef.current);
-        });
-      }
-      if (wheelEnd.current != null) window.clearTimeout(wheelEnd.current);
-      wheelEnd.current = window.setTimeout(() => {
-        wheelEnd.current = null;
-        setZoom(zoomRef.current);
-      }, 80);
-    };
-    el.addEventListener("wheel", onWheel, { passive: false });
-    return () => {
-      el.removeEventListener("wheel", onWheel);
-      if (wheelEnd.current != null) window.clearTimeout(wheelEnd.current);
-    };
-  }, [bad]);
-
-  const endPan = (target: HTMLElement) => {
-    panDrag.current = null;
-    target.classList.remove("is-panning");
-    setZoom(zoomRef.current);
-  };
-
-  return (
-    <figure className={highlighted ? "mockup-read-face is-highlight" : "mockup-read-face"} id={faceId}>
-      <div
-        className="mockup-read-frame"
-        ref={viewRef}
-        onDragStart={(event) => event.preventDefault()}
-        onPointerDown={(event) => {
-          if (event.button !== 0 || bad) return;
-          if ((event.target as HTMLElement).closest("button, a")) return;
-          event.preventDefault();
-          panDrag.current = { x: event.clientX, y: event.clientY };
-          event.currentTarget.classList.add("is-panning");
-          event.currentTarget.setPointerCapture(event.pointerId);
-        }}
-        onPointerMove={(event) => {
-          const drag = panDrag.current;
-          if (!drag) return;
-          event.preventDefault();
-          const next = panBy(zoomRef.current, event.clientX - drag.x, event.clientY - drag.y);
-          drag.x = event.clientX;
-          drag.y = event.clientY;
-          zoomRef.current = next;
-          if (panRaf.current == null) {
-            panRaf.current = window.requestAnimationFrame(() => {
-              panRaf.current = null;
-              paintZoom(zoomRef.current);
-            });
-          }
-        }}
-        onPointerUp={(event) => endPan(event.currentTarget)}
-        onPointerCancel={(event) => endPan(event.currentTarget)}
-        onLostPointerCapture={(event) => endPan(event.currentTarget)}
-      >
-        {bad ? (
-          <p className="page-lead">这张图无法显示，请重新生成。</p>
-        ) : (
-          <div className="mockup-read-zoom" ref={zoomElRef} style={{ transform: zoomCss(zoom) }}>
-            <img
-              src={fileHref(jobId, fileKey)}
-              alt={`${label}印刷面`}
-              loading="lazy"
-              draggable={false}
-              onDragStart={(event) => event.preventDefault()}
-              onError={() => setBad(true)}
-            />
-          </div>
-        )}
-        {bad ? null : (
-          <>
-            <div className="mockup-read-tools">
-              <button
-                type="button"
-                className="mockup-dl"
-                aria-label={`缩小${label}印刷面`}
-                onClick={() => zoomFromCenter(zoomRef.current.scale / 1.25)}
-              >
-                缩小
-              </button>
-              <button
-                type="button"
-                className="mockup-dl"
-                aria-label={`恢复${label}印刷面 1 倍`}
-                onClick={() => commitZoom(resetZoom())}
-              >
-                1×
-              </button>
-              <button
-                type="button"
-                className="mockup-dl"
-                aria-label={`放大${label}印刷面`}
-                onClick={() => zoomFromCenter(zoomRef.current.scale * 1.25)}
-              >
-                放大
-              </button>
-            </div>
-            <a
-              className="mockup-dl mockup-dl-fs"
-              href={fileHref(jobId, fileKey)}
-              target="_blank"
-              rel="noreferrer"
-              aria-label={`打开${label}印刷面`}
-            >
-              原图
-            </a>
-            <a
-              className="mockup-dl mockup-dl-corner"
-              href={fileHref(jobId, fileKey, true)}
-              download={downloadName}
-              aria-label={`下载${label}印刷面`}
-              onClick={onDownload}
-            >
-              下载
-            </a>
-          </>
-        )}
-      </div>
-      <figcaption className="mockup-sheet-cap">{label}</figcaption>
-    </figure>
   );
 }
 
@@ -2258,36 +2084,4 @@ function LegacyLitCanvas({ image, alt, productLight, backgroundLight, backdrop, 
     } catch { ctx.clearRect(0, 0, canvas.width, canvas.height); setError(true); }
   }, [image, size, full, productLight, backgroundLight, backdrop]);
   return <>{error ? <p className="page-lead">调灯失败，请重新加载图片。</p> : null}<canvas ref={setCanvasRef} className={full ? "mockup-studio-lightbox-canvas" : "mockup-studio-canvas"} aria-label={alt} /></>;
-}
-
-const UNFOLDED_COPY: Record<string, string> = {
-  source_missing: "找不到源稿，无法生成展开图。",
-  geometry_incomplete: "展开结构不完整，无法确认封口。",
-  separation_unreliable: "无法区分结构线和印刷内容，请先整理源稿。",
-  host_unavailable: "当前无法生成展开图，请稍后再试。",
-  source_changed: "源稿已变化，请重新生成展开图。",
-  close_unconfirmed: "展开图还在生成，请稍后查看。",
-  export_failed: "展开图生成失败，请重试。",
-};
-function UnfoldedPanel({ job, canCreate, submitting, error, onRequest }: {
-  job: MockupJob; canCreate: boolean; submitting: boolean; error: string | null; onRequest: () => void;
-}) {
-  const result = job.unfolded_print;
-  const pending = result?.status === "queued" || result?.status === "running";
-  const ready = result?.status === "ready" && result.file_key === "unfolded_print";
-  return <section className="unfolded-panel" aria-label="展开图">
-    <div className="batch-section-head"><div>
-      <div className="asset-title-row"><h3>展开图</h3><span className="format-tag">2D</span></div>
-      <p className="page-lead">只保留印刷内容，支持原尺寸打印。</p>
-      {ready ? <p className="physical-size">{result.width_mm} × {result.height_mm} mm · 1:1</p> : null}
-    </div><div className="asset-actions">
-      {ready ? <><Button href={fileHref(job.id, "unfolded_print")} target="_blank">预览</Button><Button type="primary" href={fileHref(job.id, "unfolded_print", true)}>下载 PDF</Button><span className="format-tag">PDF</span></>
-        : <Button type="primary" disabled={!canCreate || pending} loading={submitting || pending} onClick={onRequest}>
-          {pending ? "正在生成" : result?.status === "failed" ? "重试" : "生成展开图"}
-        </Button>}
-    </div></div>
-    {error || result?.reason ? <Alert type={pending ? "info" : "warning"} showIcon title={error || UNFOLDED_COPY[result?.reason || ""] || "展开图暂不可用，请重试。"} /> : null}
-    {ready ? <iframe key={job.current_render_generation_id || "current"} title="展开图预览" className="unfolded-preview" src={fileHref(job.id, "unfolded_print")} />
-      : <Empty description={pending ? "已进入队列，可以离开页面。" : "生成后可预览和下载。"} />}
-  </section>;
 }

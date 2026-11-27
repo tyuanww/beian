@@ -651,6 +651,17 @@ export async function runUnfoldedPublish(opts: UnfoldedPublishOpts): Promise<Run
   });
 }
 
+export function runUnfoldedSourceRecovery(opts: {
+  source: string; resolution: string; output: string; jobDir: string; executionId: string;
+}): Promise<RunPythonResult> {
+  return runPython({
+    args: ["export_unfolded_print.py", "--source", opts.source, "--from-resolution", opts.resolution,
+      "--output", opts.output, "--job-dir", opts.jobDir, "--execution-id", opts.executionId],
+    cwd: PACKAGING,
+    timeoutMs: 15_000,
+  });
+}
+
 export type UnfoldedNativeOpts = {
   executionId: string;
   configPath: string;

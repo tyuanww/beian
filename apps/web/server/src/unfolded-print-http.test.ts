@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
 import { makeTestTempDir } from "./testTemp.js";
@@ -134,7 +134,7 @@ describe("unfolded print http", () => {
   });
 
   it("refuses viewers and keeps a failed reason visible", async () => {
-    seed();
+    const dir = seed();
     const viewer = issueSessionForTest("只看", "viewer", "ou_unfolded_view");
     const denied = await app.request(`/api/mockups/${id}/unfolded-print`, { method: "POST", headers: { authorization: `Bearer ${viewer.token}` } });
     assert.equal(denied.status, 403);
@@ -142,17 +142,31 @@ describe("unfolded print http", () => {
     writeFileSync(join(DATA_DIR, "mockups", id, "source.ai"), "synthetic");
     const job = readMockupFromDisk(id)!;
     job.source_path = join(DATA_DIR, "mockups", id, "source.ai");
+    const previewPath = join(dir, "artwork-preview.png");
+    job.structure_artwork_preview_path = previewPath;
+    writeFileSync(previewPath, png);
     saveMockup(job);
     const token = session().token;
     const failed = await app.request(`/api/mockups/${id}/unfolded-print`, { method: "POST", headers: { authorization: `Bearer ${token}` } });
     assert.equal(failed.status, 409);
     const body = await failed.json() as { reason: string; unfolded_print: { status: string; reason?: string } };
-    assert.equal(body.reason, "geometry_incomplete");
+    assert.equal(body.reason, "geometry_unverified");
     assert.equal(body.unfolded_print.status, "failed");
-    assert.equal(body.unfolded_print.reason, "geometry_incomplete");
+    assert.equal(body.unfolded_print.reason, "geometry_unverified");
     const again = await app.request(`/api/mockups/${id}`, { headers: { authorization: `Bearer ${token}` } });
-    const view = await again.json() as { unfolded_print: { status: string; reason?: string; file_key?: string } };
-    assert.equal(view.unfolded_print.reason, "geometry_incomplete");
+    const view = await again.json() as { unfolded_print: { status: string; reason?: string; file_key?: string }; unfolded_artwork_preview_url?: string };
+    assert.equal(view.unfolded_print.reason, "geometry_unverified");
     assert.equal(view.unfolded_print.file_key, undefined);
+    assert.equal(view.unfolded_artwork_preview_url, `/api/mockups/${id}/structure-preview`);
+    const preview = await app.request(view.unfolded_artwork_preview_url, { headers: { authorization: `Bearer ${viewer.token}` } });
+    assert.equal(preview.status, 200);
+    assert.equal(preview.headers.get("content-type"), "image/png");
+    assert.deepEqual(Buffer.from(await preview.arrayBuffer()), png);
+    assert.equal((await app.request(view.unfolded_artwork_preview_url)).status, 401);
+    const outsidePreview = join(DATA_DIR, "outside-artwork.png");
+    writeFileSync(outsidePreview, png);
+    rmSync(previewPath);
+    symlinkSync(outsidePreview, previewPath, "file");
+    assert.equal((await app.request(view.unfolded_artwork_preview_url, { headers: { authorization: `Bearer ${token}` } })).status, 404);
   });
 });

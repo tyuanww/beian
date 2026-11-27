@@ -37,6 +37,7 @@ class UnfoldedPrintReject(Exception):
     def __init__(self, reason: str):
         if reason not in {
             "source_missing",
+            "geometry_unverified",
             "geometry_incomplete",
             "separation_unreliable",
             "source_changed",
@@ -359,42 +360,68 @@ def publish_unfolded_print(
     }
 
 
-def produce_unfolded_source(resolution: Mapping[str, Any], source_ai: Path, output: Path, print_layers: list[str] | None = None) -> bool:
-    """Carry accepted V2 geometry to the shared native exporter; no new inference.
+def _declared_unfolded_panels(structure: Mapping[str, Any]) -> list[dict[str, Any]]:
+    from shapely.geometry import LineString
+    from shapely.ops import polygonize_full
 
-    Absence of explicit flap/glue roles is an unsupported net, not permission
-    to replace artwork with six face textures or drop blank structural areas.
-    """
-    structure = resolution.get("structure") or {}
-    if resolution.get("status") != "ready" or structure.get("validation", {}).get("status") != "accepted":
-        return False
-    digest = _sha256(source_ai)
-    source = structure.get("source", {})
-    if source.get("sha256") != digest or structure.get("units") != "mm":
-        return False
-    vertices = {v["id"]: [v["x"], v["y"]] for v in structure.get("vertices", [])}
+    faces = structure["faces"]
+    roles = {face["role"] for face in faces}
+    if not {"glue_tab", "flap"} <= roles:
+        raise UnfoldedPrintReject("geometry_unverified")
+    if not 1 <= len(faces) <= 64:
+        raise UnfoldedPrintReject("geometry_incomplete")
+    vertices = {v["id"]: (_finite_number(v["x"]), _finite_number(v["y"])) for v in structure["vertices"]}
+    edges = {e["id"]: (vertices[e["start"]], vertices[e["end"]]) for e in structure["edges"]}
     panels = []
+    for face in faces:
+        boundary = face["boundary"]
+        if not 3 <= len(boundary) <= 20000 or len(set(boundary)) != len(boundary):
+            raise UnfoldedPrintReject("geometry_incomplete")
+        polygons, *unused = polygonize_full([LineString(edges[edge]) for edge in boundary])
+        if len(polygons.geoms) != 1 or any(not part.is_empty for part in unused):
+            raise UnfoldedPrintReject("geometry_incomplete")
+        polygon = polygons.geoms[0]
+        if polygon.interiors:
+            raise UnfoldedPrintReject("geometry_incomplete")
+        role = {"glue_tab": "glue", "flap": "tuck"}.get(face["role"], face["role"])
+        panels.append({"id": face["id"], "role": role, "polygon_mm": list(polygon.exterior.coords)[:-1],
+                       "bounds_mm": list(polygon.bounds)})
+    return panels
+
+
+def write_unfolded_source(resolution: Mapping[str, Any], source_ai: Path, output: Path, print_layers: list[str] | None = None) -> None:
+    """Carry only accepted, source-bound V2 geometry to the native exporter."""
+    from shapely.errors import GEOSException
+
     try:
-        for face in structure.get("faces", []):
-            role = {"glue_tab": "glue", "flap": "tuck"}.get(face["role"], face["role"])
-            if role not in PANEL_ROLES:
-                return False
-            polygon = [vertices[v] for v in face["boundary"]]
-            xs, ys = zip(*polygon)
-            panels.append({"id": face["id"], "role": role, "polygon_mm": polygon,
-                           "bounds_mm": [min(xs), min(ys), max(xs), max(ys)]})
-        page = source["page_size"]
+        structure = resolution["structure"]
+        if resolution["status"] != "ready" or structure["validation"]["status"] != "accepted":
+            raise UnfoldedPrintReject("geometry_unverified")
+        if structure["schema"] != "packaging-structure/1" or structure["units"] != "mm":
+            raise UnfoldedPrintReject("geometry_incomplete")
+        source = structure["source"]
+        digest = _sha256(source_ai)
+        if source["sha256"] != digest:
+            raise UnfoldedPrintReject("source_changed")
+        width, height = source["page_size"]
         payload = {"schema": SOURCE_SCHEMA, "assembly": "attested-pdf", "export": "native",
-                   "source_ai_sha256": digest, "panels": panels, "print_layers": print_layers or [],
-                   "page_bounds_mm": [0, 0, page[0], page[1]],
+                   "source_ai_sha256": digest, "panels": _declared_unfolded_panels(structure), "print_layers": print_layers or [],
+                   "page_bounds_mm": [0, 0, width, height],
                    "attestation": {"schema": ATTESTATION_SCHEMA, "method": "semantic-identity",
                                    "hidden_roles": list(sorted(HELPER_ROLES)), "covers_blank_structure": True}}
         checked = _panels(payload)
         if not _inside(_union(checked), _bounds(payload["page_bounds_mm"])):
-            return False
-    except (KeyError, TypeError, ValueError, UnfoldedPrintReject):
-        return False
+            raise UnfoldedPrintReject("geometry_incomplete")
+    except (KeyError, TypeError, ValueError, OverflowError, GEOSException) as error:
+        raise UnfoldedPrintReject("geometry_incomplete") from error
     if _sha256(source_ai) != digest:
-        return False
+        raise UnfoldedPrintReject("source_changed")
     output.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+
+def produce_unfolded_source(resolution: Mapping[str, Any], source_ai: Path, output: Path, print_layers: list[str] | None = None) -> bool:
+    try:
+        write_unfolded_source(resolution, source_ai, output, print_layers)
+    except (OSError, UnfoldedPrintReject):
+        return False
     return True

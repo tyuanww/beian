@@ -234,7 +234,7 @@ test("白底图损坏时隐藏原图和下载操作", async ({ page, syntheticAp
   await expect(shot.getByRole("button")).toHaveCount(0);
 });
 
-test("完成态打样单在三图下用印刷面读字并可放大", async ({ page, context, syntheticApi }) => {
+test("打样单从立体效果切换到印刷面并完整适应窗口", async ({ page, syntheticApi }) => {
   const mockup = completedMockup("9a9b9c9d9e9f", "高清印刷盒");
   mockup.files = [
     { key: "white_a", name: "正面与侧面.png" },
@@ -244,12 +244,9 @@ test("完成态打样单在三图下用印刷面读字并可放大", async ({ pa
     { key: "read_back", name: "panel_back.png" },
   ];
   syntheticApi.mockups.push(mockup);
-  const image = "<svg xmlns='http://www.w3.org/2000/svg' width='800' height='1200'><rect width='800' height='1200' fill='white'/><text x='40' y='80' font-size='28'>8pt</text></svg>";
+  const image = "<svg xmlns='http://www.w3.org/2000/svg' width='2081' height='5082'><rect width='2081' height='5082' fill='white'/><text x='40' y='80' font-size='28'>8pt</text></svg>";
   for (const key of ["white_a", "white_b", "read_front", "read_back"]) {
     const pattern = new RegExp(`/api/mockups/${mockup.id}/files/${key}(?:\\?.*)?$`);
-    await context.route(pattern, async (route) => {
-      await route.fulfill({ status: 200, contentType: "image/svg+xml", body: image });
-    });
     await page.route(pattern, async (route) => {
       await route.fulfill({ status: 200, contentType: "image/svg+xml", body: image });
     });
@@ -261,17 +258,34 @@ test("完成态打样单在三图下用印刷面读字并可放大", async ({ pa
 
   await page.goto(`/mockup/${mockup.id}`);
 
-  const read = page.getByRole("region", { name: "印刷面" });
-  await expect(page.getByText("上面看立体效果，下面看印刷文字。")).toBeVisible();
-  await expect(read.getByRole("heading", { name: "印刷面" })).toBeVisible();
-  await expect(read.getByText("这单没有印刷面图。")).toHaveCount(0);
-  await page.getByRole("tab", { name: "正面", exact: true }).click();
-  await expect(read.getByRole("img", { name: "正面印刷面" })).toBeVisible();
-  await page.getByRole("tab", { name: "反面", exact: true }).click();
-  await expect(read.getByRole("img", { name: "反面印刷面" })).toBeVisible();
-  await page.getByRole("tab", { name: "正面", exact: true }).click();
-  await expect(page.locator("canvas[aria-label='正面与侧面白底']")).toBeVisible();
-  await expect(page.locator(".mockup-sheet-photos").getByRole("img", { name: /印刷面/ })).toHaveCount(0);
+  const tabs = page.getByRole("tablist", { name: "打样内容" });
+  const studioTab = tabs.getByRole("tab", { name: "立体效果" });
+  const printTab = tabs.getByRole("tab", { name: "印刷面" });
+  const photo = page.getByLabel("正面与侧面白底", { exact: true });
+  const read = page.getByRole("region", { name: "印刷面", exact: true });
+  await expect(studioTab).toHaveAttribute("aria-selected", "true");
+  await expect(tabs).toBeInViewport();
+  await expect(photo).toBeVisible();
+  await expect(read).toBeHidden();
+  await studioTab.press("ArrowRight");
+  await expect(printTab).toBeFocused();
+  await expect(studioTab).toHaveAttribute("aria-selected", "true");
+  await printTab.press("Enter");
+  await expect(read).toBeVisible();
+  await expect(photo).toBeHidden();
+  await expect(read.getByRole("tab", { name: "正面", exact: true })).toHaveAttribute("aria-selected", "true");
+
+  const face = read.getByRole("img", { name: "正面印刷面" });
+  const frame = read.getByRole("region", { name: "查看正面印刷面", exact: true });
+  const fitsFrame = () => face.evaluate(element => {
+    if (!(element instanceof HTMLImageElement) || element.naturalHeight === 0) return false;
+    const imageRect = element.getBoundingClientRect();
+    const frameRect = element.closest(".mockup-read-frame")?.getBoundingClientRect();
+    return Boolean(frameRect && imageRect.width > 0 && imageRect.height > 0
+      && imageRect.left >= frameRect.left - 1 && imageRect.right <= frameRect.right + 1
+      && imageRect.top >= frameRect.top - 1 && imageRect.bottom <= frameRect.bottom + 1);
+  });
+  await expect.poll(fitsFrame).toBe(true);
   await expect(read.getByRole("link", { name: "打开正面印刷面" })).toHaveAttribute(
     "href",
     `/api/mockups/${mockup.id}/files/read_front`,
@@ -280,11 +294,35 @@ test("完成态打样单在三图下用印刷面读字并可放大", async ({ pa
     "href",
     `/api/mockups/${mockup.id}/files/read_front?download=1`,
   );
-  await expect(read.getByRole("button", { name: "放大正面印刷面" })).toBeVisible();
+  const faceHeight = () => face.evaluate(element => element.getBoundingClientRect().height);
+  const fitHeight = await faceHeight();
   await read.getByRole("button", { name: "放大正面印刷面" }).click();
-  await expect(read.locator(".mockup-read-zoom").first()).toHaveAttribute("style", /scale\(/);
-  await read.getByRole("button", { name: "恢复正面印刷面 1 倍" }).click();
-  await expect(read.locator(".mockup-read-zoom").first()).toHaveAttribute("style", /transform:\s*none/);
+  await expect.poll(faceHeight).toBeGreaterThan(fitHeight);
+  const scrollTop = () => frame.evaluate(element => element.scrollTop);
+  await read.getByRole("link", { name: "下载正面印刷面" }).focus();
+  await page.keyboard.press("Tab");
+  await expect(frame).toBeFocused();
+  const beforeScroll = await scrollTop();
+  await page.keyboard.press("ArrowDown");
+  await expect.poll(scrollTop).toBeGreaterThan(beforeScroll);
+  const zoomHeight = await faceHeight();
+  await read.getByRole("button", { name: "缩小正面印刷面" }).click();
+  await expect.poll(faceHeight).toBeLessThan(zoomHeight);
+  await read.getByRole("button", { name: "放大正面印刷面" }).click();
+  await read.getByRole("button", { name: "恢复正面印刷面适合窗口" }).click();
+  await expect.poll(faceHeight).toBeCloseTo(fitHeight, 0);
+  await expect.poll(fitsFrame).toBe(true);
+
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect.poll(fitsFrame).toBe(true);
+  await expect.poll(() => frame.evaluate(element => {
+    const { left, right } = element.getBoundingClientRect();
+    return left >= -1 && right <= innerWidth + 1;
+  })).toBe(true);
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1);
+  await studioTab.click();
+  await expect(photo).toBeVisible();
+  await expect(read).toBeHidden();
 });
 
 test("完成态打样单没有印刷面时提示重新打样，不用 GLB 读字", async ({ page, syntheticApi }) => {
@@ -303,16 +341,18 @@ test("完成态打样单没有印刷面时提示重新打样，不用 GLB 读字
   });
   await page.goto(`/mockup/${mockup.id}`);
 
-  const read = page.getByRole("region", { name: "印刷面" });
+  const read = page.getByRole("region", { name: "印刷面", exact: true });
   const alert = page.locator(".mockup-print-alert");
   await expect(alert).toContainText("没有可用底稿，请重新生成。");
   const alertBox = await alert.boundingBox();
   const photosBox = await page.locator(".mockup-sheet-photos").boundingBox();
   expect(alertBox && photosBox && alertBox.y < photosBox.y).toBeTruthy();
   await expect(page.getByRole("button", { name: "生成印刷面" })).toHaveCount(0);
+  await expect(page.getByLabel("正面与侧面白底", { exact: true })).toBeVisible();
+  await page.getByRole("tab", { name: "印刷面", exact: true }).click();
+  await expect(read.getByRole("tab", { name: "2D 展开图" })).toHaveAttribute("aria-selected", "true");
   await expect(read.getByRole("img", { name: /印刷面/ })).toHaveCount(0);
   await expect(read.getByRole("link")).toHaveCount(0);
-  await expect(page.locator("canvas[aria-label='正面与侧面白底']")).toBeVisible();
 });
 
 test("缺印刷面且可补时点生成印刷面后读字出现，看板仍已出图", async ({ page, syntheticApi }) => {
@@ -345,7 +385,7 @@ test("缺印刷面且可补时点生成印刷面后读字出现，看板仍已�
   await expect(page.getByText("生成中", { exact: true })).toHaveCount(0);
   await page.getByRole("button", { name: "生成印刷面" }).click();
   await expect(page.locator(".mockup-print-alert")).toHaveCount(0);
-  await page.getByRole("tab", { name: "正面", exact: true }).click();
+  await page.getByRole("tab", { name: "印刷面", exact: true }).click();
   await expect(page.getByRole("img", { name: "正面印刷面" })).toBeVisible();
   expect(
     syntheticApi.calls.some((call) => call.method === "POST" && call.path === `/api/mockups/${mockup.id}/print-faces`),
@@ -381,23 +421,39 @@ test("旧单未取得逐动作授权时不能退回原位重渲棚", async ({ pa
   await expect(page.getByRole("heading", { name: mockup.title })).toBeVisible();
 });
 
-test("切换反面标签显示对应印刷面", async ({ page, syntheticApi }) => {
+test("用键盘浏览印刷面标签，确认后才加载对应图片", async ({ page, syntheticApi }) => {
   const mockup = completedMockup("ee77ff001122", "读字芯片盒");
   mockup.files = [
     { key: "white_a", name: "正面与侧面.png" },
     { key: "read_front", name: "panel_front.png" },
     { key: "read_back", name: "panel_back.png" },
+    { key: "read_left", name: "panel_left.png" },
   ];
   syntheticApi.mockups.push(mockup);
   const image = "<svg xmlns='http://www.w3.org/2000/svg' width='400' height='600'><rect width='400' height='600' fill='white'/></svg>";
-  for (const key of ["white_a", "read_front", "read_back"]) {
+  const requestedFaces: string[] = [];
+  for (const key of ["white_a", "read_front", "read_back", "read_left"]) {
     await page.route(new RegExp(`/api/mockups/${mockup.id}/files/${key}(?:\\?.*)?$`), async (route) => {
+      if (key.startsWith("read_")) requestedFaces.push(key);
       await route.fulfill({ status: 200, contentType: "image/svg+xml", body: image });
     });
   }
   await page.goto(`/mockup/${mockup.id}`);
-  await page.getByRole("tab", { name: "反面", exact: true }).click();
-  await expect(page.locator("#read-face-back")).toBeVisible();
+  await expect(page.getByLabel("正面与侧面白底", { exact: true })).toBeVisible();
+  expect(requestedFaces).toEqual([]);
+  await page.getByRole("tab", { name: "印刷面", exact: true }).click();
+  const read = page.getByRole("region", { name: "印刷面", exact: true });
+  const front = read.getByRole("tab", { name: "正面", exact: true });
+  const back = read.getByRole("tab", { name: "反面", exact: true });
+  await expect.poll(() => requestedFaces).toEqual(["read_front"]);
+  await front.press("ArrowRight");
+  await expect(back).toBeFocused();
+  await expect(front).toHaveAttribute("aria-selected", "true");
+  expect(requestedFaces).toEqual(["read_front"]);
+  await back.press("Enter");
+  await expect(back).toHaveAttribute("aria-selected", "true");
+  await expect(read.getByRole("img", { name: "反面印刷面" })).toBeVisible();
+  await expect.poll(() => requestedFaces).toEqual(["read_front", "read_back"]);
 });
 
 test("印刷面图损坏时隐藏原图和下载操作", async ({ page, syntheticApi }) => {
@@ -414,8 +470,8 @@ test("印刷面图损坏时隐藏原图和下载操作", async ({ page, syntheti
 
   await page.goto(`/mockup/${mockup.id}`);
 
-  const read = page.getByRole("region", { name: "印刷面" });
-  await page.getByRole("tab", { name: "正面", exact: true }).click();
+  const read = page.getByRole("region", { name: "印刷面", exact: true });
+  await page.getByRole("tab", { name: "印刷面", exact: true }).click();
   await expect(read.getByText("这张图无法显示，请重新生成。")).toBeVisible();
   await expect(read.getByRole("link")).toHaveCount(0);
   await expect(read.getByRole("button", { name: /印刷面/ })).toHaveCount(0);
