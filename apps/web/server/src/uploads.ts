@@ -1063,6 +1063,48 @@ function readChunk(path: string, offset: number, length: number): Buffer {
   }
 }
 
+export type UploadChunkResponse = { upload: ListedUploadReceipt; offset_advanced?: true };
+
+function assertUploadChunkMatches(path: string, offset: number, bytes: number, sha256: string): void {
+  const chunk = readChunk(path, offset, bytes);
+  const existingHash = createHash("sha256").update(chunk).digest("hex");
+  if (chunk.length !== bytes || existingHash !== sha256.toLowerCase()) {
+    throw uploadFailure("重新选择的文件与已上传内容不一致，请重新开始", 409);
+  }
+}
+
+export function verifyUploadChunk(
+  id: string,
+  owner: string,
+  field: string,
+  offset: number,
+  bytes: number,
+  sha256: string,
+): UploadChunkResponse {
+  if (!Number.isInteger(offset) || offset < 0) throw uploadFailure("上传位置不正确", 400);
+  if (!Number.isInteger(bytes) || bytes <= 0 || bytes > UPLOAD_CHUNK_BYTES) {
+    throw uploadFailure("上传分片大小不正确", 413);
+  }
+  if (!/^[a-f0-9]{64}$/i.test(sha256)) throw uploadFailure("上传分片缺少校验值", 400);
+
+  const session = loadUploadSession(id, owner);
+  if (session) {
+    const file = session.files.find((candidate) => candidate.field === field);
+    if (!file) throw uploadFailure("上传文件栏不存在", 404);
+    if (offset + bytes > file.received) throw uploadFailure(`服务器已收到 ${file.received} 字节，请从该位置继续`, 409);
+    assertUploadChunkMatches(sessionFilePath(session, file), offset, bytes, sha256);
+    return { upload: listedSession(session) };
+  }
+
+  const receipt = loadReceipt(id, owner);
+  if (!receipt) throw uploadFailure("上传会话已过期，请重新选择文件", 404);
+  const file = receipt.files.find((candidate) => candidate.field === field);
+  if (!file || !underReceiptDir(id, file.path)) throw uploadFailure("上传文件栏不存在", 404);
+  if (offset + bytes > file.bytes) throw uploadFailure(`服务器已收到 ${file.bytes} 字节，请从该位置继续`, 409);
+  assertUploadChunkMatches(file.path, offset, bytes, sha256);
+  return { upload: listedReceipt(receipt) };
+}
+
 export function appendUploadChunk(
   id: string,
   owner: string,
@@ -1070,7 +1112,8 @@ export function appendUploadChunk(
   offset: number,
   chunk: Buffer,
   sha256: string,
-): ListedUploadReceipt {
+  strictOffset = false,
+): UploadChunkResponse {
   if (!Number.isInteger(offset) || offset < 0) throw uploadFailure("上传位置不正确", 400);
   if (!chunk.length || chunk.length > UPLOAD_CHUNK_BYTES) throw uploadFailure("上传分片大小不正确", 413);
   if (!/^[a-f0-9]{64}$/i.test(sha256)) throw uploadFailure("上传分片缺少校验值", 400);
@@ -1078,16 +1121,22 @@ export function appendUploadChunk(
   if (actualHash !== sha256.toLowerCase()) throw uploadFailure("上传分片校验失败，请重试", 409);
 
   const session = loadUploadSession(id, owner);
-  if (!session) throw uploadFailure("上传会话已过期，请重新选择文件", 404);
+  if (!session) {
+    const receipt = strictOffset ? loadReceipt(id, owner) : null;
+    if (receipt?.files.some((file) => file.field === field && offset < file.bytes)) {
+      return { upload: listedReceipt(receipt), offset_advanced: true };
+    }
+    throw uploadFailure("上传会话已过期，请重新选择文件", 404);
+  }
   const file = session.files.find((candidate) => candidate.field === field);
   if (!file) throw uploadFailure("上传文件栏不存在", 404);
   const path = sessionFilePath(session, file);
 
   if (offset < file.received) {
+    if (strictOffset) return { upload: listedSession(session), offset_advanced: true };
     if (offset + chunk.length > file.received) throw uploadFailure(`服务器已收到 ${file.received} 字节，请从该位置继续`, 409);
-    const existingHash = createHash("sha256").update(readChunk(path, offset, chunk.length)).digest("hex");
-    if (existingHash !== actualHash) throw uploadFailure("重新选择的文件与已上传内容不一致，请重新开始", 409);
-    return listedSession(session);
+    assertUploadChunkMatches(path, offset, chunk.length, actualHash);
+    return { upload: listedSession(session) };
   }
   if (offset !== file.received) throw uploadFailure(`服务器已收到 ${file.received} 字节，请从该位置继续`, 409);
   if (offset + chunk.length > file.bytes) throw uploadFailure("上传内容超过文件大小", 413);
@@ -1107,7 +1156,7 @@ export function appendUploadChunk(
   file.received = offset + chunk.length;
   session.updated_at = nowIso();
   saveUploadSession(session);
-  return listedSession(session);
+  return { upload: listedSession(session) };
 }
 
 export function completeUploadSession(id: string, owner: string): ListedUploadReceipt {

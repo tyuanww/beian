@@ -305,7 +305,11 @@ export class UploadPausedError extends ApiError {
 const RESUMABLE_CHUNK_BYTES = 1024 * 1024;
 const RESUMABLE_RETRIES = 3;
 
-type UploadSessionResponse = { upload: PendingUploadReceipt };
+type UploadSessionResponse = {
+  upload: PendingUploadReceipt;
+  prefix_verification?: true;
+  offset_advanced?: true;
+};
 
 function uploadStep<T>(path: string, opts: RequestInit): Promise<T> {
   return request<T>(path, { ...opts, timeoutMs: RESUMABLE_STEP_TIMEOUT_MS });
@@ -409,6 +413,15 @@ function uploadReceipt(upload: PendingUploadReceipt): UploadReceipt {
   };
 }
 
+function confirmedFileBytes(session: PendingUploadReceipt, selected: SelectedUploadFile): number {
+  const file = session.files.find((item) => item.field === selected.field);
+  if (!file) throw new ApiError(409, "服务器上传记录不完整，请重新开始");
+  if (!Number.isInteger(file.received) || file.received < 0 || file.received > selected.file.size) {
+    throw new ApiError(409, "服务器上传进度不正确，请重新开始");
+  }
+  return file.received;
+}
+
 /**
  * 云盘式上传：每 1 MB 独立确认，断线后沿用 client_upload_id 与服务器 offset。
  * 分片与完成接口都幂等，因此“服务端写成、响应丢了”也只会重试当前一步。
@@ -438,100 +451,63 @@ export async function uploadResumable(
       last_modified: file.lastModified,
     })),
   };
-  let session = (
-    await retryUploadCall(
-      () => uploadStep<UploadSessionResponse>("/api/uploads/sessions", {
-        method: "POST",
-        body: JSON.stringify(startBody),
-        signal,
-      }),
-      retryNotice,
+  const started = await retryUploadCall(
+    () => uploadStep<UploadSessionResponse>("/api/uploads/sessions", {
+      method: "POST",
+      body: JSON.stringify(startBody),
       signal,
-    )
-  ).upload;
+    }),
+    retryNotice,
+    signal,
+  );
+  let session = started.upload;
+  const verifyPrefix = started.prefix_verification === true;
   uploadId = session.id;
-  if (session.phase === "ready") return uploadReceipt(session);
+  if (session.phase === "ready" && !verifyPrefix) return uploadReceipt(session);
 
   let loaded = session.files.reduce((sum, file) => sum + file.received, 0);
   latestProgress = { loaded, total, pct: Math.round((loaded / total) * 100) };
   onProgress?.({ ...latestProgress, phase: "uploading", uploadId });
 
   for (const selected of input.files) {
-    const serverFile = session.files.find((file) => file.field === selected.field);
-    if (!serverFile) throw new ApiError(409, "服务器上传记录不完整，请重新开始");
-
-    // 文件名、大小和修改时间都可能碰撞。续传前把服务器已确认的区段逐块重放，
-    // 由服务端比较落盘内容的 SHA-256；任何一块不同都必须拒绝，不能拼成混合稿。
-    let confirmedPrefix = serverFile.received;
-    if (confirmedPrefix > selected.file.size) throw new ApiError(409, "服务器上传进度超过文件大小，请重新开始");
-    let verified = 0;
-    while (verified < confirmedPrefix) {
-      const end = Math.min(verified + RESUMABLE_CHUNK_BYTES, confirmedPrefix);
-      const buffer = await selected.file.slice(verified, end).arrayBuffer();
-      const sha256 = await sha256Hex(buffer);
-      const response = await retryUploadCall(
-        () =>
-          uploadStep<UploadSessionResponse>(
-            `/api/uploads/sessions/${encodeURIComponent(uploadId!)}/files/${selected.field}`,
-            {
-              method: "PUT",
-              headers: {
-                "Content-Type": "application/octet-stream",
-                "x-upload-offset": String(verified),
-                "x-upload-sha256": sha256,
-              },
-              body: buffer,
-              signal,
-            },
-          ),
-        retryNotice,
-        signal,
-        uploadId,
-      );
-      session = response.upload;
-      const checked = session.files.find((file) => file.field === selected.field);
-      if (!checked || checked.received < end) throw new ApiError(409, "服务器没有确认续传文件校验");
-      if (checked.received > selected.file.size) throw new ApiError(409, "服务器上传进度超过文件大小，请重新开始");
-      verified = end;
-      // 另一标签页可能推进了同一会话。只扩大“待校验前缀”，不能直接跳到它报告的 offset。
-      confirmedPrefix = Math.max(confirmedPrefix, checked.received);
-    }
-
-    let offset = verified;
+    let confirmed = confirmedFileBytes(session, selected);
+    let offset = 0;
+    const path = `/api/uploads/sessions/${encodeURIComponent(uploadId)}/files/${selected.field}`;
     while (offset < selected.file.size) {
-      const end = Math.min(offset + RESUMABLE_CHUNK_BYTES, selected.file.size);
+      const checkingPrefix = offset < confirmed;
+      const end = Math.min(offset + RESUMABLE_CHUNK_BYTES, checkingPrefix ? confirmed : selected.file.size);
       const buffer = await selected.file.slice(offset, end).arrayBuffer();
       const sha256 = await sha256Hex(buffer);
+      const digestOnly = verifyPrefix && checkingPrefix;
       const response = await retryUploadCall(
-        () =>
-          uploadStep<UploadSessionResponse>(
-            `/api/uploads/sessions/${encodeURIComponent(uploadId!)}/files/${selected.field}`,
-            {
-              method: "PUT",
-              headers: {
-                "Content-Type": "application/octet-stream",
-                "x-upload-offset": String(offset),
-                "x-upload-sha256": sha256,
-              },
-              body: buffer,
-              signal,
-            },
-          ),
+        () => uploadStep<UploadSessionResponse>(path, {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/octet-stream",
+            "x-upload-offset": String(offset),
+            "x-upload-sha256": sha256,
+            ...(verifyPrefix ? { "x-upload-prefix-bytes": String(digestOnly ? end - offset : 0) } : {}),
+          },
+          body: digestOnly ? undefined : buffer,
+          signal,
+        }),
         retryNotice,
         signal,
         uploadId,
       );
       session = response.upload;
-      const updated = session.files.find((file) => file.field === selected.field);
-      if (!updated || updated.received < end) throw new ApiError(409, "服务器没有确认本次上传分片");
-      if (updated.received > selected.file.size) throw new ApiError(409, "服务器上传进度超过文件大小，请重新开始");
-      // 即便并发页面已把服务端推进得更远，本页也只前进到自己刚校验过的末端。
+      confirmed = confirmedFileBytes(session, selected);
+      if (response.offset_advanced === true && verifyPrefix && !checkingPrefix && confirmed > offset) continue;
+      if (confirmed < end || response.offset_advanced === true) throw new ApiError(409, "服务器没有确认本次上传分片");
       offset = end;
+      if (checkingPrefix) continue;
       loaded = session.files.reduce((sum, file) => sum + file.received, 0);
       latestProgress = { loaded, total, pct: Math.min(100, Math.round((loaded / total) * 100)) };
-      onProgress?.({ ...latestProgress, phase: loaded >= total ? "confirming" : "uploading", uploadId });
+      if (loaded < total) onProgress?.({ ...latestProgress, phase: "uploading", uploadId });
     }
   }
+
+  if (session.phase === "ready") return uploadReceipt(session);
 
   latestProgress = { loaded: total, total, pct: 100 };
   onProgress?.({ ...latestProgress, phase: "confirming", uploadId });

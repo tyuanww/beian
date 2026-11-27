@@ -1,5 +1,5 @@
 import type { PendingUploadReceipt } from "../api";
-import type { UploadKind, UploadPhase, UploadSnapshot } from "../uploadStore";
+import { uploadAllowsReadyReceipt, type UploadKind, type UploadPhase, type UploadSnapshot } from "../uploadStore";
 import type { DeskCardRow } from "./deskBoard";
 import { stemFromFilename } from "./stemName";
 
@@ -82,7 +82,7 @@ export function pendingUploadItems(
       )
     : undefined;
   if (local && local.kind === kind && ["uploading", "retrying", "confirming", "paused", "ready", "failed"].includes(local.phase)) {
-    const recoveredReady = matchedReceipt?.phase === "ready";
+    const recoveredReady = matchedReceipt?.phase === "ready" && uploadAllowsReadyReceipt(local);
     const recoveredPaused =
       matchedReceipt?.phase === "paused" &&
       local.phase !== "ready" &&

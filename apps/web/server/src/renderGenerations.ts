@@ -469,7 +469,7 @@ function crc32(buf: Uint8Array): number {
   return (c ^ 0xffffffff) >>> 0;
 }
 
-function assertPng(buf: Buffer, causePrefix: string): void {
+export function assertPng(buf: Buffer, causePrefix: string): void {
   if (buf.length < 45) throw invalid("PNG 不完整", `${causePrefix}:png_too_short`, "提供完整 PNG，而不是文件头");
   if (!buf.subarray(0, 8).equals(PNG_MAGIC)) {
     throw invalid("PNG 签名无效", `${causePrefix}:png_magic`, "提供真实 PNG");

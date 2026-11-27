@@ -161,6 +161,7 @@ import {
   UPLOAD_RECEIPT_EXPIRED_CODE,
   oversizeMessage,
   uploadTotalTooLarge,
+  verifyUploadChunk,
 } from "./uploads.js";
 import {
   activeHits,
@@ -185,7 +186,7 @@ type NodeBindings = HttpBindings | Http2Bindings;
 type Env = { Bindings: NodeBindings; Variables: { session: Session } };
 
 const app = new Hono<Env>();
-const VERSION = "0.31.1.35";
+const VERSION = "0.31.1.36";
 
 const STRUCTURE_INPUT_BODY_BYTES = 16 * 1024;
 
@@ -794,7 +795,7 @@ app.post(
     const s = need(c, "create");
     try {
       const body = await c.req.json();
-      return c.json({ upload: uploadCoordinator.start(receiptOwner(s), body) });
+      return c.json({ upload: uploadCoordinator.start(receiptOwner(s), body), prefix_verification: true });
     } catch (err) {
       boom(err);
     }
@@ -817,15 +818,15 @@ app.put(
       const chunk = Buffer.from(await c.req.arrayBuffer());
       const offset = Number(c.req.header("x-upload-offset") || "NaN");
       const sha256 = c.req.header("x-upload-sha256") || "";
-      const upload = appendUploadChunk(
-        c.req.param("id"),
-        receiptOwner(s),
-        c.req.param("field"),
-        offset,
-        chunk,
-        sha256,
-      );
-      return c.json({ upload });
+      const prefixBytes = c.req.header("x-upload-prefix-bytes");
+      const id = c.req.param("id");
+      const owner = receiptOwner(s);
+      const field = c.req.param("field");
+      if (prefixBytes !== undefined && prefixBytes !== "0") {
+        if (chunk.length) throw new HTTPException(400, { message: "续传校验请求不能携带文件内容" });
+        return c.json(verifyUploadChunk(id, owner, field, offset, Number(prefixBytes), sha256));
+      }
+      return c.json(appendUploadChunk(id, owner, field, offset, chunk, sha256, prefixBytes === "0"));
     } catch (err) {
       boom(err);
     }
@@ -1718,14 +1719,15 @@ app.get("/api/mockups/:id/files/:key", async (c) => {
   if (key === "print_faces_zip") {
     const entries = printFacesZipEntries(job.id);
     if (!entries) throw new HTTPException(404, { message: "六面印刷图还不齐" });
-    return new Response(Readable.toWeb(compressionZipStream(entries)) as ReadableStream, {
-      headers: {
-        "Content-Type": "application/zip",
-        "X-Content-Type-Options": "nosniff",
-        "Cache-Control": "private, no-store",
-        "Content-Disposition": "attachment; filename=\"print-faces.zip\"",
-      },
-    });
+    const headers = {
+      "Content-Type": "application/zip",
+      "X-Content-Type-Options": "nosniff",
+      "Cache-Control": "private, no-store",
+      "Content-Disposition": "attachment; filename=\"print-faces.zip\"",
+    };
+    if (c.req.raw.method === "HEAD") return new Response(null, { headers });
+    const stream = compressionZipStream(entries, { pinFiles: true });
+    return new Response(Readable.toWeb(stream) as ReadableStream, { headers });
   }
   const f = fileOf(job, key);
   if (!f?.path || !existsSync(f.path)) throw new HTTPException(404, { message: "文件还没有" });

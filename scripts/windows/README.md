@@ -124,11 +124,15 @@ node_modules\.bin\tsx.cmd apps\web\server\src\recoverNativeText.ts --task <任�
 
 不要安装 PowerShell 7、.NET SDK 或 pywin32，也不要手工在 Session 0 启动 Illustrator。
 
-Clash 开系统代理时，备案域名和 `127.0.0.1` 必须直连。self-hosted runner 若走 `127.0.0.1:7897` 会被拒绝（`Runner connect error`），设 DIRECT 或关掉 Clash 再听 job。控制台里「所提供的模式无法找到文件」乱码，是 cmd/PowerShell 在 GBK 下找不到通配文件，不是 8787 挂了。
+Clash 运行时，备案域名和 `127.0.0.1` 必须直连。GitHub 直连异常时，专用 runner 可通过其 `.env` 的 `https_proxy` 使用现有可达代理，`no_proxy` 保留备案域名和回环地址。见 [GitHub runner 代理配置](https://docs.github.com/en/actions/how-tos/manage-runners/use-proxy-servers)。
+
+控制台里「所提供的模式无法找到文件」乱码，是 cmd/PowerShell 在 GBK 下找不到通配文件，不是 8787 挂了。
 
 ## CD（只在杭州本机）
 
 合进 GitHub `main` 后，本机 **GitHub Actions self-hosted runner**（标签 `hangzhou`）只接受该次 `main` push，运行 `.github/workflows/hangzhou-release.yml`。workflow 从事件提交下载经过绑定的发布组件，并把同一个完整 `GITHUB_SHA` 交给 `release.ps1`。杭州仓库里的脚本可能落后于事件提交，因此没有“直接运行本地 `release.ps1`”的兜底入口。runner 灰掉时先恢复同一 runner，再对刚才那条可信 push run 使用 **Re-run failed jobs**；被在途作业挡住时先让作业结束，再重跑同一 run。不要创建可选 ref 的手工 workflow，也不要从分支或本地 checkout 发版。
+
+下载步骤把 runner 进程的 `HTTPS_PROXY` 显式传给 Windows PowerShell 5.1 的 `Invoke-WebRequest`。该设置只作用于发布组件取件。支持的代理 URL 和 `NO_PROXY` 规则见 [杭州发布合同](../../docs/contracts/release.md)。
 
 发版按一个有 journal 的事务执行：
 

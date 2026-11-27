@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import fs, { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
 import { join } from "node:path";
 import { afterEach, it } from "node:test";
 import { makeTestTempDir } from "./testTemp.js";
@@ -8,12 +9,15 @@ process.env.VITEST = "1";
 process.env.WB_DATA_DIR = makeTestTempDir("beian-print-faces-");
 const { DATA_DIR } = await import("./config.js");
 const { repairMockupPrintFaces, queueSnapshot, reclaimOnBoot, resetJobsTestHooks, setJobsTestHooks, setJobsLiveForTest, tryStart } = await import("./jobs.js");
-const { saveMockup, readMockupFromDisk, publicMockup, deleteMockup, beginStructureConfirmation } = await import("./mockup.js");
+const { saveMockup, readMockupFromDisk, publicMockup, fileOf, printFacesZipEntries, deleteMockup, beginStructureConfirmation } = await import("./mockup.js");
 const { releaseReadiness } = await import("./releaseAdmission.js");
 const viewer = { id: "reviewer", name: "审核员", admin: false };
 const id = "aa00aa00aa01";
 const otherId = "aa00aa00aa02";
 const png = Buffer.from("89504e470d0a1a0a", "hex");
+const previousFace = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAAEUlEQVR4nGMwdgn9D8IMMAYAO7QHLXLeR4wAAAAASUVORK5CYII=", "base64");
+const newFace = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAAEUlEQVR4nGMITSv/D8IMMAYAStgIxR2AMBwAAAAASUVORK5CYII=", "base64");
+const printFaceNames = ["front", "back", "left", "right", "top", "bottom"].map(face => `panel_${face}.png`);
 const ok = { code: 0, stdout: "", stderr: "", timedOut: false };
 function seed(tid = id) {
   const dir = join(DATA_DIR, "mockups", tid);
@@ -36,6 +40,16 @@ async function settled(tid = id) {
     if (["succeeded", "failed"].includes(job.print_faces_request?.status || "")) return job;
   }
   throw new Error("repair did not settle");
+}
+async function settleRender(expected: "done" | "failed") {
+  saveMockup({ ...readMockupFromDisk(id)!, status: "queued", job_status: "queued" });
+  tryStart();
+  for (let n = 0; n < 100 && readMockupFromDisk(id)?.status !== expected; n++) {
+    await new Promise(resolve => setTimeout(resolve, 5));
+  }
+  const job = readMockupFromDisk(id)!;
+  assert.equal(job.status, expected);
+  return job;
 }
 afterEach(() => { resetJobsTestHooks(); rmSync(join(DATA_DIR, "mockups"), { recursive: true, force: true }); });
 
@@ -172,6 +186,89 @@ it("zero worker exit without every required staged face never overwrites the old
   await repairMockupPrintFaces(id, viewer);
   assert.equal((await settled()).print_faces_request?.status, "failed");
   assert.deepEqual(readFileSync(join(dir, "assets", "panel_front.png")), before);
+});
+
+it("a failed render or incomplete project faces preserve the previously published print faces", async () => {
+  const dir = seed();
+  const assets = join(dir, id.slice(0, 8), "assets");
+  mkdirSync(assets, { recursive: true });
+  for (const name of printFaceNames) writeFileSync(join(dir, "assets", name), previousFace);
+  writeFileSync(join(dir, "box_front_right_white.png"), png);
+  for (const problem of ["worker exit", "invalid PNG", "missing PNG"]) {
+    for (const name of printFaceNames) writeFileSync(join(assets, name), newFace);
+    if (problem === "invalid PNG") writeFileSync(join(assets, "panel_bottom.png"), newFace.subarray(0, -5));
+    if (problem === "missing PNG") unlinkSync(join(assets, "panel_bottom.png"));
+    const code = problem === "worker exit" ? 1 : 0;
+    setJobsTestHooks({ runPack: async () => ({ ...ok, code }) });
+    await settleRender(code === 0 ? "done" : "failed");
+    for (const name of printFaceNames) assert.deepEqual(readFileSync(join(dir, "assets", name)), previousFace);
+    assert.deepEqual(readFileSync(join(assets, "panel_front.png")), newFace);
+    assert.deepEqual(readFileSync(join(dir, "box_front_right_white.png")), png);
+  }
+});
+
+it("six print faces alone do not complete a render", async () => {
+  const dir = seed();
+  const assets = join(dir, id.slice(0, 8), "assets");
+  mkdirSync(assets, { recursive: true });
+  for (const name of printFaceNames) writeFileSync(join(assets, name), newFace);
+  setJobsTestHooks({ runPack: async () => ok });
+  const job = await settleRender("failed");
+  assert.equal(job.job_error, "打样没有输出文件");
+  assert.equal(existsSync(join(dir, "assets", "panel_back.png")), false);
+});
+
+it("an interrupted six-face publication rolls back or hides the incomplete set until a complete repair", async (t) => {
+  const dir = seed();
+  const assets = join(dir, id.slice(0, 8), "assets");
+  const destination = join(dir, "assets");
+  mkdirSync(assets, { recursive: true });
+  for (const name of printFaceNames) {
+    writeFileSync(join(assets, name), newFace);
+    writeFileSync(join(destination, name), previousFace);
+  }
+  writeFileSync(join(dir, "box_front_right_white.png"), png);
+  let failRollback = false;
+  const rename = fs.renameSync;
+  t.mock.method(fs, "renameSync", (from: fs.PathLike, to: fs.PathLike) => {
+    if (String(to) === join(destination, "panel_left.png") ||
+      (failRollback && String(to) === join(destination, "panel_back.png") && String(from).endsWith("previous-panel_back.png"))) {
+      throw Object.assign(new Error("file in use"), { code: "EPERM" });
+    }
+    rename(from, to);
+  });
+  syncBuiltinESMExports();
+  setJobsTestHooks({ runPack: async () => ok });
+  try {
+    const restored = await settleRender("done");
+    assert.equal(printFacesZipEntries(id)?.length, 6);
+    for (const name of printFaceNames) assert.deepEqual(readFileSync(join(destination, name)), previousFace);
+    assert.equal(publicMockup(restored).can_repair_print_faces, false);
+    failRollback = true;
+    const mixed = await settleRender("done");
+    assert.deepEqual(readFileSync(join(destination, "panel_front.png")), newFace);
+    assert.deepEqual(readFileSync(join(destination, "panel_left.png")), previousFace);
+    assert.equal(printFacesZipEntries(id), null);
+    assert.equal(fileOf(mixed, "read_front"), undefined);
+    assert.equal(publicMockup(mixed).files.filter(file => file.key.startsWith("read_")).length, 0);
+    assert.equal(publicMockup(mixed).can_repair_print_faces, true);
+  } finally {
+    t.mock.restoreAll();
+    syncBuiltinESMExports();
+  }
+  setJobsTestHooks({ runPrintFaceRepair: async opts => { faces(opts.assets); return ok; } });
+  await repairMockupPrintFaces(id, viewer);
+  assert.equal((await settled()).print_faces_request?.status, "failed");
+  assert.equal(printFacesZipEntries(id), null);
+  setJobsTestHooks({ runPrintFaceRepair: async opts => {
+    mkdirSync(opts.assets, { recursive: true });
+    for (const name of printFaceNames) writeFileSync(join(opts.assets, name), newFace);
+    return ok;
+  } });
+  await repairMockupPrintFaces(id, viewer);
+  assert.equal((await settled()).print_faces_request?.status, "succeeded");
+  assert.equal(printFacesZipEntries(id)?.length, 6);
+  for (const name of printFaceNames) assert.deepEqual(readFileSync(join(destination, name)), newFace);
 });
 
 it("publication failure after required faces remains retryable through refresh and queueing", async () => {

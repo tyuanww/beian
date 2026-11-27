@@ -211,21 +211,25 @@ describe("upload then start", () => {
       });
     const created = await create();
     assert.equal(created.status, 200);
-    const first = (await created.json()) as { upload: { id: string; phase: string; received: number } };
+    const first = (await created.json()) as {
+      upload: { id: string; phase: string; received: number };
+      prefix_verification?: true;
+    };
     assert.equal(first.upload.phase, "paused");
     assert.equal(first.upload.received, 0);
 
-    const put = (offset: number, chunk: Buffer) => {
-      const body = Uint8Array.from(chunk).buffer;
+    const put = (offset: number, chunk: Buffer, opts?: { prefixBytes: number; body?: Buffer; openId?: string }) => {
+      const body = opts ? opts.body : chunk;
       return app.request(`/api/uploads/sessions/${first.upload.id}/files/ai`, {
         method: "PUT",
         headers: {
-          ...authHeader(owner),
+          ...authHeader(opts?.openId ?? owner),
           "content-type": "application/octet-stream",
           "x-upload-offset": String(offset),
           "x-upload-sha256": createHash("sha256").update(chunk).digest("hex"),
+          ...(opts ? { "x-upload-prefix-bytes": String(opts.prefixBytes) } : {}),
         },
-        body,
+        ...(body ? { body: Uint8Array.from(body).buffer } : {}),
       });
     };
     const firstChunk = source.subarray(0, UPLOAD_CHUNK_BYTES);
@@ -236,7 +240,36 @@ describe("upload then start", () => {
     const duplicate = await put(0, firstChunk);
     assert.equal(duplicate.status, 200);
     assert.equal(((await duplicate.json()) as { upload: { received: number } }).upload.received, firstChunk.length);
-    const tail = await put(firstChunk.length, tailChunk);
+
+    const verified = await put(0, firstChunk, { prefixBytes: firstChunk.length });
+    assert.equal(verified.status, 200);
+    assert.equal(first.prefix_verification, true);
+    assert.equal(((await verified.json()) as { upload: { received: number } }).upload.received, firstChunk.length);
+    const otherOwner = await put(0, firstChunk, { prefixBytes: firstChunk.length, openId: "ou_other_prefix_owner" });
+    assert.equal(otherOwner.status, 404);
+    const mismatched = await put(0, Buffer.alloc(firstChunk.length, 0), { prefixBytes: firstChunk.length });
+    assert.equal(mismatched.status, 409);
+    assert.match((await mismatched.json()).detail, /内容不一致/);
+    const requestedPastPrefix = await put(firstChunk.length, tailChunk, { prefixBytes: tailChunk.length });
+    assert.equal(requestedPastPrefix.status, 409);
+    const oversized = await put(0, firstChunk, { prefixBytes: UPLOAD_CHUNK_BYTES + 1 });
+    assert.equal(oversized.status, 413);
+    const bodyOnVerify = await put(0, firstChunk, { prefixBytes: firstChunk.length, body: firstChunk });
+    assert.equal(bodyOnVerify.status, 400);
+    const oversizedBody = await put(0, firstChunk, { prefixBytes: firstChunk.length, body: source });
+    assert.equal(oversizedBody.status, 413);
+
+    // 旧客户端可以先追加非整片的数据。另一页的写入只得知最新位置，
+    // 按对应范围校验后才能把自己尚未校验的剩余数据补齐。
+    const shortTail = tailChunk.subarray(0, 3);
+    assert.equal((await put(firstChunk.length, shortTail)).status, 200);
+    const advanced = await put(firstChunk.length, tailChunk, { prefixBytes: 0, body: tailChunk });
+    assert.equal(advanced.status, 200);
+    const advancedResponse = await advanced.json();
+    assert.equal(advancedResponse.offset_advanced, true);
+    assert.equal(advancedResponse.upload.received, firstChunk.length + shortTail.length);
+    assert.equal((await put(firstChunk.length, shortTail, { prefixBytes: shortTail.length })).status, 200);
+    const tail = await put(firstChunk.length + shortTail.length, tailChunk.subarray(shortTail.length));
     assert.equal(tail.status, 200);
     assert.equal(((await tail.json()) as { upload: { received: number } }).upload.received, source.length);
 
@@ -256,6 +289,11 @@ describe("upload then start", () => {
     assert.equal(ready.upload.id, first.upload.id);
     assert.equal(ready.upload.phase, "ready");
     assert.equal(ready.upload.received, source.length);
+
+    const concurrentComplete = await put(firstChunk.length, tailChunk, { prefixBytes: tailChunk.length });
+    assert.equal(concurrentComplete.status, 200);
+    assert.equal((await concurrentComplete.json()).upload.id, first.upload.id);
+    assert.equal((await put(firstChunk.length, Buffer.alloc(tailChunk.length, 0), { prefixBytes: tailChunk.length })).status, 409);
 
     const retriedCreate = await create();
     assert.equal(retriedCreate.status, 200);
@@ -845,6 +883,15 @@ describe("upload then start", () => {
       assert.deepEqual(await res.json(), {
         detail: `待开工上传最多保留 ${MAX_PENDING_RECEIPTS_PER_OWNER} 单，请先开始已有上传`,
       });
+      const resumable = await app.request("/api/uploads/sessions", {
+        method: "POST",
+        headers: { ...authHeader(owner), "content-type": "application/json" },
+        body: JSON.stringify({
+          client_upload_id: "client-owner-quota",
+          files: [{ field: "ai", name: "next.ai", bytes: 4 }],
+        }),
+      });
+      assert.equal(resumable.status, 429);
     } finally {
       for (const rec of held) discardReceipt(rec.id, owner);
     }

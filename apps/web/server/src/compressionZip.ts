@@ -37,13 +37,27 @@ function u32(target: Buffer, offset: number, value: number): void {
  * STORE 方式按 64 KiB 流式写出，并用 data descriptor 回填 CRC。
  * 不把整个 ZIP 或单个原件读进一个缓冲区。调用方必须保证至少有一个条目。
  */
-export function compressionZipStream(entries: readonly ZipEntry[]): Readable {
+export function compressionZipStream(entries: readonly ZipEntry[], options: { pinFiles?: boolean } = {}): Readable {
   if (!entries.length) throw new Error("不会生成空的压缩包");
+  const pinned: number[] = [];
+  const closeRemaining = () => {
+    for (const fd of pinned.splice(0)) closeSync(fd);
+  };
+  try {
+    if (options.pinFiles) {
+      for (const entry of entries) pinned.push(openSync(entry.path, "r"));
+    }
+  } catch (error) {
+    closeRemaining();
+    throw error;
+  }
   const clock = dosTime(new Date());
-  return Readable.from(generate(entries, clock.time, clock.day));
+  const stream = Readable.from(generate(entries, clock.time, clock.day, pinned));
+  stream.once("close", closeRemaining);
+  return stream;
 }
 
-async function* generate(entries: readonly ZipEntry[], time: number, day: number): AsyncGenerator<Buffer> {
+async function* generate(entries: readonly ZipEntry[], time: number, day: number, pinned: number[]): AsyncGenerator<Buffer> {
   const central: Buffer[] = [];
   let offset = 0;
   const chunk = Buffer.alloc(64 * 1024);
@@ -66,7 +80,7 @@ async function* generate(entries: readonly ZipEntry[], time: number, day: number
     offset += local.length + name.length;
     let crc = 0xffffffff;
     let size = 0;
-    const fd = openSync(entry.path, "r");
+    const fd = pinned.shift() ?? openSync(entry.path, "r");
     try {
       for (;;) {
         const read = readSync(fd, chunk, 0, chunk.length, null);

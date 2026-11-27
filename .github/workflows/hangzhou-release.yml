@@ -37,10 +37,39 @@ jobs:
         shell: cmd
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          rem Download the exact event commit's CD components to RUNNER_TEMP via GitHub API.
-          rem Bootstrap must not checkout/reset D:\beian before release.ps1 owns a journal.
-          powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; $dir=Join-Path $env:RUNNER_TEMP ('beian-release-' + $env:GITHUB_RUN_ID + '-' + $env:GITHUB_RUN_ATTEMPT); $headers=@{ Authorization=('Bearer ' + $env:GITHUB_TOKEN); Accept='application/vnd.github.raw+json'; 'X-GitHub-Api-Version'='2022-11-28' }; $files=@('release.ps1','release-recover.ps1','install-illustrator-agent.ps1','release-dependency-check.mjs'); $code=1; try { New-Item -ItemType Directory -Force -Path $dir | Out-Null; foreach ($name in $files) { $uri=('https://api.github.com/repos/' + $env:GITHUB_REPOSITORY + '/contents/scripts/windows/' + $name + '?ref=' + [Uri]::EscapeDataString($env:GITHUB_SHA)); Invoke-WebRequest -UseBasicParsing -Headers $headers -Uri $uri -OutFile (Join-Path $dir $name) }; $engine=Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'; $arguments=@('-NoProfile','-ExecutionPolicy','Bypass','-File',(Join-Path $dir 'release.ps1'),'-RepositoryRoot','D:\beian','-ReleaseSourceDir',$dir,'-TargetSha',$env:GITHUB_SHA); if ($env:ALLOW_LEGACY_OFFLINE_BOOTSTRAP -eq 'true') { $arguments += '-AllowLegacyOfflineBootstrap' }; & $engine @arguments; $code=$LASTEXITCODE } finally { Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue }; exit $code"
+        # Fold to one cmd line. Download only from the event SHA before touching D:\beian.
+        # PowerShell 5.1 needs an explicit proxy for the GitHub Contents requests.
+        run: >-
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop';
+          $request=@{};
+          if (($env:NO_PROXY -split ',') -match '^\s*(?:\*|(?:api\.|\.|\*\.)?github\.com(?::443)?)\s*$') {
+          [System.Net.WebRequest]::DefaultWebProxy=$null
+          } elseif (-not [string]::IsNullOrWhiteSpace($env:HTTPS_PROXY)) {
+          $proxyUri=$null;
+          if (-not [Uri]::TryCreate($env:HTTPS_PROXY, [UriKind]::Absolute, [ref]$proxyUri)
+          -or $proxyUri.Scheme -ne 'http' -or -not $proxyUri.Host -or $proxyUri.UserInfo
+          -or $proxyUri.AbsolutePath -ne '/' -or $proxyUri.Query -or $proxyUri.Fragment) {
+          throw 'HTTPS_PROXY must be an HTTP proxy URL without credentials.'
+          };
+          $request.Proxy=$proxyUri
+          };
+          $dir=Join-Path $env:RUNNER_TEMP ('beian-release-' + $env:GITHUB_RUN_ID + '-' + $env:GITHUB_RUN_ATTEMPT);
+          $headers=@{ Authorization=('Bearer ' + $env:GITHUB_TOKEN); Accept='application/vnd.github.raw+json'; 'X-GitHub-Api-Version'='2022-11-28' };
+          $files=@('release.ps1','release-recover.ps1','install-illustrator-agent.ps1','release-dependency-check.mjs');
+          $code=1;
+          try {
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null;
+          foreach ($name in $files) {
+          $uri=('https://api.github.com/repos/' + $env:GITHUB_REPOSITORY + '/contents/scripts/windows/' + $name + '?ref=' + [Uri]::EscapeDataString($env:GITHUB_SHA));
+          Invoke-WebRequest @request -UseBasicParsing -Headers $headers -Uri $uri -OutFile (Join-Path $dir $name)
+          };
+          $engine=Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe';
+          $arguments=@('-NoProfile','-ExecutionPolicy','Bypass','-File',(Join-Path $dir 'release.ps1'),'-RepositoryRoot','D:\beian','-ReleaseSourceDir',$dir,'-TargetSha',$env:GITHUB_SHA);
+          if ($env:ALLOW_LEGACY_OFFLINE_BOOTSTRAP -eq 'true') { $arguments += '-AllowLegacyOfflineBootstrap' };
+          & $engine @arguments;
+          $code=$LASTEXITCODE
+          } finally { Remove-Item -LiteralPath $dir -Recurse -Force -ErrorAction SilentlyContinue };
+          exit $code"
       - name: Start last 8787 if release died after stop
         if: failure()
         shell: cmd

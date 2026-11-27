@@ -1516,7 +1516,7 @@ function hasResolvedPackagingJob(path: string): boolean {
 }
 
 export function requiredPrintFacesReady(jobId: string): boolean {
-  if (!isTid(jobId)) return false;
+  if (!isTid(jobId) || existsSync(printFacesPublicationMarker(jobId))) return false;
   for (const face of REQUIRED_PRINT_FACES) {
     const path = join(mockupRoot(false), jobId, "assets", `panel_${face}.png`);
     if (!existsSync(path) || !underJobDir(jobId, path) || !pngMagicAtPath(path)) return false;
@@ -1550,7 +1550,7 @@ export function unfoldedPrintActive(job: MockupJob): boolean {
 }
 
 function readyPrintFaceCount(jobId: string): number {
-  if (!isTid(jobId)) return 0;
+  if (!isTid(jobId) || existsSync(printFacesPublicationMarker(jobId))) return 0;
   let ready = 0;
   for (const face of PRINT_FACE_NAMES) {
     const path = join(mockupRoot(false), jobId, "assets", `panel_${face}.png`);
@@ -1683,6 +1683,14 @@ export function mockupJobDir(id: string): string {
   return join(mockupRoot(false), id);
 }
 
+export function mockupProjectCode(id: string): string {
+  return id.slice(0, 8);
+}
+
+export function printFacesPublicationMarker(id: string): string {
+  return join(mockupJobDir(id), ".print-faces-publishing");
+}
+
 function canRelightStudio(job: MockupJob): boolean {
   if (isGenerationManagedMockup(job)) return false;
   const mutationStatus = job.render_mutation?.status;
@@ -1787,6 +1795,7 @@ function underJobDir(jobId: string, p: string): boolean {
 }
 
 function liveReadPanelFiles(jobId: string): MockupJob["files"] {
+  if (existsSync(printFacesPublicationMarker(jobId))) return [];
   const files: MockupJob["files"] = [];
   for (const face of ["front", "back", "right", "left", "top", "bottom"] as const) {
     const name = `panel_${face}.png`;
@@ -1828,8 +1837,10 @@ function publicMockupFile(job: MockupJob, file: { key: string; name: string; pat
 
 function visibleMockupFiles(job: MockupJob): PublicMockupFile[] {
   const byKey = new Map<string, PublicMockupFile>();
+  const publishingFaces = existsSync(printFacesPublicationMarker(job.id));
   for (const file of job.files || []) {
     if (!file.key || !file.name) continue;
+    if (publishingFaces && file.key.startsWith("read_")) continue;
     byKey.set(file.key, publicMockupFile(job, file));
   }
   for (const file of liveReadPanelFiles(job.id)) {
@@ -2033,7 +2044,7 @@ export function queueMockup(opts: {
   const outDir = join(mockupRoot(), opts.id);
   mkdirSync(outDir, { recursive: true });
   const product = {
-    code: opts.id.slice(0, 8),
+    code: mockupProjectCode(opts.id),
     slug: "pack",
     display_name: (opts.title || opts.displayName).slice(0, 40),
     source_ai: opts.sourcePath,
