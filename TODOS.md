@@ -10,6 +10,7 @@
 
 10ml 混层原单已通过本轮验收。Windows 用同一原稿副本重新生成，核验了盒型、正面两处激凹和产物。该单的线上原尺寸 PNG 也已实际保存并解码。证据在仓库外的 `beian-evidence/mockup-hd-transfer-checks-20261125/`，分别见 `windows-original-acceptance.md` 和 `verification.md`。这两条记录分别证明本机处理和公网下载。
 
+- [ ] **10ml 成片下载的线上复验。** 改动覆盖单份原尺寸 PNG、紧凑预览、关页找回和浏览器断点续传。待发布后用原打样单核验冷缓存首图、一次点击、关页和重新登录、弱网续传、背景和灯光一致性及文件完整性。记录从点击到保存的真实用时和传输字节。[成片合同](docs/contracts/packaging-presentation.md#导出与-ppt-规则)
 - [ ] **最初报下载问题的 30ml 对照单。** 待用当前线上版本，在原页面点一次下载。验收时记录等待期间预览是否可用，并打开保存的原尺寸 PNG。[成片合同](docs/contracts/packaging-presentation.md#打样成片与背景)
 - [ ] **最初报不能成盒的 10ml 备案图。** 获准后核对原稿指纹和层名，在 Windows 专用验收目录运行。记录刀线候选、盒身和上下封口。复验超邻接预算的 10ml「转曲 C」及已成盒的 30ml 对照稿，逐份记录通过或首个失败点。非路径对象和重合刀线已有专项回归。原样本记录在仓库外的 `beian-evidence/closeout-20261124-k1kdmp/illustrator-native-check.md`。[单稿导出](scripts/windows/README.md) · [结构合同](docs/contracts/packaging-structure.md)
 - [ ] **复用 Windows 真稿验收。** 复用现有单稿导出和打样流水线，把版本、原稿指纹、阶段计时和实际产物核验收成一条获准后可重复运行的命令。验收时用已知失败输入确认能报告首个失败点，再用已知通过样本确认能生成回执。[测试与验证](TESTING.md#显式选择真实稿或原生应用)

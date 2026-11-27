@@ -102,6 +102,59 @@ it("RF-04 details/history/files are shared read, contain no private paths, and n
   assert.equal((await app.request(`/api/mockups/${f.id}/render-generations`)).status,401);
 });
 
+it("studio exports retain the requested PNG across a generation switch without changing source assets", async () => {
+  const f = seed("f00400b00001");
+  const path = `/api/mockups/${f.id}/studio-downloads`;
+  const selection = { file_key: "white_a", generation_id: f.virtual, backdrop: "white", layer: "none",
+    product_light: 1, background_light: 1 };
+  const initial = await post(path, selection, reader);
+  assert.equal(initial.status, 202);
+  const initialRecord = await initial.json();
+
+  async function ready(id: string) {
+    for (let attempt = 0; attempt < 200; attempt++) {
+      const response = await request(path, reader);
+      assert.equal(response.status, 200);
+      const { items } = await response.json();
+      const item = items.find((value: { id: string }) => value.id === id);
+      if (item?.status === "ready") return item;
+      await delay(10);
+    }
+    assert.fail("export did not become ready");
+  }
+
+  const old = await ready(initialRecord.id);
+  const before = await request(old.download_url, reader);
+  assert.equal(before.status, 200);
+  const first = Buffer.from(await before.arrayBuffer());
+  assert.deepEqual(first.subarray(0, 8), png().subarray(0, 8));
+
+  const sealed = f.store.sealGeneration({mode:"legacy_import",contractSha256:contractSha,contractBytes:contract,
+    profile:"compat-legacy-v0",observedCurrentGenerationId:null,expectedCurrentGenerationId:f.virtual,actorLabel:"合成作者"});
+  saveMockup(applyRenderGenerationPatch(readMockupFromDisk(f.id)!,sealed.patch));
+  const current = (await (await request(`/api/mockups/${f.id}`, reader)).json()).current_render_generation_id;
+  assert.equal(current, "g0-legacy-original");
+  const archive = join(f.root, ".render-generations");
+  const sourceBefore = tree(archive);
+  assert.ok(Object.keys(sourceBefore).length);
+
+  const after = await request(old.download_url, reader);
+  assert.equal(after.status, 200);
+  assert.equal(after.headers.get("etag"), before.headers.get("etag"));
+  assert.deepEqual(Buffer.from(await after.arrayBuffer()), first);
+  assert.equal((await post(path, selection, reader)).status, 200, "repeating a ready export never substitutes the current source");
+
+  const archiveExport = await post(path, { ...selection, generation_id: current }, reader);
+  assert.equal(archiveExport.status, 202);
+  const archiveRecord = await archiveExport.json();
+  assert.notEqual(archiveRecord.id, initialRecord.id);
+  const archived = await ready(archiveRecord.id);
+  const output = await request(archived.download_url, reader);
+  assert.equal(output.status, 200);
+  assert.deepEqual(Buffer.from(await output.arrayBuffer()), first);
+  assert.deepEqual(tree(archive), sourceBefore);
+});
+
 it("RF-04 per-action permissions preserve history/activation independently of runtime", async () => {
   const f=seed("f00400000002",true);
   for(const session of [reader,owner,admin,stranger]) {

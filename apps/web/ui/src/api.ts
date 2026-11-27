@@ -1,6 +1,7 @@
 import type { CompressionBatch, HistoryResult, UnfoldedPrint } from "./batchTypes";
 import type { NativeTextEvidence } from "./pages/nativeTextEvidence";
 import type { GlbTextureInfo } from "./pages/mockupGlbTexture";
+import type { StudioDownloadBody } from "./pages/mockupStillDownload";
 import { API_DOWN_LOCAL } from "./apiHint";
 import { describeBrokenApi } from "./authGate";
 import { uploadTooLargeText } from "./uploadLimit";
@@ -556,6 +557,7 @@ export type Me = {
   avatar_url?: string | null;
   role: string | null;
   open_id?: string;
+  expires_at?: string | number;
   perms: string[];
   /** 可选：服务端给这个账号的上传上限（字节）；前端取它和公网 99,000,000 字节（100MB 十进制留 1MB 余量）里小的。 */
   upload_limit_bytes?: number;
@@ -717,6 +719,10 @@ export type TaskDetail = TaskSummary & {
 
 export type Decision = "confirm" | "issue" | "ignore" | "pending";
 
+export function studioDownloadCollection(jobId: string): string {
+  return `/api/mockups/${encodeURIComponent(jobId)}/studio-downloads`;
+}
+
 export const api = {
   me: () => request<Me>("/api/auth/me"),
   health: () => request<HealthView>("/api/health"),
@@ -742,6 +748,12 @@ export const api = {
     request<MockupJob>("/api/mockups/start", { method: "POST", body: JSON.stringify(body) }),
   retryMockup: (id: string) =>
     request<MockupJob>(`/api/mockups/${id}/retry`, { method: "POST" }),
+  studioDownloads: (id: string, signal: AbortSignal) =>
+    fetchJson<unknown>(studioDownloadCollection(id), { signal, cache: "no-store", priority: "low" }),
+  prepareStudioDownload: (id: string, body: StudioDownloadBody, signal: AbortSignal) =>
+    fetchJson<unknown>(studioDownloadCollection(id), {
+      method: "POST", body: JSON.stringify(body), signal, timeoutMs: GET_TIMEOUT_MS,
+    }),
   repairMockupPrintFaces: (id: string) =>
     request<MockupJob>(`/api/mockups/${id}/print-faces`, { method: "POST" }),
   createRenderGeneration: (id: string, body: RenderGenerationCreate) =>

@@ -1,5 +1,8 @@
 import { cleanupStaleGlbWebpTemps } from "./glbWebp.js";
 import { ifNoneMatchSatisfied } from "./httpValidators.js";
+import { compactStudioCard, isStudioCard } from "./studioStillDelivery.js";
+import { listStudioDownloads, openStudioDownload, startStudioDownload, StudioDownloadError } from "./studioDownloads.js";
+import { studioDownloadFileResponse } from "./studioDownloadResponse.js";
 import { cleanupGlbWebpVariantsOnBoot, glbWebpVariantEnabled, glbVersionOf, openGlbForServe, openGlbOriginalForServe } from "./glbWebpVariant.js";
 import {
   closeSync,
@@ -182,7 +185,7 @@ type NodeBindings = HttpBindings | Http2Bindings;
 type Env = { Bindings: NodeBindings; Variables: { session: Session } };
 
 const app = new Hono<Env>();
-const VERSION = "0.31.1.34";
+const VERSION = "0.31.1.35";
 
 const STRUCTURE_INPUT_BODY_BYTES = 16 * 1024;
 
@@ -329,6 +332,32 @@ function generationFileResponse(c: Context, file: HeldGenerationFile): Response 
     }});
     return new Response(Readable.toWeb(stream) as ReadableStream,{headers:responseHeaders});
   } catch (error) { file.close(); throw error; }
+}
+
+function* pngChunks(bytes: Buffer): Iterable<Buffer> {
+  const chunkBytes = 256 * 1024;
+  for (let offset = 0; offset < bytes.length; offset += chunkBytes) {
+    yield bytes.subarray(offset, offset + chunkBytes);
+  }
+}
+
+function pngResponse(c: Context, bytes: Buffer, headers: Record<string, string>): Response {
+  const body = c.req.raw.method === "HEAD" ? null : Readable.toWeb(Readable.from(pngChunks(bytes))) as ReadableStream;
+  return new Response(body, { headers: {
+    ...headers, "Content-Type": "image/png", "Content-Length": String(bytes.length), "X-Content-Type-Options": "nosniff",
+  } });
+}
+
+async function compactStudioCardResponse(c: Context, fd: number, bytes: number, etag: string, identity: string) {
+  try {
+    const card = compactStudioCard(fd, bytes, etag, identity);
+    const headers = { ETag: card.etag, "Cache-Control": "private, no-cache", "X-Content-Type-Options": "nosniff" };
+    if (ifNoneMatchSatisfied(c.req.header("if-none-match"), card.etag)) return new Response(null, { status: 304, headers });
+    return pngResponse(c, await card.data(), { ...headers, "Content-Disposition": "inline" });
+  } catch {
+    // The ordinary verified preview is still usable if resizing is busy or fails.
+    return null;
+  }
 }
 
 function safeLogCause(err: unknown): string {
@@ -1626,18 +1655,66 @@ app.post("/api/mockups/:id/relight", async (c) => {
   } catch (error) { return generationHttpError(c,error); }
 });
 
-app.get("/api/mockups/:id/files/:key", (c) => {
+const STUDIO_DOWNLOAD_FIELDS = ["file_key", "generation_id", "generation", "backdrop", "layer", "product_light", "background_light"];
+
+function studioDownloadContext(c: Context<Env>, id: string) {
+  const session = need(c, "read");
+  const owner = session.source === "display" && session.display_name
+    ? `display:${session.display_name}`
+    : session.open_id && `account:${session.open_id}`;
+  if (!owner) throw new HTTPException(403, { message: "成片下载需要已绑定账号" });
+  const job = readMockupFromDisk(assertTid(id));
+  if (!job) throw new HTTPException(404, { message: "没有这单打样" });
+  c.header("Cache-Control", "private, no-store");
+  return { job, owner };
+}
+
+function studioDownloadHttpError(c: Context, error: unknown): Response {
+  if (error instanceof StudioDownloadError) {
+    return c.json({ reason: error.reason, message: error.message }, error.status);
+  }
+  return generationHttpError(c, error);
+}
+
+app.post("/api/mockups/:id/studio-downloads", async (c) => {
+  const { job, owner } = studioDownloadContext(c, c.req.param("id"));
+  try {
+    const body = await generationBody(c, STUDIO_DOWNLOAD_FIELDS);
+    const result = startStudioDownload(job.id, owner, body);
+    return c.json(result, result.status === "ready" ? 200 : 202);
+  } catch (error) { return studioDownloadHttpError(c, error); }
+});
+
+app.get("/api/mockups/:id/studio-downloads", (c) => {
+  const { job, owner } = studioDownloadContext(c, c.req.param("id"));
+  try { return c.json({ items: listStudioDownloads(job.id, owner) }); }
+  catch (error) { return studioDownloadHttpError(c, error); }
+});
+
+app.get("/api/mockups/:id/studio-downloads/:exportId/file", (c) => {
+  const { job, owner } = studioDownloadContext(c, c.req.param("id"));
+  try { return studioDownloadFileResponse(c.req.raw, openStudioDownload(job.id, owner, c.req.param("exportId"))); }
+  catch (error) { return studioDownloadHttpError(c, error); }
+});
+
+app.get("/api/mockups/:id/files/:key", async (c) => {
   need(c, "read");
   const generationId = c.req.query("generation_id");
+  const key = c.req.param("key");
+  const compact = c.req.query("compact") === "1" && c.req.query("download") !== "1" && isStudioCard(key);
   if (generationId !== undefined) {
     try {
       if (c.req.queries("generation_id")?.length !== 1) throw Object.assign(new Error("版本参数无效"),{status:400,reason:"payload_invalid"});
-      return generationFileResponse(c,openRenderGenerationFile(assertTid(c.req.param("id")),generationId,c.req.param("key")));
+      const file = openRenderGenerationFile(assertTid(c.req.param("id")), generationId, key);
+      if (compact) {
+        const response = await compactStudioCardResponse(c, file.fd, file.bytes, "", file.sha256);
+        if (response) { file.close(); return response; }
+      }
+      return generationFileResponse(c, file);
     } catch (error) { return generationHttpError(c,error); }
   }
   const job = getJob(assertTid(c.req.param("id")));
   if (!job) throw new HTTPException(404, { message: "没有这单打样" });
-  const key = c.req.param("key");
   if (key === "print_faces_zip") {
     const entries = printFacesZipEntries(job.id);
     if (!entries) throw new HTTPException(404, { message: "六面印刷图还不齐" });
@@ -1693,7 +1770,14 @@ app.get("/api/mockups/:id/files/:key", (c) => {
   // make the declared Content-Length disagree with the streamed body.
   const fd = openSync(f.path, "r");
   let size: number;
-  try { size = fstatSync(fd).size; } catch (error) { closeSync(fd); throw error; }
+  try {
+    const stat = fstatSync(fd);
+    size = stat.size;
+    if (compact) {
+      const response = await compactStudioCardResponse(c, fd, size, etag, `${job.id}:${key}:${stat.ctimeMs}`);
+      if (response) { closeSync(fd); return response; }
+    }
+  } catch (error) { closeSync(fd); throw error; }
   return responseFromOpenedFile(c, fd, size, {
     "Content-Type": type,
     "X-Content-Type-Options": "nosniff",

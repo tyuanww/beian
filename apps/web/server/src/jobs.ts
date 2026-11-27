@@ -10,6 +10,7 @@ import { compareBookkeeping } from "./billing.js";
 import { notifyIllustratorWatchdog, notifyJobFinished, watchdogEventFromStdout, type WatchdogEvent } from "./notify.js";
 import { compressGlbTexturesToWebp, logGlbWebpResult } from "./glbWebp.js";
 import { dropGlbWebpVariant } from "./glbWebpVariant.js";
+import { warmDefaultStudioStills } from "./studioStillDelivery.js";
 import {
   applyRenderGenerationPatch,
   assertCanManageMockup,
@@ -1725,7 +1726,7 @@ function commitActivatedGeneration(next: MockupJob, fromId: string, actorId: str
   return committed;
 }
 
-function legacyGenerationReadBusy(job: MockupJob): boolean {
+export function legacyGenerationReadBusy(job: MockupJob): boolean {
   return job.status !== "done" || job.job_pid !== undefined || job.job_status === "running"
     || job.job_status === "queued" || relightStudioJobs.has(job.id) || printFaceRepairActive(job)
     || unfoldedPrintActive(job)
@@ -3530,8 +3531,22 @@ function finishMockup(id: string, startedAt: string, result: RunPythonResult): v
   job.job_status = "succeeded";
   job.job_error = undefined;
   saveMockup(job);
+  if (files.some(({ key }) => key === "white_a_ground" || key === "white_b_ground")) {
+    setImmediate(() => warmFreshStudioStills(id, job.job_finished_at)).unref();
+  }
   launchNotification(`mockup ${job.id}`, () => fireMockupNotify(job, true));
   tryStart();
+}
+
+function warmFreshStudioStills(id: string, finishedAt: string | undefined): void {
+  const job = readMockupFromDisk(id);
+  if (!job || job.job_finished_at !== finishedAt || legacyGenerationReadBusy(job)) return;
+  try {
+    const generation = job.current_render_generation_id ?? openJobGenerationStore(id).virtualLegacyCurrentId();
+    void warmDefaultStudioStills(job, generation, openRenderGenerationFile).catch(() => undefined);
+  } catch {
+    // Optional derivative; the download route can still compose a valid selection on demand.
+  }
 }
 
 function markMockupFailed(job: MockupJob, msg: string): void {
