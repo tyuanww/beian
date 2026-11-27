@@ -110,6 +110,7 @@ describe("uploadDesk", () => {
       phase: "failed",
       receipt: undefined,
       clientUploadId: "client-response-lost",
+      recoverable: true,
       error: "上传超时。请检查网络后重新上传。",
     };
     const recovered = { ...restored, client_upload_id: "client-response-lost" };
@@ -141,6 +142,24 @@ describe("uploadDesk", () => {
     assert.equal(items[0]?.error, "不是有效的 PDF");
     assert.equal(shouldReconcileUpload("compare", failed, [partial]), false);
     assert.equal(shouldReconcileUpload("compare", { ...failed, recoverable: true }, [partial]), true);
+  });
+
+  it("看板在重新选择的文件内容校验失败时保留错误，禁用开工", () => {
+    const failed: UploadSnapshot = {
+      ...local,
+      phase: "failed",
+      receipt: undefined,
+      clientUploadId: "client-invalid-file",
+      recoverable: false,
+      error: "重选的文件内容不一致",
+    };
+    const items = pendingUploadItems("compare", failed, [
+      { ...restored, client_upload_id: failed.clientUploadId },
+    ]);
+    assert.equal(items.length, 1);
+    assert.equal(items[0]?.phase, "failed");
+    assert.equal(items[0]?.error, failed.error);
+    assert.notEqual(items[0] && pendingUploadOpenAction(items[0]), "start");
   });
 
   it("相同文件的另一次上传不会被错误合并", () => {

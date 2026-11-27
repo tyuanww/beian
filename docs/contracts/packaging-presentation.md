@@ -51,6 +51,8 @@
 
 独立 print_faces_zip：0 面 unavailable、1–5 面 incomplete + faces_incomplete、六面才 ready + file_key=print_faces_zip。净版不能由六面拼接或 GLB 截图代替。
 
+网页 V2 流水线生成六张印刷面。流水线成功退出且已有出图资产后，服务端在登记完成前暂存六张 `panel_*.png`。六张通过 PNG 结构和 CRC 校验后逐张原子发布到任务根目录的 `assets/`。详情、单面和 ZIP 均使用这一套已发布资产。六面 ZIP 在开始响应前打开同一套的六张图，下载过程中替换路径也不会混入其他版本。源贴图及渲染计划留在项目子目录，已托管渲染版本沿用代际资产。渲染失败、六面校验失败或发布回滚成功时继续提供先前已发布的印刷面。发布中断或回滚失败时隐藏未确认的套图，有底稿的单可补齐六面后恢复。已有缺面单沿用补面入口，普通补面要求四个盒身面，凑齐六面时才提供 ZIP。
+
 两个文件都沿 `/api/mockups/:id/files/:key`：净版仅 ready 返回 application/pdf，坏 PDF 返回 415「净版展开不是可印刷的 PDF。」；六面不齐返回 404「六面印刷图还不齐」，齐全返回 application/zip、print-faces.zip。净版普通 GET 允许 inline 预览，download=1 才附件；缓存头沿既有预览/下载策略。未 ready 或源稿已变不提供旧净版。
 
 ## GLB 贴图 WebP 与 `texture_format`

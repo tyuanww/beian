@@ -184,7 +184,7 @@ describe("uploadStore", () => {
     assert.equal(restored.get("mockup")?.clientUploadId, clientUploadId);
   });
 
-  it("确定性文件校验失败不会被同一会话的 partial 快照覆盖", async () => {
+  it("确定性文件校验失败不会被同一会话的快照覆盖", async () => {
     const fake = controlledTransport();
     const store = createUploadStore(fake.transport);
     store.replaceFile("mockup", "ai", ai());
@@ -208,6 +208,7 @@ describe("uploadStore", () => {
     assert.equal(store.get("mockup")?.recoverable, false);
     assert.equal(uploadCanRetry(store.get("mockup")), false);
     assert.equal(store.recover("mockup", partial), false);
+    assert.equal(store.recover("mockup", { ...partial, phase: "ready" }), false);
     assert.equal(store.get("mockup")?.error, "不是有效的 AI");
     store.retry("mockup");
     assert.equal(fake.calls.length, 1);
@@ -234,7 +235,7 @@ describe("uploadStore", () => {
     store.replaceFile("mockup", "ai", ai());
     const clientUploadId = store.get("mockup")?.clientUploadId;
     assert.ok(clientUploadId);
-    fake.calls[0]?.reject(new Error("上传中断。请检查网络后重新上传。"));
+    fake.calls[0]?.reject(new UploadPausedError("暂时无法确认服务器是否收到这次上传"));
     await flush();
     assert.ok(store.get("mockup")?.files[0]?.file);
 
@@ -275,7 +276,7 @@ describe("uploadStore", () => {
     assert.match(store.get("mockup")?.error || "", /重新选择同一文件/);
   });
 
-  it("整页刷新保留本次上传身份，并在重选同一文件后续传", () => {
+  it("整页刷新中断请求后保留本次上传身份，并在重选同一文件后续传", async () => {
     const storage = memoryStorage();
     const firstTransport = controlledTransport();
     const source = ai("刷新续传.ai");
@@ -290,9 +291,16 @@ describe("uploadStore", () => {
     });
     const clientUploadId = first.get("mockup")?.clientUploadId;
     assert.ok(clientUploadId);
+    first.abortAll();
+    assert.equal(firstTransport.calls[0]?.signal?.aborted, true);
+    firstTransport.calls[0]?.reject(new ApiError(0, "上传已停止"));
+    await flush();
 
     const resumedTransport = controlledTransport();
-    const resumed = createUploadStore(resumedTransport.transport, async () => undefined, storage, "ou_refresh_owner");
+    const discarded: string[] = [];
+    const resumed = createUploadStore(resumedTransport.transport, async (id) => {
+      discarded.push(id);
+    }, storage, "ou_refresh_owner");
     assert.equal(resumed.get("mockup")?.phase, "paused");
     assert.equal(resumed.get("mockup")?.clientUploadId, clientUploadId);
     assert.equal(resumed.get("mockup")?.uploadId, "112233445566");
@@ -303,8 +311,37 @@ describe("uploadStore", () => {
     assert.equal(resumedTransport.calls.length, 1);
     assert.equal(resumed.get("mockup")?.clientUploadId, clientUploadId);
     assert.equal(resumed.get("mockup")?.uploadId, "112233445566");
-    first.abortAll();
+    assert.deepEqual(discarded, []);
     resumed.abortAll();
+  });
+
+  it("同一会话在别处完成时，重选的文件继续校验后才放行回执", async () => {
+    const fake = controlledTransport();
+    const store = createUploadStore(fake.transport);
+    const selected = ai();
+    store.replaceFile("mockup", "ai", selected);
+    const clientUploadId = store.get("mockup")?.clientUploadId;
+    const receipt = {
+      id: "44556677aa99",
+      kind: "mockup" as const,
+      client_upload_id: clientUploadId,
+      files: [{ field: "ai", name: selected.name, bytes: selected.size, received: selected.size }],
+      bytes: selected.size,
+      received: selected.size,
+      created_at: "2026-08-26T08:00:00.000Z",
+      phase: "ready" as const,
+    };
+    fake.calls[0]?.reject(new UploadPausedError("已暂停", receipt.id));
+    await flush();
+    store.replaceFile("mockup", "ai", selected);
+    assert.equal(store.recover("mockup", receipt), false);
+    assert.equal(store.get("mockup")?.phase, "uploading");
+    assert.equal(fake.calls[1]?.signal?.aborted, false);
+    fake.calls[1]?.progress?.({
+      phase: "confirming", pct: 100, total: selected.size, loaded: selected.size, uploadId: receipt.id,
+    });
+    assert.equal(store.recover("mockup", receipt), true);
+    assert.equal(store.get("mockup")?.phase, "ready");
   });
 
   it("按登录人隔离刷新状态，切换账号不会看到上一人的文件名", () => {

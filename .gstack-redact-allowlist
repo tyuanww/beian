@@ -8,3 +8,6 @@ https://a:b@c@h:8787
 http://bob:SECRET@x
 # TODOS.md F10：非 http(s) 连接串输出 postgres:本机路径 的已知缺口示例
 postgres://u:p@db
+
+# Loopback-only fixture for rejecting proxy user info in the release contract.
+http://fixture:synthetic-secret@127.0.0.1:3128

@@ -1047,6 +1047,88 @@ describe("mockup structure confirmation http", () => {
 });
 
 describe("mockup post", { concurrency: false }, () => {
+  it("publishes the six rendered print faces and their ZIP when a new V2 job finishes", async () => {
+    const { setJobsTestHooks, resetJobsTestHooks } = await import("./jobs.js");
+    const env = { BLENDER_EXECUTABLE: process.env.BLENDER_EXECUTABLE, ILLUSTRATOR_EXECUTABLE: process.env.ILLUSTRATOR_EXECUTABLE };
+    process.env.BLENDER_EXECUTABLE = process.execPath;
+    process.env.ILLUSTRATOR_EXECUTABLE = process.execPath;
+    const faces = ["front", "back", "left", "right", "top", "bottom"];
+    const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAAEUlEQVR4nGMwdgn9D8IMMAYAO7QHLXLeR4wAAAAASUVORK5CYII=", "base64");
+    setJobsTestHooks({
+      runStructure: async (manifest) => ({
+        code: 0,
+        stdout: JSON.stringify({ success: true, prepared_manifest: manifest }),
+        stderr: "",
+        timedOut: false,
+      }),
+      runPack: async (manifest) => {
+        const { output_root, products } = JSON.parse(readFileSync(manifest, "utf8")) as {
+          output_root: string;
+          products: [{ code: string }];
+        };
+        const project = join(output_root, products[0].code);
+        const assets = join(project, "assets");
+        mkdirSync(assets, { recursive: true });
+        for (const face of faces) writeFileSync(join(assets, `panel_${face}.png`), png);
+        writeFileSync(join(project, "box_front_right_white.png"), png);
+        return { code: 0, stdout: "", stderr: "", timedOut: false };
+      },
+    });
+    try {
+      const sess = issueSessionForTest("籽烨", "reviewer", "ou_pf_new");
+      const receipt = await stageAi(sess.token);
+      const start = await startMockup(sess.token, receipt);
+      assert.equal(start.status, 200);
+      const { id } = (await start.json()) as { id: string };
+      const request = (suffix = "") => app.request(`/api/mockups/${id}${suffix}`, {
+        headers: { authorization: `Bearer ${sess.token}` },
+      });
+      const detail = async () => {
+        const response = await request();
+        assert.equal(response.status, 200);
+        return await response.json() as { status: string; files: Array<{key: string}>; print_faces_zip: { status: string } };
+      };
+      let done = await detail();
+      for (let attempt = 0; done.status !== "done" && attempt < 100; attempt++) {
+        await new Promise(resolve => setTimeout(resolve, 5));
+        done = await detail();
+      }
+      assert.equal(done.status, "done");
+      assert.equal(done.print_faces_zip.status, "ready");
+      assert.deepEqual(done.files.map(file => file.key).sort(), [...faces.map(face => `read_${face}`), "white_a"].sort());
+      for (const face of faces) {
+        const response = await request(`/files/read_${face}`);
+        assert.equal(response.status, 200);
+        assert.deepEqual(Buffer.from(await response.arrayBuffer()), png);
+      }
+      const response = await request("/files/print_faces_zip");
+      assert.equal(response.status, 200);
+      assert.equal(response.headers.get("content-type"), "application/zip");
+      const updatedPath = join(DATA_DIR, "mockups", id, "assets", "panel_bottom.png");
+      rmSync(updatedPath);
+      const zip = Buffer.from(await response.arrayBuffer());
+      assert.equal(zip.readUInt32LE(zip.length - 22), 0x06054b50);
+      assert.equal(zip.readUInt16LE(zip.length - 12), faces.length);
+      let localOffset = 0;
+      for (const face of faces) {
+        assert.equal(zip.readUInt32LE(localOffset), 0x04034b50);
+        const nameBytes = zip.readUInt16LE(localOffset + 26);
+        const name = zip.subarray(localOffset + 30, localOffset + 30 + nameBytes);
+        assert.equal(name.toString("utf8"), `panel_${face}.png`);
+        const contentStart = localOffset + 30 + nameBytes;
+        assert.deepEqual(zip.subarray(contentStart, contentStart + png.length), png);
+        localOffset = contentStart + png.length + 16;
+      }
+      assert.equal((await request("/files/print_faces_zip")).status, 404);
+    } finally {
+      resetJobsTestHooks();
+      for (const [name, value] of Object.entries(env)) {
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
+      }
+    }
+  });
+
   it("routes every new web mockup through V2 without a legacy fallback", async () => {
     const { setJobsTestHooks, resetJobsTestHooks } = await import("./jobs.js");
     const prevBin = process.env.BLENDER_EXECUTABLE;

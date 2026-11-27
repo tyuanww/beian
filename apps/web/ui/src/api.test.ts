@@ -164,13 +164,13 @@ describe("resumable upload", () => {
       assert.equal(calls[2]?.offset, String(1024 * 1024));
       assert.match(calls[1]?.hash || "", /^[a-f0-9]{64}$/);
       assert.match(calls[2]?.hash || "", /^[a-f0-9]{64}$/);
-      assert.deepEqual(phases, ["uploading", "uploading", "confirming", "confirming"]);
+      assert.deepEqual(phases, ["uploading", "uploading", "confirming"]);
     } finally {
       globalThis.fetch = original;
     }
   });
 
-  it("续传前重放并校验服务器已确认的前缀，再发送剩余字节", async () => {
+  it("旧服务端不声明摘要校验能力时重放前缀，再发送剩余字节", async () => {
     const original = globalThis.fetch;
     const file = new File(["old-tail"], "same.ai", { lastModified: 4321 });
     const fd = new FormData();
@@ -212,15 +212,16 @@ describe("resumable upload", () => {
     }
   });
 
-  it("并发页面推进服务端 offset 时仍逐块校验，不能跳过中间内容", async () => {
+  it("摘要续传只发送剩余文件正文，并逐段校验并发推进的非整片前缀", async () => {
     const original = globalThis.fetch;
     const chunk = 1024 * 1024;
     const file = new File([Buffer.alloc(chunk * 4, 65)], "parallel.ai", { lastModified: 7654 });
     const fd = new FormData();
     fd.append("client_upload_id", "client-parallel-prefix");
     fd.append("file", file);
-    const offsets: number[] = [];
+    const transfers: Array<{ offset: number; bytes: number; prefixBytes: string | null }> = [];
     let received = chunk;
+    let offsetAdvanced = false;
     const upload = (phase: "paused" | "ready") => ({
       id: "223344556688",
       files: [{ field: "ai", name: file.name, bytes: file.size, received, last_modified: 7654 }],
@@ -234,20 +235,31 @@ describe("resumable upload", () => {
     globalThis.fetch = (async (input, init) => {
       const method = String(init?.method || "GET").toUpperCase();
       if (method === "PUT") {
-        const offset = Number(new Headers(init?.headers).get("x-upload-offset") || 0);
-        offsets.push(offset);
-        if (offset === chunk) received = chunk * 3;
-        if (offset === chunk * 3) received = chunk * 4;
+        const headers = new Headers(init?.headers);
+        const offset = Number(headers.get("x-upload-offset") || 0);
+        const bytes = init?.body instanceof ArrayBuffer ? init.body.byteLength : 0;
+        const prefixBytes = headers.get("x-upload-prefix-bytes");
+        transfers.push({ offset, bytes, prefixBytes });
+        offsetAdvanced = offset === chunk && bytes > 0;
+        if (offsetAdvanced) received = chunk * 2 + 11;
+        else if (bytes > 0 && offset === received) received += bytes;
       }
       const body = String(input).endsWith("/complete") ? upload("ready") : upload("paused");
-      return new Response(JSON.stringify({ upload: body }), {
+      return new Response(JSON.stringify({ upload: body, prefix_verification: true, offset_advanced: offsetAdvanced }), {
         status: 200,
         headers: { "content-type": "application/json" },
       });
     }) as typeof fetch;
     try {
       await uploadResumable(fd);
-      assert.deepEqual(offsets, [0, chunk, chunk * 2, chunk * 3]);
+      assert.deepEqual(transfers, [
+        { offset: 0, bytes: 0, prefixBytes: String(chunk) },
+        { offset: chunk, bytes: chunk, prefixBytes: "0" },
+        { offset: chunk, bytes: 0, prefixBytes: String(chunk) },
+        { offset: chunk * 2, bytes: 0, prefixBytes: "11" },
+        { offset: chunk * 2 + 11, bytes: chunk, prefixBytes: "0" },
+        { offset: chunk * 3 + 11, bytes: chunk - 11, prefixBytes: "0" },
+      ]);
     } finally {
       globalThis.fetch = original;
     }
@@ -287,6 +299,43 @@ describe("resumable upload", () => {
         (err: unknown) => err instanceof ApiError && err.status === 409 && /内容不一致/.test(err.message),
       );
       assert.equal(calls, 2);
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+
+  it("并发完成的回执仍校验重选的文件，只发摘要且不会再次请求完成", async () => {
+    const original = globalThis.fetch;
+    const file = new File(["new-tail"], "same.ai", { lastModified: 4321 });
+    const fd = new FormData();
+    fd.append("client_upload_id", "client-finished-elsewhere");
+    fd.append("file", file);
+    const upload = {
+      id: "33445566aa88",
+      files: [{ field: "ai", name: file.name, bytes: file.size, received: file.size, last_modified: 4321 }],
+      bytes: file.size, received: file.size,
+      created_at: "2026-08-26T08:00:00.000Z",
+      client_upload_id: "client-finished-elsewhere",
+      kind: "mockup", phase: "ready",
+    };
+    const requests: string[] = [];
+    let matches = false;
+    globalThis.fetch = (async (input, init) => {
+      requests.push(String(input));
+      if (init?.method === "PUT") {
+        const headers = new Headers(init.headers);
+        assert.equal(headers.get("x-upload-prefix-bytes"), String(file.size));
+        assert.equal(init.body, undefined);
+        if (!matches) return Response.json({ detail: "重选的文件内容不一致" }, { status: 409 });
+      }
+      return Response.json({ upload, prefix_verification: true });
+    }) as typeof fetch;
+    try {
+      await assert.rejects(uploadResumable(fd), /内容不一致/);
+      matches = true;
+      assert.equal((await uploadResumable(fd)).receipt, upload.id);
+      assert.equal(requests.length, 4);
+      assert.ok(requests.every((path) => !path.endsWith("/complete")));
     } finally {
       globalThis.fetch = original;
     }

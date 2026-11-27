@@ -9,6 +9,7 @@
 - Repository: `https://github.com/tyuanww/beian`（公开仓）。2026-10-10 起替代已封禁、不可访问的 `weiweity/beian`；`D:\beian` 的 `origin` 已指向新仓。历史 PR/run 链接保留在 TODOS 与 closeout 中作证据，但原仓已无法打开。迁移步骤见 [仓库迁移与 runner 重注册](../howto-repo-migration.md)。
 - Runner 前提：新仓的 Actions 必须已启用；runner 以 Windows 服务运行且服务账号必须是 **LocalSystem**（不是默认的 `NETWORK SERVICE`），否则 `release.ps1` 无法管理 WinSW、计划任务和 ACL 运行时目录。
 - Deploy workflow: `.github/workflows/hangzhou-release.yml`（仅 `push` `main`；从事件 SHA 下载发布组件到 `RUNNER_TEMP`，再以不可变 `TargetSha` 操作 `D:\beian`；PR 与可选择 ref 的 `workflow_dispatch` 禁止触达生产 runner）。
+- 取件代理由 Windows PowerShell 5.1 显式读取 runner 进程的 `HTTPS_PROXY`，用于访问 GitHub Contents API。使用匿名 `http://` 代理端点，目标连接仍用 HTTPS。变量未设置时沿用 PowerShell 默认网络路径。取件支持 `NO_PROXY` 的 `*`、`api.github.com`、`github.com`、`.github.com` 和 `*.github.com`，域名可带 `:443`。匹配时仅取件进程直连。无效代理配置在取件前失败，错误只显示配置要求。备案域名和回环继续按现有规则直连。见 [Windows README](../../scripts/windows/README.md#cd只在杭州本机)。
 - Deploy status command: 无平台 CLI。看 [hangzhou-release](https://github.com/tyuanww/beian/actions/workflows/hangzhou-release.yml) 是否绿。杭州环回才是杭州进程：`curl -sS http://127.0.0.1:8787/api/health`。公网 health 仅在 Named Tunnel 跑在杭州时有效。
 - Merge method: squash
 - Project type: web app（Hono `:8787`）

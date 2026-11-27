@@ -3,7 +3,7 @@ import { rewriteLegacyHits } from "./legacyCopy.js";
 import { withHitText } from "./hitText.js";
 import { runNativeText, verbatimMemoryFailure } from "./workers.js";
 import { createHash, randomBytes } from "node:crypto";
-import { closeSync, copyFileSync, existsSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { closeSync, copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, readSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { DATA_DIR, PACKAGING, PYTHON } from "./config.js";
 import { compareBookkeeping } from "./billing.js";
@@ -25,9 +25,11 @@ import {
   loadAllMockups,
   loadMockup,
   mockupJobDir,
+  mockupProjectCode,
   mockupRenderPlanBytes,
   mockupStoreSnapshot,
   prepareStructureConfirmation,
+  printFacesPublicationMarker,
   printFaceRepairSource,
   printFaceRepairActive,
   publicRenderMutation,
@@ -46,6 +48,7 @@ import {
   type RenderGenerationRequestRecord,
 } from "./mockup.js";
 import {
+  assertPng,
   G0_LEGACY_ORIGINAL_ID,
   RENDER_GENERATION_DIR,
   isRenderActorAccountId,
@@ -92,6 +95,7 @@ import { guardErrorFields, guardNotifyError } from "./pathRedact.js";
 import { rasterAiFile } from "./aiRaster.js";
 import { readIllustratorAgentStatus } from "./illustratorAgent.js";
 import {
+  PRINT_FACE_NAMES,
   UNFOLDED_BINARY_MAX_BYTES,
   UNFOLDED_MESSAGE,
   UNFOLDED_PRINT_NAME,
@@ -612,10 +616,9 @@ function finishPrintFaceRepair(id: string, requestId: string, error?: string): v
   } else saveMockup(job);
 }
 
-function publishPrintFaceRepair(job: MockupJob, assets: string): void {
-  const faces = ["front", "back", "left", "right", "top", "bottom"];
-  const required = faces.slice(0, 4);
-  const files = faces.filter(face => existsSync(join(assets, `panel_${face}.png`)));
+function publishStagedPrintFaces(job: MockupJob, assets: string): void {
+  const required = PRINT_FACE_NAMES.slice(0, 4);
+  const files = PRINT_FACE_NAMES.filter(face => existsSync(join(assets, `panel_${face}.png`)));
   if (required.some(face => !files.includes(face))) throw new Error("切面失败，请稍后再试。");
   for (const face of files) {
     const path = join(assets, `panel_${face}.png`);
@@ -675,7 +678,12 @@ async function executePrintFaceRepair(job: MockupJob, requestId: string): Promis
     if (!fresh || fresh.print_faces_request?.id !== requestId || fresh.print_faces_request.status !== "running") return;
     if (isGenerationManagedMockup(fresh) || structureConfirmationActive(job.id)
       || printFaceSourceHash(fresh) !== fresh.print_faces_request.source_sha256) throw new Error("底稿或版本已变化，请重新补印刷面。");
-    publishPrintFaceRepair(fresh, assets);
+    const marker = printFacesPublicationMarker(job.id);
+    if (existsSync(marker) && !PRINT_FACE_NAMES.every(face => existsSync(join(assets, `panel_${face}.png`)))) {
+      throw new Error("切面失败，请稍后再试。");
+    }
+    publishStagedPrintFaces(fresh, assets);
+    rmSync(marker, { force: true });
     finishPrintFaceRepair(job.id, requestId);
   } catch (error) {
     const reason = error instanceof Error ? error.message : "";
@@ -3497,6 +3505,72 @@ async function compressFreshMockupGlb(id: string, startedAt: string): Promise<vo
   }
 }
 
+function publishRenderedPrintFaces(job: MockupJob): MockupJob["files"] | undefined {
+  if (job.structure_engine !== "v2") return;
+  const root = mockupJobDir(job.id);
+  const assets = join(root, mockupProjectCode(job.id), "assets");
+  if (!existsSync(assets)) return;
+  assertPrintFacePath(job, assets);
+  const destination = join(root, "assets");
+  assertPrintFacePath(job, destination, true);
+  const staging = mkdtempSync(join(root, ".print-faces-"));
+  try {
+    let bytes = 0;
+    for (const face of PRINT_FACE_NAMES) {
+      const name = `panel_${face}.png`;
+      const source = join(assets, name);
+      const staged = join(staging, name);
+      assertPrintFacePath(job, source);
+      const stat = lstatSync(source);
+      bytes += stat.size;
+      if (!stat.isFile() || bytes > UNFOLDED_BINARY_MAX_BYTES) throw new Error("切面文件无效或超过六面下载大小上限。");
+      copyFileSync(source, staged);
+      assertPng(readFileSync(staged), face);
+    }
+    mkdirSync(destination, { recursive: true });
+    const files = PRINT_FACE_NAMES.map(face => {
+      const name = `panel_${face}.png`;
+      return { key: `read_${face}`, name, path: join(destination, name) };
+    });
+    replaceRenderedPrintFaces(job, staging, files);
+    return files;
+  } finally {
+    rmSync(staging, { recursive: true, force: true });
+  }
+}
+
+function replaceRenderedPrintFaces(job: MockupJob, staging: string, files: Array<{ name: string; path: string }>): void {
+  const originals = new Map<string, string>();
+  for (const file of files) {
+    assertPrintFacePath(job, file.path, true);
+    if (!existsSync(file.path)) continue;
+    if (!lstatSync(file.path).isFile()) throw new Error("已发布切面不是普通文件。");
+    const backup = join(staging, `previous-${file.name}`);
+    copyFileSync(file.path, backup);
+    originals.set(file.path, backup);
+  }
+  const marker = printFacesPublicationMarker(job.id);
+  assertPrintFacePath(job, marker, true);
+  const interrupted = existsSync(marker);
+  if (!interrupted) writeFileSync(marker, "", { flag: "wx" });
+  const published: string[] = [];
+  try {
+    for (const file of files) {
+      renameSync(join(staging, file.name), file.path);
+      published.push(file.path);
+    }
+    rmSync(marker);
+  } catch (error) {
+    for (const path of published.reverse()) {
+      const backup = originals.get(path);
+      if (backup) renameSync(backup, path);
+      else rmSync(path);
+    }
+    if (!interrupted) rmSync(marker, { force: true });
+    throw error;
+  }
+}
+
 function finishMockup(id: string, startedAt: string, result: RunPythonResult): void {
   const job = loadMockup(id);
   if (!job || job.job_started_at !== startedAt) {
@@ -3522,11 +3596,21 @@ function finishMockup(id: string, startedAt: string, result: RunPythonResult): v
     return;
   }
   const files = collectOutputs(outDir);
-  if (!files.length) {
+  if (!files.some(file => !file.key.startsWith("read_"))) {
     markMockupFailed(job, "打样没有输出文件");
     return;
   }
   job.files = files;
+  try {
+    const faces = publishRenderedPrintFaces(job);
+    if (faces) job.files = [...files.filter(file => !file.key.startsWith("read_")), ...faces];
+  } catch (error) {
+    console.warn(`mockup ${id}: problem=print_faces_publish cause=${error instanceof Error ? error.message : "unknown"} fix=核对任务根目录和六面产物`);
+    if (existsSync(printFacesPublicationMarker(id)) && !printFaceRepairSource(job)) {
+      markMockupFailed(job, "印刷面没有写完，请重试打样");
+      return;
+    }
+  }
   job.status = "done";
   job.job_status = "succeeded";
   job.job_error = undefined;

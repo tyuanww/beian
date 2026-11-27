@@ -37,7 +37,7 @@
 2. 在新仓 Settings → Actions → Runners → New self-hosted runner 取一次性注册令牌（只在杭州机使用，不贴到对话或仓库）。
 3. 在 runner 目录先注销旧注册（旧仓不可访问时 `config.cmd remove` 可能失败，删除旧的 `.runner`/`.credentials` 后重配即可），再执行 `config.cmd --url https://github.com/tyuanww/beian --token <令牌> --name hangzhou-windows --labels hangzhou --runasservice`。
 4. **改服务账号**：`--runasservice` 默认使用 `NETWORK SERVICE`。在 `services.msc` 中把 `actions.runner.*` 服务的登录身份改为“本地系统账户”（LocalSystem）并重启服务。`NETWORK SERVICE` 无法管理 WinSW 服务、计划任务和 `C:\supply\data\runtime\release` 的 ACL 目录，发版会失败。
-5. Clash 系统代理开启时，runner 不能走 `127.0.0.1:7897`，见 [Windows README](../scripts/windows/README.md) 的代理说明。
+5. 核对 runner 到 GitHub 的网络和备案域名的直连分流，见 [Windows README](../scripts/windows/README.md) 的代理说明。
 6. 在 GitHub Runners 页确认 `hangzhou-windows` 为 Idle、标签含 `hangzhou`。
 
 ### 4. 改 `D:\beian` 的 origin（杭州机）
@@ -61,5 +61,5 @@
 | 合 main 后没有 `hangzhou-release` run | 新仓 Actions 未启用，或 workflow 被禁用 | 启用 Actions；只对那条可信 push run 重跑 |
 | run 一直 Queued | runner 离线/注册在旧仓/标签不符 | 按第 3 步重注册，标签 `hangzhou` |
 | run 在发版脚本里报权限/服务控制错误 | runner 服务账号是 `NETWORK SERVICE` | 改为 LocalSystem 并重启 runner 服务 |
-| `Runner connect error` | runner 走了 Clash 代理 | 设 DIRECT 或关掉系统代理 |
+| `Runner connect error` | runner 无法连接 GitHub | 核对 runner 的代理配置和 GitHub 域名分流 |
 | 停服前因 ff-only 拒绝 | `D:\beian` origin 仍指旧仓或历史不连续 | 改 origin 并只读核对祖先关系 |

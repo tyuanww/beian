@@ -36,6 +36,7 @@ export type UploadSnapshot = {
   clientUploadId?: string;
   retryAttempt?: number;
   recoverable?: boolean;
+  verifyingReselectedFiles?: boolean;
   error?: string;
   createdAt: string;
 };
@@ -154,6 +155,7 @@ function storedSnapshot(kind: UploadKind, value: unknown): UploadSnapshot | null
     ...(typeof raw.uploadId === "string" ? { uploadId: raw.uploadId } : {}),
     clientUploadId: raw.clientUploadId,
     recoverable: ready ? false : recoverable,
+    verifyingReselectedFiles: !ready && raw.verifyingReselectedFiles === true,
     error: ready
       ? undefined
       : deterministicFailure
@@ -226,6 +228,10 @@ export function uploadPhaseLine(snapshot: UploadSnapshot, readyText: string): st
   if (snapshot.phase === "ready") return readyText;
   if (snapshot.phase === "failed") return snapshot.error || "上传失败，请重新上传。";
   return "等待选齐文件";
+}
+
+export function uploadAllowsReadyReceipt(snapshot: UploadSnapshot): boolean {
+  return !snapshot.verifyingReselectedFiles && !(snapshot.phase === "failed" && !snapshot.recoverable);
 }
 
 export function uploadIsBusy(snapshot: UploadSnapshot | null): boolean {
@@ -315,6 +321,7 @@ export function createUploadStore(
           uploadId: progress.uploadId || latest.uploadId,
           retryAttempt: progress.retryAttempt,
           recoverable: true,
+          verifyingReselectedFiles: phase !== "confirming" && latest.verifyingReselectedFiles,
           error: undefined,
         });
       },
@@ -344,6 +351,7 @@ export function createUploadStore(
           }),
           retryAttempt: undefined,
           recoverable: false,
+          verifyingReselectedFiles: false,
           error: undefined,
         });
       })
@@ -443,6 +451,7 @@ export function createUploadStore(
       clientUploadId,
       uploadId: resuming ? current?.uploadId : undefined,
       recoverable: resuming,
+      verifyingReselectedFiles: resuming,
       createdAt: new Date().toISOString(),
     };
 
@@ -496,6 +505,7 @@ export function createUploadStore(
     ) {
       return false;
     }
+    if (receipt.phase === "ready" && !uploadAllowsReadyReceipt(current)) return false;
     if (receipt.phase === "paused" && current.phase === "failed" && !current.recoverable) return false;
     if (receipt.phase === "paused" && uploadIsBusy(current)) return true;
     controllers[kind]?.abort();
@@ -566,6 +576,18 @@ export function createUploadStore(
     for (const kind of Object.keys(controllers) as UploadKind[]) {
       controllers[kind]?.abort();
       delete controllers[kind];
+      const current = state[kind];
+      if (!current || !uploadIsBusy(current)) continue;
+      publish(kind, {
+        ...current,
+        attempt: ++sequence,
+        phase: current.uploadId ? "paused" : "failed",
+        retryAttempt: undefined,
+        recoverable: true,
+        error: current.uploadId
+          ? "上传已暂停，服务器已保存收到的部分"
+          : "暂时无法确认服务器状态，正在按上传标识查找。",
+      });
     }
   }
 

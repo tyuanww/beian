@@ -129,6 +129,11 @@ const WRITE_SITES: WriteSite[] = [
   { file: "apps/web/server/src/jobs.ts", code: "copyFileSync(current.source_path || \"\", aiCopy);", glb: false },
   { file: "apps/web/server/src/jobs.ts", code: "writeFileSync(configPath, JSON.stringify({", glb: false },
   { file: "apps/web/server/src/jobs.ts", code: "writeFileSync(join(root, UNFOLDED_SOURCE_NAME), bytes);", glb: false },
+  { file: "apps/web/server/src/jobs.ts", code: "copyFileSync(source, staged);", glb: false }, // 固定六面 PNG 暂存
+  { file: "apps/web/server/src/jobs.ts", code: "copyFileSync(file.path, backup);", glb: false }, // 印刷面 PNG 备份
+  { file: "apps/web/server/src/jobs.ts", code: "if (!interrupted) writeFileSync(marker, \"\", { flag: \"wx\" });", glb: false }, // 印刷面发布标记
+  { file: "apps/web/server/src/jobs.ts", code: "renameSync(join(staging, file.name), file.path);", glb: false }, // 发布印刷面 PNG
+  { file: "apps/web/server/src/jobs.ts", code: "if (backup) renameSync(backup, path);", glb: false }, // 恢复原印刷面 PNG
   { file: "apps/web/server/src/mockup.ts", code: "copyFileSync(job.structure_artwork_preview_path, inputPreview);", glb: false },
   { file: "apps/web/server/src/mockupAtomicWrite.ts", code: "rename(tmp, target);", glb: false },
   { file: "apps/web/server/src/nativeTextJobs.ts", code: "copyFileSync(join(taskRoot(task), req.source_name), copy);", glb: false },
