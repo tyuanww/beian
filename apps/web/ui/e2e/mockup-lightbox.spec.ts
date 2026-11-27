@@ -3,8 +3,14 @@ import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { expect, test } from "./fixtures";
+import { mergeTests } from "@playwright/test";
+import { expect, test as syntheticTest } from "./fixtures";
+import { studioDownloadTest } from "./fixtures/nativeStudioFiles";
+import { pngFill } from "./fixtures/pngFixture";
+import { studioDownloadsFixture } from "./fixtures/studioDownloadsFixture";
+import type { MockupJob } from "../src/api";
 
+const test = mergeTests(syntheticTest, studioDownloadTest);
 let dist: string;
 test.beforeAll(() => {
   dist = mkdtempSync(join(tmpdir(), "beian-lightbox-e2e-"));
@@ -14,23 +20,28 @@ test.beforeAll(() => {
 });
 test.afterAll(() => { if (dist) rmSync(dist, { recursive: true }); });
 
-test("旧单加载中打开原图，图片就绪后灯箱自动绘制", async ({ page, syntheticApi }) => {
-  // Exercise the built React app with every request intercepted; no Hono or
-  // production data, and no HTTP server is needed for this regression.
+test("旧单加载中可从灯箱下载，图片就绪后灯箱自动绘制", async ({ page, syntheticApi, studioFiles }) => {
+  // Intercept app and API requests. Serve only the synthetic attachment over loopback.
   const assets = new Map<string, Buffer>([["/mockup/aaaaaaaaaaaa", readFileSync(join(dist, "index.html"))]]);
   for (const name of readdirSync(join(dist, "assets"))) {
     assets.set(`/assets/${name}`, readFileSync(join(dist, "assets", name)));
   }
-  syntheticApi.mockups.push({
-    id: "aaaaaaaaaaaa", title: "SYNTHETIC legacy lightbox", status: "done",
+  const generation = "2026-09-06T10:00:00Z";
+  const job = {
+    id: "aaaaaaaaaaaa", title: "SYNTHETIC legacy lightbox", status: "done", job_finished_at: generation,
     files: [{ key: "white_a", name: "front.png" }, { key: "white_b", name: "back.png" }],
-  });
+  } satisfies MockupJob;
+  syntheticApi.mockups.push(job);
+  const png = pngFill(40, 50, [255, 0, 0, 255]);
+  const studio = studioDownloadsFixture({ jobId: job.id, files: studioFiles, png: () => png, filename: () => "front.png" });
   let release!: () => void;
   const gate = new Promise<void>((resolve) => { release = resolve; });
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
   await page.route("**/*", async (route) => {
-    const path = new URL(route.request().url()).pathname;
+    const url = new URL(route.request().url());
+    const path = url.pathname;
+    if (studio.matches(path)) return studio.handle(route);
     if (/\/files\/white_[ab]$/.test(path)) {
       await gate;
       return route.fulfill({ contentType: "image/svg+xml", body:
@@ -45,9 +56,21 @@ test("旧单加载中打开原图，图片就绪后灯箱自动绘制", async ({
   try {
     await page.goto("/mockup/aaaaaaaaaaaa", { waitUntil: "domcontentloaded" });
     await page.getByRole("button", { name: "打开正面 + 侧面原图", exact: true }).click();
-    await expect(page.getByRole("dialog")).toBeVisible();
+    const dialog = page.getByRole("dialog");
+    await expect(dialog).toBeVisible();
+    await dialog.getByRole("slider", { name: "产品灯光" }).fill("1.2");
+    await dialog.getByRole("slider", { name: "背景灯光" }).fill("0.8");
+    const download = page.waitForEvent("download");
+    await dialog.getByRole("button", { name: "下载", exact: true }).click();
+    const saved = await download;
+    expect(saved.suggestedFilename()).toBe("front.png");
+    expect(readFileSync((await saved.path())!)).toEqual(png);
+    expect(studio.requests).toEqual([
+      { file_key: "white_a", generation, backdrop: "white_set", layer: "none", product_light: 1.2, background_light: 0.8 },
+    ]);
+    expect(studio.fileRequests).toEqual([new URL(saved.url()).pathname]);
     release();
-    const canvas = page.getByRole("dialog").locator("canvas");
+    const canvas = dialog.locator("canvas");
     await expect(canvas).toHaveAttribute("width", "40");
     await expect(canvas).toHaveAttribute("height", "50");
     expect(await canvas.evaluate((node: HTMLCanvasElement) =>

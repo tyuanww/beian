@@ -24,22 +24,29 @@ import { structureIssueCopy, structureStatusLabel } from "./mockupStructure";
 import { liveJobLine, mockupBoardProgress, shouldShowWaitCard } from "./waitCard";
 import { stemFromFilename } from "./stemName";
 import {
-  HUD_MS, FULL_UPGRADE_NOTICE, STUDIO_DOWNLOAD_PREPARING, STUDIO_DOWNLOAD_FAILED,
+  HUD_MS, FULL_UPGRADE_NOTICE, STUDIO_DOWNLOAD_PREPARING,
   allowFullUpgradeNotice, downloadHudLine, missingPptHud,
 } from "./mockupHud";
+import {
+  StudioStillDownloadHistory, StudioStillDownloadStatus, studioStillDownloadFor,
+  useStudioStillDownloads, type StudioStillDownloads,
+} from "./StudioStillDownloadStatus";
+import {
+  studioDownloadLayer,
+  studioDownloadFor,
+  type PaintedStudioBackground,
+  type StudioShotKey,
+} from "./mockupStillDownload";
 import { panBy, resetZoom, zoomAt, zoomCss, type ZoomState } from "./canvasZoom";
 import { listedReadFaces, READ_FACE_LABEL, readFaceKey } from "./mockupReadFaces";
 import {
   BACKDROP_LABEL,
   BACKDROP_PRESETS,
   backdropFrameClass,
-  blobFromLitStill,
-  blobFromStudioStill,
   canvasFilterSupported,
   clampStudioLight,
   applyStudioPreviewDataset,
   composeStudioStill,
-  loadStudioExport,
   loadStudioPreview,
   observeStudioFrame,
   studioAssetHref,
@@ -135,7 +142,13 @@ function fileHref(jobId: string, key: string, download = false, generation = "")
   return studioAssetHref(jobId, key, generation, download);
 }
 
+function compactStudioCardHref(jobId: string, key: string, generation: string) {
+  const href = fileHref(jobId, key, false, generation);
+  return `${href}${href.includes("?") ? "&" : "?"}compact=1`;
+}
+
 export function MockupDesk({
+  studioActor,
   openId,
   composing,
   receiptId,
@@ -147,6 +160,7 @@ export function MockupDesk({
   onCompose,
   onResumeReceipt,
 }: {
+  studioActor: string;
   openId?: string | null;
   composing?: boolean;
   receiptId?: string | null;
@@ -169,6 +183,7 @@ export function MockupDesk({
       <MockupJobPage
         key={openId}
         jobId={openId}
+        studioActor={studioActor}
         canCreate={canCreate}
         canConfirmStructure={canConfirmStructure}
         canAdmin={canAdmin}
@@ -761,8 +776,6 @@ export function MockupNewPage({
   );
 }
 
-type StudioShotKey = "white_a" | "white_b";
-
 type StudioPreviewVisit = {
   identity: string;
   id: number;
@@ -798,18 +811,16 @@ function useStudioFirstPaint(identity: string, front: boolean, back: boolean) {
 
 export function MockupJobPage({
   jobId,
+  studioActor,
   canCreate,
   canConfirmStructure,
   canAdmin = false,
   onBack,
-}: JobProps & { canCreate: boolean; canConfirmStructure: boolean; canAdmin?: boolean }) {
+}: JobProps & { studioActor: string; canCreate: boolean; canConfirmStructure: boolean; canAdmin?: boolean }) {
   const { message } = App.useApp();
   const [job, setJob] = useState<MockupJob | null>(() => mockupHandoffFor(jobId));
   const [error, setError] = useState<string | null>(null);
   const [hud, setHud] = useState("");
-  const [pendingStudioExports, setPendingStudioExports] = useState(0);
-  const displayedHud = pendingStudioExports > 0 && (!hud || hud === FULL_UPGRADE_NOTICE)
-    ? STUDIO_DOWNLOAD_PREPARING : hud;
   const [glbFs, setGlbFs] = useState(false);
   const [productLight, setProductLight] = useState(STUDIO_LIGHT_DEFAULT);
   const [backgroundLight, setBackgroundLight] = useState(STUDIO_LIGHT_DEFAULT);
@@ -830,9 +841,12 @@ export function MockupJobPage({
   const waiting = Boolean(job) && shouldShowWaitCard(job);
   const repairPending = job?.print_faces_repair?.status === "queued" || job?.print_faces_repair?.status === "running";
   const unfoldedPending = job?.unfolded_print?.status === "queued" || job?.unfolded_print?.status === "running";
-  const generation=job?.current_render_generation_id || job?.studio_relit_at || job?.job_finished_at || "";
+  const generation=job?.current_render_generation_id || job?.studio_relit_at || job?.job_finished_at || job?.created_at || "";
   const whiteA = job?.files?.find((file) => file.key === "white_a");
   const whiteB = job?.files?.find((file) => file.key === "white_b");
+  const downloads = useStudioStillDownloads(jobId, studioActor, job?.id === jobId && job.status === "done");
+  const showStudioHud = downloads.preparing && (!hud || hud === FULL_UPGRADE_NOTICE);
+  const displayedHud = showStudioHud ? STUDIO_DOWNLOAD_PREPARING : hud;
   const groundA = job?.files?.find((file) => file.key === "white_a_ground");
   const groundB = job?.files?.find((file) => file.key === "white_b_ground");
   const { afterFirstPreview, markSettled } = useStudioFirstPaint(
@@ -862,20 +876,9 @@ export function MockupJobPage({
       if (!allowFullUpgradeNotice(fullUpgradeHud.current, generation)) return;
       fullUpgradeHud.current = generation;
     }
-    setHud((current) => current === STUDIO_DOWNLOAD_FAILED && text === FULL_UPGRADE_NOTICE ? current : text);
+    setHud(text);
     if (hudTimer.current != null) window.clearTimeout(hudTimer.current);
     hudTimer.current = window.setTimeout(() => setHud(""), HUD_MS);
-  }
-
-  function startStudioExport() {
-    setPendingStudioExports((count) => count + 1);
-    notice("");
-  }
-
-  function finishStudioExport(result: "saved" | "failed") {
-    if (!alive.current) return;
-    setPendingStudioExports((count) => count - 1);
-    notice(result === "saved" ? downloadHudLine("成片") : STUDIO_DOWNLOAD_FAILED);
   }
 
   async function retry() {
@@ -1218,7 +1221,7 @@ export function MockupJobPage({
       {!boundAssetsReady ? <p className="page-lead" role="status">正在确认当前版本资源。</p> : <div key={`${job.id}:${generation}`} data-render-generation={generation} className={grounded ? "mockup-sheet-photos is-grounded" : "mockup-sheet-photos"}>
         {groundA && whiteA ? (
           <GroundedShot
-            afterFirstPreview={afterFirstPreview}
+            afterFirstPreview={afterFirstPreview && !downloads.preparing}
             onInitialPreview={markSettled}
             generation={generation}
             onSourceError={refreshSource}
@@ -1228,33 +1231,30 @@ export function MockupJobPage({
             groundKey="white_a_ground"
             alt="正面与侧面成片"
             caption="正面 + 侧面"
-            downloadName={whiteA.name}
+            downloads={downloads}
             productLight={productLight}
             backgroundLight={backgroundLight}
             backdrop={backdrop}
             onProductLight={setProductLight}
             onBackgroundLight={setBackgroundLight}
-            onExportStart={startStudioExport}
-            onExportFinish={finishStudioExport}
             onNotice={notice}
           />
         ) : whiteA ? (
           <WhiteShot
             key={`${job.id}:${generation}:white_a`}
-            fullTransfer={grounded ? { start: startStudioExport, finish: finishStudioExport } : undefined}
+            queueFull={grounded}
             generation={generation}
             onSourceError={grounded ? () => refreshSource({ quiet: true }) : refreshSource}
             jobId={job.id}
             fileKey="white_a"
             alt="正面与侧面白底"
             caption="正面 + 侧面"
-            downloadName={whiteA.name}
+            downloads={downloads}
             productLight={productLight}
             backgroundLight={backgroundLight}
             backdrop={backdrop}
             onProductLight={setProductLight}
             onBackgroundLight={setBackgroundLight}
-            onDownload={() => notice(downloadHudLine("白底"))}
           />
         ) : (
           <figure className="mockup-sheet-photo">
@@ -1269,7 +1269,7 @@ export function MockupJobPage({
         )}
         {groundB && whiteB ? (
           <GroundedShot
-            afterFirstPreview={afterFirstPreview}
+            afterFirstPreview={afterFirstPreview && !downloads.preparing}
             onInitialPreview={markSettled}
             generation={generation}
             onSourceError={refreshSource}
@@ -1279,33 +1279,30 @@ export function MockupJobPage({
             groundKey="white_b_ground"
             alt="反面与侧面成片"
             caption="反面 + 侧面"
-            downloadName={whiteB.name}
+            downloads={downloads}
             productLight={productLight}
             backgroundLight={backgroundLight}
             backdrop={backdrop}
             onProductLight={setProductLight}
             onBackgroundLight={setBackgroundLight}
-            onExportStart={startStudioExport}
-            onExportFinish={finishStudioExport}
             onNotice={notice}
           />
         ) : whiteB ? (
           <WhiteShot
             key={`${job.id}:${generation}:white_b`}
-            fullTransfer={grounded ? { start: startStudioExport, finish: finishStudioExport } : undefined}
+            queueFull={grounded}
             generation={generation}
             onSourceError={grounded ? () => refreshSource({ quiet: true }) : refreshSource}
             jobId={job.id}
             fileKey="white_b"
             alt="反面与侧面白底"
             caption="反面 + 侧面"
-            downloadName={whiteB.name}
+            downloads={downloads}
             productLight={productLight}
             backgroundLight={backgroundLight}
             backdrop={backdrop}
             onProductLight={setProductLight}
             onBackgroundLight={setBackgroundLight}
-            onDownload={() => notice(downloadHudLine("白底"))}
           />
         ) : (
           <figure className="mockup-sheet-photo">
@@ -1321,6 +1318,7 @@ export function MockupJobPage({
         {hasGlb ? (
           <GlbShot
             afterFirstPreview={afterFirstPreview}
+            deferLoad={downloads.preparing}
             jobId={job.id}
             files={job.files}
             generation={generation}
@@ -1341,6 +1339,10 @@ export function MockupJobPage({
           </figure>
         )}
       </div>}
+      <StudioStillDownloadHistory downloads={downloads} visible={[
+        whiteA && boundAssetsReady ? studioDownloadFor(downloads.entries, { generation, fileKey: "white_a", backdrop, productLight, backgroundLight }) : undefined,
+        whiteB && boundAssetsReady ? studioDownloadFor(downloads.entries, { generation, fileKey: "white_b", backdrop, productLight, backgroundLight }) : undefined,
+      ]} />
       <section className="mockup-read-faces" aria-label="印刷面">
         <div className="batch-section-head">
           <div>
@@ -1370,7 +1372,7 @@ export function MockupJobPage({
       {typeof document !== "undefined"
         ? createPortal(
             <div role="status" aria-live="polite" aria-atomic="true">
-              {displayedHud && <p className="mockup-hud">{displayedHud}</p>}
+              {displayedHud && <p className="mockup-hud" aria-hidden={showStudioHud || undefined}>{displayedHud}</p>}
             </div>,
             document.body,
           )
@@ -1565,6 +1567,7 @@ function ReadFaceShot({
 
 function GlbShot({
   afterFirstPreview,
+  deferLoad,
   jobId,
   files,
   generation,
@@ -1577,6 +1580,7 @@ function GlbShot({
   onNotice,
 }: {
   afterFirstPreview: boolean;
+  deferLoad: boolean;
   jobId: string;
   files?: Array<{ key: string } & GlbTextureInfo & GlbVersionInfo>;
   generation:string;
@@ -1592,6 +1596,13 @@ function GlbShot({
   const posterKey = glbPosterKey(files, backdrop);
   const glbVersionInfo = glbVersions(files);
   const glbUrls = glbSourceUrls(fileHref(jobId, "glb", false, generation), glbVersionInfo);
+  const [showPoster, setShowPoster] = useState(false);
+  useEffect(() => {
+    if (afterFirstPreview && !deferLoad) setShowPoster(true);
+  }, [afterFirstPreview, deferLoad]);
+  const poster = showPoster && posterKey
+    ? posterKey.endsWith("_card") ? compactStudioCardHref(jobId, posterKey, generation) : fileHref(jobId, posterKey, false, generation)
+    : undefined;
   return (
     <figure className="mockup-sheet-photo">
       <div
@@ -1601,10 +1612,11 @@ function GlbShot({
       >
         <MockupGlbViewer
           allowLoad={afterFirstPreview}
+          deferLoad={deferLoad}
           source={glbUrls.primary}
           originalSource={glbUrls.original}
           versions={glbVersionInfo}
-          poster={afterFirstPreview && posterKey ? fileHref(jobId, posterKey, false, generation) : undefined}
+          poster={poster}
           textureFormat={glbTextureFormat(files)}
           backdrop={backdrop}
           backgroundLight={backgroundLight}
@@ -1664,14 +1676,12 @@ function GroundedShot({
   groundKey,
   alt,
   caption,
-  downloadName,
+  downloads,
   productLight,
   backgroundLight,
   backdrop,
   onProductLight,
   onBackgroundLight,
-  onExportStart,
-  onExportFinish,
   onNotice,
   lazy,
 }: {
@@ -1685,14 +1695,12 @@ function GroundedShot({
   groundKey: "white_a_ground" | "white_b_ground";
   alt: string;
   caption: string;
-  downloadName?: string;
+  downloads: StudioStillDownloads;
   productLight: number;
   backgroundLight: number;
   backdrop: BackdropPreset;
   onProductLight: (value: number) => void;
   onBackgroundLight: (value: number) => void;
-  onExportStart: () => void;
-  onExportFinish: (result: "saved" | "failed") => void;
   onNotice: (text: string) => void;
   lazy?: boolean;
 }) {
@@ -1706,9 +1714,9 @@ function GroundedShot({
   const previewRef = useRef<StudioPreviewSources | null>(null);
   const loaderRef = useRef<ReturnType<typeof loadStudioPreview> | null>(null);
   const settledRef = useRef<string>();
-  const drawnSetRef = useRef<PreviewSource | null>(null);
-  const lightboxDrawnSetRef = useRef<PreviewSource | null>(null);
-  const exporting = useRef(new Set<BackdropPreset>());
+  const paintedBackground = useRef<PaintedStudioBackground | null>(null);
+  const lightboxBackground = useRef<PaintedStudioBackground | null>(null);
+  const download = studioStillDownloadFor(downloads, { generation, fileKey, backdrop, productLight, backgroundLight });
   const noticedUpgrade = useRef("");
   const sourceIdentity = `${jobId}:${generation}:${fileKey}:${groundKey}:${(files || []).map((file) => file.key).sort().join(",")}`;
 
@@ -1723,7 +1731,7 @@ function GroundedShot({
     setOriginalOpen(false);
     setReady(0);
     previewRef.current = null;
-    drawnSetRef.current = null;
+    paintedBackground.current = null;
     noticedUpgrade.current = "";
     if (canvasRef.current) {
       releaseCanvasBacking(canvasRef.current);
@@ -1754,7 +1762,7 @@ function GroundedShot({
     if (!visible) return;
     const urls = (key: "white_a" | "white_b" | "white_a_ground" | "white_b_ground" | "white_a_set" | "white_b_set") => ({
       full: fileHref(jobId, key, false, generation),
-      card: jobHasReviewCard(files, key) ? fileHref(jobId, reviewCardKey(key), false, generation) : undefined,
+      card: jobHasReviewCard(files, key) ? compactStudioCardHref(jobId, reviewCardKey(key), generation) : undefined,
     });
     const loader = loadStudioPreview({
       product: urls(fileKey), ground: urls(groundKey),
@@ -1797,7 +1805,7 @@ function GroundedShot({
       set: sources.set,
       filterSupported: canvasFilterSupported(ctx),
     });
-    drawnSetRef.current = sources.set;
+    paintedBackground.current = { backdrop, layer: sources.set ? "set" : sources.ground ? "ground" : "none" };
     applyStudioPreviewDataset(canvas, sources.facts, backdrop, sources.set);
     markInitialPreview();
     if (typeof window !== "undefined" && (window as Window & { __RF09_PERF__?: boolean }).__RF09_PERF__
@@ -1809,7 +1817,13 @@ function GroundedShot({
       noticedUpgrade.current = sourceIdentity;
       onNotice(FULL_UPGRADE_NOTICE);
     }
-    } catch { ctx.clearRect(0, 0, canvas.width, canvas.height); applyStudioPreviewDataset(canvas, null, backdrop, null); setBad(true); markInitialPreview(); }
+    } catch {
+      paintedBackground.current = null;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      applyStudioPreviewDataset(canvas, null, backdrop, null);
+      setBad(true);
+      markInitialPreview();
+    }
   }, [visible, bad, ready, frameSize, productLight, backgroundLight, backdrop]);
 
   useEffect(() => {
@@ -1820,36 +1834,6 @@ function GroundedShot({
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [originalOpen]);
-
-  async function saveLit(drawnSet: PreviewSource | null) {
-    if (!ready || exporting.current.has(backdrop)) return;
-    exporting.current.add(backdrop);
-    onExportStart();
-    try {
-      const { product, ground, set } = await loadStudioExport(backdrop, drawnSet, {
-        product: fileHref(jobId, fileKey, false, generation),
-        ground: fileHref(jobId, groundKey, false, generation),
-        set: fileHref(jobId, stillSetKey(fileKey), false, generation),
-      });
-      const blob = await blobFromStudioStill(product, ground, {
-        productLight,
-        backgroundLight,
-        backdrop,
-        set,
-      });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = downloadName || `${caption}.png`;
-      link.click();
-      URL.revokeObjectURL(url);
-      onExportFinish("saved");
-    } catch {
-      onExportFinish("failed");
-    } finally {
-      exporting.current.delete(backdrop);
-    }
-  }
 
   return (
     <figure className="mockup-sheet-photo">
@@ -1870,7 +1854,7 @@ function GroundedShot({
               className="mockup-dl mockup-dl-fs"
               aria-label={`打开${caption}原图`}
               onClick={() => {
-                lightboxDrawnSetRef.current = drawnSetRef.current;
+                lightboxBackground.current = null;
                 setOriginalOpen(true);
               }}
             >
@@ -1880,15 +1864,18 @@ function GroundedShot({
               type="button"
               className="mockup-dl mockup-dl-corner"
               aria-label={`下载${caption}`}
-              disabled={!ready}
-              onClick={() => void saveLit(drawnSetRef.current)}
+              aria-disabled={download.active || undefined}
+              onClick={() => download.start(studioDownloadLayer(backdrop, paintedBackground.current))}
             >
               下载
             </button>
           </>
         )}
       </div>
-      <figcaption className="mockup-sheet-cap">{caption}</figcaption>
+      <figcaption className="mockup-sheet-cap">
+        {caption}
+        <StudioStillDownloadStatus caption={caption} state={download.state} onRetry={downloads.start} muted={originalOpen && !bad} />
+      </figcaption>
       {originalOpen && !bad
         ? createPortal(
             <div
@@ -1913,7 +1900,7 @@ function GroundedShot({
                     productLight={productLight}
                     backgroundLight={backgroundLight}
                     backdrop={backdrop}
-                    drawnSetOut={lightboxDrawnSetRef}
+                    paintedBackground={lightboxBackground}
                     placeholder={previewRef.current ? { product: previewRef.current.product, ground: previewRef.current.ground, set: previewRef.current.set } : null}
                   />
                 </div>
@@ -1923,8 +1910,14 @@ function GroundedShot({
                   onProductLight={onProductLight}
                   onBackgroundLight={onBackgroundLight}
                 />
+                <StudioStillDownloadStatus caption={caption} state={download.state} onRetry={downloads.start} />
                 <div className="mockup-still-lightbox-actions">
-                  <button type="button" className="mockup-dl" disabled={!ready} onClick={() => void saveLit(lightboxDrawnSetRef.current)}>
+                  <button
+                    type="button"
+                    className="mockup-dl"
+                    aria-disabled={download.active || undefined}
+                    onClick={() => download.start(studioDownloadLayer(backdrop, lightboxBackground.current))}
+                  >
                     下载
                   </button>
                   <button type="button" className="mockup-dl" onClick={() => setOriginalOpen(false)}>
@@ -1951,7 +1944,7 @@ function GroundedLightboxStill({
   backgroundLight,
   backdrop,
   placeholder,
-  drawnSetOut,
+  paintedBackground,
 }: {
   generation: string;
   jobId: string;
@@ -1963,7 +1956,7 @@ function GroundedLightboxStill({
   backgroundLight: number;
   backdrop: BackdropPreset;
   placeholder?: { product: PreviewSource; ground: PreviewSource | null; set: PreviewSource | null } | null;
-  drawnSetOut: { current: PreviewSource | null };
+  paintedBackground: { current: PaintedStudioBackground | null };
 }) {
   const [canvasRef, setCanvasRef] = useReleasedCanvasRef();
   const sourcesRef = useRef<{ product: PreviewSource; ground: PreviewSource | null; set: PreviewSource | null } | null>(
@@ -2031,9 +2024,13 @@ function GroundedLightboxStill({
       set: sources.set,
       filterSupported: canvasFilterSupported(ctx),
     });
-    drawnSetOut.current = sources.set;
+    paintedBackground.current = { backdrop, layer: sources.set ? "set" : sources.ground ? "ground" : "none" };
     setPaintError(false);
-    } catch { ctx.clearRect(0, 0, canvas.width, canvas.height); setPaintError(true); }
+    } catch {
+      paintedBackground.current = null;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      setPaintError(true);
+    }
   }, [loaded, productLight, backgroundLight, backdrop, jobId, generation]);
   return <>{paintError ? <p className="page-lead">调灯失败，请重新加载图片。</p> : null}<canvas ref={setCanvasRef} className="mockup-studio-lightbox-canvas" aria-label={alt} /></>;
 }
@@ -2086,43 +2083,40 @@ function StudioLightSliders({
 }
 
 function WhiteShot({
-  fullTransfer,
+  queueFull,
   generation,
   onSourceError,
   jobId,
   fileKey,
   alt,
   caption,
-  downloadName,
+  downloads,
   productLight,
   backgroundLight,
   backdrop,
   onProductLight,
   onBackgroundLight,
-  onDownload,
 }: {
-  fullTransfer?: { start: () => void; finish: (result: "saved" | "failed") => void };
+  queueFull: boolean;
   generation: string;
   onSourceError:()=>void;
   jobId: string;
   fileKey: "white_a" | "white_b";
   alt: string;
   caption: string;
-  downloadName?: string;
+  downloads: StudioStillDownloads;
   productLight: number;
   backgroundLight: number;
   backdrop: BackdropPreset;
   onProductLight: (value: number) => void;
   onBackgroundLight: (value: number) => void;
-  onDownload: () => void;
 }) {
   const [bad, setBad] = useState(false);
   const [originalOpen, setOriginalOpen] = useState(false);
   const [image, setImage] = useState<HTMLImageElement | null>(null);
-  const exporting = useRef(new Set<BackdropPreset>());
+  const download = studioStillDownloadFor(downloads, { generation, fileKey, backdrop, productLight, backgroundLight });
   const fill = studioBackdrop(backgroundLight, backdrop);
   const sourceUrl = fileHref(jobId, fileKey, false, generation);
-  const queueFull = Boolean(fullTransfer);
 
   useEffect(() => {
     if (!queueFull || image || bad) return;
@@ -2149,38 +2143,11 @@ function WhiteShot({
     return () => document.removeEventListener("keydown", onKey);
   }, [originalOpen]);
 
-  async function saveLit() {
-    const exportKey = fullTransfer ? backdrop : "white";
-    if ((!image && !fullTransfer) || exporting.current.has(exportKey)) return;
-    exporting.current.add(exportKey);
-    fullTransfer?.start();
-    try {
-      const source = image ?? await loadStillImage(sourceUrl, { urgency: "download" });
-      if (!image) {
-        setImage(source);
-        setBad(false);
-      }
-      const blob = await blobFromLitStill(source, { productLight, backgroundLight, backdrop });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = downloadName || `${caption}.png`;
-      link.click();
-      URL.revokeObjectURL(url);
-      if (fullTransfer) fullTransfer.finish("saved");
-      else onDownload();
-    } catch {
-      fullTransfer?.finish("failed");
-    } finally {
-      exporting.current.delete(exportKey);
-    }
-  }
-
   return (
     <figure className="mockup-sheet-photo">
       <div className={`mockup-sheet-frame ${backdropFrameClass(backdrop)}`} style={{ background: fill }}>
         {bad ? (
-          <p className="page-lead">{fullTransfer ? "这张预览图暂时无法显示。" : "这张预览图无法显示，请重新生成。"}</p>
+          <p className="page-lead">{queueFull ? "这张预览图暂时无法显示。" : "这张预览图无法显示，请重新生成。"}</p>
         ) : (
           <>
           {queueFull ? null : <img
@@ -2203,18 +2170,22 @@ function WhiteShot({
             原图
           </button>
         )}
-        {!bad || fullTransfer ? (
+        {!bad || queueFull ? (
           <button
             type="button"
             className="mockup-dl mockup-dl-corner"
             aria-label={`下载${caption}`}
-            onClick={() => void saveLit()}
+            aria-disabled={download.active || undefined}
+            onClick={() => download.start("none")}
           >
             下载
           </button>
         ) : null}
       </div>
-      <figcaption className="mockup-sheet-cap">{caption}</figcaption>
+      <figcaption className="mockup-sheet-cap">
+        {caption}
+        <StudioStillDownloadStatus caption={caption} state={download.state} onRetry={downloads.start} muted={originalOpen && !bad} />
+      </figcaption>
       {originalOpen && !bad
         ? createPortal(
             <div
@@ -2237,8 +2208,14 @@ function WhiteShot({
                   onProductLight={onProductLight}
                   onBackgroundLight={onBackgroundLight}
                 />
+                <StudioStillDownloadStatus caption={caption} state={download.state} onRetry={downloads.start} />
                 <div className="mockup-still-lightbox-actions">
-                  <button type="button" className="mockup-dl" onClick={() => void saveLit()}>
+                  <button
+                    type="button"
+                    className="mockup-dl"
+                    aria-disabled={download.active || undefined}
+                    onClick={() => download.start("none")}
+                  >
                     下载
                   </button>
                   <button type="button" className="mockup-dl" onClick={() => setOriginalOpen(false)}>

@@ -762,6 +762,11 @@ async function installSyntheticApi(page: Page, state: SyntheticApi) {
         const mockup = state.mockups.find((item) => item.id === mockupPath[1]);
         return mockup ? json(route, mockup) : json(route, { detail: "合成打样不存在" }, 404);
       }
+      const studioDownloadsPath = path.match(/^\/api\/mockups\/([0-9a-f]{12})\/studio-downloads$/);
+      if (studioDownloadsPath && method === "GET") {
+        const exists = state.mockups.some((item) => item.id === studioDownloadsPath[1]);
+        return exists ? json(route, { items: [] }) : json(route, { detail: "合成打样不存在" }, 404);
+      }
       if (method === "GET" && path === "/api/mockups") return json(route, state.mockups);
 
       state.unhandled.push(`${method} ${path}`);

@@ -1,8 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
-  blobFromLitStill, blobFromStudioStill,
-  loadStudioExport, loadStudioPreview, loadStillImage, observeStudioFrame,
+  loadStudioPreview, loadStillImage, observeStudioFrame,
   prepareStudioCanvas, releaseCanvasBacking, releaseStudioGeneration, setCanvasBacking, studioAssetHref,
   studioDrawnUpgradeFailed, studioPreviewSummary, studioStillCacheHas, studioStillCacheSize,
   type StudioPreviewSources,
@@ -333,6 +332,29 @@ test("late set after cancel does not publish or start a new full", async () => {
   assert.deepEqual(fulls, ["p"]);
 });
 
+test("pausing automatic upgrades keeps the card and resumes when download work finishes", async () => {
+  const frames: StudioPreviewSources[] = [];
+  const fulls: Array<(value: HTMLImageElement) => void> = [];
+  const preview = loadStudioPreview(urls, (frame) => frames.push(frame), assert.fail,
+    () => new Promise<HTMLImageElement>(resolve => fulls.push(resolve)),
+    async (url) => image(url));
+
+  preview.show("white", true);
+  await tick();
+  assert.equal(fulls.length, 1);
+  preview.show("white", false);
+  fulls[0](image("old-full"));
+  await tick();
+  assert.equal(frames.at(-1)?.product.src, "pc");
+
+  preview.show("white", true);
+  assert.equal(fulls.length, 2);
+  fulls[1](image("p"));
+  await tick();
+  assert.equal(frames.at(-1)?.product.src, "p");
+  preview.cancel();
+});
+
 test("cancel then late card failure does not start full or refill stillLoads", async () => {
   const original = Object.getOwnPropertyDescriptor(globalThis, "Image");
   const cards: Array<{ reject: (error: Error) => void }> = [];
@@ -413,38 +435,6 @@ test("failed full is requested again on a new preview of the same identity", asy
   assert.deepEqual(fulls, ["p", "s", "p", "s"]);
 });
 
-test("export waits for the shown set without requesting unused ground", async () => {
-  const requested: string[] = [];
-  let releaseSet!: (value: HTMLImageElement) => void;
-  const setFull = new Promise<HTMLImageElement>((resolve) => { releaseSet = resolve; });
-  const product = image("product-full");
-  const set = image("set-full");
-  let ready = false;
-  const pending = loadStudioExport("white_set", image("set-card"), { product: "p", ground: "g", set: "s" }, (url) => {
-    requested.push(url);
-    return url === "s" ? setFull : Promise.resolve(product);
-  }).then((data) => {
-    ready = true;
-    return data;
-  });
-  await tick();
-  assert.equal(ready, false);
-  assert.deepEqual(requested, ["p", "s"]);
-  releaseSet(set);
-  assert.deepEqual(await pending, { product, ground: null, set });
-});
-
-test("a required export input fails without waiting for the other input", async () => {
-  let rejectSet!: (error: Error) => void;
-  const setFull = new Promise<HTMLImageElement>((_, reject) => { rejectSet = reject; });
-  const pending = loadStudioExport("white_set", image("set-card"), { product: "p", ground: "g", set: "s" }, (url) => (
-    url === "s" ? setFull : Promise.reject(new Error("product missing"))
-  ));
-  await assert.rejects(pending, /product missing/);
-  rejectSet(new Error("late set failure"));
-  await tick();
-});
-
 test("setCanvasBacking skips identical sizes; releaseCanvasBacking zeros the backing store", () => {
   const writes: string[] = [];
   const box = { w: 10, h: 20 };
@@ -507,94 +497,6 @@ test("prepareStudioCanvas clears same-size redraws and releases when context is 
   assert.equal(empty.height, 0);
 });
 
-test("blobFromStudioStill and blobFromLitStill zero the export canvas after toBlob", async () => {
-  const atEncode: Array<{ width: number; height: number }> = [];
-  const created: Array<{ width: number; height: number }> = [];
-  const originalDocument = Object.getOwnPropertyDescriptor(globalThis, "document");
-  const fake = {
-    createElement(tag: string) {
-      assert.equal(tag, "canvas");
-      const canvas = {
-        width: 0,
-        height: 0,
-        dataset: {} as Record<string, string>,
-        getContext() {
-          return {
-            canvas,
-            filter: undefined,
-            save() {},
-            restore() {},
-            fillRect() {},
-            drawImage() {},
-            getImageData() { return { data: new Uint8ClampedArray(4) }; },
-          };
-        },
-        toBlob(cb: (blob: Blob | null) => void) {
-          atEncode.push({ width: canvas.width, height: canvas.height });
-          queueMicrotask(() => cb(new Blob(["png"])));
-        },
-      };
-      created.push(canvas);
-      return canvas;
-    },
-  };
-  Object.defineProperty(globalThis, "document", { configurable: true, value: fake });
-  try {
-    const product = { naturalWidth: 32, naturalHeight: 24 };
-    await blobFromStudioStill(product, null, { productLight: 1, backgroundLight: 1, backdrop: "white" });
-    await blobFromLitStill(product, { productLight: 1, backgroundLight: 1, backdrop: "white" });
-    assert.deepEqual(atEncode, [{ width: 32, height: 24 }, { width: 32, height: 24 }]);
-    assert.equal(created.length, 2);
-    assert.ok(created.every((canvas) => canvas.width === 0 && canvas.height === 0));
-  } finally {
-    if (originalDocument) Object.defineProperty(globalThis, "document", originalDocument);
-    else Reflect.deleteProperty(globalThis, "document");
-  }
-});
-
-test("blobFromStudioStill releases backing when toBlob throws synchronously", async () => {
-  const created: Array<{ width: number; height: number }> = [];
-  const originalDocument = Object.getOwnPropertyDescriptor(globalThis, "document");
-  Object.defineProperty(globalThis, "document", {
-    configurable: true,
-    value: {
-      createElement(tag: string) {
-        assert.equal(tag, "canvas");
-        const canvas = {
-          width: 0,
-          height: 0,
-          dataset: {} as Record<string, string>,
-          getContext() {
-            return {
-              canvas,
-              filter: undefined,
-              save() {},
-              restore() {},
-              fillRect() {},
-              drawImage() {},
-            };
-          },
-          toBlob() { throw new Error("SecurityError"); },
-        };
-        created.push(canvas);
-        return canvas;
-      },
-    },
-  });
-  try {
-    await assert.rejects(
-      blobFromStudioStill({ naturalWidth: 16, naturalHeight: 12 }, null, { productLight: 1, backgroundLight: 1, backdrop: "white" }),
-      /SecurityError/,
-    );
-    assert.equal(created.length, 1);
-    assert.equal(created[0].width, 0);
-    assert.equal(created[0].height, 0);
-  } finally {
-    if (originalDocument) Object.defineProperty(globalThis, "document", originalDocument);
-    else Reflect.deleteProperty(globalThis, "document");
-  }
-});
-
 test("same-asset generation load evicts the previous stillLoads entry; release drops the rest", async () => {
   const original = Object.getOwnPropertyDescriptor(globalThis, "Image");
   class FakeImage {
@@ -625,16 +527,6 @@ test("same-asset generation load evicts the previous stillLoads entry; release d
     if (original) Object.defineProperty(globalThis, "Image", original);
     else Reflect.deleteProperty(globalThis, "Image");
   }
-});
-
-test("export loads ground for the shown fallback and just product for solid backgrounds", async () => {
-  const fullUrls = { product: "p", ground: "g", set: "s" };
-  const requested: string[] = [];
-  const load = async (url: string) => { requested.push(url); return image(url); };
-  assert.deepEqual(await loadStudioExport("white_set", null, fullUrls, load), { product: image("p"), ground: image("g"), set: null });
-  assert.deepEqual(await loadStudioExport("white", image("sc"), fullUrls, load), { product: image("p"), ground: null, set: null });
-  assert.deepEqual(await loadStudioExport("silver", image("sc"), fullUrls, load), { product: image("p"), ground: null, set: null });
-  assert.deepEqual(requested, ["p", "g", "p", "p"]);
 });
 
 test("drawn-layer summary ignores unused set and records white_set fallback", () => {

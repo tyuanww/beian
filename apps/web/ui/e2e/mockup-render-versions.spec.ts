@@ -1,5 +1,8 @@
+import { pngFill } from "./fixtures/pngFixture";
 import { carton } from "./fixtures/glbFixture";
-import { expect, test, type Page } from "@playwright/test";
+import { studioDownloadTest as test, type StudioFiles } from "./fixtures/nativeStudioFiles";
+import { studioDownloadsFixture } from "./fixtures/studioDownloadsFixture";
+import { expect, type Page } from "@playwright/test";
 import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
@@ -8,7 +11,7 @@ import { fileURLToPath } from "node:url";
 import type { MockupJob, RenderGenerationCreate, RenderGenerationRow, RenderMutation } from "../src/api";
 
 // Browser interactions against built application code and SYNTHETIC protocol/images only.
-// Every URL is intercepted, including non-API URLs. No Hono/Blender/production access.
+// App and API URLs are intercepted. Native attachments come from a loopback fixture.
 let dist:string;
 const assets=new Map<string,Buffer>();
 test.beforeAll(()=>{
@@ -48,7 +51,13 @@ function model() {
   };
 }
 
-async function serve(page:Page,state:ReturnType<typeof model>,options:{oldGround?:ReturnType<typeof deferred>;oldGlb?:ReturnType<typeof deferred>;reader?:boolean;detail?:()=>MockupJob}={}) {
+async function serve(page:Page,studioFiles:StudioFiles,state:ReturnType<typeof model>,options:{oldGround?:ReturnType<typeof deferred>;oldGlb?:ReturnType<typeof deferred>;oldStudio?:ReturnType<typeof deferred>;reader?:boolean;detail?:()=>MockupJob}={}) {
+  const studio = studioDownloadsFixture({
+    jobId: ID,
+    files: studioFiles,
+    prepare: ({ generation_id }) => generation_id === LEGACY && options.oldStudio ? options.oldStudio : "ready",
+    png: ({ generation_id }) => pngFill(80, 96, generation_id === G1 ? [20, 50, 230, 255] : [220, 60, 30, 255]),
+  });
   await page.route("**/*",async route=>{
     const request=route.request(),url=new URL(request.url()),path=url.pathname,method=request.method();
     const json=(body:unknown,status=200)=>route.fulfill({status,contentType:"application/json",body:JSON.stringify(body)});
@@ -57,6 +66,7 @@ async function serve(page:Page,state:ReturnType<typeof model>,options:{oldGround
       return body ? route.fulfill({body,contentType:path.endsWith(".js") ? "text/javascript" : path.endsWith(".css") ? "text/css" : "text/html"})
         : route.fulfill({status:404,body:"synthetic asset not supplied"});
     }
+    if (studio.matches(path)) return studio.handle(route);
     const body=request.postData() ? request.postDataJSON() : undefined;state.calls.push({method,path,body});
     if(path === "/api/auth/me")return json({logged_in:true,display_name:"SYNTHETIC 用户",open_id:"ou_synthetic",role:options.reader ? "viewer" : "reviewer",perms:options.reader ? ["read"] : ["read","create","confirm_structure"]});
     if(path === "/api/status" || path === "/api/health")return json({ok:true,version:"0.0.0.0",jobs:{}});
@@ -97,6 +107,7 @@ async function serve(page:Page,state:ReturnType<typeof model>,options:{oldGround
     }
     state.unknown.push(`${method}:${path}`);return json({message:"synthetic route missing"},404);
   });
+  return studio;
 }
 
 async function centerColor(page:Page) {
@@ -104,11 +115,11 @@ async function centerColor(page:Page) {
     Array.from(canvas.getContext("2d")!.getImageData(canvas.width/2,canvas.height/2,1,1).data));
 }
 
-test("首次生成、运行中旧代下载、晚到高清地面和 GLB 不回写、历史切回与失败留图",async({page})=>{
+test("首次生成、运行中旧代下载、晚到高清地面和 GLB 不回写、历史切回与失败留图",async({page,studioFiles})=>{
   test.setTimeout(45_000);
-  const state=model(),oldGround=deferred(),oldGlb=deferred();
+  const state=model(),oldGround=deferred(),oldGlb=deferred(),oldStudio=deferred();
   const errors:string[]=[];page.on("pageerror",error=>errors.push(error.message));
-  await serve(page,state,{oldGround,oldGlb,detail:()=>state.job.current_render_generation_id === LEGACY
+  const studio = await serve(page,studioFiles,state,{oldGround,oldGlb,oldStudio,detail:()=>state.job.current_render_generation_id === LEGACY
     ? {...state.job,files:state.job.files?.filter(file=>!file.key.includes("_set"))}
     : state.job});
   const requested=(key:string,generation:string)=>state.urls.some(href=>{
@@ -122,8 +133,18 @@ test("首次生成、运行中旧代下载、晚到高清地面和 GLB 不回写
     await expect.poll(()=>["white_a_ground_card","white_a_ground","glb"].every(key=>requested(key,LEGACY))).toBe(true);
     await expect(page.locator('canvas[aria-label="正面与侧面成片"]')).toHaveAttribute("data-preview-ground","card");
     await expect.poll(async()=>{const c=await centerColor(page);return c[0]>c[2];}).toBe(true);
+    await page.getByRole("button", { name: "调灯", exact: true }).click();
+    const productLight = page.getByRole("slider", { name: "产品灯光", exact: true });
+    const backgroundLight = page.getByRole("slider", { name: "背景灯光", exact: true });
+    await productLight.fill("1.2");
+    await backgroundLight.fill("0.8");
+    await expect(productLight).toHaveValue("1.2");
+    await expect(backgroundLight).toHaveValue("0.8");
     const download=page.waitForEvent("download");
     await page.getByRole("button",{name:"下载正面 + 侧面",exact:true}).click();
+    const frozen = { file_key: "white_a", generation_id: LEGACY, backdrop: "white_set", layer: "ground", product_light: 1.2, background_light: 0.8 };
+    await expect.poll(() => studio.requests).toEqual([frozen]);
+    expect(studio.fileRequests).toEqual([]);
     await backdrop.getByText("白底",{exact:true}).click();
     await page.getByRole("button",{name:"出图版本",exact:true}).click();
     await page.getByRole("button",{name:"重新出图",exact:true}).click();
@@ -133,11 +154,15 @@ test("首次生成、运行中旧代下载、晚到高清地面和 GLB 不回写
     state.complete(true);
     await expect(page.locator(".mockup-sheet-photos")).toHaveAttribute("data-render-generation",G1);
     await expect.poll(async()=>{const c=await centerColor(page);return c[2]>c[0];}).toBe(true);
-    oldGround.release();oldGlb.release();
+    oldStudio.release();
     const saved=await download;const bytes=readFileSync((await saved.path())!);
+    expect(bytes).toEqual(pngFill(80, 96, [220, 60, 30, 255]));
+    expect(studio.fileRequests).toEqual([new URL(saved.url()).pathname]);
     const pixel=await page.evaluate(async data=>{const image=await createImageBitmap(new Blob([new Uint8Array(data)]));
       const canvas=new OffscreenCanvas(image.width,image.height),ctx=canvas.getContext("2d")!;ctx.drawImage(image,0,0);image.close();return [...ctx.getImageData(40,48,1,1).data];},Array.from(bytes));
     expect(pixel[0]).toBeGreaterThan(pixel[2]);
+    expect(studio.requests).toEqual([frozen]);
+    oldGround.release();oldGlb.release();
     await expect.poll(async()=>{const c=await centerColor(page);return c[2]>c[0];}).toBe(true);
     await expect(page.locator("model-viewer")).toHaveAttribute("src",new RegExp(`generation_id=${G1}`));
     await expect(page.getByRole("link",{name:"下载模型",exact:true})).toHaveAttribute("href",new RegExp(`generation_id=${G1}`));
@@ -154,11 +179,11 @@ test("首次生成、运行中旧代下载、晚到高清地面和 GLB 不回写
     await expect(page.locator(".mockup-version-status")).toContainText("当前图片未变");
     await expect(page.locator(".mockup-sheet-photos")).toHaveAttribute("data-render-generation",G0);
     expect(state.unknown).toEqual([]);expect(errors).toEqual([]);
-  } finally {oldGround.release();oldGlb.release();}
+  } finally {oldGround.release();oldGlb.release();oldStudio.release();}
 });
 
-test("响应丢失后刷新仅恢复请求，显式确认复用同号同内容",async({page})=>{
-  const state=model();state.lose();await serve(page,state);
+test("响应丢失后刷新仅恢复请求，显式确认复用同号同内容",async({page,studioFiles})=>{
+  const state=model();state.lose();await serve(page,studioFiles,state);
   await page.goto(`/mockup/${ID}`);await page.getByRole("button",{name:"出图版本",exact:true}).click();
   await page.getByRole("button",{name:"重新出图",exact:true}).click();
   await expect(page.locator(".mockup-version-status")).toContainText("未确认这次请求");
@@ -175,10 +200,10 @@ test("响应丢失后刷新仅恢复请求，显式确认复用同号同内容",
   expect(state.unknown).toEqual([]);
 });
 
-test("第二 tab 的旧 CAS 得 409；保留灯光，只刷新不自动重投",async({page,context})=>{
-  const state=model();await serve(page,state);
+test("第二 tab 的旧 CAS 得 409；保留灯光，只刷新不自动重投",async({page,context,studioFiles})=>{
+  const state=model();await serve(page,studioFiles,state);
   const second=await context.newPage();const snapshot=structuredClone(state.job);let stale=true;
-  await serve(second,state,{detail:()=>stale ? snapshot : state.job});
+  await serve(second,studioFiles,state,{detail:()=>stale ? snapshot : state.job});
   await page.goto(`/mockup/${ID}`);await second.goto(`/mockup/${ID}`);
   await second.getByRole("button",{name:"调灯",exact:true}).click();
   const light=second.locator('#mockup-studio-lights input[type="range"]').first();await light.fill("1.2");
@@ -193,11 +218,11 @@ test("第二 tab 的旧 CAS 得 409；保留灯光，只刷新不自动重投",a
   expect(state.unknown).toEqual([]);await second.close();
 });
 
-test("viewer 只读与生产关闭态仍能看历史；窄屏入口可用键盘且没有写按钮",async({page})=>{
+test("viewer 只读与生产关闭态仍能看历史；窄屏入口可用键盘且没有写按钮",async({page,studioFiles})=>{
   const state=model();state.job.current_render_generation_id=G0;state.job.has_render_generations=true;
   state.history.push({generation_id:G0,mode:"legacy_import",profile:"synthetic",quality_status:"unwired",current:true,created_at:"2026-09-06T10:00:00Z"});
   for(const action of ["activate","legacy_relight","upgrade"] as const)state.job.render_generation_capabilities![action]={allowed:false,reason:"permission_denied"};
-  await page.setViewportSize({width:390,height:844});await serve(page,state,{reader:true});await page.goto(`/mockup/${ID}`);
+  await page.setViewportSize({width:390,height:844});await serve(page,studioFiles,state,{reader:true});await page.goto(`/mockup/${ID}`);
   const toggle=page.getByRole("button",{name:"出图版本",exact:true});await toggle.focus();await page.keyboard.press("Enter");
   await expect(page.getByText("原图存档 · 未补验",{exact:true})).toBeVisible();
   await expect(page.getByRole("button",{name:"使用此版本"})).toHaveCount(0);
@@ -210,7 +235,7 @@ test("viewer 只读与生产关闭态仍能看历史；窄屏入口可用键盘�
   expect(state.calls.filter(call=>call.method === "POST")).toHaveLength(0);expect(state.unknown).toEqual([]);
 });
 
-test("出图版本历史 actor_label 为空显示「未记录」",async({page})=>{
+test("出图版本历史 actor_label 为空显示「未记录」",async({page,studioFiles})=>{
   const state=model();state.job.current_render_generation_id=G0;state.job.has_render_generations=true;
   const G2="g2-legacy-omit-actor-"+"b".repeat(16);
   // null / "" / 字段省略（undefined，开发哥 API 对 id 形值会省略 actor_label）均显示「未记录」
@@ -220,19 +245,19 @@ test("出图版本历史 actor_label 为空显示「未记录」",async({page})=
     {generation_id:G2,mode:"legacy_relight",profile:"synthetic",quality_status:"unwired",current:false,created_at:"2026-09-06T10:02:00Z"},
   );
   state.job.render_generation_capabilities!.activate={allowed:true};
-  await serve(page,state);await page.goto(`/mockup/${ID}`);await page.getByRole("button",{name:"出图版本",exact:true}).click();
+  await serve(page,studioFiles,state);await page.goto(`/mockup/${ID}`);await page.getByRole("button",{name:"出图版本",exact:true}).click();
   await expect(page.locator(`[data-generation-id="${G0}"] .mockup-version-actor`)).toHaveText("未记录");
   await expect(page.locator(`[data-generation-id="${G1}"] .mockup-version-actor`)).toHaveText("未记录");
   await expect(page.locator(`[data-generation-id="${G2}"] .mockup-version-actor`)).toHaveText("未记录");
   expect(state.unknown).toEqual([]);
 });
 
-test("生产执行门关闭只禁新建，历史与原图下载仍可用",async({page})=>{
+test("生产执行门关闭只禁新建，历史与原图下载仍可用",async({page,studioFiles})=>{
   const state=model();state.job.current_render_generation_id=G0;state.job.has_render_generations=true;
   state.job.render_generation_capabilities!.legacy_relight={allowed:false,reason:"production_registration_disabled"};
   state.job.render_generation_capabilities!.activate={allowed:true};
   state.history.push({generation_id:G0,mode:"legacy_import",profile:"synthetic",quality_status:"unwired",current:true,created_at:"2026-09-06T10:00:00Z"});
-  await serve(page,state);await page.goto(`/mockup/${ID}`);await page.getByRole("button",{name:"出图版本",exact:true}).click();
+  await serve(page,studioFiles,state);await page.goto(`/mockup/${ID}`);await page.getByRole("button",{name:"出图版本",exact:true}).click();
   await expect(page.getByRole("button",{name:"重新出图",exact:true})).toBeDisabled();
   await expect(page.getByRole("button",{name:"升级新版",exact:true})).toBeDisabled();
   await expect(page.locator(".mockup-version-actions")).toContainText("这个功能暂时用不了。");
@@ -246,8 +271,8 @@ test("生产执行门关闭只禁新建，历史与原图下载仍可用",async(
   expect(state.calls.filter(call=>call.method === "POST")).toHaveLength(0);expect(state.unknown).toEqual([]);
 });
 
-test("会话存储失败时重复点击都不提交；恢复后才创建可追溯请求",async({page})=>{
-  const state=model();await serve(page,state);
+test("会话存储失败时重复点击都不提交；恢复后才创建可追溯请求",async({page,studioFiles})=>{
+  const state=model();await serve(page,studioFiles,state);
   await page.addInitScript(()=>{
     const original=Storage.prototype.setItem;
     Object.defineProperty(window,"__rf04DenyRequestStorage",{value:true,writable:true});
@@ -277,12 +302,12 @@ test("会话存储失败时重复点击都不提交；恢复后才创建可追�
   expect(state.calls.filter(call=>call.method === "POST")).toHaveLength(1);expect(state.unknown).toEqual([]);
 });
 
-test("历史分页失败保留原图与已读记录，重新读取后可加载下一页",async({page})=>{
+test("历史分页失败保留原图与已读记录，重新读取后可加载下一页",async({page,studioFiles})=>{
   const state=model();state.job.current_render_generation_id=G1;state.job.has_render_generations=true;
   const first:RenderGenerationRow={generation_id:G1,mode:"legacy_relight",profile:"synthetic",quality_status:"runtime_verified",created_at:"2026-09-06T10:01:00Z",current:true};
   const second:RenderGenerationRow={generation_id:G0,mode:"legacy_import",profile:"synthetic",quality_status:"unwired",created_at:"2026-09-06T10:00:00Z",current:false};
   const cursors:Array<string | null>=[];let staleCursor=true;
-  await serve(page,state);
+  await serve(page,studioFiles,state);
   await page.route(new RegExp(`/api/mockups/${ID}/render-generations(?:\\?.*)?$`),async route=>{
     if(route.request().method() !== "GET")return route.fallback();
     const cursor=new URL(route.request().url()).searchParams.get("cursor");cursors.push(cursor);
@@ -307,10 +332,10 @@ test("历史分页失败保留原图与已读记录，重新读取后可加载�
   expect(state.calls.filter(call=>call.method === "POST")).toHaveLength(0);expect(state.unknown).toEqual([]);
 });
 
-test("旧代图片报错仅刷新一次，新代已显示后迟到的旧详情不能回写",async({page})=>{
+test("旧代图片报错仅刷新一次，新代已显示后迟到的旧详情不能回写",async({page,studioFiles})=>{
   const state=model(),oldDetail=deferred();const snapshot=structuredClone(state.job);
   let detailReads=0,lateDelivered=false;
-  await serve(page,state);
+  await serve(page,studioFiles,state);
   await page.route(new RegExp(`/api/mockups/${ID}$`),async route=>{
     detailReads++;
     const body=detailReads === 2 ? snapshot : structuredClone(state.job);
@@ -338,9 +363,9 @@ test("旧代图片报错仅刷新一次，新代已显示后迟到的旧详情�
   } finally {oldDetail.release();}
 });
 
-test("GLB 显示桌墙与原始下载分离，切背景和全屏不发起作业", async ({ page }) => {
+test("GLB 显示桌墙与原始下载分离，切背景和全屏不发起作业", async ({ page, studioFiles }) => {
   const state = model();
-  await serve(page, state);
+  await serve(page,studioFiles,state);
   await page.goto(`/mockup/${ID}`);
   const viewer = page.locator("model-viewer");
   const frame = page.locator(".mockup-sheet-glb");

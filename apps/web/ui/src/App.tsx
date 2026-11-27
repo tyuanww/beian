@@ -9,6 +9,7 @@ import { Sidebar, type NavKey } from "./chrome/Sidebar";
 import { isAdmin } from "./authRole";
 import { hrefOf, parsePath, type AppRoute, type AppView } from "./appRoute";
 import { liveNavPulse } from "./pages/waitCard";
+import { studioDownloads } from "./pages/mockupStillDownload";
 import { useAppearance } from "./chrome/AppearanceRoot";
 import { NewTaskPage } from "./pages/NewTaskPage";
 import { ReviewPage } from "./pages/ReviewPage";
@@ -111,9 +112,16 @@ function bootRoute() {
   return { view: r.view, compressionId: r.compressionId ?? null, taskId: r.taskId ?? null, mockupId: r.mockupId ?? null, receipt: r.receipt ?? null };
 }
 
+function studioDownloadActor(me: Me | null): string {
+  if (!me?.logged_in) return "";
+  return JSON.stringify([me.open_id || me.display_name, me.expires_at]);
+}
+
 export function App() {
   const { setActor } = useAppearance();
   const bootedRef = useRef(false);
+  const authCheck = useRef(0);
+  const loggingOut = useRef(false);
   const [me, setMe] = useState<Me | null>(null);
   const boot = bootRoute();
   const [view, setView] = useState<View>(boot.view);
@@ -130,8 +138,12 @@ export function App() {
   const [version, setVersion] = useState<string | null>(null);
 
   const refreshMe = useCallback(async () => {
+    if (loggingOut.current) return;
+    const check = ++authCheck.current;
     try {
       const next = await api.me();
+      if (check !== authCheck.current) return;
+      studioDownloads.setOwner(studioDownloadActor(next) || null);
       setUploadLimitFromMe(next);
       setMe(next);
       setApiBroken(null);
@@ -146,6 +158,8 @@ export function App() {
         setTaskId(null);
       }
     } catch (e) {
+      if (check !== authCheck.current) return;
+      studioDownloads.setOwner(null);
       resetUploadLimit();
       uploadStore.setOwner(null);
       setApiBroken(brokenApiMessage(e, window.location.host));
@@ -169,7 +183,10 @@ export function App() {
   }, [refreshMe]);
 
   useEffect(() => {
-    const onPageHide = () => uploadStore.abortAll();
+    const onPageHide = () => {
+      uploadStore.abortAll();
+      studioDownloads.abandonHandoffs();
+    };
     window.addEventListener("pagehide", onPageHide);
     return () => {
       window.removeEventListener("pagehide", onPageHide);
@@ -288,9 +305,18 @@ export function App() {
   }
 
   async function logout() {
+    if (loggingOut.current) return;
+    loggingOut.current = true;
+    authCheck.current += 1;
+    studioDownloads.setOwner(null);
     resetUploadLimit();
-    await api.logout();
-    window.location.replace(feishuLoginHref(window.location.pathname));
+    try {
+      await api.logout();
+      window.location.replace(feishuLoginHref(window.location.pathname));
+    } catch {
+      loggingOut.current = false;
+      void refreshMe();
+    }
   }
 
   function collapsePhoneSheet() {
@@ -417,6 +443,8 @@ export function App() {
         {view === "mockup" || view === "mockupNew" ? (
           <Suspense fallback={<PaneFallback label="打开 3D 打样…" />}>
             <MockupDesk
+              key={studioDownloadActor(me)}
+              studioActor={studioDownloadActor(me)}
               canCreate={me.perms.includes("create")}
               canConfirmStructure={me.perms.includes("confirm_structure")}
               canAdmin={isAdmin(me)}

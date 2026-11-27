@@ -1,3 +1,5 @@
+import { studioGenerationParam } from "./mockupStudioVersion";
+
 export const STUDIO_LIGHT_MIN = 0.6;
 export const STUDIO_LIGHT_MAX = 1.4;
 export const STUDIO_LIGHT_DEFAULT = 1;
@@ -297,35 +299,8 @@ export function canvasFilterSupported(ctx: CanvasRenderingContext2D): boolean {
   }
 }
 
-export async function blobFromLitStill(
-  image: SizedSource,
-  opts: { productLight: number; backgroundLight: number; backdrop?: BackdropPreset },
-): Promise<Blob> {
-  const width = Number(image.naturalWidth || image.width || 0);
-  const height = Number(image.naturalHeight || image.height || 0);
-  if (!width || !height) throw new Error("图还没加载完");
-  const canvas = document.createElement("canvas");
-  canvas.width = width;
-  canvas.height = height;
-  const ctx = canvas.getContext("2d");
-  if (!ctx) {
-    releaseCanvasBacking(canvas);
-    throw new Error("这台浏览器不能导出白底图");
-  }
-  try {
-    composeStudioStill(ctx, width, height, image, null, {
-      ...opts,
-      filterSupported: canvasFilterSupported(ctx),
-    });
-  } catch (error) {
-    releaseCanvasBacking(canvas);
-    throw error;
-  }
-  return blobFromCanvasPng(canvas);
-}
-
 const stillLoads = new Map<string, Promise<HTMLImageElement>>();
-const STILL_URGENCY = { download: 0, original: 1, fallback: 2, upgrade: 3 };
+const STILL_URGENCY = { original: 0, fallback: 1, upgrade: 2 };
 type StillUrgency = keyof typeof STILL_URGENCY;
 type StillDemand = { urgency: StillUrgency; signal?: AbortSignal; order: number };
 type StillRequest = {
@@ -343,7 +318,7 @@ let stillDemandOrder = 0;
 export function studioAssetHref(jobId: string, key: string, generation = "", download = false): string {
   const base = `/api/mockups/${jobId}/files/${key}`;
   const query = new URLSearchParams();
-  if (generation) query.set(/^(?:g0-legacy-original|g[1-9][0-9]*-|legacy-current-v2-)/.test(generation) ? "generation_id" : "generation", generation);
+  if (generation) query.set(studioGenerationParam(generation), generation);
   if (download) query.set("download", "1");
   const suffix = query.toString();
   return suffix ? `${base}?${suffix}` : base;
@@ -353,7 +328,7 @@ async function decodeStillImage(url: string, priority: RequestPriority): Promise
   if (typeof Image === "undefined") throw new Error("load");
   const image = new Image();
   image.crossOrigin = "anonymous";
-  image.fetchPriority = priority;
+  if (priority !== "auto") image.fetchPriority = priority;
   image.src = url;
   await image.decode();
   return image;
@@ -431,7 +406,7 @@ export function loadStillImage(
   return promise;
 }
 
-/** Drop only this page's cache references. An already-started download retains its own frozen sources. */
+/** Drop only this page's preview cache references. */
 export function releaseStudioGeneration(jobId:string,generation:string): void {
   const prefix=`/api/mockups/${jobId}/files/`;
   for (const url of stillLoads.keys()) {
@@ -504,25 +479,6 @@ export function prepareStudioCanvas(
   return ctx;
 }
 
-function blobFromCanvasPng(canvas: HTMLCanvasElement): Promise<Blob> {
-  return new Promise((resolve, reject) => {
-    let settled = false;
-    const finish = (blob: Blob | null, error?: unknown) => {
-      if (settled) return;
-      settled = true;
-      releaseCanvasBacking(canvas);
-      if (error) reject(error instanceof Error ? error : new Error("导出失败"));
-      else if (blob) resolve(blob);
-      else reject(new Error("导出失败"));
-    };
-    try {
-      canvas.toBlob((blob) => finish(blob), "image/png");
-    } catch (error) {
-      finish(null, error);
-    }
-  });
-}
-
 function attachPerfProbe(): void {
   if (typeof window === "undefined") return;
   if (!Boolean((window as Window & { __RF09_PERF__?: boolean }).__RF09_PERF__)) return;
@@ -586,25 +542,6 @@ export function studioDrawnUpgradeFailed(
 ): boolean {
   const { keys } = studioDrawnLayerKeys(backdrop, set);
   return keys.some((key) => Boolean(facts[key].upgradeFailed));
-}
-
-/** Request full-resolution inputs for the backdrop visible at click time. */
-export async function loadStudioExport(
-  backdrop: BackdropPreset,
-  drawnSet: SizedSource | null,
-  urls: Record<StudioLayerKey, string>,
-  load = loadStillImage,
-) {
-  const [, layer] = studioDrawnLayerKeys(backdrop, drawnSet).keys;
-  const [product, background] = await Promise.all([
-    load(urls.product, { urgency: "download" }),
-    layer ? load(urls[layer], { urgency: "download" }) : null,
-  ]);
-  return {
-    product,
-    ground: layer === "ground" ? background : null,
-    set: layer === "set" ? background : null,
-  };
 }
 
 export function applyStudioPreviewDataset(
@@ -782,6 +719,11 @@ export function loadStudioPreview(
   return {
     show(next: BackdropPreset, afterFirstPreview: boolean): void {
       backdrop = next;
+      if (promote && !afterFirstPreview) {
+        for (const key of ["product", "ground", "set"] as const) {
+          if (layers[key].upgrading) stopFull(key);
+        }
+      }
       promote = afterFirstPreview;
       update();
     },
@@ -828,32 +770,4 @@ export function observeStudioFrame(frame: HTMLElement, resized: (width: number, 
     media?.removeEventListener("change", watchDpr);
     window.removeEventListener("resize", schedule);
   };
-}
-
-export async function blobFromStudioStill(
-  product: SizedSource,
-  ground: SizedSource | null,
-  opts: { productLight: number; backgroundLight: number; backdrop?: BackdropPreset; set?: SizedSource | null },
-): Promise<Blob> {
-  const width = Number(product.naturalWidth || product.width || 0);
-  const height = Number(product.naturalHeight || product.height || 0);
-  if (!width || !height) throw new Error("图还没加载完");
-  const canvas = document.createElement("canvas");
-  canvas.width = width;
-  canvas.height = height;
-  const ctx = canvas.getContext("2d");
-  if (!ctx) {
-    releaseCanvasBacking(canvas);
-    throw new Error("这台浏览器不能导出成片");
-  }
-  try {
-    composeStudioStill(ctx, width, height, product, ground, {
-      ...opts,
-      filterSupported: canvasFilterSupported(ctx),
-    });
-  } catch (error) {
-    releaseCanvasBacking(canvas);
-    throw error;
-  }
-  return blobFromCanvasPng(canvas);
 }

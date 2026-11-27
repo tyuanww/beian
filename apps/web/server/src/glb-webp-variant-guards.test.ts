@@ -138,6 +138,11 @@ const WRITE_SITES: WriteSite[] = [
   { file: "apps/web/server/src/releaseAdmission.ts", code: "writeFileSync(path, `${JSON.stringify({", glb: false },
   { file: "apps/web/server/src/renderGenerationBudget.ts", code: "writeFileSync(`${path}.json`, JSON.stringify({ schema: \"render-reservation/1\", mutationId: input.mutationId,", glb: false },
   { file: "apps/web/server/src/settings.ts", code: "writeFileSync(path, JSON.stringify(data, null, 2) + \"\\n\", \"utf8\");", glb: false },
+  // 私有成片目录内的导出 JSON 和 PNG，路径均由固定格式的导出 ID 和 SHA-256 构造。
+  { file: "apps/web/server/src/studioDownloads.ts", code: "try { writeFileSync(fd, JSON.stringify(input)); fsyncSync(fd); }", glb: false },
+  { file: "apps/web/server/src/studioDownloads.ts", code: "renameSync(temp, dest);", glb: false },
+  { file: "apps/web/server/src/studioDownloads.ts", code: "try { await fd.writeFile(bytes); await fd.sync(); }", glb: false },
+  { file: "apps/web/server/src/studioDownloads.ts", code: "renameSync(stage, dest);", glb: false },
   { file: "apps/web/server/src/tasks.ts", code: "writeFileSync(tmp, contents, \"utf8\");", glb: false },
   { file: "apps/web/server/src/tasks.ts", code: "rename(tmp, dest);", glb: false },
   { file: "apps/web/server/src/uploads.ts", code: "writeFileSync(tmp, JSON.stringify(value), \"utf8\");", glb: false },

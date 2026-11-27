@@ -3597,6 +3597,52 @@ html[data-theme="dark"] .notes.is-float {
   font-size: 13px;
 }
 
+.mockup-still-download-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: 8px;
+  color: #1c1a1f;
+  font-size: 13px;
+}
+
+.mockup-still-download-action {
+  display: inline-flex;
+  align-items: center;
+  min-block-size: 24px;
+  padding: 0 4px;
+  border: 0;
+  background: none;
+  color: #68447d;
+  cursor: pointer;
+  font: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.mockup-still-download-history {
+  margin-block: 10px 16px;
+  color: #403a45;
+  font-size: 13px;
+}
+
+.mockup-still-download-history summary {
+  min-block-size: 24px;
+  cursor: pointer;
+}
+
+.mockup-still-download-history ul {
+  display: grid;
+  gap: 4px;
+  margin-block: 4px 0;
+  padding-inline-start: 20px;
+}
+
+.mockup-still-download-history small {
+  color: #625768;
+  font-size: inherit;
+}
+
 .mockup-dl {
   flex: none;
   display: inline-flex;
@@ -3696,13 +3742,16 @@ html[data-theme="dark"] .notes.is-float {
   align-self: center;
 }
 
-.mockup-dl:disabled {
+.mockup-dl:disabled,
+.mockup-dl[aria-disabled="true"] {
   opacity: 0.45;
   cursor: not-allowed;
 }
 
 .mockup-dl:disabled:hover,
-.mockup-dl:disabled:active {
+.mockup-dl:disabled:active,
+.mockup-dl[aria-disabled="true"]:hover,
+.mockup-dl[aria-disabled="true"]:active {
   filter: none;
 }
 

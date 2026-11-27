@@ -26,7 +26,7 @@ type SceneProps = Omit<ViewerProps, "onSourceError"> & { onFail: () => void };
  * 本机解得了 WebP、两次地址都失败，写「3D 没加载出来，请重新打开此单」。
  * 本机解不了 WebP 时，没有两个版本就不请求模型。有两个版本则只拉原始。这条路径失败仍写「这台设备显示不了 3D，已换成效果图」。
  */
-export function MockupGlbViewer({ allowLoad, textureFormat, originalSource, versions, onSourceError, ...props }: ViewerProps & { allowLoad: boolean; textureFormat?: string; originalSource: string; versions: GlbVersionInfo }) {
+export function MockupGlbViewer({ allowLoad, deferLoad, textureFormat, originalSource, versions, onSourceError, ...props }: ViewerProps & { allowLoad: boolean; deferLoad: boolean; textureFormat?: string; originalSource: string; versions: GlbVersionInfo }) {
   const [webp, setWebp] = useState<boolean | null>(() => webpSupport.known());
   const gate = glbTextureGate(textureFormat, webp);
   useEffect(() => {
@@ -48,8 +48,8 @@ export function MockupGlbViewer({ allowLoad, textureFormat, originalSource, vers
   useEffect(() => { if (exhausted && tried) errorRef.current(); }, [exhausted, tried, plan]);
   const [idle, setIdle] = useState(false);
   useEffect(() => {
-    if (allowLoad) return whenIdle(() => setIdle(true));
-  }, [allowLoad]);
+    if (allowLoad && !deferLoad && !idle) return whenIdle(() => setIdle(true));
+  }, [allowLoad, deferLoad, idle]);
   const source = attempts?.[count];
   if (!source || !allowLoad || !idle) return <GlbPosterOnly poster={props.poster} note={exhausted ? failureText : null} loading={!exhausted} />;
   return <GlbScene key={source} {...props} source={source}

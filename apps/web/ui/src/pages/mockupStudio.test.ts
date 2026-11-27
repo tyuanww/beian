@@ -3,7 +3,6 @@ import { describe, it } from "node:test";
 import {
   BACKDROP_DEFAULT,
   backdropFrameClass,
-  blobFromStudioStill,
   canvasFilterSupported,
   clampStudioLight,
   composeStudioStill,
@@ -415,13 +414,6 @@ describe("composeStudioStill", () => {
       { productLight: 1, backgroundLight: 1, filterSupported: true },
     );
     assert.equal(ctx.calls.filter((call) => call[0] === "drawImage").length, 0);
-  });
-
-  it("blobFromStudioStill throws before canvas when the product has no size", async () => {
-    await assert.rejects(
-      () => blobFromStudioStill({ naturalWidth: 0, naturalHeight: 0 }, null, { productLight: 1, backgroundLight: 1 }),
-      /图还没加载完/,
-    );
   });
 
   it("canvasFilterSupported is false without a document", () => {
